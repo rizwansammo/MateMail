@@ -1,6 +1,10 @@
 # MateMail application stack
 # Mail engine (mailcow) runs separately — see docker-compose.mailengine.yml
 #
+# This server runs a shared nginx on ports 80/443.
+# MateMail services bind to localhost-only ports and the host nginx proxies to them.
+# See nginx/matemail-vhost.conf for the vhost config to add to the host nginx.
+#
 # Usage:
 #   cp .env.example .env && nano .env
 #   docker compose up -d
@@ -50,7 +54,7 @@ services:
       DJANGO_SETTINGS_MODULE: config.settings.dev
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-False}
-      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend,app.matemail.online}
       DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:-matemail}@postgres:5432/${POSTGRES_DB:-matemail}
       REDIS_URL: redis://redis:6379/0
       MAIL_ENGINE_API_URL: ${MAIL_ENGINE_API_URL:-http://mailcow-nginx:8080}
@@ -58,10 +62,10 @@ services:
       MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
       MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.online}
       DKIM_SELECTOR: ${DKIM_SELECTOR:-mm1}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
-      WEBMAIL_BASE_URL: ${WEBMAIL_BASE_URL:-http://localhost:3000}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3015}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3015}
+      WEBMAIL_BASE_URL: ${WEBMAIL_BASE_URL:-http://localhost:3015}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3015}
       JWT_ACCESS_TOKEN_LIFETIME_MINUTES: ${JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
       JWT_REFRESH_TOKEN_LIFETIME_DAYS: ${JWT_REFRESH_TOKEN_LIFETIME_DAYS:-7}
     depends_on:
@@ -73,7 +77,8 @@ services:
       - ./backend:/app
       - static_files:/app/staticfiles
     ports:
-      - "8000:8000"
+      # Localhost-only — host nginx proxies to this port
+      - "127.0.0.1:8015:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
       interval: 30s
@@ -139,30 +144,12 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8015}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3015}
     ports:
-      - "3000:3000"
+      # Localhost-only — host nginx proxies to this port
+      - "127.0.0.1:3015:3000"
     depends_on:
-      - backend
-    networks:
-      - matemail_external
-
-  # ── Nginx reverse proxy ──────────────────────────────────────────────────────
-  nginx:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - static_files:/app/staticfiles:ro
-      - certbot_certs:/etc/letsencrypt:ro
-      - certbot_www:/var/www/certbot:ro
-    depends_on:
-      - frontend
       - backend
     networks:
       - matemail_external
@@ -171,8 +158,6 @@ volumes:
   postgres_data:
   redis_data:
   static_files:
-  certbot_certs:
-  certbot_www:
 
 networks:
   matemail_internal:

@@ -103,9 +103,9 @@ for i in $(seq 1 24); do
     sleep 5
 done
 
-# ── Reload nginx (zero-downtime config reload) ────────────────────────────────
-echo "▸ Reloading nginx..."
-$COMPOSE exec -T nginx nginx -s reload || echo "  (nginx reload skipped — may not be running yet)"
+# ── Reload host nginx (zero-downtime) ────────────────────────────────────────
+echo "▸ Reloading host nginx..."
+sudo nginx -t && sudo nginx -s reload || echo "  (nginx reload skipped — check config manually)"
 
 echo ""
 echo "══════════════════════════════════════════════════════════════════════"

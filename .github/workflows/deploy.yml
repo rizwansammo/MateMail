@@ -1,0 +1,103 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # allow manual trigger from GitHub UI
+
+env:
+  DEPLOY_DIR: /opt/matemail
+  REPO_URL: https://github.com/rizwansammo/MateMail.git
+
+jobs:
+  deploy:
+    name: Deploy to Contabo VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ── 1. Basic config validation (runs in CI before touching the server) ───
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose config
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+        env:
+          DJANGO_SECRET_KEY: ci-placeholder
+          POSTGRES_PASSWORD: ci-placeholder
+          INTERNAL_API_SECRET: ci-placeholder
+          MAIL_ENGINE_API_KEY: ci-placeholder
+          EMAIL_HOST: localhost
+          EMAIL_HOST_USER: ci@example.com
+          EMAIL_HOST_PASSWORD: ci-placeholder
+
+      # ── 2. Deploy to VPS ──────────────────────────────────────────────────────
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.CNTB_HOST }}
+          username: ${{ secrets.CNTB_USER }}
+          key: ${{ secrets.CNTB_SSH_KEY }}
+          timeout: 300s
+          script: |
+            set -euo pipefail
+
+            DEPLOY_DIR="/opt/matemail"
+            COMPOSE="docker compose -f $DEPLOY_DIR/docker-compose.yml -f $DEPLOY_DIR/docker-compose.prod.yml"
+
+            # ── Clone on first deploy, pull on subsequent ───────────────────
+            if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              echo "▸ First deploy — cloning repository..."
+              mkdir -p "$DEPLOY_DIR"
+              git clone https://github.com/rizwansammo/MateMail.git "$DEPLOY_DIR"
+            else
+              echo "▸ Pulling latest code..."
+              cd "$DEPLOY_DIR"
+              git fetch --prune
+              git reset --hard origin/main
+            fi
+
+            cd "$DEPLOY_DIR"
+
+            # ── Verify .env exists ──────────────────────────────────────────
+            if [ ! -f ".env" ]; then
+              echo "ERROR: .env not found at $DEPLOY_DIR/.env"
+              echo "  SSH in and run: cp .env.example .env && nano .env"
+              exit 1
+            fi
+
+            chmod +x scripts/*.sh 2>/dev/null || true
+
+            # ── Build Docker images ─────────────────────────────────────────
+            echo "▸ Building images..."
+            $COMPOSE build
+
+            # ── Database migrations ─────────────────────────────────────────
+            echo "▸ Running migrations..."
+            $COMPOSE run --rm --no-deps backend python manage.py migrate --noinput
+
+            # ── Static files ────────────────────────────────────────────────
+            echo "▸ Collecting static files..."
+            $COMPOSE run --rm --no-deps backend python manage.py collectstatic --noinput --clear
+
+            # ── Start / restart services ────────────────────────────────────
+            echo "▸ Starting services..."
+            $COMPOSE up -d --remove-orphans
+
+            # ── Wait for backend health ─────────────────────────────────────
+            echo "▸ Waiting for backend..."
+            for i in $(seq 1 20); do
+              if curl -sf http://127.0.0.1:8015/api/health/ > /dev/null 2>&1; then
+                echo "  Backend healthy ✓"
+                break
+              fi
+              [ $i -eq 20 ] && { echo "ERROR: Backend not healthy after 100s"; $COMPOSE logs --tail=30 backend; exit 1; }
+              sleep 5
+            done
+
+            # ── Reload host nginx ───────────────────────────────────────────
+            echo "▸ Reloading nginx..."
+            nginx -t && nginx -s reload
+
+            echo "══ Deployment complete ══"

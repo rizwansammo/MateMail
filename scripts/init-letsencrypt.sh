@@ -1,120 +1,77 @@
 #!/usr/bin/env bash
-# MateMail — Let's Encrypt certificate bootstrap
+# MateMail — TLS certificate setup via the host nginx
 #
-# Run this ONCE on first deployment to obtain the initial TLS certificate.
-# After successful issuance, switch nginx to the TLS config via docker-compose.prod.yml.
+# Since this server already runs a shared nginx on ports 80/443,
+# we use certbot --nginx to obtain and auto-configure TLS for MateMail's domain.
+# The host nginx MUST have the matemail vhost enabled first.
 #
-# Prerequisites:
-#   - Docker and Docker Compose v2 installed
-#   - DNS A records pointing matemail.online and app.matemail.online to this server
-#   - Ports 80 and 443 open in the firewall
-#   - The base docker-compose.yml stack is running (nginx serving HTTP)
-#
-# Usage:
-#   ./scripts/init-letsencrypt.sh                        # production cert
-#   STAGING=1 ./scripts/init-letsencrypt.sh              # staging cert (test first!)
-#   EXTRA_DOMAINS="webmail.matemail.online" ./scripts/init-letsencrypt.sh
+# Usage (run on the VPS as root):
+#   sudo ./scripts/init-letsencrypt.sh
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-joe@netswitch.net}"
-STAGING="${STAGING:-0}"
-PRIMARY_DOMAIN="matemail.online"
-DEFAULT_DOMAINS=("matemail.online" "app.matemail.online")
-EXTRA_DOMAINS_RAW="${EXTRA_DOMAINS:-}"
-
-# Build full domain list
-ALL_DOMAINS=("${DEFAULT_DOMAINS[@]}")
-if [[ -n "$EXTRA_DOMAINS_RAW" ]]; then
-    IFS=',' read -ra EXTRA <<< "$EXTRA_DOMAINS_RAW"
-    ALL_DOMAINS+=("${EXTRA[@]}")
-fi
+DOMAINS=("app.matemail.online" "matemail.online")
 
 echo "══════════════════════════════════════════════════════════════════════"
-echo "  MateMail — Let's Encrypt Certificate Bootstrap"
+echo "  MateMail — TLS Certificate Setup"
 echo "══════════════════════════════════════════════════════════════════════"
-echo "  Domains : ${ALL_DOMAINS[*]}"
+echo "  Domains : ${DOMAINS[*]}"
 echo "  Email   : $CERTBOT_EMAIL"
-echo "  Staging : $STAGING"
 echo ""
 
-cd "$PROJECT_DIR"
-
-if [[ ! -f ".env" ]]; then
-    echo "ERROR: .env not found."
-    echo "  Run: cp .env.example .env && nano .env"
+if [[ "$(id -u)" != "0" ]]; then
+    echo "ERROR: Run as root (sudo)."
     exit 1
 fi
 
-# Ensure nginx is up (HTTP-only mode, which serves /.well-known/acme-challenge/)
-echo "▸ Ensuring nginx is running for ACME challenge..."
-docker compose up -d nginx
-sleep 3
-
-# Verify nginx is reachable
-if ! curl -sf "http://localhost/api/health/" > /dev/null 2>&1; then
-    echo "WARNING: Could not reach http://localhost/api/health/ — nginx may not be ready."
-    echo "  Continuing anyway, but certbot validation may fail."
+# ── Step 1: Install certbot if not present ────────────────────────────────────
+if ! command -v certbot &> /dev/null; then
+    echo "▸ Installing certbot..."
+    apt-get update -q
+    apt-get install -y certbot python3-certbot-nginx
 fi
 
-# Build certbot arguments
-CERTBOT_ARGS=(
-    "certonly"
-    "--webroot"
-    "--webroot-path=/var/www/certbot"
-    "--email" "$CERTBOT_EMAIL"
-    "--agree-tos"
-    "--no-eff-email"
-    "--keep-until-expiring"
-)
+# ── Step 2: Ensure the vhost is installed ────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+VHOST_SRC="$PROJECT_DIR/nginx/matemail-vhost.conf"
+VHOST_DEST="/etc/nginx/sites-available/matemail"
+VHOST_LINK="/etc/nginx/sites-enabled/matemail"
 
-for domain in "${ALL_DOMAINS[@]}"; do
-    CERTBOT_ARGS+=("-d" "$domain")
+if [[ ! -f "$VHOST_DEST" ]]; then
+    echo "▸ Installing vhost config..."
+    cp "$VHOST_SRC" "$VHOST_DEST"
+    ln -sf "$VHOST_DEST" "$VHOST_LINK"
+    nginx -t && nginx -s reload
+    echo "  Vhost installed and nginx reloaded."
+else
+    echo "▸ Vhost already installed at $VHOST_DEST"
+fi
+
+# ── Step 3: Obtain certificate ────────────────────────────────────────────────
+DOMAIN_ARGS=""
+for d in "${DOMAINS[@]}"; do
+    DOMAIN_ARGS="$DOMAIN_ARGS -d $d"
 done
 
-if [[ "$STAGING" == "1" ]]; then
-    CERTBOT_ARGS+=("--staging")
-    echo "  ⚠  STAGING MODE — cert will NOT be trusted by browsers."
-    echo "     Run again with STAGING=0 after verifying this works."
-    echo ""
-fi
-
-echo "▸ Requesting certificate from Let's Encrypt..."
-docker run --rm \
-    --network "$(basename "$PROJECT_DIR")_matemail_external" \
-    -v "$(basename "$PROJECT_DIR")_certbot_certs:/etc/letsencrypt" \
-    -v "$(basename "$PROJECT_DIR")_certbot_www:/var/www/certbot" \
-    certbot/certbot:latest \
-    "${CERTBOT_ARGS[@]}"
+echo "▸ Running certbot..."
+certbot --nginx \
+    $DOMAIN_ARGS \
+    --email "$CERTBOT_EMAIL" \
+    --agree-tos \
+    --no-eff-email \
+    --redirect \
+    --keep-until-expiring
 
 echo ""
 echo "══════════════════════════════════════════════════════════════════════"
-echo "  Certificate obtained successfully!"
+echo "  Done — certificate obtained and nginx updated."
 echo "══════════════════════════════════════════════════════════════════════"
 echo ""
-echo "NEXT STEPS"
+echo "  Auto-renewal is handled by certbot's systemd timer:"
+echo "    systemctl status certbot.timer"
 echo ""
-echo "  1. Switch to production TLS configuration:"
-echo "     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d"
-echo ""
-echo "  2. Verify HTTPS:"
-echo "     curl -v https://app.matemail.online/api/health/"
-echo ""
-echo "  3. Add auto-renewal to crontab (sudo crontab -e):"
-cat <<'CRON'
-     # Let's Encrypt renewal (runs daily at noon, renews if <30 days remain)
-     0 12 * * * docker run --rm \
-         -v matemail_certbot_certs:/etc/letsencrypt \
-         -v matemail_certbot_www:/var/www/certbot \
-         certbot/certbot:latest renew --quiet && \
-         docker compose -f /opt/matemail/docker-compose.yml \
-                        -f /opt/matemail/docker-compose.prod.yml \
-                        exec nginx nginx -s reload
-CRON
-echo ""
-echo "  4. Apply mailcow config changes:"
-echo "     sudo ./scripts/apply-mailcow-config.sh"
+echo "  Verify:"
+echo "    curl -v https://app.matemail.online/api/health/"
 echo ""
