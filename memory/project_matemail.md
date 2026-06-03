@@ -20,9 +20,11 @@ MateMail is a full production-grade SaaS email hosting platform. Built from scra
 - DB: PostgreSQL 16 (MateMail data), MariaDB inside mailcow (mail delivery data)
 - Async: Celery 5 + Redis 7
 - Mail engine: Mailcow (Postfix + Dovecot + Rspamd via mailcow REST API)
-- Proxy: Nginx (HTTP dev, TLS in Phase 15)
-- Containers: Docker Compose (`docker-compose.yml` MateMail stack, `docker-compose.mailengine.yml` mail engine)
+- Proxy: Host nginx (shared VPS, already running on 80/443 for other apps) — MateMail adds vhost via `nginx/matemail-vhost.conf`
+- Containers: Docker Compose (`docker-compose.yml` MateMail stack, `docker-compose.mailengine.yml` mail engine) — NO nginx container in MateMail stack
 - VPS: Contabo, IP `176.57.188.13`, AS51167, France — all 60+ blacklists clean, AbuseIPDB 0%
+- GitHub repo: https://github.com/rizwansammo/MateMail (main branch)
+- CI/CD: GitHub Actions → `.github/workflows/deploy.yml` → SSH to VPS → deploy at `/opt/matemail`
 
 ---
 
@@ -255,4 +257,27 @@ These prevent mailcow internal tool names from leaking in SMTP/IMAP banners.
 - All 60+ MXToolbox blacklists clean (verified 2026-05-30)
 - AbuseIPDB: 0% confidence, 3 historical reports (not actionable)
 - IP warmup required: 4–8 weeks gradual increase before full send volume
-- Postfix policy daemon bridge script (translates Postfix text protocol → HTTP calls to `/api/internal/smtp/`) deferred to Phase 15
+- GitHub repo: https://github.com/rizwansammo/MateMail
+- CI/CD secrets in GitHub: `CNTB_HOST`, `CNTB_USER`, `CNTB_SSH_KEY`
+- Deploy path on VPS: `/opt/matemail`
+
+### VPS port layout (verified 2026-06-04)
+The VPS already runs a shared nginx on ports 80/443 serving other apps. MateMail does NOT run its own nginx container.
+
+| Port | Bound to | Service |
+|------|----------|---------|
+| 80/443 | 0.0.0.0 | Host nginx (shared — handles all apps including MateMail) |
+| 8015 | 127.0.0.1 | MateMail Django backend (host nginx proxies /api/ here) |
+| 3015 | 127.0.0.1 | MateMail Next.js frontend (host nginx proxies / here) |
+| 10031 | 0.0.0.0 | Postfix policy bridge (restrict to mailcow Docker subnet via ufw) |
+| 25/587/465/993/143 | 0.0.0.0 | Mailcow (mail ports — separate stack) |
+
+Other ports in use on VPS (not MateMail): 4317 (otel), 8642 (python), 5050 (docker-proxy), 3000/3005/3010 (node/docker), 8005/8010/8013/8081/8082 (docker-proxies), 19999 (netdata), 8125 (netdata stats).
+
+### To go live
+1. SSH to VPS, `git clone https://github.com/rizwansammo/MateMail.git /opt/matemail`
+2. `cp .env.example .env && nano .env` (fill secrets)
+3. `sudo ./scripts/init-letsencrypt.sh` (installs vhost + gets TLS cert)
+4. `./scripts/deploy.sh` (builds + migrates + starts)
+5. `sudo ./scripts/apply-mailcow-config.sh` (mailcow banner fix)
+6. Install policy bridge: `sudo cp scripts/postfix-policy-bridge.service /etc/systemd/system/ && sudo systemctl enable --now postfix-policy-bridge`

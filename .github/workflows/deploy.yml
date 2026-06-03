@@ -49,8 +49,8 @@ jobs:
             # ── Clone on first deploy, pull on subsequent ───────────────────
             if [ ! -d "$DEPLOY_DIR/.git" ]; then
               echo "▸ First deploy — cloning repository..."
-              mkdir -p "$DEPLOY_DIR"
-              git clone https://github.com/rizwansammo/MateMail.git "$DEPLOY_DIR"
+              mkdir -p "$(dirname $DEPLOY_DIR)"
+              git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/rizwansammo/MateMail.git "$DEPLOY_DIR"
             else
               echo "▸ Pulling latest code..."
               cd "$DEPLOY_DIR"
