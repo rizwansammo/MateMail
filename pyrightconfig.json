@@ -1,0 +1,8 @@
+{
+  "pythonVersion": "3.11",
+  "venvPath": "backend",
+  "venv": ".venv",
+  "include": ["backend"],
+  "extraPaths": ["backend"],
+  "pythonPath": "C:/Users/Rizwan/AppData/Local/Programs/Python/Python311/python.exe"
+}

@@ -1,0 +1,68 @@
+# ─── Secrets (NEVER commit) ───────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+*.key
+*.pem
+*.p12
+secrets/
+
+# ─── Python / Django ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+backend/staticfiles/
+backend/mediafiles/
+
+# ─── Node / Next.js ──────────────────────────────────────────────────────────
+node_modules/
+.next/
+.turbo/
+out/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+frontend/.env.local
+
+# ─── Docker ──────────────────────────────────────────────────────────────────
+# Keep docker-compose files, ignore generated data
+postgres_data/
+redis_data/
+mail_data/
+
+# ─── IDEs and OS ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Logs ────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Test / CI artifacts ─────────────────────────────────────────────────────
+coverage/
+.coverage
+junit*.xml
