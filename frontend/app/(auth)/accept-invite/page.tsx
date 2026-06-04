@@ -1,8 +1,6 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
@@ -19,7 +17,7 @@ interface InvitePreview {
   detail?: string;
 }
 
-export default function AcceptInvitePage() {
+function AcceptInviteContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
@@ -34,7 +32,6 @@ export default function AcceptInvitePage() {
   const [tenantId, setTenantId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  // Load invite preview (public — no auth needed)
   useEffect(() => {
     if (!token) {
       setPreviewLoading(false);
@@ -133,7 +130,6 @@ export default function AcceptInvitePage() {
   return (
     <InviteShell>
       <div className="space-y-5">
-        {/* Invite details */}
         <div className="text-center space-y-1">
           <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-cyan-50">
             <Mail className="h-5 w-5 text-cyan-600" />
@@ -149,12 +145,9 @@ export default function AcceptInvitePage() {
           <p className="text-sm text-slate-500">
             Role: <span className="font-medium capitalize">{preview.role?.replace("_", " ")}</span>
           </p>
-          <p className="text-xs text-slate-400">
-            Sent to {preview.email}
-          </p>
+          <p className="text-xs text-slate-400">Sent to {preview.email}</p>
         </div>
 
-        {/* Not logged in */}
         {!isAuthenticated && (
           <div className="space-y-3">
             <p className="text-center text-sm text-slate-600">
@@ -177,7 +170,6 @@ export default function AcceptInvitePage() {
           </div>
         )}
 
-        {/* Logged in as wrong email */}
         {isAuthenticated && user && preview.email && user.email.toLowerCase() !== preview.email.toLowerCase() && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 space-y-2">
             <p>
@@ -194,7 +186,6 @@ export default function AcceptInvitePage() {
           </div>
         )}
 
-        {/* Logged in as correct email */}
         {isAuthenticated && user && preview.email && user.email.toLowerCase() === preview.email.toLowerCase() && (
           <div className="space-y-3">
             {error && (
@@ -208,13 +199,25 @@ export default function AcceptInvitePage() {
               {accepting && <Loader2 className="h-4 w-4 animate-spin" />}
               {accepting ? "Accepting…" : `Accept and join ${preview.tenant_name}`}
             </button>
-            <p className="text-center text-xs text-slate-400">
-              Accepting as {user.email}
-            </p>
+            <p className="text-center text-xs text-slate-400">Accepting as {user.email}</p>
           </div>
         )}
       </div>
     </InviteShell>
+  );
+}
+
+export default function AcceptInvitePage() {
+  return (
+    <Suspense fallback={
+      <InviteShell>
+        <div className="flex justify-center py-6">
+          <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+        </div>
+      </InviteShell>
+    }>
+      <AcceptInviteContent />
+    </Suspense>
   );
 }
 
