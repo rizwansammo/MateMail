@@ -73,6 +73,21 @@ jobs:
             echo "▸ Building images..."
             $COMPOSE build
 
+            # ── Start database and cache first ──────────────────────────────
+            echo "▸ Starting postgres and redis..."
+            $COMPOSE up -d postgres redis
+
+            # ── Wait for postgres to be ready ───────────────────────────────
+            echo "▸ Waiting for postgres..."
+            for i in $(seq 1 15); do
+              if $COMPOSE exec -T postgres pg_isready > /dev/null 2>&1; then
+                echo "  Postgres ready ✓"
+                break
+              fi
+              [ $i -eq 15 ] && { echo "ERROR: Postgres not ready after 75s"; exit 1; }
+              sleep 5
+            done
+
             # ── Database migrations ─────────────────────────────────────────
             echo "▸ Running migrations..."
             $COMPOSE run --rm --no-deps backend python manage.py migrate --noinput
@@ -81,7 +96,7 @@ jobs:
             echo "▸ Collecting static files..."
             $COMPOSE run --rm --no-deps backend python manage.py collectstatic --noinput --clear
 
-            # ── Start / restart services ────────────────────────────────────
+            # ── Start / restart all services ────────────────────────────────
             echo "▸ Starting services..."
             $COMPOSE up -d --remove-orphans
 

@@ -274,10 +274,20 @@ The VPS already runs a shared nginx on ports 80/443 serving other apps. MateMail
 
 Other ports in use on VPS (not MateMail): 4317 (otel), 8642 (python), 5050 (docker-proxy), 3000/3005/3010 (node/docker), 8005/8010/8013/8081/8082 (docker-proxies), 19999 (netdata), 8125 (netdata stats).
 
-### To go live
-1. SSH to VPS, `git clone https://github.com/rizwansammo/MateMail.git /opt/matemail`
-2. `cp .env.example .env && nano .env` (fill secrets)
-3. `sudo ./scripts/init-letsencrypt.sh` (installs vhost + gets TLS cert)
-4. `./scripts/deploy.sh` (builds + migrates + starts)
-5. `sudo ./scripts/apply-mailcow-config.sh` (mailcow banner fix)
-6. Install policy bridge: `sudo cp scripts/postfix-policy-bridge.service /etc/systemd/system/ && sudo systemctl enable --now postfix-policy-bridge`
+### VPS current state (as of 2026-06-04)
+
+- Repo cloned at `/opt/MateMail` (capital M); symlink `/opt/matemail → /opt/MateMail` created
+- `.env` is configured with real secrets (DJANGO_SECRET_KEY, POSTGRES_PASSWORD, INTERNAL_API_SECRET filled)
+- DNS records set in Namecheap: A @ → 176.57.188.13, A app → 176.57.188.13, A mx → 176.57.188.13, MX @ → mx.matemail.online (priority 10)
+- CI/CD is working (GitHub Actions → SSH → VPS). Secrets in repo: `CNTB_HOST`, `CNTB_USER`, `CNTB_SSH_KEY`
+- `apps/logs` module was missing from repo (gitignore blocked `logs/` dir). Fixed: `.gitignore` now uses `/logs/` and `backend/logs/` instead of `logs/`. Module created with MailLog model, LogEventType, log_event util, serializer, view, URLs.
+- **Next pending action:** Push `apps/logs/` + `.gitignore` fix → CI/CD should deploy successfully
+- nginx vhost NOT yet installed; TLS cert NOT yet obtained — run `init-letsencrypt.sh` after first successful deploy
+- `MAIL_ENGINE_ADAPTER=stub` in .env (mailcow not connected yet)
+
+### To go live (remaining steps after CI/CD passes)
+1. `sudo ./scripts/init-letsencrypt.sh` (installs nginx vhost + gets TLS cert)
+2. `sudo ./scripts/apply-mailcow-config.sh` (mailcow banner fix — when mailcow is set up)
+3. Install policy bridge: `sudo cp scripts/postfix-policy-bridge.service /etc/systemd/system/ && sudo systemctl enable --now postfix-policy-bridge`
+4. Set `MAIL_ENGINE_ADAPTER=mailcow` in .env once mailcow is connected
+5. Create platform admin user: `CREATE_ADMIN=true ADMIN_EMAIL=joe@netswitch.net ADMIN_PASSWORD=... ./scripts/deploy.sh`
