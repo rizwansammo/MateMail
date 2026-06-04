@@ -12,7 +12,7 @@ environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 DEBUG = env("DJANGO_DEBUG", default=False)
-ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = list({*env("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1").split(","), "localhost", "127.0.0.1"})
 
 DJANGO_APPS = [
     "django.contrib.admin",

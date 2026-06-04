@@ -103,7 +103,7 @@ jobs:
             # ── Wait for backend health ─────────────────────────────────────
             echo "▸ Waiting for backend..."
             for i in $(seq 1 20); do
-              if curl -sf http://127.0.0.1:8015/api/health/ > /dev/null 2>&1; then
+              if $COMPOSE exec -T backend curl -sf http://localhost:8000/api/health/ > /dev/null 2>&1; then
                 echo "  Backend healthy ✓"
                 break
               fi
