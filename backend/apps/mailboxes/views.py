@@ -8,7 +8,7 @@ from apps.domains.models import Domain
 from apps.billing.utils import check_mailbox_limit
 from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
-from apps.tenants.permissions import HasTenantAccess, IsTenantAdmin
+from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
 from .models import Mailbox
 from .serializers import MailboxCreateSerializer, MailboxReProvisionSerializer, MailboxSerializer, MailboxStatusSerializer
 
@@ -29,7 +29,7 @@ def _provision_mailbox(mailbox, password: str) -> None:
 
 
 class MailboxListCreateView(APIView):
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite, IsEmailVerified]
 
     def get(self, request):
         mailboxes = Mailbox.objects.for_tenant(request.tenant).select_related("domain")
@@ -78,7 +78,7 @@ class MailboxListCreateView(APIView):
 
 
 class MailboxDetailView(APIView):
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
     def _get_mailbox(self, request, pk):
         return Mailbox.objects.for_tenant(request.tenant).select_related("domain").filter(pk=pk).first()
@@ -146,7 +146,7 @@ class MailboxStatusView(APIView):
 
 class MailboxReProvisionView(APIView):
     """POST /api/mailboxes/{id}/reprovision/ — re-provision with a new password."""
-    permission_classes = [IsAuthenticated, IsTenantAdmin]
+    permission_classes = [IsAuthenticated, IsTenantAdmin, IsEmailVerified]
 
     def post(self, request, pk):
         mb = Mailbox.objects.for_tenant(request.tenant).select_related("domain").filter(pk=pk).first()

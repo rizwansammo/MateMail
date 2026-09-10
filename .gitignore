@@ -67,3 +67,7 @@ backend/logs/
 coverage/
 .coverage
 junit*.xml
+
+# ─── Claude Code ─────────────────────────────────────────────────────────────
+CLAUDE.md
+.claude/

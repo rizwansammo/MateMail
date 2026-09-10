@@ -33,6 +33,11 @@ class MailLog(models.Model):
     objects = TenantScopedManager()
 
     class Meta:
+        # Explicit table name, matching every other model in this project.
+        # Migration 0001 created this table as "logs_mail_log"; the Phase 10 model
+        # rewrite dropped the db_table line, silently repointing the ORM at
+        # "logs_maillog" (which does not exist) and breaking every audit write.
+        db_table = "logs_mail_log"
         ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["tenant", "-created_at"]),

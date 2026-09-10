@@ -1,9 +1,8 @@
 import hashlib
 import secrets
 import string
-from datetime import timedelta
 
-from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+from rest_framework_simplejwt.tokens import RefreshToken
 
 
 def make_tokens(user, tenant_id=None):
@@ -15,18 +14,33 @@ def make_tokens(user, tenant_id=None):
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
 
-def make_partial_token(user, tenant_id):
-    """Short-lived access token issued when 2FA is required. Not usable for API calls."""
-    token = AccessToken.for_user(user)
-    token.set_exp(lifetime=timedelta(minutes=5))
-    token["two_fa_required"] = True
-    if tenant_id:
-        token["tenant_id"] = str(tenant_id)
-    return str(token)
-
-
 def hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def revoke_all_refresh_tokens(user) -> int:
+    """
+    Blacklist every outstanding refresh token for `user`, ending all sessions
+    that could still be renewed. Called on security events such as a password
+    reset.
+
+    Returns the number of tokens newly blacklisted.
+
+    Note: already-issued *access* tokens remain valid until they expire
+    (ACCESS_TOKEN_LIFETIME, 15 minutes by default). Revoking those would require
+    a deny-list check on every request; the short lifetime bounds the exposure.
+    """
+    from rest_framework_simplejwt.token_blacklist.models import (
+        BlacklistedToken,
+        OutstandingToken,
+    )
+
+    revoked = 0
+    for token in OutstandingToken.objects.filter(user=user):
+        _, created = BlacklistedToken.objects.get_or_create(token=token)
+        if created:
+            revoked += 1
+    return revoked
 
 
 def generate_backup_codes(n: int = 10) -> list[str]:

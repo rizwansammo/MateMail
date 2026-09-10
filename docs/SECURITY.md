@@ -116,9 +116,53 @@ There is no API path that allows Tenant A to read or affect Tenant B's mail.
 
 Platform admin access is controlled by `User.is_platform_admin` (separate from tenant roles) and enforced by a dedicated `IsPlatformAdmin` DRF permission class on all `/api/platform/` endpoints.
 
+### Enforcement (implemented in Phase 0)
+
+The table above is enforced by permission classes in `apps/tenants/permissions.py`, not by convention:
+
+| Class | Reads | Writes | Used on |
+|-------|-------|--------|---------|
+| `HasTenantAccess` | any active member | **not role-aware — read-only views only** | billing, DNS record listing |
+| `TenantReadAdminWrite` | any active member | owner, admin | domains, mailboxes, aliases, forwarding |
+| `TenantReadSupportWrite` | any active member | owner, admin, support | domain DNS re-check only |
+| `IsTenantAdmin` | owner, admin | owner, admin | logs, queue, quarantine, backups, invites, API keys, mailbox status/reprovision |
+| `IsEmailVerified` | any | verified accounts only | domain + mailbox provisioning |
+
+`HasTenantAccess` checks only that *some* active membership exists. Before Phase 0 it guarded ten mutating endpoints, so a `read_only` member could delete a domain or create a forwarding rule to an external address. Never use it on a view that mutates tenant state.
+
+`TenantReadSupportWrite` is the one deliberate exception to admin-only writes: re-running a domain's DNS check is non-destructive and diagnostic. Do not widen it without recording the reason here — `read_only` must still receive 403.
+
+The matrix is pinned by `tests/test_role_permissions.py`, which drives every mutating endpoint as each of the four roles.
+
+### Two-factor challenge tokens
+
+A 2FA challenge (`partial_token`) is **not** a JWT and must never become one. It is
+32 bytes of opaque entropy; the user/tenant binding lives server-side in the
+Redis-backed cache keyed by the token's SHA-256, with a 5-minute TTL, single-use
+semantics, and destruction after 5 failed code attempts. It is also bound to the
+password hash that created it, so a password change voids it immediately.
+
+Before Phase 0 this was a real `AccessToken`, which DRF's `JWTAuthentication`
+accepted — a password alone granted full API access with 2FA never presented.
+See `apps/accounts/challenge.py` and `tests/test_two_factor.py`.
+
+### Internal endpoints
+
+Every endpoint that authenticates with `INTERNAL_API_SECRET` rather than a user
+credential **must** be routed under `/api/internal/`, because that prefix is what
+the edge nginx config denies. Comparison uses `hmac.compare_digest`, and an
+unset secret fails closed. Pinned by `tests/test_internal_endpoints.py`.
+
 ---
 
 ## Rate Limiting
+
+> **Status: NOT IMPLEMENTED.** The table below is the target design, not the
+> current behaviour. Today the only limits in force are DRF's
+> `AnonRateThrottle`/`UserRateThrottle` (60/min anon, 120/min user) plus a 5/min
+> per-IP `auth` scope on the auth endpoints. There is no per-account lockout, no
+> per-email or per-domain limit, and `django-ratelimit` is not a dependency.
+> Scheduled for the abuse-hardening phase (P5).
 
 | Endpoint / Operation | Limit |
 |---------------------|-------|
@@ -133,7 +177,9 @@ Platform admin access is controlled by `User.is_platform_admin` (separate from t
 | DNS check tasks | 1 / 5 min per domain (Celery) |
 | API endpoints (general) | 60 / min per authenticated user |
 
-Implementation: `django-ratelimit` for web endpoints, Stalwart rate limiter for mail protocols.
+Planned implementation: `django-ratelimit` for web endpoints, plus the mail
+engine's own rate limiter for SMTP/IMAP protocols. (The "Stalwart" reference in
+earlier drafts predates DEC-001, which selected mailcow.)
 
 ---
 

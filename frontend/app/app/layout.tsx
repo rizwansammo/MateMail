@@ -29,7 +29,9 @@ const nav = [
   { label: "Mailboxes", href: "/app/mailboxes", icon: Users },
   { label: "Aliases", href: "/app/aliases", icon: Layers },
   { label: "Forwarding", href: "/app/forwarding", icon: Send },
-  { label: "DNS Health", href: "/app/dns-health", icon: ShieldCheck },
+  // No "DNS Health" entry: /app/dns-health has never existed, so the link 404'd.
+  // Per-domain DNS status lives on /app/domains/[id]. Restore a dedicated
+  // cross-domain page here only once that route is actually built.
   { label: "Spam", href: "/app/spam", icon: Shield },
   { label: "Queue", href: "/app/queue", icon: Clock },
   { label: "Logs", href: "/app/logs", icon: FileText },

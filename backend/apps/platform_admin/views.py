@@ -1,5 +1,6 @@
 import logging
 
+from django.db.models import F
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -123,10 +124,12 @@ class AdminTenantDetailView(APIView):
         except Exception:
             subscription_data = None
 
+        # Domain's fields are `domain` and `added_at`; the admin UI consumes
+        # `name` and `created_at`, so alias rather than rename the API contract.
         domains = list(
             tenant.domains
-            .values("id", "name", "status", "created_at")
-            .order_by("-created_at")[:30]
+            .values("id", "status", name=F("domain"), created_at=F("added_at"))
+            .order_by("-added_at")[:30]
         )
         for d in domains:
             d["id"] = str(d["id"])

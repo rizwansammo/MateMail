@@ -2,7 +2,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.tenants.permissions import HasTenantAccess
+from apps.tenants.permissions import HasTenantAccess, TenantReadSupportWrite
 from apps.domains.models import Domain
 from .models import DNSRecordCheck
 from .serializers import DNSRecordCheckSerializer
@@ -28,7 +28,7 @@ class DomainDNSRecordsView(APIView):
 
 class DomainCheckDNSView(APIView):
     """POST /api/domains/{id}/check/ — trigger synchronous DNS check, return updated domain + records."""
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadSupportWrite]
 
     def post(self, request, pk):
         domain = Domain.objects.for_tenant(request.tenant).filter(pk=pk).first()

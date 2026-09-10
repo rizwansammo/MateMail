@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 
 from apps.domains.models import Domain
 from apps.mailboxes.models import Mailbox
-from apps.tenants.permissions import HasTenantAccess, IsTenantAdmin
+from apps.tenants.permissions import IsTenantAdmin, TenantReadAdminWrite
 from .models import Alias, AliasStatus
 from .serializers import AliasCreateSerializer, AliasSerializer
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class AliasListCreateView(APIView):
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
     def get(self, request):
         aliases = (
@@ -85,7 +85,7 @@ class AliasListCreateView(APIView):
 
 
 class AliasDetailView(APIView):
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
     def _get(self, request, pk):
         return (

@@ -14,10 +14,13 @@ urlpatterns = [
     path("api/logs/", include("apps.logs.urls")),
     path("api/queue/", include("apps.mailqueue.urls")),
     path("api/quarantine/", include("apps.quarantine.urls")),
-    # Webmail SSO — /api/webmail/sso/ (tenant-authenticated) + /api/internal/webmail/validate-token/
+    # Webmail SSO — tenant-authenticated
     path("api/webmail/", include("apps.webmail.urls")),
-    # Internal SMTP policy endpoints — secured by INTERNAL_API_SECRET, blocked publicly by nginx
+    # ── Internal endpoints ────────────────────────────────────────────────────
+    # Secured by INTERNAL_API_SECRET *and* denied at the edge by nginx.
+    # Everything internal MUST live under /api/internal/ for that rule to apply.
     path("api/internal/smtp/", include("apps.smtp_policy.urls")),
+    path("api/internal/webmail/", include("apps.webmail.internal_urls")),
     # Platform admin endpoints — IsPlatformAdmin permission required
     path("api/platform/", include("apps.platform_admin.urls")),
     # Team invites + API keys

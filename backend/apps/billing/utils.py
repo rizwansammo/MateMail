@@ -26,7 +26,7 @@ def days_left_on_trial(tenant):
     sub = get_subscription(tenant)
     if not sub or not sub.trial_ends_at:
         return 0
-    from billing.models import SubscriptionStatus
+    from apps.billing.models import SubscriptionStatus
     if sub.status != SubscriptionStatus.TRIALING:
         return 0
     delta = sub.trial_ends_at - timezone.now()

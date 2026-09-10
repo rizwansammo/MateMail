@@ -2,6 +2,7 @@ import hashlib
 
 from django.http import JsonResponse
 from django.utils import timezone
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
@@ -33,10 +34,17 @@ class TenantMiddleware:
         if path.startswith("/api/platform/") or path.startswith("/api/auth/") or path.startswith("/api/health/"):
             return self.get_response(request)
 
-        # Attempt JWT authentication
+        # Attempt JWT authentication.
+        #
+        # This middleware runs outside DRF's exception handling, so any exception
+        # escaping here becomes an unhandled 500 rather than a 401. simplejwt
+        # raises AuthenticationFailed (not InvalidToken) for a structurally valid
+        # token belonging to an inactive or deleted user, so that case must be
+        # caught too. We resolve no tenant and let DRF's authentication classes
+        # produce the proper 401 on the view.
         try:
             result = self._jwt_auth.authenticate(request)
-        except (InvalidToken, TokenError):
+        except (InvalidToken, TokenError, AuthenticationFailed):
             return self.get_response(request)
 
         if result is None:
@@ -82,12 +90,15 @@ class TenantMiddleware:
             return
         raw_key = auth[len("Bearer "):]
         key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        from apps.teams.models import APIKey
         try:
-            from apps.teams.models import APIKey
             api_key = APIKey.objects.select_related("tenant", "created_by").get(
                 key_hash=key_hash, is_active=True
             )
-        except Exception:
+        except APIKey.DoesNotExist:
+            # Unknown or revoked key — resolve no tenant and let DRF's
+            # APIKeyAuthentication return the 401. Any other exception is a real
+            # fault and must propagate rather than silently granting no tenant.
             return
         if api_key.expires_at and timezone.now() > api_key.expires_at:
             return

@@ -12,6 +12,7 @@ Dovecot integration (Phase 15):
     Configure passdb { driver = dict } pointing to the validate endpoint,
     or use a Lua policy script that calls /api/internal/smtp/outbound/ on SASL success.
 """
+import hmac
 import logging
 
 from django.conf import settings
@@ -28,12 +29,14 @@ _limiter = MailRateLimiter()
 
 
 def _authorized(request) -> bool:
-    """Verify the shared internal secret is present and correct."""
+    """Verify the shared internal secret is present and correct (constant time)."""
     expected = getattr(settings, "INTERNAL_API_SECRET", "")
     if not expected:
         logger.error("INTERNAL_API_SECRET not configured — rejecting internal call")
         return False
-    return request.META.get("HTTP_X_INTERNAL_SECRET", "") == expected
+    provided = request.META.get("HTTP_X_INTERNAL_SECRET", "")
+    # compare_digest avoids leaking a byte-by-byte match through timing.
+    return hmac.compare_digest(provided.encode(), expected.encode())
 
 
 class InboundPolicyView(APIView):

@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from apps.billing.utils import check_domain_limit
 from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
-from apps.tenants.permissions import HasTenantAccess
+from apps.tenants.permissions import IsEmailVerified, TenantReadAdminWrite
 from .dkim import generate_dkim_keypair
 from .models import Domain
 from .serializers import DomainCreateSerializer, DomainSerializer
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class DomainListCreateView(APIView):
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite, IsEmailVerified]
 
     def get(self, request):
         domains = Domain.objects.for_tenant(request.tenant).order_by("-added_at")
@@ -60,7 +60,7 @@ class DomainListCreateView(APIView):
 
 
 class DomainDetailView(APIView):
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
     def _get_domain(self, request, pk):
         return Domain.objects.for_tenant(request.tenant).filter(pk=pk).first()
@@ -91,7 +91,7 @@ class DomainDetailView(APIView):
 
 class DomainProvisionView(APIView):
     """POST /api/domains/{id}/provision/ — manually re-trigger mail engine provisioning."""
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite, IsEmailVerified]
 
     def post(self, request, pk):
         domain = Domain.objects.for_tenant(request.tenant).filter(pk=pk).first()

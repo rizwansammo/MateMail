@@ -1,10 +1,34 @@
 # PROJECT_STATUS.md
 
 **Product:** MateMail  
+**Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
-**Last updated:** 2026-05-30  
-**Current phase:** PHASE 15 — COMPLETE  
-**Next phase:** PHASE 16 — Testing and quality
+**Last updated:** 2026-09-10  
+**Current phase:** PRODUCTION READINESS PHASE 0 — COMPLETE  
+**Next phase:** to be assigned
+
+---
+
+## Honest readiness summary
+
+The feature phases below (1–15) describe what was *built*. A production-readiness
+audit on 2026-09-10 found that several of them shipped an API and a UI page
+without the mechanism underneath. Read this section before trusting the tables.
+
+**Not production ready.** Blocking items, in order:
+
+| # | Blocker | State |
+|---|---------|-------|
+| 1 | **No mail engine.** `docker-compose.mailengine.yml` is an nginx placeholder. mailcow was never installed, so no mail has ever been sent or received. `MailcowAdapter` is written but has nothing to call. | Open |
+| 2 | **Outbound SMTP policy never consulted.** The documented Postfix restriction order puts `permit_sasl_authenticated` before `check_policy_service`, so rate limits, sender-equals-auth and tenant suspension are not enforced for sending. | Open |
+| 3 | **Backups are simulated.** `run_backup_task` counts rows, invents a size and marks the job complete. Nothing is backed up and there is no restore path. Domain deletion cascades to permanent mail destruction. | Open |
+| 4 | **No webmail.** No inbox/compose/thread routes exist. The SSO bridge cannot authenticate anyone, because webmail needs the mailbox IMAP password and MateMail deliberately never stores it. DEC-005 is unresolved. | Open |
+| 5 | **Queue, quarantine and storage usage are empty shells.** Nothing writes `QueueMessage` or `QuarantineMessage`; `storage_used_mb` is never assigned. No mailcow→MateMail sync task exists. | Open |
+| 6 | **Domain ownership is not verified** before a domain is provisioned into the mail engine. | Open |
+| 7 | **Deployment architecture is contradictory** and does not yet match the NetaMate model in `CLAUDE.md` (ports 8020/3020, GHCR image deploys, host-native nginx). | Open |
+
+Resolved in Phase 0: the four critical application-security defects and the
+broken audit log. See the Phase 0 section below.
 
 ---
 
@@ -23,7 +47,7 @@
 | TenantMiddleware | ✅ Phase 2 |
 | RBAC permission classes | ✅ Phase 2 |
 | Django admin for all models | ✅ Phase 2 |
-| Tenant isolation tests (15/15) | ✅ Phase 2 |
+| Tenant isolation tests | ✅ Phase 2 (15 ORM tests; 2 were failing until Phase 0 — see below) |
 | Mail engine adapter interface | ✅ Phase 1 |
 | Auth APIs (signup/login/logout/2FA/reset) | ✅ Phase 3 |
 | JWT with tenant_id claim | ✅ Phase 3 |
@@ -148,8 +172,14 @@
 | 13 | Internal platform admin portal | ✅ Complete |
 | 14 | Backups and restore visibility | ✅ Complete |
 | 15 | Deployment, TLS, DNS, production hardening | ✅ Complete |
-| 16 | Testing and quality | Pending |
+| 16 | Testing and quality | Partial — Phase 0 added 92 tests and a green suite; broader coverage still pending |
 | 17 | Final polish | Pending |
+
+### Production readiness phases
+
+| Phase | Title | Status |
+|-------|-------|--------|
+| P0 | Trustworthy baseline + critical application security | ✅ Complete (2026-09-10) |
 
 ---
 
@@ -243,3 +273,68 @@ docker compose run --rm backend python manage.py migrate
 - **Sending limits**: Per-tenant, per-domain, per-mailbox rate limits via Redis counters
 - **Suspended tenants**: Hook into billing/suspension to block sending
 - Security rules: Never build an open relay; outbound only for authenticated active mailboxes
+
+---
+
+## Production Readiness Phase 0 — Trustworthy baseline + critical app security
+
+**Completed 2026-09-10.** Scope: establish a verifiable baseline and fix the
+critical application-security defects. No deployment, no mail engine work.
+
+### Baseline established
+
+| Check | Before Phase 0 | After |
+|-------|----------------|-------|
+| `pip install -r requirements.txt` (clean venv) | pass | pass |
+| `pip install -r requirements-dev.txt` (clean venv) | pass | pass |
+| `manage.py check` (dev) | pass | pass |
+| `manage.py check --deploy` (prod) | 1 warning (`W019`) | 1 warning (`W019`) |
+| `manage.py makemigrations --check --dry-run` | **8 pending operations on `logs`** | no changes detected |
+| Backend test suite | **15 tests, 2 errors** | **107 tests, 0 failures** |
+| `npm ci` | pass | pass |
+| `npm run lint` | 18 errors, 19 warnings | 18 errors, 19 warnings (unchanged; pre-existing `react-hooks` issues) |
+| `npm run build` | pass, 27 routes | pass, 27 routes |
+
+`W019` is `X_FRAME_OPTIONS = "SAMEORIGIN"` rather than `"DENY"`, kept deliberately
+so the app can frame its own pages. Revisit if that need disappears.
+
+### Security defects fixed
+
+| ID | Defect | Fix |
+|----|--------|-----|
+| C1 | **2FA fully bypassable.** `partial_token` was a real `AccessToken`; DRF accepted it, so a password alone granted full API access. Reproduced before the fix. | Opaque single-use Redis-backed challenge (`apps/accounts/challenge.py`); `make_partial_token` deleted |
+| C2 | **Admin disclosed DKIM private keys and TOTP secrets.** `readonly_fields` without a field restriction renders every editable field. | `exclude` on all secret-bearing admins; `has_dkim_private_key` boolean replaces the key |
+| C3 | **`read_only` members could mutate.** Ten endpoints guarded only by `HasTenantAccess`, which ignores role — a read-only member could delete a domain or forward a mailbox externally. | `TenantReadAdminWrite` / `TenantReadSupportWrite`; full matrix test |
+| C4 | **Audit log silently recorded nothing.** Phase 10 dropped `MailLog.Meta.db_table`, repointing the ORM at a non-existent table; `log_event` swallowed the error. | `db_table` restored + migration `logs/0002`; broad `except` removed |
+| H1 | Internal webmail validator routed publicly at `/api/webmail/validate-token/`, outside the nginx-denied prefix | moved to `/api/internal/webmail/validate-token/` |
+| H4 | Password reset left refresh tokens and other reset links valid | all outstanding tokens blacklisted; sibling reset tokens burned; challenge bound to password hash |
+| H5 | Inactive user's valid JWT caused an unhandled middleware **500** | `AuthenticationFailed` caught → 401 |
+| H6 | Internal secret compared with `==` (timing oracle) | `hmac.compare_digest` |
+| H2 | Email verification never enforced | `IsEmailVerified` on domain + mailbox provisioning |
+
+### Day-one defects fixed
+
+- `/api/platform/tenants/{id}/` raised `FieldError` (queried `Domain.name` / `Domain.created_at`, which do not exist) — the whole `/admin/tenants/[id]` page was dead.
+- Sidebar linked to `/app/dns-health`, a route that has never existed — link removed.
+- Domain normalization used `str.lstrip("www.")`, which strips a character set, not a prefix (`web.example.com` → `eb.example.com`) — replaced with `removeprefix` plus hostname validation.
+- `billing/utils.days_left_on_trial` imported `billing.models` instead of `apps.billing.models`.
+
+### Tests added (92 new, 107 total)
+
+| File | Tests | Covers |
+|------|-------|--------|
+| `tests/test_two_factor.py` | 10 | challenge cannot authenticate; valid 2FA works; single-use; attempt cap; password-change voids |
+| `tests/test_role_permissions.py` | 16 | every mutating endpoint × all four roles |
+| `tests/test_cross_tenant_api.py` | 16 | HTTP-layer isolation: read, mutate, delete, cross-tenant parent attachment |
+| `tests/test_day_one_defects.py` | 16 | audit-log writes, platform-admin detail, domain normalization, billing import |
+| `tests/test_auth_security.py` | 11 | reset revokes sessions/tokens; inactive user → 401 not 500 |
+| `tests/test_email_verification.py` | 8 | unverified cannot provision; reads still work; verification unblocks |
+| `tests/test_internal_endpoints.py` | 8 | internal routes under `/api/internal/`; secret enforcement; constant-time compare |
+| `tests/factories.py` | — | shared helpers (no secrets; test-only fast password hasher) |
+
+### Known limitations carried forward
+
+- Access tokens (15 min) cannot be revoked mid-life; password reset revokes refresh tokens only.
+- The 2FA challenge requires a working cache. Production must have `CACHES` pointed at Redis (now configured in `config/settings/base.py`).
+- `IsEmailVerified` blocks provisioning for any account with `email_verified = False`, which includes accounts created before this change.
+- Frontend lint carries 18 pre-existing `react-hooks` errors, untouched by Phase 0.

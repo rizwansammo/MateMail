@@ -1,7 +1,9 @@
 import hashlib
+import logging
 
 import pyotp
 from django.contrib.auth import authenticate
+from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import transaction
@@ -13,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.billing.utils import TRIAL_DAYS
 from apps.tenants.models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
@@ -36,12 +38,23 @@ from .serializers import (
     UserProfileSerializer,
     VerifyEmailSerializer,
 )
+from .challenge import (
+    challenge_matches_password,
+    consume_challenge,
+    create_challenge,
+    discard_challenge,
+    peek_challenge,
+    register_failed_attempt,
+)
 from .tokens import (
     generate_backup_codes,
     hash_token,
-    make_partial_token,
     make_tokens,
+    revoke_all_refresh_tokens,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class AuthThrottle(AnonRateThrottle):
@@ -127,7 +140,9 @@ class LoginView(APIView):
         tenant_id = membership.tenant_id if membership else None
 
         if user.two_factor_enabled:
-            partial = make_partial_token(user, tenant_id)
+            # Opaque server-side challenge — deliberately NOT a JWT, so it cannot
+            # be replayed as an API access token. See apps.accounts.challenge.
+            partial = create_challenge(user, tenant_id)
             return Response({"requires_2fa": True, "partial_token": partial})
 
         tokens = make_tokens(user, tenant_id=tenant_id)
@@ -144,11 +159,13 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        # A malformed or already-blacklisted token is not an error worth surfacing:
+        # the caller's intent (end this session) is satisfied either way. Anything
+        # else is a real failure and must not be swallowed.
         try:
-            refresh = RefreshToken(request.data.get("refresh", ""))
-            refresh.blacklist()
-        except (InvalidToken, TokenError, Exception):
-            pass
+            RefreshToken(request.data.get("refresh", "")).blacklist()
+        except (InvalidToken, TokenError):
+            logger.info("Logout called with an invalid or already-revoked refresh token.")
         return Response({"detail": "Logged out."})
 
 
@@ -199,10 +216,30 @@ class ResetPasswordView(APIView):
         if timezone.now() > token_obj.expires_at:
             return Response({"detail": "This reset link has expired."}, status=400)
 
-        token_obj.user.set_password(data["new_password"])
-        token_obj.user.save(update_fields=["password"])
+        user = token_obj.user
+        user.set_password(data["new_password"])
+        user.save(update_fields=["password"])
         token_obj.is_used = True
         token_obj.save(update_fields=["is_used"])
+
+        # A password reset is a security event: assume the old credential is
+        # compromised and cut every session that could outlive it.
+        revoked = revoke_all_refresh_tokens(user)
+
+        # Burn any other outstanding reset links for this user, so a second
+        # emailed link cannot be replayed later.
+        also_used = PasswordResetToken.objects.filter(
+            user=user, is_used=False
+        ).exclude(pk=token_obj.pk).update(is_used=True)
+
+        # Any in-flight 2FA challenge is bound to the old password hash and is
+        # therefore already void — see challenge_matches_password().
+
+        logger.info(
+            "Password reset completed for user %s — revoked %d refresh token(s), "
+            "invalidated %d other reset token(s)",
+            user.pk, revoked, also_used,
+        )
 
         return Response({"detail": "Password updated. You can now log in."})
 
@@ -303,18 +340,20 @@ class TwoFactorVerifyView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        try:
-            token = AccessToken(data["partial_token"])
-        except (InvalidToken, TokenError):
+        raw_challenge = data["partial_token"]
+        payload = peek_challenge(raw_challenge)
+        if payload is None:
             return Response({"detail": "Invalid or expired token."}, status=401)
 
-        if not token.get("two_fa_required"):
-            return Response({"detail": "Invalid token type."}, status=401)
-
         try:
-            user = User.objects.get(id=token["user_id"])
-        except (User.DoesNotExist, KeyError):
+            user = User.objects.get(id=payload["user_id"], is_active=True)
+        except (User.DoesNotExist, KeyError, ValidationError):
             return Response({"detail": "User not found."}, status=401)
+
+        if not challenge_matches_password(payload, user):
+            # Password changed after this challenge was issued (e.g. a reset).
+            discard_challenge(raw_challenge)
+            return Response({"detail": "Invalid or expired token."}, status=401)
 
         code = data["code"]
         try:
@@ -323,6 +362,7 @@ class TwoFactorVerifyView(APIView):
             return Response({"detail": "2FA not configured."}, status=401)
 
         totp = pyotp.TOTP(setup.totp_secret)
+        backup = None
         if not totp.verify(code, valid_window=1):
             # Try backup code
             code_hash = hash_token(code)
@@ -330,11 +370,19 @@ class TwoFactorVerifyView(APIView):
                 user=user, code_hash=code_hash, is_used=False
             ).first()
             if not backup:
+                register_failed_attempt(raw_challenge)
                 return Response({"detail": "Invalid authentication code."}, status=401)
+
+        # Claim the challenge before issuing credentials. delete() returns False if
+        # a concurrent request already claimed it, which keeps the token single-use.
+        if not consume_challenge(raw_challenge):
+            return Response({"detail": "Invalid or expired token."}, status=401)
+
+        if backup is not None:
             backup.is_used = True
             backup.save(update_fields=["is_used"])
 
-        tenant_id = token.get("tenant_id")
+        tenant_id = payload.get("tenant_id")
         tokens = make_tokens(user, tenant_id=tenant_id)
         membership = (
             TenantMembership.objects.select_related("tenant")

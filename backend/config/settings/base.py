@@ -116,6 +116,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Redis
 REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
 
+# Cache — Redis-backed. Used for short-lived security state that must not live in
+# the database or in a client-held token (e.g. the 2FA login challenge).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+        "KEY_PREFIX": "matemail",
+    }
+}
+
 # Celery
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = "django-db"

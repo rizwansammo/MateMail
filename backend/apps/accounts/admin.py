@@ -27,7 +27,8 @@ class EmailVerificationTokenAdmin(admin.ModelAdmin):
     list_display = ("user", "is_used", "expires_at", "created_at")
     list_filter = ("is_used",)
     search_fields = ("user__email",)
-    readonly_fields = ("id", "token_hash", "created_at")
+    readonly_fields = ("id", "created_at")
+    exclude = ("token_hash",)
 
 
 @admin.register(PasswordResetToken)
@@ -35,7 +36,8 @@ class PasswordResetTokenAdmin(admin.ModelAdmin):
     list_display = ("user", "is_used", "expires_at", "created_at")
     list_filter = ("is_used",)
     search_fields = ("user__email",)
-    readonly_fields = ("id", "token_hash", "created_at")
+    readonly_fields = ("id", "created_at")
+    exclude = ("token_hash",)
 
 
 @admin.register(TwoFactorSetup)
@@ -44,10 +46,17 @@ class TwoFactorSetupAdmin(admin.ModelAdmin):
     search_fields = ("user__email",)
     readonly_fields = ("id", "created_at")
 
+    # totp_secret reconstructs the user's authenticator. Never render it.
+    exclude = ("totp_secret",)
+
 
 @admin.register(TwoFactorBackupCode)
 class TwoFactorBackupCodeAdmin(admin.ModelAdmin):
     list_display = ("user", "is_used", "created_at")
     list_filter = ("is_used",)
     search_fields = ("user__email",)
-    readonly_fields = ("id", "code_hash", "created_at")
+    readonly_fields = ("id", "created_at")
+
+    # Backup codes are short (8 chars, 36-symbol alphabet), so their unsalted
+    # SHA-256 is brute-forceable offline. The hash has no admin use anyway.
+    exclude = ("code_hash",)

@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.mailboxes.models import Mailbox
-from apps.tenants.permissions import HasTenantAccess, IsTenantAdmin
+from apps.tenants.permissions import IsTenantAdmin, TenantReadAdminWrite
 from .models import ForwardingRule, ForwardingStatus
 from .serializers import ForwardingRuleCreateSerializer, ForwardingRuleSerializer
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class ForwardingRuleListCreateView(APIView):
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
     def get(self, request):
         rules = (
@@ -67,7 +67,7 @@ class ForwardingRuleListCreateView(APIView):
 
 
 class ForwardingRuleDetailView(APIView):
-    permission_classes = [IsAuthenticated, HasTenantAccess]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
     def _get_rule(self, request, pk):
         return (

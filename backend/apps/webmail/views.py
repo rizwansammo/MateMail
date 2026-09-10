@@ -14,6 +14,7 @@ Flow:
 The internal validate endpoint is secured by INTERNAL_API_SECRET.
 nginx must block public access to /api/internal/.
 """
+import hmac
 import logging
 import secrets
 
@@ -37,8 +38,11 @@ def _redis():
 def _authorized(request) -> bool:
     expected = getattr(settings, "INTERNAL_API_SECRET", "")
     if not expected:
+        logger.error("INTERNAL_API_SECRET not configured — rejecting internal call")
         return False
-    return request.META.get("HTTP_X_INTERNAL_SECRET", "") == expected
+    provided = request.META.get("HTTP_X_INTERNAL_SECRET", "")
+    # compare_digest avoids leaking a byte-by-byte match through timing.
+    return hmac.compare_digest(provided.encode(), expected.encode())
 
 
 class WebmailSSOView(APIView):
