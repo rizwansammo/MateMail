@@ -1071,13 +1071,23 @@ no other site touched (checksums verified identical before and after).
 - `app.matemail.online/api/` → `127.0.0.1:8020`
 - `app.matemail.online/` → `127.0.0.1:3020`
 - `app.matemail.online/api/internal/` → **403 at the edge**
-- `matemail.online` → 301 to `app.matemail.online` (own server block, so the P9
-  marketing site can replace it without touching the app vhost)
+- `matemail.online` and `www.matemail.online` → 301 to `app.matemail.online`
+  (own server block, so the P9 marketing site can replace it without touching
+  the app vhost)
 
-TLS: Let's Encrypt `matemail.online` covering `matemail.online` and
-`app.matemail.online`, expiring 2026-12-09, issued by the host's existing
-certbot. `webmail.matemail.online` deliberately excluded — it has no A record
-and nothing to serve.
+TLS: Let's Encrypt `matemail.online` covering **`matemail.online`,
+`www.matemail.online` and `app.matemail.online`**, expiring 2026-12-09, issued
+by the host's existing certbot. `webmail.matemail.online` deliberately excluded
+— it has no A record and nothing to serve.
+
+**Port-80 block restructured when www was added.** Certbot had left it as
+`if ($host = …) { return 301 }` plus a server-level `return 404`. Both run in
+nginx's *server* rewrite phase, which completes before a location is selected,
+so an ACME challenge for any name without a matching `if` would 404 and
+issuance for a new name would fail. Replaced with a location-based form: the
+challenge path has its own `location`, everything else redirects. Renewal
+dry-run for all three names succeeds. `certonly` was used for the expansion so
+certbot authenticated via nginx without rewriting the config back.
 
 ### Known-unavailable, deliberately
 
