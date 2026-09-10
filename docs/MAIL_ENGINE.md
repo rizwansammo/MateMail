@@ -1,14 +1,37 @@
-# MAIL_ENGINE.md — Mail Engine Decision and Integration Guide
+# MAIL_ENGINE.md — MateMail Mail Engine
 
-**Product:** MateMail  
-**Last updated:** 2026-05-29  
-**Status:** Decision updated after Phase 0 repo review
+**Product:** MateMail
+**Last updated:** 2026-09-10
+**Status:** Re-framed by DEC-011 — engine selection unchanged, product framing changed
 
 ---
 
-## Repository Review
+## What this document is
 
-The MateMail repository is currently empty. There are no existing mail engine files, Docker Compose configs, or mail service configurations. This means the mail engine choice is an architectural decision to be made from scratch, with no existing work to preserve.
+This is the internal engineering guide to the **MateMail Mail Engine**: the
+Postfix / Dovecot / Rspamd stack, orchestrated via mailcow, that MateMail uses
+to actually move and store mail.
+
+**Framing (DEC-011, 2026-09-10).** The engine is an *internal component of
+MateMail*, not a separate product MateMail administers. Customers must never
+learn it exists. Everything below the `MailEngineAdapter` is implementation
+detail; everything customers touch is MateMail's own UI and API.
+
+The option comparison below is retained for history — it explains why this stack
+was chosen. Read `docs/ARCHITECTURE.md` v2.0 first for the current model, and
+`PROJECT_STATUS.md` → *Mail Engine integration review* for the current state of
+the boundary, including known leaks.
+
+> **Note on the section headings that follow.** They refer to "Mailcow" because
+> that is the upstream software. In code, docs, UI and customer communication,
+> the component is called the **MateMail Mail Engine**.
+
+---
+
+## Repository Review (historical — May 2026)
+
+At the time of the original review the repository was empty, so the engine choice
+was made from scratch with no existing work to preserve.
 
 ---
 

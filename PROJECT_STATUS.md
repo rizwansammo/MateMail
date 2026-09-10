@@ -9,6 +9,20 @@
 
 ---
 
+## Architecture direction
+
+As of **DEC-011 (2026-09-10)**, MateMail is one integrated business email
+platform. Postfix / Dovecot / Rspamd — orchestrated via mailcow — are MateMail's
+**internal Mail Engine**, an implementation detail customers must never see.
+MateMail owns tenancy, permissions, plans, onboarding, provisioning, abuse
+policy, audit, backups, monitoring, webmail and all UI.
+
+See `docs/ARCHITECTURE.md` v2.0, and DEC-011 / DEC-005r / DEC-007r in
+`docs/DECISIONS.md`. The previous framing (control panel beside a separately
+presented mailcow) is superseded.
+
+---
+
 ## Honest readiness summary
 
 The feature phases below (1–15) describe what was *built*. A production-readiness
@@ -19,13 +33,14 @@ without the mechanism underneath. Read this section before trusting the tables.
 
 | # | Blocker | State |
 |---|---------|-------|
-| 1 | **No mail engine.** `docker-compose.mailengine.yml` is an nginx placeholder. mailcow was never installed, so no mail has ever been sent or received. `MailcowAdapter` is written but has nothing to call. | Open |
+| 1 | **No Mail Engine.** `docker-compose.mailengine.yml` is an nginx placeholder. The engine was never installed, so no mail has ever been sent or received. `MailcowAdapter` is written but has nothing to call. | Open |
 | 2 | **Outbound SMTP policy never consulted.** The documented Postfix restriction order puts `permit_sasl_authenticated` before `check_policy_service`, so rate limits, sender-equals-auth and tenant suspension are not enforced for sending. | Open |
 | 3 | **Backups are simulated.** `run_backup_task` counts rows, invents a size and marks the job complete. Nothing is backed up and there is no restore path. Domain deletion cascades to permanent mail destruction. | Open |
-| 4 | **No webmail.** No inbox/compose/thread routes exist. The SSO bridge cannot authenticate anyone, because webmail needs the mailbox IMAP password and MateMail deliberately never stores it. DEC-005 is unresolved. | Open |
+| 4 | **No webmail.** No inbox/compose/thread routes exist. The SSO bridge cannot authenticate anyone, because webmail needs the mailbox IMAP password and MateMail deliberately never stores it. Direction fixed by DEC-005r (MateMail-built, not SOGo); auth mechanism still open as TBD-G. | Open |
 | 5 | **Queue, quarantine and storage usage are empty shells.** Nothing writes `QueueMessage` or `QuarantineMessage`; `storage_used_mb` is never assigned. No mailcow→MateMail sync task exists. | Open |
 | 6 | **Domain ownership is not verified** before a domain is provisioned into the mail engine. | Open |
-| 7 | **Deployment architecture is contradictory** and does not yet match the NetaMate model in `CLAUDE.md` (ports 8020/3020, GHCR image deploys, host-native nginx). | Open |
+| 7 | **Deployment architecture is contradictory** and does not yet match the NetaMate model in `CLAUDE.md`: ports must move to 8020/3020 (8015/3015 belong to MateConnect), CI must build and push GHCR images instead of building on the VPS, and the dead containerized-nginx configs must go. | Open |
+| 8 | **Engine detail can reach customers.** The error sanitizer is case-sensitive and incomplete, and one code path writes raw exceptions into a customer-visible field. Violates DEC-011. See the Mail Engine integration review. | Open |
 
 Resolved in Phase 0: the four critical application-security defects and the
 broken audit log. See the Phase 0 section below.
@@ -338,3 +353,312 @@ so the app can frame its own pages. Revisit if that need disappears.
 - The 2FA challenge requires a working cache. Production must have `CACHES` pointed at Redis (now configured in `config/settings/base.py`).
 - `IsEmailVerified` blocks provisioning for any account with `email_verified = False`, which includes accounts created before this change.
 - Frontend lint carries 18 pre-existing `react-hooks` errors, untouched by Phase 0.
+- **MateMail holds DKIM private keys it should not hold.** Plaintext in
+  PostgreSQL, pushed over plaintext HTTP. Compromise allows forging mail as any
+  customer domain. P0 removed it from Django admin; full remediation is the
+  DEC-007r migration in P4.
+
+---
+
+## Mail Engine integration review (2026-09-10)
+
+Assessed against DEC-011: MateMail owns the product; the engine is internal and
+replaceable. No code changed as part of this review.
+
+### Coverage — what the adapter already wraps
+
+19 methods, all reached only via `get_adapter()`. No module outside
+`apps/mail_engine/` calls the engine, and no engine branding appears in any
+frontend file. That boundary is genuinely in place.
+
+| Capability | Adapter | MateMail owns policy | Notes |
+|---|---|---|---|
+| Domain create / suspend / delete | ✅ | ✅ | engine per-domain limits hardcoded, not plan-derived |
+| Mailbox create / enable / disable / delete | ✅ | ✅ | provisioning is synchronous in the request path |
+| Mailbox password / quota update | ✅ | ✅ | quota has no plan ceiling |
+| Alias create / delete / toggle | ✅ | ✅ | |
+| Forwarding create / delete | ✅ | ⚠️ | rule-set logic lives **inside** the adapter — see L4 |
+| DKIM public key read | ✅ | ✅ | **Wrong ownership today:** Django generates and stores the private key. DEC-007r puts key generation and storage in the engine. See L9. |
+| Queue + quarantine read / act | ✅ | ❌ | engine-global, no tenant dimension; nothing calls them |
+| Health ping | ✅ | — | boolean only |
+
+### Leaks — engine detail reaching or able to reach customers
+
+| ID | Leak | Severity |
+|----|------|----------|
+| L1 | `apps/mailboxes/views.py:73` writes `str(exc)[:500]` straight into `mail_engine_error`, which `MailboxSerializer` exposes. A connection failure puts the internal engine hostname and port in the customer UI. **Unsanitized.** | High |
+| L2 | `_sanitize()` is case-sensitive and term-limited. Verified: `Mailcow`, `MAILCOW`, `postfix`, `dovecot`, `SOGo`, `Roundcube`, `ClamAV` and engine API paths all pass through unchanged — 7 of 11 realistic probes leaked. Even a matched case leaves structure like `HTTPConnectionPool(host='…-nginx', port=8080)`. | High |
+| L3 | `ProvisionResult.raw` carries the engine's response dict through the port. Not currently serialized to customers, but nothing prevents it. | Medium |
+| L4 | `provision_forwarding` / `delete_forwarding` query `apps.forwarding.models` and implement `keep_copy` and active-rule-set semantics **inside the adapter**. This is MateMail product logic below the port: a replacement engine would have to reimplement it. | Medium |
+| L5 | Adapter methods take Django model instances, coupling the port to the ORM. `tasks.py` already works around this with `_FakeDomain` / `_FakeMailbox` shims. | Medium |
+| L6 | `WEBMAIL_BASE_URL` points wherever webmail lives; if aimed at the engine's SOGo it becomes a customer-facing engine surface. Contradicts DEC-005r. | Medium |
+| L7 | `/api/health/` is public and reports `mail_engine` status, disclosing that a distinct mail engine exists and whether it is up. | Low |
+| L8 | Docstrings in `smtp_policy/views.py` and `webmail/views.py` name Postfix, Dovecot, Roundcube and SOGo. Internal-only, but should be reframed as Mail Engine components. | Low |
+| L9 | **DKIM private key held in the control plane.** Django generates the keypair, stores the PEM unencrypted in `Domain.dkim_private_key`, and pushes it to the engine over plaintext HTTP. Violates DEC-007r: the signing key must be generated and stored inside the engine, with MateMail reading only the public half. | High |
+
+### Missing — capability the integrated product needs and the port lacks
+
+**Blocks correctness or policy:**
+- No engine-side rate limit push. MateMail's Redis limiter exists but the engine never consults MateMail on send (the policy path is not wired — blocker #2).
+- No `list_domains` / `list_mailboxes` reconciliation, so MateMail cannot detect drift between its records and the engine.
+- No typed errors. Everything collapses to `success` + `message`, so callers cannot distinguish "already exists" from "engine down" from "rejected", and cannot retry intelligently.
+- No idempotency contract, so a retried provision may behave differently from the first attempt.
+
+**Blocks customer-visible features already in the UI:**
+- No `get_mailbox_usage` → `storage_used_mb` is permanently 0 and every usage bar reads zero.
+- No last-login read → `Mailbox.last_login` is never set.
+- Queue and quarantine reads have no tenant dimension, so the existing pages cannot be populated safely.
+
+**Blocks features a business email product is expected to have:**
+- No autoresponder / out-of-office, no sieve or filter rules.
+- No catch-all address support.
+- No per-domain or per-mailbox spam policy (threshold, allow/block lists).
+- No app passwords — needed once web login uses 2FA but IMAP clients still need a credential.
+- No `rotate_dkim_key()` on the port, and no way to have the engine generate a keypair and return only the public half — both required by DEC-007r.
+- No message-level operations (folders, messages, send), which MateMail webmail will require.
+- No Dovecot master-user support, the likely mechanism for webmail auth (TBD-G).
+- No MTA-STS / TLS policy per domain.
+- No engine log or event stream for the audit trail.
+- No backup or restore hooks.
+
+### Boundary rules now recorded in `docs/ARCHITECTURE.md`
+
+1. Only `apps/mail_engine/` may call the engine.
+2. No engine-shaped data crosses the port outward.
+3. No MateMail product logic below the port.
+4. Errors are typed.
+5. Customer-visible text never originates from the engine.
+
+L1–L5 are existing violations of rules 2, 3 and 5.
+
+---
+
+## Revised roadmap (post DEC-011)
+
+Authoritative plan. Supersedes the phase tables in `docs/TODO.md`. Ordering rule:
+each phase leaves the system more defensible than it found it, and nothing
+depends on the Mail Engine until the boundary that hides it is sound.
+
+**P0 — Trustworthy baseline + critical app security.** Complete 2026-09-10.
+
+---
+
+### P1 — Harden the adapter boundary *(no engine required)*
+
+The boundary must be right *before* the engine exists, or every later phase
+builds on a leaky port. All of this is testable against `StubAdapter`.
+
+- Fix L1: never write a raw exception into `mail_engine_error`; customer-visible
+  text is MateMail-authored only.
+- Fix L2: replace term-substitution sanitizing with an allowlist — customers get
+  a MateMail message keyed by error type; raw engine text goes to logs only.
+- Introduce typed adapter errors (`EngineUnavailable`, `AlreadyExists`,
+  `Rejected`, `NotFound`, `QuotaExceeded`) and make callers branch on them.
+- Fix L4/L5: adapter takes plain DTOs, not Django models; move forwarding
+  rule-set semantics out of the adapter into `apps/forwarding`. Retires the
+  `_FakeDomain` / `_FakeMailbox` shims.
+- Drop `raw` from the outward contract (L3).
+- Add `list_domains` / `list_mailboxes` / `get_mailbox_usage` / `get_last_login`
+  to the port, plus an idempotency contract per method.
+- Reframe internal docstrings as Mail Engine components (L8).
+- Restrict `/api/health/` detail behind the internal secret (L7).
+- Tests: a leak test asserting no engine term can reach a serializer; one shared
+  contract test suite both adapters must satisfy.
+
+**Exit:** both adapters pass one shared contract suite; no engine string can
+reach a customer-visible field; suite green.
+
+---
+
+### P2 — Align deployment with the NetaMate model *(no engine, no VPS changes)*
+
+- Move to `127.0.0.1:8020` (backend) and `127.0.0.1:3020` (frontend).
+- Rewrite CI: build images in GitHub Actions, push to
+  `ghcr.io/rizwansammo/matemail-{backend,frontend}:<sha>`, deploy by
+  `docker compose pull && up -d`. No source build on the VPS, no Git checkout.
+- Celery worker and beat reuse the backend image.
+- Delete the dead containerized-nginx/certbot configs; host-native nginx is the
+  single authority. Carry the security headers and `/api/internal/` deny rule
+  into the host vhost, and add a CSP.
+- Remove the `./backend:/app` bind mount from the production compose path.
+- Compose hygiene: no host ports on postgres/redis, named volumes,
+  `restart: unless-stopped`, healthchecks on every service.
+- Carry P0's CI gate into the new pipeline: tests, `makemigrations --check`,
+  frontend build and lint must pass before deploy.
+- Target config layout `/opt/MateMail/`.
+
+**Exit:** a dry-run deploy to a scratch target succeeds from GHCR images alone;
+port map documented and free of collisions with existing MateServer apps.
+
+---
+
+### P3 — Domain ownership + abuse prevention *(no engine required)*
+
+Must land before any real domain is provisioned into a real engine.
+
+- `_matemail-verify.<domain>` TXT token required before provisioning; scope
+  uniqueness per-tenant until verified (closes blocker 6).
+- Cap workspaces per user; make plan `max_members` actually enforced.
+- Implement the `SECURITY.md` rate-limit table: signup, forgot-password, DNS
+  check, mailbox create; per-account login lockout; strict per-user 2FA throttle;
+  single-use TOTP codes. Add `django-ratelimit`.
+- API key scopes; default read-only; refuse platform-admin inheritance.
+- Make the DNS check endpoint async and rate-limited; fan out the periodic sweep.
+- Move refresh tokens to `httpOnly` cookies.
+- Route transactional mail via an external provider on a subdomain — MateMail
+  must not depend on the engine it is bootstrapping.
+- Interim mitigation only: encrypt `Domain.dkim_private_key` at rest and keep it
+  out of logs and serializers. This is a stopgap — DEC-007r removes the column
+  entirely in P4, so do not build anything new on it.
+
+**Exit:** a scripted signup-and-abuse attempt is throttled at every stage; an
+unverified domain cannot be provisioned.
+
+---
+
+### P4 — Stand up the Mail Engine *(first engine phase)*
+
+Only now is it safe to deploy the engine.
+
+- Confirm MateServer capacity: the engine needs roughly 6 GB RAM plus about
+  2 GB for the app stack. Verify headroom against existing NetaMate apps first.
+- **Verify outbound TCP/25 from MateServer itself** before deploying the engine.
+  Contabo does not restrict ports or outbound traffic by default, so treat this
+  as a connectivity check, not a support request. Only contact Contabo if the
+  real test from the actual server shows 25 is blocked.
+- Note Contabo's sending policy of roughly **25 emails/minute** and size the
+  launch plan and outbound rate limits against it — this is a throughput
+  constraint on the platform, not a blocker.
+- Set reverse DNS for the send IP to `mx.matemail.online`; publish agreeing
+  forward and reverse records.
+- Install the engine as its own Compose project; join it to the app network so
+  the backend reaches it internally.
+- Resolve the 80/443 conflict: host nginx owns them, so the engine nginx must not
+  claim them. The engine admin UI is never published — localhost/VPN only.
+- Derive the engine per-domain limits from the tenant `Plan` instead of the
+  hardcoded values; add a `max_quota_mb` ceiling on mailbox creation.
+- Publish MateMail's own SPF, DKIM and DMARC records.
+- **Migrate DKIM key ownership (DEC-007r).** Move keypair generation into the
+  engine; add `rotate_dkim_key()` to the port; have MateMail read only the public
+  key. Backfill existing domains one at a time, sequenced with each customer's
+  DNS update because regeneration changes the published record — never as a bulk
+  job. Then purge and drop `Domain.dkim_private_key`.
+- Make mailbox provisioning asynchronous so a slow engine cannot exhaust workers.
+- Ship the interim **Email Clients** page (per-mailbox IMAP/SMTP settings with
+  Outlook / Apple Mail / Thunderbird guides) so the product is usable now.
+
+**Exit:** a mailbox created in the MateMail UI sends to Gmail and receives a
+reply; mail-tester scores 9/10 or better; the engine admin UI is verified
+unreachable from the internet.
+
+---
+
+### P5 — Make mail policy actually enforce
+
+Closes blocker 2 — the phase that protects sending reputation.
+
+- Fix the Postfix restriction order so the policy service runs *before*
+  `permit_sasl_authenticated`, or move it to `smtpd_end_of_data_restrictions`
+  where a message is counted once rather than once per recipient.
+- Make the policy bridge reachable: bind to the container-visible address,
+  correct `DJANGO_INTERNAL_URL` to the new port, source-restrict the internal
+  nginx location instead of denying it wholesale.
+- Write the missing `scripts/install-policy-bridge.sh` (`deploy.sh` already
+  instructs operators to run it).
+- Teach the inbound policy about aliases, forwarding rules and catch-alls, or
+  every alias address will bounce.
+- Make the rate limiter atomic; count per message; read limits from the plan.
+- Tenant suspension must call `suspend_domain` so it stops outbound too.
+- Require destination confirmation before a forwarding rule activates; notify
+  the mailbox owner and the workspace owner.
+
+**Exit:** every box in the `SECURITY.md` no-open-relay checklist is ticked by an
+automated test that speaks real SMTP.
+
+---
+
+### P6 — Backups, restore and safe deletion
+
+Closes blocker 3.
+
+- Soft-delete domains and mailboxes with a 30-day hold before any engine
+  deletion; typed confirmation in the UI.
+- Real backups: nightly `pg_dump` plus mail-store sync to encrypted offsite
+  storage, with retention.
+- Rewrite `run_backup_task` to report real artifacts — or remove the Backups page
+  until it does. A false green is worse than a missing feature.
+- Restore runbook, performed at least once from a wiped environment.
+- Daily verification that the previous night's backup exists and is plausibly sized.
+
+**Exit:** a tenant's mail has been restored from offsite into a clean
+environment, timed and documented. No UI claims a backup that does not exist.
+
+---
+
+### P7 — Own the operational surface
+
+Closes blocker 5 and removes the operator's need for the engine admin UI.
+
+- Engine to MateMail sync task: queue, quarantine, per-mailbox usage, last login,
+  each mapped to a tenant on the way in.
+- Reconciliation pass flagging MateMail/engine disagreement, surfaced in
+  platform admin.
+- Real pagination and the documented filters on `/api/logs/`; retention policy.
+- Per-domain and per-mailbox spam policy through MateMail's own API.
+- Platform-admin coverage for every routine operational task.
+- Monitoring: error tracking, uptime checks on app and mail ports, disk alerts on
+  the mail volume, blocklist monitoring, outbound-volume anomaly alerts.
+
+**Exit:** queue, quarantine and storage reflect real engine state within five
+minutes; an operator can run a normal week without touching the engine directly.
+
+---
+
+### P8 — MateMail webmail
+
+DEC-005r: MateMail-built, not SOGo.
+
+- **Resolve TBD-G first:** the auth mechanism. Likely a Dovecot master user, so a
+  verified MateMail session exchanges for an authenticated IMAP session. Record
+  the decision before writing code.
+- Resolve TBD-H: app passwords for IMAP/SMTP clients once web login uses 2FA.
+- Add message-level operations to the port: folders, messages, send, flags.
+- Build inbox, reading pane, compose, thread view and webmail settings.
+- Serve `webmail.matemail.online` from MateMail with its own vhost and
+  certificate — `WEBMAIL_BASE_URL` currently points at a host no config serves (L6).
+
+**Exit:** a customer reads and sends mail through MateMail's own interface, and
+no engine-supplied UI is reachable by customers.
+
+---
+
+### P9 — Launch readiness
+
+- Broaden test coverage past P0's security core.
+- Public front door: landing, pricing, security and docs pages. Today `/`
+  redirects straight to `/login`, so there is nowhere to send a prospect.
+- Billing: no payment path exists — plans have prices but no way to pay.
+- Runbooks: blocklist removal, restore, engine upgrade, incident response.
+- Soft launch to 5–10 friendly tenants on real domains; watch for two weeks
+  before opening signups.
+
+**Exit:** ten real mailboxes sending and receiving without complaint; alerting
+proven by a drill.
+
+---
+
+### Sequencing notes
+
+- **P1 to P3 need no engine and no VPS access.** That is deliberate: the
+  boundary, the pipeline and the abuse controls should all be sound before real
+  mail flows.
+- **Verify outbound TCP/25 from MateServer early** (during P1 is ideal) so any
+  surprise is found before P4 depends on it. It is a check, not a request:
+  Contabo does not block it by default. Escalate only if the live test fails.
+- **Contabo's ~25 emails/minute sending policy is a planning input**, not a
+  deployment blocker. It bounds onboarding pace and per-tenant send rates, so
+  factor it into the plan-tier limits set in P4 and the launch sizing in P9.
+- **P8 is the largest phase and the least urgent.** The interim Email Clients
+  page in P4 makes the product sellable without it.
+- Do not defer P6 past launch. Simulated backups plus one-call irreversible
+  deletion is the combination that turns a bad week into a closed business.

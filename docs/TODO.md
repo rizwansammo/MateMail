@@ -1,10 +1,20 @@
 # TODO.md — MateMail Task Tracker
 
-**Product:** MateMail  
-**Last updated:** 2026-05-29  
-**Current phase:** Phase 0 complete → Phase 1 next
+**Product:** MateMail
+**Last updated:** 2026-09-10
+**Current phase:** Production Readiness P0 complete → next phase awaiting assignment
 
 Legend: ✅ Done | 🔄 In Progress | ⬜ Pending | ❌ Blocked
+
+> **This file's phase 1–17 checklists below are the ORIGINAL feature plan and are
+> stale in two ways.** They still show Phase 1–2 tasks as pending although that
+> work shipped, and they predate DEC-011 (MateMail as one integrated platform).
+>
+> The authoritative plan is now the **Production Readiness roadmap** in
+> `PROJECT_STATUS.md`. The Phase 7 "Webmail Data Flow" checklist below is the
+> closest thing to the webmail work still owed, and remains largely unbuilt.
+>
+> Retained for history and because several unchecked items are still real work.
 
 ---
 

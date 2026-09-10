@@ -1,8 +1,34 @@
 # SECURITY.md — Security Architecture and Controls
 
-**Product:** MateMail  
-**Last updated:** 2026-05-29  
+**Product:** MateMail
+**Last updated:** 2026-09-11
 **Classification:** Engineering reference
+
+---
+
+> ## ⚠️ Read this before trusting any table below
+>
+> This document mixes **verified controls** with **aspirational design that was
+> never built**. Treat an unmarked row as a claim to verify, not a fact.
+>
+> **Verified and pinned by tests** (updated 2026-09-10/11):
+> Role-Based Access Control → *Enforcement*, *Two-factor challenge tokens*,
+> *Internal endpoints*, and the Rate Limiting status banner.
+>
+> **Known stale or false, pending a full pass:**
+> - The Anti-Relay, IMAP/SMTP Auth and Mail Engine Layer tables describe
+>   **Stalwart**, which was never used. DEC-001 selected the Postfix/Dovecot/
+>   Rspamd stack; DEC-011 names it the MateMail Mail Engine.
+> - "Password hashing — Argon2 via `django-argon2`" is false; the project uses
+>   Django's default PBKDF2 and that package is not a dependency.
+> - "Session invalidation — Redis-backed token revocation list" is false; it is
+>   simplejwt's database-backed blacklist.
+> - "Suspicious login alerts" and "Session listing" do not exist.
+> - "2FA — `django-otp` or `pyotp`" — it is `pyotp`, with a custom flow.
+>
+> Correcting these is scheduled with the adapter-boundary work (P1) and the
+> abuse-hardening work (P3). Until then, verify against code before relying on
+> any row.
 
 ---
 
@@ -38,7 +64,7 @@
 | Reject unknown recipient | Stalwart 550 RCPT TO check against known mailboxes |
 | Reject unknown domain | Stalwart 550 MAIL FROM domain check |
 | SPF check on inbound | Stalwart built-in |
-| DKIM verify on inbound | Stalwart built-in |
+| DKIM verify on inbound | Mail Engine (Rspamd) |
 | DMARC policy on inbound | Stalwart built-in |
 | Spam scanning | Stalwart anti-spam engine |
 | Rate limit per source IP | Stalwart connection rate limiter |
@@ -162,7 +188,7 @@ unset secret fails closed. Pinned by `tests/test_internal_endpoints.py`.
 > `AnonRateThrottle`/`UserRateThrottle` (60/min anon, 120/min user) plus a 5/min
 > per-IP `auth` scope on the auth endpoints. There is no per-account lockout, no
 > per-email or per-domain limit, and `django-ratelimit` is not a dependency.
-> Scheduled for the abuse-hardening phase (P5).
+> Scheduled for the abuse-hardening phase (P3).
 
 | Endpoint / Operation | Limit |
 |---------------------|-------|
@@ -189,8 +215,8 @@ earlier drafts predates DEC-001, which selected mailcow.)
 |--------|---------|
 | Django SECRET_KEY | Environment variable only, never committed |
 | Database password | Environment variable |
-| Stalwart API key | Environment variable |
-| DKIM private keys | Encrypted at rest in `Domain.dkim_private_key` using Django's `EncryptedField` (django-encrypted-model-fields) |
+| Mail Engine API key | Environment variable |
+| DKIM private keys | ⚠️ **Plaintext in `Domain.dkim_private_key`.** This row previously claimed encryption via `django-encrypted-model-fields`; that package is not a dependency and the field is a plain `TextField`. Excluded from Django admin (P0). Target architecture is DEC-007r: the key is generated and stored inside the Mail Engine and never reaches Django. Interim mitigation in P3, column removed in P4. |
 | JWT signing key | Environment variable |
 | Password reset tokens | SHA-256 hashed before DB storage, raw token emailed once |
 | 2FA backup codes | SHA-256 hashed before DB storage |

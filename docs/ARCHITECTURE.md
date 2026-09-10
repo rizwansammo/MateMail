@@ -1,278 +1,230 @@
 # ARCHITECTURE.md — MateMail System Architecture
 
-**Product:** MateMail  
-**Version:** 1.0 (Phase 0 draft)  
-**Last updated:** 2026-05-29
+**Product:** MateMail
+**Owner:** NetaMate Solutions
+**Version:** 2.0 — integrated mail platform
+**Last updated:** 2026-09-10
+**Supersedes:** v1.0 (2026-05-29), which described a Stalwart-based engine that was never built.
 
 ---
 
 ## Overview
 
-MateMail is a multi-tenant SaaS email hosting platform. It is composed of three distinct layers:
+MateMail is a complete, multi-tenant business email platform. It is one product,
+not a control panel bolted onto a third-party mail server.
 
-1. **SaaS control plane** — Django backend + Next.js frontend
-2. **Mail engine** — Stalwart Mail Server (SMTP + IMAP + JMAP)
-3. **Supporting infrastructure** — PostgreSQL, Redis, Celery, Nginx
+MateMail uses the mature Postfix / Dovecot / Rspamd stack — provisioned and
+orchestrated via mailcow — as its **internal Mail Engine**. That engine is an
+implementation detail of MateMail, in the same way PostgreSQL is an
+implementation detail: essential, replaceable, and invisible to customers.
 
-These layers are deliberately separated. Customers interact only with the MateMail UI and API. The mail engine is never exposed directly to customers.
+### The governing principle
 
----
+> **Customers must never need to know the Mail Engine exists, what it is built
+> from, or who makes it.**
 
-## High-Level Architecture Diagram
-
-```
-Internet
-    │
-    ├─── HTTPS (443) ──────────────────────────────────────────────────┐
-    │                                                                   │
-    │                                              Nginx/Caddy Reverse Proxy
-    │                                                   │          │
-    │                                            Next.js (3000)   Django API (8000)
-    │                                            app.matemail.online
-    │                                            webmail.matemail.online
-    │
-    ├─── SMTP inbound (25) ────── Stalwart Mail Server
-    ├─── SMTP submission (587) ── Stalwart Mail Server ──── Authenticated users only
-    ├─── SMTPS (465) ─────────── Stalwart Mail Server ──── Authenticated users only
-    ├─── IMAP TLS (993) ─────── Stalwart Mail Server ──── Authenticated users only
-    └─── IMAP STARTTLS (143) ─── Stalwart Mail Server ──── Authenticated users only
-
-Stalwart Mail Server
-    │
-    ├─── Provisioning API (REST, internal only) ←── Django control plane
-    ├─── PostgreSQL (shared, separate schema) ← virtual domains/users
-    ├─── Mail storage (on-disk per mailbox)
-    ├─── DKIM signing (built-in, per domain)
-    └─── Spam filtering (built-in Sieve + optional Rspamd)
-
-Django Backend
-    │
-    ├─── PostgreSQL (tenants, users, domains, mailboxes, billing, logs, etc.)
-    ├─── Redis (Celery broker + cache)
-    ├─── Celery workers (async tasks)
-    └─── Stalwart adapter (provisioning layer)
-
-Celery Workers
-    ├─── DNS check tasks (periodic + on-demand)
-    ├─── DKIM keypair generation
-    ├─── Mailbox provisioning sync
-    ├─── Mail queue sync
-    ├─── Log ingestion from Stalwart
-    ├─── Backup jobs
-    └─── Billing sync / suspension enforcement
-```
+Every customer operation — onboarding a domain, creating a mailbox, releasing a
+quarantined message, reading mail — happens through MateMail's own UI and API.
+No mailcow branding, admin UI, API shape, hostname, container name, or error
+string may reach a customer.
 
 ---
 
-## SaaS Control Plane
+## Layer model
 
-### Django Backend
+```
+                          ┌─────────────────────────────┐
+   Customer ──── HTTPS ──▶│      MateMail Next.js UI    │
+                          └──────────────┬──────────────┘
+                                         │
+                          ┌──────────────▼──────────────┐
+                          │   MateMail Django API       │  ◀── owns ALL product logic
+                          │   tenants · RBAC · plans    │
+                          │   quotas · onboarding ·     │
+                          │   DNS/DKIM · abuse · audit  │
+                          └──────────────┬──────────────┘
+                                         │
+                          ┌──────────────▼──────────────┐
+                          │      MailEngineAdapter      │  ◀── the ONLY boundary
+                          │      (the port)             │
+                          └──────────────┬──────────────┘
+                                         │  internal network only
+                          ┌──────────────▼──────────────┐
+                          │   MateMail Mail Engine      │
+                          │   Postfix · Dovecot ·       │
+                          │   Rspamd · DKIM · storage   │
+                          │   (mailcow-orchestrated)    │
+                          └─────────────────────────────┘
+```
 
-The Django application is the authoritative source of truth for all tenant, domain, mailbox, billing, and team data.
-
-**Responsibilities:**
-- User authentication (JWT/sessions)
-- Tenant isolation enforcement
-- Domain and mailbox lifecycle management
-- DKIM keypair generation and storage
-- DNS record generation and verification
-- Alias and forwarding rule management
-- Billing and plan enforcement
-- Team and RBAC management
-- Internal platform admin
-- Webmail proxy/API (reads from Stalwart JMAP/IMAP)
-- Audit logging
-
-**Does NOT:**
-- Handle SMTP protocol
-- Handle IMAP protocol
-- Store mail messages (only metadata)
-- Expose mail engine internals to customers
-
-### Next.js Frontend
-
-Three distinct app surfaces served from the same Next.js application:
-
-| Surface | Subdomain | Purpose |
-|---------|-----------|---------|
-| Marketing site | matemail.online | Landing, pricing, security, docs |
-| Admin app | app.matemail.online | Workspace control center |
-| Webmail | webmail.matemail.online | End-user email interface |
+Nothing above the adapter may reference the engine's implementation. Nothing
+below it may contain MateMail product logic (tenancy, plans, permissions).
 
 ---
 
-## Mail Engine: Stalwart Mail Server
+## What MateMail owns
 
-See [MAIL_ENGINE.md](MAIL_ENGINE.md) for full reasoning.
+These are MateMail's responsibility and must never be delegated to the engine's
+own interfaces, even where the engine offers an equivalent feature:
 
-Stalwart is an all-in-one modern mail server written in Rust. It handles:
-- Inbound SMTP (port 25)
-- SMTP submission (port 587 STARTTLS, port 465 SMTPS)
-- IMAP (port 993 TLS, port 143 STARTTLS)
-- JMAP (HTTP/S, internal use by webmail backend)
-- DKIM signing
-- Basic spam filtering
-- Virtual domains and users via configuration or database backend
+| Concern | Owner |
+|---|---|
+| Tenancy and workspace model | MateMail |
+| Roles and permissions (RBAC) | MateMail |
+| Plans, quotas, limit enforcement | MateMail |
+| Domain onboarding and ownership verification | MateMail |
+| Customer-facing DNS instructions and health scoring | MateMail |
+| DKIM capability: UI, DNS guidance, verification, status, rotation workflow, audit | MateMail |
+| DKIM **private key** generation and storage | Mail Engine (DEC-007r) — MateMail reads only the public key |
+| Mailbox / alias / forwarding lifecycle | MateMail |
+| Suspension and reactivation | MateMail |
+| Anti-abuse policy and rate limiting | MateMail |
+| Audit logging | MateMail |
+| Queue and quarantine **presentation and actions** | MateMail |
+| Backups and restore | MateMail |
+| Monitoring and alerting | MateMail |
+| Webmail experience | MateMail |
+| All customer UI | MateMail |
 
-### Django ↔ Stalwart Integration
-
-The Django `mail_engine` service layer communicates with Stalwart through its **REST management API** (internal network only, never exposed to the internet).
-
-```
-Django backend  ──[HTTP POST /api/v1/principal]──►  Stalwart REST API
-                                                          │
-                                              Stalwart updates its
-                                              internal domain/user store
-```
-
-All provisioning is synchronous where possible, with a Celery fallback for retries.
-
----
-
-## Tenant Isolation
-
-Every customer belongs to exactly one **Tenant**. Tenant isolation is enforced at multiple levels:
-
-| Layer | Mechanism |
-|-------|-----------|
-| Django ORM | Every model has a `tenant` FK; every queryset is filtered by `request.tenant` |
-| API permissions | DRF permission classes verify tenant ownership on every endpoint |
-| Mail engine | Domains are namespaced by Stalwart domain. Cross-domain delivery is rejected. |
-| Mail storage | Stalwart stores mail per-domain per-user in isolated paths |
-| PostgreSQL | Row-level tenant scoping (no shared tables without tenant FK) |
-| Celery tasks | Task arguments always include tenant_id; workers re-validate scope |
-
-Tenants cannot see, modify, or affect other tenants' data at any layer.
+The engine provides mechanism — message transport, delivery, storage,
+authentication, spam scoring, signing. MateMail provides every policy decision
+about who may do what, and every pixel a customer sees.
 
 ---
 
-## DNS Verification Flow
+## Deployment topology
+
+Everything runs on the existing **MateServer**. There is no separate mail VPS.
 
 ```
-User adds domain in UI
-        │
-        ▼
-Django generates DNS records:
-  - MX record (pointing to mx.matemail.online)
-  - SPF TXT record
-  - DKIM TXT record (public key from generated keypair)
-  - DMARC TXT record
-  - MTA-STS TXT record
-  - TLS-RPT TXT record
-        │
-        ▼
-UI shows copyable DNS record cards
-        │
-        ▼
-User adds records in their DNS provider
-        │
-        ▼
-User clicks "Verify" (or Celery periodic task triggers)
-        │
-        ▼
-Django resolves each DNS record using dnspython
-        │
-        ▼
-Each check stored in DNSRecordCheck model
-DNS health score calculated
-        │
-        ▼
-If MX + SPF verified: domain is provisioned as active in Stalwart
-If DKIM verified: DKIM signing enabled in Stalwart
-Domain status updated (pending/active/warning/failed)
+MateServer (Ubuntu 26.04 LTS)
+│
+├── Host-native nginx ─── owns :80 / :443 for all NetaMate apps
+│   ├── matemail.online          → MateMail public site
+│   ├── app.matemail.online      → MateMail control panel
+│   └── webmail.matemail.online  → MateMail webmail
+│
+├── MateMail application stack (Docker Compose)
+│   ├── frontend   127.0.0.1:3020   Next.js
+│   ├── backend    127.0.0.1:8020   Django + gunicorn
+│   ├── celery-worker / celery-beat (backend image)
+│   ├── postgres   no host port     MateMail's own instance
+│   └── redis      no host port     MateMail's own instance
+│
+└── MateMail Mail Engine (separate Compose project)
+    ├── Postfix   :25 :587 :465     public mail ports
+    ├── Dovecot   :143 :993         public mail ports
+    ├── Rspamd, DKIM signing, mail storage
+    └── engine admin UI ── NEVER published; operator access via localhost/VPN only
 ```
+
+Constraints inherited from the NetaMate production model (see `CLAUDE.md`):
+
+- MateMail must not reuse PostgreSQL or Redis belonging to other applications.
+- Internal datastores publish no host ports.
+- Public web containers bind unique `127.0.0.1` ports — **8020 / 3020** for MateMail.
+- Ports through 8016 / 3015 are already allocated; 8015 / 3015 belong to MateConnect.
+- Persistent data uses named Docker volumes; `restart: unless-stopped`; healthchecks required.
+- Application images are built in CI and pulled from GHCR by commit SHA. The VPS
+  does not build source and does not require a Git checkout of the app repo.
+
+The engine's mail ports (25/587/465/143/993) are the one public surface below the
+adapter. They are protocol endpoints, not product surfaces: customers configure
+them as `smtp.matemail.online` / `imap.matemail.online`, never by an engine name.
 
 ---
 
-## Webmail Flow
+## The adapter boundary
 
-```
-User opens webmail.matemail.online
-        │
-        ▼
-Next.js frontend authenticates user via Django API
-        │
-        ▼
-Django webmail API proxies to Stalwart JMAP endpoint
-(JMAP = RFC 8620, modern JSON-based mail access protocol)
-        │
-        ▼
-Message list, folder list, message body returned to frontend
-        │
-        ▼
-User composes message
-        │
-        ▼
-Django webmail /send API receives compose request
-        │
-        ▼
-Django validates: tenant active, mailbox active, send limits OK
-        │
-        ▼
-Django submits message to Stalwart SMTP submission (port 587)
-with authenticated mailbox credentials (or via JMAP EmailSubmission)
-        │
-        ▼
-Stalwart sends message, stores copy in Sent folder
-        │
-        ▼
-Sent message visible in webmail via JMAP
-```
+`apps/mail_engine/adapter.py` defines the port; `mailcow_adapter.py` implements it.
+`factory.get_adapter()` selects the implementation from `MAIL_ENGINE_ADAPTER`.
+
+Rules:
+
+1. **No module outside `apps/mail_engine/` may call the engine.** Everything goes
+   through `get_adapter()`.
+2. **No engine-shaped data crosses the port outward.** Engine IDs, response
+   payloads, hostnames and error text are translated to MateMail types before
+   returning.
+3. **No MateMail product logic lives below the port.** The adapter must not decide
+   which forwarding rules are active or what a plan permits; it receives an
+   instruction and carries it out.
+4. **Errors are typed**, so callers can distinguish "already exists" from
+   "engine unreachable" from "rejected", and retry appropriately.
+5. **Customer-visible text never originates from the engine.** Engine messages go
+   to logs; customers receive MateMail-authored messages.
+
+A `StubAdapter` implements the same port with no engine present. It is the
+default, so local development and CI never require the engine.
 
 ---
 
-## Admin Dashboard Flow
+## Data ownership
 
-```
-Admin logs into app.matemail.online
-        │
-        ▼
-JWT token issued by Django, scoped to tenant + role
-        │
-        ▼
-Dashboard API: /api/dashboard/overview/
-  - Aggregates from Django models (domains, mailboxes, billing)
-  - Pulls queue size from Stalwart REST API
-  - Pulls recent activity from MailLog model
-        │
-        ▼
-Admin manages domains → Django API → Stalwart provisioning
-Admin manages mailboxes → Django API → Stalwart provisioning
-Admin views logs → Django MailLog model
-Admin views queue → Django proxy to Stalwart queue API
-Admin views spam → Django proxy to Stalwart/spam engine
-```
+MateMail's PostgreSQL is the system of record for tenants, users, domains,
+mailboxes, aliases, forwarding rules, plans, subscriptions, audit logs, backup
+jobs, and the DNS health model.
+
+The engine keeps its own internal database. MateMail **never writes to it
+directly** — only through the adapter. Where the same fact exists on both sides
+(a mailbox's existence, a domain's active flag), MateMail's copy is
+authoritative and a reconciliation task detects drift.
+
+Facts that only the engine can know — queue contents, quarantine contents,
+storage consumed, last login — are pulled into MateMail's database by a sync
+task, mapped to a tenant on the way in, and served to customers from MateMail's
+own tables. Customer requests never fan out to the engine synchronously.
 
 ---
 
-## Component Inventory
+## Request paths
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Frontend | Next.js 14 + TypeScript + Tailwind | UI for all three surfaces |
-| Backend | Django 5 + DRF | SaaS control plane API |
-| Database | PostgreSQL 16 | Persistent data store |
-| Cache/broker | Redis 7 | Celery task queue + API cache |
-| Celery workers | Celery 5 | Async/scheduled tasks |
-| Mail engine | Stalwart Mail Server | SMTP + IMAP + JMAP |
-| Reverse proxy | Nginx / Caddy | HTTPS routing, TLS termination |
-| Container runtime | Docker + Docker Compose | Local and production deployment |
+**Control-plane write** (create a mailbox):
+
+```
+UI → Django API → permission + plan check → MateMail DB write
+                → MailEngineAdapter.provision_mailbox()
+                → engine
+                → audit log
+```
+
+**Mail submission** (customer sends mail): the client authenticates to the
+engine's submission port; the engine consults MateMail's internal policy service
+before accepting, so suspension, sender identity and rate limits are enforced by
+MateMail, not by engine configuration.
+
+**Webmail**: the long-term direction is a MateMail-built webmail over IMAP/SMTP.
+SOGo may exist inside the engine as a by-product of mailcow; it is not the
+product and must not be presented to customers. See DEC-005r.
 
 ---
 
-## Port Map
+## Security architecture
 
-| Port | Protocol | Service | Access |
-|------|----------|---------|--------|
-| 80 | HTTP | Nginx redirect | Public |
-| 443 | HTTPS | Nginx → Next.js + Django | Public |
-| 25 | SMTP | Stalwart inbound | Public (mail servers) |
-| 587 | SMTP+STARTTLS | Stalwart submission | Authenticated clients |
-| 465 | SMTPS | Stalwart submission | Authenticated clients |
-| 993 | IMAPS | Stalwart IMAP | Authenticated clients |
-| 143 | IMAP+STARTTLS | Stalwart IMAP | Authenticated clients |
-| 3000 | HTTP | Next.js dev | Internal / Docker |
-| 8000 | HTTP | Django API | Internal / Docker |
-| 5432 | TCP | PostgreSQL | Internal / Docker |
-| 6379 | TCP | Redis | Internal / Docker |
-| 8080 | HTTP | Stalwart REST API | Internal / Docker only |
+Detailed controls live in `SECURITY.md`. The architectural invariants:
+
+- Tenant isolation is enforced at the query layer (`TenantScopedManager`) and at
+  the permission layer, and is covered by tests at both the ORM and HTTP layers.
+- The engine admin interface is never published. Operator access is via localhost
+  or VPN only, and every routine operation should eventually be available through
+  MateMail's own platform-admin UI so operators do not need it.
+- Internal service endpoints live under `/api/internal/`, are denied at the edge,
+  and authenticate with a shared secret compared in constant time.
+- Secrets (DKIM private keys, TOTP secrets, API keys, internal secrets) never
+  appear in APIs, admin forms, logs, frontend bundles or error messages.
+- Secret material lives in exactly one component: the one that needs it to do
+  its job. The DKIM signing key belongs to the Mail Engine and must not be
+  copied into the control plane (DEC-007r). MateMail currently violates this and
+  the migration is tracked as debt.
+
+---
+
+## Replaceability
+
+The adapter exists so the engine can be replaced without touching product code.
+That property is only real if it is maintained deliberately: every time engine
+behaviour leaks upward — an engine ID in a serializer, an engine error string in
+a response, product logic inside the adapter — replaceability erodes.
+
+Current known erosions are tracked in `PROJECT_STATUS.md` under the Mail Engine
+integration review.
