@@ -4,8 +4,8 @@
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
 **Last updated:** 2026-09-10  
-**Current phase:** PRODUCTION READINESS PHASE 0 — COMPLETE  
-**Next phase:** to be assigned
+**Current phase:** PRODUCTION READINESS P1 — COMPLETE  
+**Next phase:** P2 (deployment alignment) — awaiting assignment
 
 ---
 
@@ -40,7 +40,7 @@ without the mechanism underneath. Read this section before trusting the tables.
 | 5 | **Queue, quarantine and storage usage are empty shells.** Nothing writes `QueueMessage` or `QuarantineMessage`; `storage_used_mb` is never assigned. No mailcow→MateMail sync task exists. | Open |
 | 6 | **Domain ownership is not verified** before a domain is provisioned into the mail engine. | Open |
 | 7 | **Deployment architecture is contradictory** and does not yet match the NetaMate model in `CLAUDE.md`: ports must move to 8020/3020 (8015/3015 belong to MateConnect), CI must build and push GHCR images instead of building on the VPS, and the dead containerized-nginx configs must go. | Open |
-| 8 | **Engine detail can reach customers.** The error sanitizer is case-sensitive and incomplete, and one code path writes raw exceptions into a customer-visible field. Violates DEC-011. See the Mail Engine integration review. | Open |
+| 8 | ~~Engine detail can reach customers.~~ | ✅ Closed in P1 |
 
 Resolved in Phase 0: the four critical application-security defects and the
 broken audit log. See the Phase 0 section below.
@@ -195,6 +195,7 @@ broken audit log. See the Phase 0 section below.
 | Phase | Title | Status |
 |-------|-------|--------|
 | P0 | Trustworthy baseline + critical application security | ✅ Complete (2026-09-10) |
+| P1 | Harden the Mail Engine boundary | ✅ Complete (2026-09-11) |
 
 ---
 
@@ -386,15 +387,15 @@ frontend file. That boundary is genuinely in place.
 
 | ID | Leak | Severity |
 |----|------|----------|
-| L1 | `apps/mailboxes/views.py:73` writes `str(exc)[:500]` straight into `mail_engine_error`, which `MailboxSerializer` exposes. A connection failure puts the internal engine hostname and port in the customer UI. **Unsanitized.** | High |
-| L2 | `_sanitize()` is case-sensitive and term-limited. Verified: `Mailcow`, `MAILCOW`, `postfix`, `dovecot`, `SOGo`, `Roundcube`, `ClamAV` and engine API paths all pass through unchanged — 7 of 11 realistic probes leaked. Even a matched case leaves structure like `HTTPConnectionPool(host='…-nginx', port=8080)`. | High |
-| L3 | `ProvisionResult.raw` carries the engine's response dict through the port. Not currently serialized to customers, but nothing prevents it. | Medium |
-| L4 | `provision_forwarding` / `delete_forwarding` query `apps.forwarding.models` and implement `keep_copy` and active-rule-set semantics **inside the adapter**. This is MateMail product logic below the port: a replacement engine would have to reimplement it. | Medium |
-| L5 | Adapter methods take Django model instances, coupling the port to the ORM. `tasks.py` already works around this with `_FakeDomain` / `_FakeMailbox` shims. | Medium |
-| L6 | `WEBMAIL_BASE_URL` points wherever webmail lives; if aimed at the engine's SOGo it becomes a customer-facing engine surface. Contradicts DEC-005r. | Medium |
-| L7 | `/api/health/` is public and reports `mail_engine` status, disclosing that a distinct mail engine exists and whether it is up. | Low |
-| L8 | Docstrings in `smtp_policy/views.py` and `webmail/views.py` name Postfix, Dovecot, Roundcube and SOGo. Internal-only, but should be reframed as Mail Engine components. | Low |
-| L9 | **DKIM private key held in the control plane.** Django generates the keypair, stores the PEM unencrypted in `Domain.dkim_private_key`, and pushes it to the engine over plaintext HTTP. Violates DEC-007r: the signing key must be generated and stored inside the engine, with MateMail reading only the public half. | High |
+| L1 | **RESOLVED in P1.** `apps/mailboxes/views.py:73` writes `str(exc)[:500]` straight into `mail_engine_error`, which `MailboxSerializer` exposes. A connection failure puts the internal engine hostname and port in the customer UI. **Unsanitized.** | High |
+| L2 | **RESOLVED in P1.** `_sanitize()` is case-sensitive and term-limited. Verified: `Mailcow`, `MAILCOW`, `postfix`, `dovecot`, `SOGo`, `Roundcube`, `ClamAV` and engine API paths all pass through unchanged — 7 of 11 realistic probes leaked. Even a matched case leaves structure like `HTTPConnectionPool(host='…-nginx', port=8080)`. | High |
+| L3 | **RESOLVED in P1.** `ProvisionResult.raw` carries the engine's response dict through the port. Not currently serialized to customers, but nothing prevents it. | Medium |
+| L4 | **RESOLVED in P1.** `provision_forwarding` / `delete_forwarding` query `apps.forwarding.models` and implement `keep_copy` and active-rule-set semantics **inside the adapter**. This is MateMail product logic below the port: a replacement engine would have to reimplement it. | Medium |
+| L5 | **RESOLVED in P1.** Adapter methods take Django model instances, coupling the port to the ORM. `tasks.py` already works around this with `_FakeDomain` / `_FakeMailbox` shims. | Medium |
+| L6 | **OPEN — deferred to P8 (webmail).** `WEBMAIL_BASE_URL` points wherever webmail lives; if aimed at the engine's SOGo it becomes a customer-facing engine surface. Contradicts DEC-005r. | Medium |
+| L7 | **RESOLVED in P1.** `/api/health/` is public and reports `mail_engine` status, disclosing that a distinct mail engine exists and whether it is up. | Low |
+| L8 | **RESOLVED in P1.** Docstrings in `smtp_policy/views.py` and `webmail/views.py` name Postfix, Dovecot, Roundcube and SOGo. Internal-only, but should be reframed as Mail Engine components. | Low |
+| L9 | **OPEN — deferred to P4 per DEC-007r.** The port is now correct (`rotate_dkim_key` returns public material only, and no DTO may carry a private key), but the legacy column still exists. DKIM private key held in the control plane: Django generates the keypair, stores the PEM unencrypted in `Domain.dkim_private_key`, and pushes it to the engine over plaintext HTTP. Violates DEC-007r: the signing key must be generated and stored inside the engine, with MateMail reading only the public half. | High |
 
 ### Missing — capability the integrated product needs and the port lacks
 
@@ -662,3 +663,119 @@ proven by a drill.
   page in P4 makes the product sellable without it.
 - Do not defer P6 past launch. Simulated backups plus one-call irreversible
   deletion is the combination that turns a bad week into a closed business.
+
+---
+
+## Production Readiness Phase 1 — Harden the Mail Engine boundary
+
+**Completed 2026-09-11.** Scope: make `MailEngineAdapter` a clean, secure
+internal boundary. No engine deployed, no VPS access, no migration.
+
+### The port now
+
+| Before | After |
+|---|---|
+| `ProvisionResult(success, message, raw)` | Methods return `None` or a DTO; failure raises a typed error. One error channel, not two. |
+| Django model instances as arguments | Frozen DTOs in `apps/mail_engine/dto.py` |
+| Engine response dict returned via `.raw` | Nothing engine-shaped crosses outward |
+| `provision_*` (create semantics) | `ensure_*` (idempotent upsert), contract documented per method |
+| Product logic inside the adapter | `apps/forwarding/services.py` resolves the destination set |
+| Engine text substituted by a term list | MateMail-authored messages on the exception types |
+
+New capabilities: `list_domains`, `list_mailboxes`, `get_mailbox_usage`,
+`get_last_login`, `rotate_dkim_key`, `check_health`.
+
+### Error taxonomy
+
+`apps/mail_engine/errors.py`: `MailEngineError` (base) plus `EngineUnavailable`,
+`AlreadyExists`, `NotFound`, `Rejected`, `QuotaExceeded`.
+
+Two properties make them safe to handle carelessly:
+
+1. **`str(exc)` is the customer message.** Technical detail lives in
+   `.technical_detail`, never in `__str__`. The old L1 anti-pattern
+   (`field = str(exc)`) is therefore harmless if it ever recurs.
+2. **`customer_message` is authored by MateMail**, never derived from engine text.
+
+Callers branch on type: `EngineUnavailable` is retried, an explicit rejection is
+terminal and recorded for the customer.
+
+### Idempotency
+
+Documented per method in `adapter.py` and enforced by the contract suite.
+`ensure_*` are upserts; `delete_*` treat "already absent" as success;
+`set_*` are assignments. `rotate_dkim_key` is explicitly **not** idempotent and
+must never run from a retry path.
+
+One subtlety worth keeping: `ensure_mailbox` applies a password only when one is
+supplied, so a retry that omits it cannot clear a working credential.
+
+### DKIM (DEC-007r)
+
+The port exposes only public material. `rotate_dkim_key` asks the engine to
+generate the keypair and returns `DkimKeyInfo`, which has no private field —
+and a test walks every DTO asserting none may ever gain one.
+
+`Domain.dkim_private_key` still exists and is untouched: migrating it belongs to
+P4, as specified. It is marked deprecated in the model.
+
+### Customer-facing naming
+
+`mail_engine_provisioned` / `mail_engine_error` are serialized as
+`mail_service_ready` / `mail_service_message`. Database columns are unchanged,
+so there is no migration. Frontend strings like "Provisioned in mail engine"
+became "Mail service active": the old wording told customers a separate engine
+exists, which DEC-011 forbids.
+
+### Health
+
+`/api/health/` now returns `{status, service}` and nothing else. It no longer
+consults the engine at all, so mail-side trouble cannot pull the web tier out of
+a load balancer, and the probe cannot be used to poll engine state from outside.
+Component detail moved to `/api/internal/health/` behind the shared secret.
+
+### Behaviour changes worth knowing
+
+Failures that were previously swallowed now surface, because silently reporting
+success was misreporting the customer's mail flow:
+
+- Forwarding create returns **202** (not 201) when the engine is unreachable —
+  the rule exists but is not live.
+- Forwarding delete returns **503** rather than deleting our record while the
+  engine still forwards mail to a third party.
+- Forwarding/alias status changes roll back and return **503** if the engine
+  rejects them.
+- Queue cancel and quarantine release return **503** instead of marking a
+  message actioned that was not.
+
+### Tests added (137 new, 244 total)
+
+| File | Tests | Covers |
+|------|-------|--------|
+| `tests/test_adapter_contract.py` | 79 | one contract run against **both** adapters (39 shared + 7 error-mapping) |
+| `tests/test_forwarding_service.py` | 19 | rule resolution, adapter purity, API behaviour on failure |
+| `tests/test_dto_boundary.py` | 16 | DTOs only, no models across the port, task retry semantics |
+| `tests/test_engine_leak.py` | 12 | 14 realistic engine failures × response bodies and stored fields |
+| `tests/test_health_privacy.py` | 11 | public payload minimal; detail behind the secret |
+| `tests/fake_engine.py` | — | in-memory fake of the engine REST API |
+
+`MailcowAdapter` is exercised against a fake transport rather than mocked, so
+payload construction, status handling, envelope parsing and error
+classification all run for real.
+
+**Two real bugs the contract suite caught while being written:**
+
+1. `list_mailboxes(domain)` used `/get/mailbox/{domain}`, which addresses a
+   single mailbox. Domain scoping needs `/get/mailbox/all/{domain}`. This would
+   have failed against a real engine.
+2. The stub's DKIM rotation used a microsecond timestamp, so two rotations in
+   the same microsecond returned identical keys.
+
+### Known limitations carried forward
+
+- `Domain.dkim_private_key` still holds plaintext keys (L9) until P4.
+- `WEBMAIL_BASE_URL` may still point at an engine-supplied interface (L6) until P8.
+- `get_queue_status` / `get_quarantine_items` remain engine-wide with no tenant
+  dimension. The port documents that callers must map to a tenant before storing
+  or displaying; the sync task that does so is P7.
+- The engine-side policy path is still not wired (blocker 2) — that is P5.

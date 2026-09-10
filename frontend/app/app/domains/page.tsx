@@ -11,7 +11,7 @@ interface Domain {
   status: "pending" | "active" | "warning" | "failed" | "paused";
   dns_health_score: number;
   dkim_selector: string;
-  mail_engine_provisioned: boolean;
+  mail_service_ready: boolean;
   added_at: string;
   verified_at: string | null;
 }

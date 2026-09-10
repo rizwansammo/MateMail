@@ -5,12 +5,48 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.domains.models import Domain
+from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
 from apps.tenants.permissions import IsTenantAdmin, TenantReadAdminWrite
 from .models import Alias, AliasStatus
 from .serializers import AliasCreateSerializer, AliasSerializer
 
 logger = logging.getLogger(__name__)
+
+
+def _alias_destinations(alias) -> tuple[str, ...]:
+    """
+    The alias's final destination set.
+
+    Which address an alias delivers to is MateMail product logic, so it is
+    resolved here and handed to the adapter as a finished instruction.
+    """
+    target = (
+        alias.destination_mailbox.email
+        if alias.destination_mailbox
+        else alias.destination_address
+    )
+    return (target,) if target else ()
+
+
+def _apply_alias(alias) -> None:
+    """Push an alias's desired state to the Mail Engine and record the result."""
+    from apps.mail_engine.dto import AliasSpec
+    from apps.mail_engine.factory import get_adapter
+
+    destinations = _alias_destinations(alias)
+    if not destinations:
+        raise MailEngineError("alias has no destination", operation="ensure_alias")
+
+    get_adapter().ensure_alias(
+        AliasSpec(
+            address=alias.source_address,
+            destinations=destinations,
+            active=alias.status == AliasStatus.ACTIVE,
+        )
+    )
+    alias.mail_engine_provisioned = True
+    alias.save(update_fields=["mail_engine_provisioned"])
 
 
 class AliasListCreateView(APIView):
@@ -71,15 +107,11 @@ class AliasListCreateView(APIView):
         )
 
         try:
-            from apps.mail_engine.factory import get_adapter
-            result = get_adapter().provision_alias(alias)
-            if result.success:
-                alias.mail_engine_provisioned = True
-            else:
-                logger.warning("Alias provision failed for %s: %s", source_address, result.message)
-            alias.save(update_fields=["mail_engine_provisioned"])
-        except Exception as exc:
-            logger.error("Alias provision error for %s: %s", source_address, exc)
+            _apply_alias(alias)
+        except MailEngineError as exc:
+            logger.warning("Alias provisioning failed for %s: %s", source_address, exc.log_message)
+        except Exception:
+            logger.exception("Unexpected error provisioning alias %s", source_address)
 
         return Response(AliasSerializer(alias).data, status=201)
 
@@ -108,11 +140,16 @@ class AliasDetailView(APIView):
             return Response({"detail": "Not found."}, status=404)
 
         if alias.mail_engine_provisioned:
+            from apps.mail_engine.factory import get_adapter
+
             try:
-                from apps.mail_engine.factory import get_adapter
-                get_adapter().delete_alias(alias)
-            except Exception as exc:
-                logger.warning("Alias deprovision error for %s: %s", alias.source_address, exc)
+                get_adapter().delete_alias(alias.source_address)
+            except MailEngineError as exc:
+                # delete_alias is idempotent, so this is a transport/refusal
+                # problem rather than "already gone". Removing our record anyway
+                # would orphan the alias in the engine, so refuse.
+                logger.error("Alias removal failed for %s: %s", alias.source_address, exc.log_message)
+                return Response({"detail": exc.customer_message}, status=503)
 
         alias.delete()
         return Response(status=204)
@@ -140,13 +177,18 @@ class AliasStatusView(APIView):
         if alias.status == new_status:
             return Response(AliasSerializer(alias).data)
 
+        # Set the desired status first so the instruction we push reflects it,
+        # then persist only if the engine accepted the change.
+        previous_status = alias.status
+        alias.status = new_status
+
         if alias.mail_engine_provisioned:
             try:
-                from apps.mail_engine.factory import get_adapter
-                get_adapter().update_alias_active(alias, new_status == "active")
-            except Exception as exc:
-                logger.warning("Alias status sync failed for %s: %s", alias.source_address, exc)
+                _apply_alias(alias)
+            except MailEngineError as exc:
+                alias.status = previous_status
+                logger.error("Alias status sync failed for %s: %s", alias.source_address, exc.log_message)
+                return Response({"detail": exc.customer_message}, status=503)
 
-        alias.status = new_status
         alias.save(update_fields=["status", "updated_at"])
         return Response(AliasSerializer(alias).data)

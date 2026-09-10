@@ -24,7 +24,7 @@ interface Alias {
   destination_address: string;
   destination_email: string;
   status: "active" | "disabled";
-  mail_engine_provisioned: boolean;
+  mail_service_ready: boolean;
   created_at: string;
 }
 
@@ -291,7 +291,7 @@ export default function AliasesPage() {
                 <p className="truncate text-xs text-slate-400">→ {alias.destination_email}</p>
               </div>
 
-              {alias.mail_engine_provisioned ? (
+              {alias.mail_service_ready ? (
                 <span title="Provisioned" className="text-emerald-500"><CheckCircle2 className="h-4 w-4" /></span>
               ) : (
                 <span title="Not provisioned" className="text-amber-400"><AlertCircle className="h-4 w-4" /></span>

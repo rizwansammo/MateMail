@@ -24,9 +24,11 @@ class Domain(models.Model):
 
     # DKIM
     dkim_selector = models.CharField(max_length=63, default="mm1")
-    # Public key text (for DNS TXT record display). Private key lives in mailcow.
+    # Public key text, shown to the customer for the DNS TXT record.
     dkim_public_key = models.TextField(blank=True)
-    # PEM private key — provisioned to mail engine in Phase 6; never exposed via API
+    # DEPRECATED (DEC-007r): the Mail Engine must own the private key. This
+    # column is technical debt scheduled for removal in P4 — do not read or
+    # write it in new code. Never exposed via API or Django admin.
     dkim_private_key = models.TextField(blank=True)
 
     # Provisioning state in the mail engine

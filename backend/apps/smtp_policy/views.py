@@ -1,16 +1,25 @@
 """
-Internal SMTP policy endpoints — called by Postfix (via policy daemon bridge) and Dovecot.
+Internal SMTP policy endpoints — consulted by the MateMail Mail Engine.
 
-All endpoints are secured by INTERNAL_API_SECRET (X-Internal-Secret header).
-They are never exposed to tenants; nginx must block public access to /api/internal/.
+These endpoints are where MateMail enforces its own policy on mail flow:
+suspension, sender identity and rate limits are MateMail's decisions, not
+engine configuration. The engine asks; MateMail answers.
 
-Postfix integration (Phase 15):
-    A small Python daemon script reads the Postfix policy protocol (text over TCP/Unix socket)
-    and translates it to HTTP calls against these endpoints.
+All endpoints are secured by INTERNAL_API_SECRET (X-Internal-Secret header),
+are mounted under /api/internal/, and are denied at the edge by nginx. They are
+never reachable by tenants.
 
-Dovecot integration (Phase 15):
-    Configure passdb { driver = dict } pointing to the validate endpoint,
-    or use a Lua policy script that calls /api/internal/smtp/outbound/ on SASL success.
+Engine-side wiring (component names retained because engineers configuring the
+Mail Engine need them):
+
+    SMTP component (Postfix)
+        A policy-daemon bridge speaks the check_policy_service protocol over TCP
+        and translates it to HTTP calls against these endpoints.
+        NOTE: the restriction ordering required for these checks to actually run
+        is not yet correct — see PROJECT_STATUS.md blocker 2, scheduled for P5.
+
+    IMAP component (Dovecot)
+        Consulted on SASL success to apply the same outbound policy.
 """
 import hmac
 import logging
@@ -43,8 +52,8 @@ class InboundPolicyView(APIView):
     """
     POST /api/internal/smtp/inbound/
 
-    Postfix calls this before accepting an inbound message to verify the recipient
-    domain is hosted and active in MateMail.
+    The Mail Engine's SMTP component calls this before accepting an inbound
+    message, to verify the recipient domain is hosted and active in MateMail.
 
     Request body: {"recipient": "user@example.com"}
     Response:     {"action": "OK"|"REJECT", "reason": "..."}
@@ -88,7 +97,7 @@ class OutboundPolicyView(APIView):
     """
     POST /api/internal/smtp/outbound/
 
-    Called by Postfix submission (port 587) after SASL authentication.
+    Called by the Mail Engine's submission service (port 587) after SASL auth.
     Enforces:
     - Sender address must match the authenticated SASL username (no impersonation)
     - Tenant must be active (not suspended or cancelled)

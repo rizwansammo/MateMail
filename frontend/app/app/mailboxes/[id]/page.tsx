@@ -18,8 +18,8 @@ interface Mailbox {
   status: "active" | "disabled" | "suspended";
   quota_mb: number;
   storage_used_mb: number;
-  mail_engine_provisioned: boolean;
-  mail_engine_error: string;
+  mail_service_ready: boolean;
+  mail_service_message: string;
   last_login: string | null;
   created_at: string;
 }
@@ -160,7 +160,7 @@ export default function MailboxDetailPage() {
             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[mailbox.status]}`}>
               {mailbox.status}
             </span>
-            {mailbox.mail_engine_provisioned ? (
+            {mailbox.mail_service_ready ? (
               <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
                 <CheckCircle2 className="h-3.5 w-3.5" /> Provisioned
               </span>
@@ -175,9 +175,9 @@ export default function MailboxDetailPage() {
         {/* Open Webmail */}
         <button
           onClick={openWebmail}
-          disabled={ssoLoading || !mailbox.mail_engine_provisioned || mailbox.status !== "active"}
+          disabled={ssoLoading || !mailbox.mail_service_ready || mailbox.status !== "active"}
           className="inline-flex items-center gap-1.5 rounded-md bg-cyan-600 px-3 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          title={!mailbox.mail_engine_provisioned ? "Mailbox not yet provisioned" : mailbox.status !== "active" ? "Mailbox is not active" : "Open webmail"}
+          title={!mailbox.mail_service_ready ? "Mail service setup in progress" : mailbox.status !== "active" ? "Mailbox is not active" : "Open webmail"}
         >
           {ssoLoading ? (
             <RefreshCw className="h-4 w-4 animate-spin" />
@@ -218,11 +218,11 @@ export default function MailboxDetailPage() {
         </InfoRow>
       </div>
 
-      {/* Mail engine status */}
+      {/* Mail service status */}
       <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-slate-800">Mail engine</p>
-          {!mailbox.mail_engine_provisioned && (
+          <p className="text-sm font-medium text-slate-800">Mail service</p>
+          {!mailbox.mail_service_ready && (
             <button
               onClick={() => setReprovOpen(true)}
               className="text-xs font-medium text-cyan-600 hover:text-cyan-700"
@@ -231,12 +231,12 @@ export default function MailboxDetailPage() {
             </button>
           )}
         </div>
-        {mailbox.mail_engine_error && (
+        {mailbox.mail_service_message && (
           <p className="rounded bg-red-50 px-3 py-2 text-xs font-mono text-red-700">
-            {mailbox.mail_engine_error}
+            {mailbox.mail_service_message}
           </p>
         )}
-        {mailbox.mail_engine_provisioned && (
+        {mailbox.mail_service_ready && (
           <button
             onClick={() => setReprovOpen(true)}
             className="text-xs text-slate-400 hover:text-slate-600"
@@ -250,10 +250,10 @@ export default function MailboxDetailPage() {
       {reprovOpen && (
         <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
           <p className="text-sm font-medium text-slate-800">
-            {mailbox.mail_engine_provisioned ? "Change mailbox password" : "Provision mailbox"}
+            {mailbox.mail_service_ready ? "Change mailbox password" : "Set mailbox password"}
           </p>
           <p className="text-xs text-slate-500">
-            The new password will be set in the mail engine immediately. It is never stored here.
+            The new password takes effect immediately. MateMail never stores it.
           </p>
           {reprovError && <p className="text-sm text-red-600">{reprovError}</p>}
           <form onSubmit={reprovision} className="space-y-3">

@@ -12,8 +12,8 @@ interface Domain {
   dns_health_score: number;
   dkim_selector: string;
   dkim_public_key: string;
-  mail_engine_provisioned: boolean;
-  mail_engine_error: string;
+  mail_service_ready: boolean;
+  mail_service_message: string;
   added_at: string;
   verified_at: string | null;
 }
@@ -242,20 +242,20 @@ export default function DomainDetailPage() {
         </div>
       )}
 
-      {/* Mail engine provisioning status */}
+      {/* Mail service status */}
       <div className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {domain.mail_engine_provisioned ? (
+            {domain.mail_service_ready ? (
               <CheckCircle2 className="h-4 w-4 text-emerald-500" />
             ) : (
               <AlertCircle className="h-4 w-4 text-amber-400" />
             )}
             <span className="text-sm font-medium text-slate-800">
-              {domain.mail_engine_provisioned ? "Provisioned in mail engine" : "Not yet provisioned in mail engine"}
+              {domain.mail_service_ready ? "Mail service active" : "Mail service setup in progress"}
             </span>
           </div>
-          {!domain.mail_engine_provisioned && (
+          {!domain.mail_service_ready && (
             <button
               onClick={async () => {
                 await apiRequest(`/api/domains/${params.id}/provision/`, { method: "POST" });
@@ -267,9 +267,9 @@ export default function DomainDetailPage() {
             </button>
           )}
         </div>
-        {domain.mail_engine_error && (
+        {domain.mail_service_message && (
           <p className="mt-2 rounded bg-red-50 px-3 py-2 text-xs text-red-700 font-mono">
-            {domain.mail_engine_error}
+            {domain.mail_service_message}
           </p>
         )}
       </div>

@@ -50,12 +50,12 @@ export interface DnsRecord {
   status: "verified" | "pending" | "missing" | "failed";
 }
 
+/**
+ * Public health payload. Deliberately minimal: component-level infrastructure
+ * state is operator-only and served from an internal endpoint the browser
+ * cannot reach.
+ */
 export interface HealthStatus {
-  status: "ok" | "degraded" | "error";
-  checks: {
-    db: "ok" | "error";
-    redis: "ok" | "error";
-    mail_engine: "ok" | "error" | "unknown";
-  };
-  version: string;
+  status: "ok" | "unavailable";
+  service: string;
 }

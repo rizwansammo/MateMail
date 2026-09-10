@@ -21,6 +21,7 @@ urlpatterns = [
     # Everything internal MUST live under /api/internal/ for that rule to apply.
     path("api/internal/smtp/", include("apps.smtp_policy.urls")),
     path("api/internal/webmail/", include("apps.webmail.internal_urls")),
+    path("api/internal/health/", include("apps.health.internal_urls")),
     # Platform admin endpoints — IsPlatformAdmin permission required
     path("api/platform/", include("apps.platform_admin.urls")),
     # Team invites + API keys

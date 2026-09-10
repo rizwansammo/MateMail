@@ -4,6 +4,7 @@ from .models import Alias
 
 
 class AliasSerializer(serializers.ModelSerializer):
+    mail_service_ready = serializers.BooleanField(source="mail_engine_provisioned", read_only=True)
     domain_name = serializers.CharField(source="domain.domain", read_only=True)
     destination_email = serializers.SerializerMethodField()
 
@@ -12,7 +13,7 @@ class AliasSerializer(serializers.ModelSerializer):
         fields = [
             "id", "source_address", "domain", "domain_name",
             "destination_mailbox", "destination_address", "destination_email",
-            "status", "mail_engine_provisioned", "created_at",
+            "status", "mail_service_ready", "created_at",
         ]
 
     def get_destination_email(self, obj):

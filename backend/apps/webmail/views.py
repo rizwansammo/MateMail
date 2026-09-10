@@ -7,8 +7,14 @@ Flow:
      with a 60-second TTL keyed as "webmail:sso:{token}".
   3. Returns {url: "https://webmail.../...?email=...&sso_token=...", expires_in: 60}
   4. Frontend opens the URL in a new tab.
-  5. Roundcube (or SOGo) middleware intercepts the sso_token query param and calls
+  5. The webmail front end intercepts the sso_token query param and calls
      POST /api/internal/webmail/validate-token/ to exchange it for a confirmed email.
+
+NOTE (DEC-005r): the long-term webmail is MateMail-built, not an engine-supplied
+interface. This bridge also cannot yet complete a login on its own — webmail
+needs an authenticated IMAP session and MateMail deliberately stores no mailbox
+password. The mechanism (likely a Dovecot master user) is open as TBD-G and is
+resolved in P8, not here.
   6. The token is deleted atomically on first use — cannot be replayed.
 
 The internal validate endpoint is secured by INTERNAL_API_SECRET.

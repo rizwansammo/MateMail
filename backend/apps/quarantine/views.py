@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
 from apps.tenants.permissions import IsTenantAdmin
+from apps.mail_engine.errors import MailEngineError
 from apps.mail_engine.factory import get_adapter
 from .models import QuarantineMessage, QuarantineStatus
 from .serializers import QuarantineMessageSerializer
@@ -47,12 +48,15 @@ class QuarantineReleaseView(APIView):
         if msg.status != QuarantineStatus.HELD:
             return Response({"detail": "Only held messages can be released."}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Idempotent by id, so a failure means the release did not happen.
+        # Marking it released anyway would tell the customer their mail was
+        # delivered when it was not.
         if msg.engine_message_id:
             try:
-                adapter = get_adapter()
-                adapter.release_quarantine_item(msg.engine_message_id)
-            except Exception:
-                logger.warning("Could not release quarantine item %s from mail engine.", msg.engine_message_id)
+                get_adapter().release_quarantine_item(msg.engine_message_id)
+            except MailEngineError as exc:
+                logger.error("Quarantine release failed for %s: %s", msg.pk, exc.log_message)
+                return Response({"detail": exc.customer_message}, status=503)
 
         msg.status = QuarantineStatus.RELEASED
         msg.actioned_at = timezone.now()

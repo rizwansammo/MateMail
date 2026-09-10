@@ -5,6 +5,9 @@ from .models import Mailbox
 
 class MailboxSerializer(serializers.ModelSerializer):
     domain_name = serializers.CharField(source="domain.domain", read_only=True)
+    # See the note in domains/serializers.py — customer-facing naming.
+    mail_service_ready = serializers.BooleanField(source="mail_engine_provisioned", read_only=True)
+    mail_service_message = serializers.CharField(source="mail_engine_error", read_only=True)
 
     class Meta:
         model = Mailbox
@@ -12,12 +15,12 @@ class MailboxSerializer(serializers.ModelSerializer):
             "id", "email", "full_name", "local_part",
             "domain", "domain_name", "status",
             "quota_mb", "storage_used_mb",
-            "mail_engine_provisioned", "mail_engine_error",
+            "mail_service_ready", "mail_service_message",
             "last_login", "created_at",
         ]
         read_only_fields = [
             "id", "email", "status", "storage_used_mb",
-            "mail_engine_provisioned", "mail_engine_error",
+            "mail_service_ready", "mail_service_message",
             "last_login", "created_at",
         ]
 

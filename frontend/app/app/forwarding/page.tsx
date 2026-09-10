@@ -17,7 +17,7 @@ interface ForwardingRule {
   destination_email: string;
   keep_copy: boolean;
   status: "active" | "paused" | "disabled";
-  mail_engine_provisioned: boolean;
+  mail_service_ready: boolean;
   created_at: string;
 }
 
@@ -239,7 +239,7 @@ export default function ForwardingPage() {
                 </p>
               </div>
 
-              {rule.mail_engine_provisioned ? (
+              {rule.mail_service_ready ? (
                 <span title="Provisioned" className="text-emerald-500"><CheckCircle2 className="h-4 w-4" /></span>
               ) : (
                 <span title="Not provisioned" className="text-amber-400"><AlertCircle className="h-4 w-4" /></span>

@@ -155,7 +155,17 @@ Rules:
    to logs; customers receive MateMail-authored messages.
 
 A `StubAdapter` implements the same port with no engine present. It is the
-default, so local development and CI never require the engine.
+default, so local development and CI never require the engine. Both
+implementations are held to one shared contract suite
+(`tests/test_adapter_contract.py`), which is what stops them drifting.
+
+**Implemented in P1.** The port takes frozen DTOs (`apps/mail_engine/dto.py`),
+returns `None` or DTOs, and raises typed errors (`apps/mail_engine/errors.py`)
+instead of returning a result object with a status string. Mutating operations
+are idempotent with the guarantees documented in `adapter.py`, so a Celery
+retry converges rather than duplicating. `str()` of every error type is the
+MateMail-authored customer message, so engine detail cannot leak even through
+careless handling.
 
 ---
 

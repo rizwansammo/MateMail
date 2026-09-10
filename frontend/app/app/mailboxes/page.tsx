@@ -19,8 +19,8 @@ interface Mailbox {
   domain_name: string;
   status: "active" | "disabled" | "suspended";
   quota_mb: number;
-  mail_engine_provisioned: boolean;
-  mail_engine_error: string;
+  mail_service_ready: boolean;
+  mail_service_message: string;
   last_login: string | null;
   created_at: string;
 }
@@ -249,13 +249,13 @@ export default function MailboxesPage() {
                 <p className="truncate text-xs text-slate-400">{mb.full_name} · {Math.round(mb.quota_mb / 1024)} GB quota</p>
               </div>
 
-              {mb.mail_engine_provisioned ? (
-                <span title="Provisioned in mail engine" className="text-emerald-500">
+              {mb.mail_service_ready ? (
+                <span title="Mail service active" className="text-emerald-500">
                   <CheckCircle2 className="h-4 w-4" />
                 </span>
               ) : (
                 <span
-                  title={mb.mail_engine_error || "Not yet provisioned in mail engine"}
+                  title={mb.mail_service_message || "Mail service setup in progress"}
                   className="text-amber-400"
                 >
                   <AlertCircle className="h-4 w-4" />

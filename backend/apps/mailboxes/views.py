@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.domains.models import Domain
+from apps.mail_engine.errors import MailEngineError
 from apps.billing.utils import check_mailbox_limit
 from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
@@ -16,15 +17,31 @@ logger = logging.getLogger(__name__)
 
 
 def _provision_mailbox(mailbox, password: str) -> None:
-    """Sync provisioning helper — password stays in memory, never stored."""
+    """
+    Bring a mailbox to its desired state in the Mail Engine.
+
+    The password stays in this call stack: it is passed to the adapter and never
+    stored, queued or logged.
+
+    Any failure is recorded as a MateMail-authored message. Raw engine text is
+    logged and discarded — see errors.MailEngineError, whose str() is
+    deliberately the customer message so this field cannot leak engine detail.
+    """
+    from apps.mail_engine.dto import MailboxSpec
+    from apps.mail_engine.errors import MailEngineError
     from apps.mail_engine.factory import get_adapter
-    adapter = get_adapter()
-    result = adapter.provision_mailbox(mailbox, password)
-    if result.success:
-        mailbox.mail_engine_provisioned = True
-        mailbox.mail_engine_error = ""
-    else:
-        mailbox.mail_engine_error = result.message[:500]
+
+    spec = MailboxSpec.from_model(mailbox)
+    try:
+        get_adapter().ensure_mailbox(spec, password)
+    except MailEngineError as exc:
+        logger.error("Mailbox provisioning failed for %s: %s", mailbox.email, exc.log_message)
+        mailbox.mail_engine_error = exc.customer_message
+        mailbox.save(update_fields=["mail_engine_error"])
+        raise
+
+    mailbox.mail_engine_provisioned = True
+    mailbox.mail_engine_error = ""
     mailbox.save(update_fields=["mail_engine_provisioned", "mail_engine_error"])
 
 
@@ -65,12 +82,19 @@ class MailboxListCreateView(APIView):
             quota_mb=data["quota_mb"],
         )
 
-        # Synchronous provisioning — password only lives in this call stack
+        # Synchronous provisioning — password only lives in this call stack.
+        # A provisioning failure does not fail mailbox creation: the record
+        # exists and can be re-provisioned. _provision_mailbox has already
+        # stored a MateMail-authored message describing the state.
         try:
             _provision_mailbox(mailbox, password)
-        except Exception as exc:
-            logger.error("Mailbox provision error for %s: %s", mailbox.email, exc)
-            mailbox.mail_engine_error = str(exc)[:500]
+        except MailEngineError:
+            pass
+        except Exception:
+            # Unexpected fault: never let an arbitrary exception string reach a
+            # customer-visible field. Log the traceback and store our own text.
+            logger.exception("Unexpected error provisioning mailbox %s", mailbox.email)
+            mailbox.mail_engine_error = MailEngineError.customer_message
             mailbox.save(update_fields=["mail_engine_error"])
 
         log_event(request.tenant, LogEventType.MAILBOX_CREATED, request=request, mailbox=mailbox)
@@ -126,16 +150,16 @@ class MailboxStatusView(APIView):
         if mb.status == new_status:
             return Response(MailboxSerializer(mb).data)
 
-        # Sync to mail engine before updating DB
+        # Sync to the Mail Engine before updating our own record.
         if mb.mail_engine_provisioned:
+            from apps.mail_engine.errors import MailEngineError
             from apps.mail_engine.factory import get_adapter
-            adapter = get_adapter()
-            if new_status == "disabled":
-                result = adapter.disable_mailbox(mb)
-            else:
-                result = adapter.enable_mailbox(mb)
-            if not result.success:
-                logger.warning("Mail engine status sync failed for %s: %s", mb.email, result.message)
+
+            try:
+                get_adapter().set_mailbox_active(mb.email, active=new_status == "active")
+            except MailEngineError as exc:
+                logger.warning("Mailbox status sync failed for %s: %s", mb.email, exc.log_message)
+                return Response({"detail": exc.customer_message}, status=503)
 
         mb.status = new_status
         mb.save(update_fields=["status", "updated_at"])
@@ -159,8 +183,11 @@ class MailboxReProvisionView(APIView):
 
         try:
             _provision_mailbox(mb, password)
-        except Exception as exc:
-            logger.error("Re-provision error for %s: %s", mb.email, exc)
-            return Response({"detail": "Provisioning failed. Check mail_engine_error."}, status=503)
+        except MailEngineError as exc:
+            logger.error("Mailbox re-provisioning failed for %s: %s", mb.email, exc.log_message)
+            return Response({"detail": exc.customer_message}, status=503)
+        except Exception:
+            logger.exception("Unexpected error re-provisioning mailbox %s", mb.email)
+            return Response({"detail": MailEngineError.customer_message}, status=503)
 
         return Response(MailboxSerializer(mb).data)

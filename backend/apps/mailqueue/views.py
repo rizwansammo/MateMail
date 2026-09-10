@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
 from apps.tenants.permissions import HasTenantAccess, IsTenantAdmin
+from apps.mail_engine.errors import MailEngineError
 from apps.mail_engine.factory import get_adapter
 from .models import QueueMessage, QueueStatus
 from .serializers import QueueMessageSerializer
@@ -43,13 +44,15 @@ class QueueMessageCancelView(APIView):
         if msg.status in (QueueStatus.DELIVERED, QueueStatus.CANCELLED):
             return Response({"detail": "Message is already delivered or cancelled."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Best-effort cancel in mail engine
+        # cancel_queue_message is idempotent by id, so a failure here is a real
+        # problem rather than "already gone". Report it instead of marking the
+        # message cancelled while it is still queued for delivery.
         if msg.engine_message_id:
             try:
-                adapter = get_adapter()
-                adapter.cancel_queue_message(msg.engine_message_id)
-            except Exception:
-                logger.warning("Could not cancel queue message %s in mail engine.", msg.engine_message_id)
+                get_adapter().cancel_queue_message(msg.engine_message_id)
+            except MailEngineError as exc:
+                logger.error("Queue cancel failed for %s: %s", msg.pk, exc.log_message)
+                return Response({"detail": exc.customer_message}, status=503)
 
         msg.status = QueueStatus.CANCELLED
         msg.save(update_fields=["status"])

@@ -6,18 +6,24 @@ from .models import Domain
 
 
 class DomainSerializer(serializers.ModelSerializer):
+    # Customer-facing names. The underlying columns keep their internal names,
+    # but "mail engine" is infrastructure vocabulary and must not appear in the
+    # customer API contract (DEC-011).
+    mail_service_ready = serializers.BooleanField(source="mail_engine_provisioned", read_only=True)
+    mail_service_message = serializers.CharField(source="mail_engine_error", read_only=True)
+
     class Meta:
         model = Domain
         fields = [
             "id", "domain", "status", "dns_health_score",
             "dkim_selector", "dkim_public_key",
-            "mail_engine_provisioned", "mail_engine_error",
+            "mail_service_ready", "mail_service_message",
             "added_at", "verified_at",
         ]
         read_only_fields = [
             "id", "status", "dns_health_score",
             "dkim_selector", "dkim_public_key",
-            "mail_engine_provisioned", "mail_engine_error",
+            "mail_service_ready", "mail_service_message",
             "added_at", "verified_at",
         ]
 

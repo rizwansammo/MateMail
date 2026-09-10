@@ -186,7 +186,8 @@ CORS_ALLOW_CREDENTIALS = True
 # Mail engine integration
 MAIL_ENGINE_API_URL = env("MAIL_ENGINE_API_URL", default="http://localhost:8080")
 MAIL_ENGINE_API_KEY = env("MAIL_ENGINE_API_KEY", default="")
-# "stub" (default) = no-op for local dev; "mailcow" = real mailcow REST API
+# "stub" (default) = in-memory adapter, no engine needed (local dev + CI)
+# "mailcow" = the real MateMail Mail Engine (Postfix/Dovecot/Rspamd via mailcow)
 MAIL_ENGINE_ADAPTER = env("MAIL_ENGINE_ADAPTER", default="stub")
 
 # MateMail platform settings
@@ -199,6 +200,7 @@ FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 APP_BASE_URL = env("APP_BASE_URL", default="http://localhost:3000")
 WEBMAIL_BASE_URL = env("WEBMAIL_BASE_URL", default="http://localhost:3000")
 
-# Internal API secret — used by Postfix policy daemon and webmail app to call /api/internal/
+# Internal API secret — used by the Mail Engine policy bridge and the webmail
+# front end to call /api/internal/. nginx denies that prefix at the edge.
 # Generate with: python -c "import secrets; print(secrets.token_urlsafe(40))"
 INTERNAL_API_SECRET = env("INTERNAL_API_SECRET", default="")

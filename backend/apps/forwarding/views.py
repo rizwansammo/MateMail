@@ -4,10 +4,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
 from apps.tenants.permissions import IsTenantAdmin, TenantReadAdminWrite
 from .models import ForwardingRule, ForwardingStatus
 from .serializers import ForwardingRuleCreateSerializer, ForwardingRuleSerializer
+from .services import apply_forwarding
 
 logger = logging.getLogger(__name__)
 
@@ -53,15 +55,20 @@ class ForwardingRuleListCreateView(APIView):
             status=ForwardingStatus.ACTIVE,
         )
 
+        # The service layer resolves the mailbox's complete destination set
+        # (active rules + keep_copy) and hands the adapter one final instruction.
         try:
-            from apps.mail_engine.factory import get_adapter
-            result = get_adapter().provision_forwarding(rule)
-            rule.mail_engine_provisioned = result.success
+            apply_forwarding(mailbox)
+            rule.mail_engine_provisioned = True
             rule.save(update_fields=["mail_engine_provisioned"])
-            if not result.success:
-                logger.warning("Forwarding provision failed for rule %s: %s", rule.id, result.message)
-        except Exception as exc:
-            logger.error("Forwarding provision error for rule %s: %s", rule.id, exc)
+        except MailEngineError as exc:
+            logger.error("Forwarding activation failed for rule %s: %s", rule.id, exc.log_message)
+            # The rule exists but is not live in the engine. Say so, rather than
+            # reporting a success the customer's mail flow will not reflect.
+            return Response(
+                {**ForwardingRuleSerializer(rule).data, "detail": exc.customer_message},
+                status=202,
+            )
 
         return Response(ForwardingRuleSerializer(rule).data, status=201)
 
@@ -89,13 +96,16 @@ class ForwardingRuleDetailView(APIView):
         if not rule:
             return Response({"detail": "Not found."}, status=404)
 
-        # Deprovision BEFORE delete so adapter can query remaining rules
-        if rule.mail_engine_provisioned:
-            try:
-                from apps.mail_engine.factory import get_adapter
-                get_adapter().delete_forwarding(rule)
-            except Exception as exc:
-                logger.warning("Forwarding deprovision error for rule %s: %s", rule.id, exc)
+        # Compute the state that will apply once this rule is gone and push it
+        # first. excluding_rule_pk means we no longer depend on delete ordering,
+        # which is what the old "deprovision before delete" comment worked around.
+        mailbox = rule.source_mailbox
+        try:
+            apply_forwarding(mailbox, excluding_rule_pk=rule.pk)
+        except MailEngineError as exc:
+            logger.error("Forwarding removal failed for rule %s: %s", rule.id, exc.log_message)
+            # Deleting our record now would leave mail still being forwarded.
+            return Response({"detail": exc.customer_message}, status=503)
 
         rule.delete()
         return Response(status=204)
@@ -123,15 +133,18 @@ class ForwardingRuleStatusView(APIView):
         if rule.status == new_status:
             return Response(ForwardingRuleSerializer(rule).data)
 
+        previous_status = rule.status
         rule.status = new_status
         rule.save(update_fields=["status", "updated_at"])
 
-        # Re-sync all active rules for this mailbox after status change
-        if rule.mail_engine_provisioned:
-            try:
-                from apps.mail_engine.factory import get_adapter
-                get_adapter().provision_forwarding(rule)
-            except Exception as exc:
-                logger.warning("Forwarding status re-sync failed for rule %s: %s", rule.id, exc)
+        # Re-resolve the whole mailbox's forwarding: pausing one rule changes the
+        # destination set, and the engine holds a single combined instruction.
+        try:
+            apply_forwarding(rule.source_mailbox)
+        except MailEngineError as exc:
+            rule.status = previous_status
+            rule.save(update_fields=["status", "updated_at"])
+            logger.error("Forwarding status sync failed for rule %s: %s", rule.id, exc.log_message)
+            return Response({"detail": exc.customer_message}, status=503)
 
         return Response(ForwardingRuleSerializer(rule).data)
