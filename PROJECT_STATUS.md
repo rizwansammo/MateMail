@@ -4,7 +4,7 @@
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
 **Last updated:** 2026-09-10  
-**Current phase:** PRODUCTION READINESS P2 — COMPLETE  
+**Current phase:** P2.5 — COMPLETE (control plane live at https://app.matemail.online)  
 **Next phase:** P3 (ownership verification + abuse prevention) — awaiting assignment  
 **Launch gate:** private beta requires all of P0–P7; public launch requires P9
 
@@ -198,6 +198,7 @@ broken audit log. See the Phase 0 section below.
 | P0 | Trustworthy baseline + critical application security | ✅ Complete (2026-09-10) |
 | P1 | Harden the Mail Engine boundary | ✅ Complete (2026-09-11) |
 | P2 | Deployment alignment (NetaMate model, GHCR, ports 8020/3020) | ✅ Complete (2026-09-11) |
+| P2.5 | Controlled production deployment of the control plane | ✅ Complete (2026-09-10) — Mail Engine NOT deployed |
 | P3 | Domain ownership verification + abuse prevention | Pending |
 | P4 | Stand up the Mail Engine | Pending |
 | P5 | Mail policy enforcement (no open relay, rate limits, suspension) | Pending |
@@ -556,6 +557,11 @@ Must land before any real domain is provisioned into a real engine.
 - API key scopes; default read-only; refuse platform-admin inheritance.
 - Make the DNS check endpoint async and rate-limited; fan out the periodic sweep.
 - Move refresh tokens to `httpOnly` cookies.
+- Replace the interim `script-src 'unsafe-inline'` CSP with a per-request
+  nonce issued by Next.js middleware, and stop nginx setting CSP for the
+  frontend. Required because the App Router emits inline hydration scripts;
+  see the P2.5 CSP incident. Pair this with the httpOnly cookie move — the
+  two together are what make an XSS survivable.
 - Route transactional mail via an external provider on a subdomain — MateMail
   must not depend on the engine it is bootstrapping.
 - Interim mitigation only: encrypt `Domain.dkim_private_key` at rest and keep it
@@ -1018,3 +1024,112 @@ error protection, `/api/internal/` protection, tenant isolation, DEC-007r. The
 4. A required reviewer set on the `production` GitHub environment.
 5. Outbound TCP/25 verified from MateServer itself.
 6. Per **DEC-012**, no real customer mail until all of P0–P7 are complete.
+
+---
+
+## P2.5 — Controlled production deployment of the control plane
+
+**Completed 2026-09-10.** The MateMail **control plane** is live on MateServer at
+<https://app.matemail.online>. The Mail Engine was **not** deployed;
+`MAIL_ENGINE_ADAPTER=stub` and no SMTP/IMAP/POP/Sieve listener exists.
+
+Per **DEC-012** this is *not* the private beta: P3–P7 remain, and no real
+customer mail may reach the platform until they are complete.
+
+### Deployed artifact
+
+| | |
+|---|---|
+| Commit | `57afda7c1ebc0efde418d3c6a36dbe2a9a334c60` |
+| Backend image | `ghcr.io/rizwansammo/matemail-backend@sha256:edbd7ca9…` |
+| Frontend image | `ghcr.io/rizwansammo/matemail-frontend@sha256:b54d537a…` |
+| CI run | 34522742832 — all four jobs green |
+
+### Host layout
+
+```
+/opt/MateMail/
+├── docker-compose.yml   0644  (byte-identical to deploy/docker-compose.yml at the deployed commit)
+├── .env                 0600  root:root, secrets generated on the server
+└── backups/             0750
+```
+
+No git checkout on the server. No build context. No source bind mount.
+
+### Ports
+
+`127.0.0.1:8020` backend, `127.0.0.1:3020` frontend. Both were verified free
+before deployment by `ss` and by Docker port inspection. PostgreSQL and Redis
+publish no host port. No UFW change was needed or made — MateMail binds
+loopback only and is reached through the existing host nginx.
+
+### Routing
+
+Host-native nginx site `/etc/nginx/sites-available/matemail`, its own symlink,
+no other site touched (checksums verified identical before and after).
+
+- `app.matemail.online/api/` → `127.0.0.1:8020`
+- `app.matemail.online/` → `127.0.0.1:3020`
+- `app.matemail.online/api/internal/` → **403 at the edge**
+- `matemail.online` → 301 to `app.matemail.online` (own server block, so the P9
+  marketing site can replace it without touching the app vhost)
+
+TLS: Let's Encrypt `matemail.online` covering `matemail.online` and
+`app.matemail.online`, expiring 2026-12-09, issued by the host's existing
+certbot. `webmail.matemail.online` deliberately excluded — it has no A record
+and nothing to serve.
+
+### Known-unavailable, deliberately
+
+- **Transactional email is not configured.** `EMAIL_HOST=localhost`, where
+  nothing listens, so application mail fails rather than appearing to work.
+  Because P0 gates domain and mailbox provisioning on a verified address, and
+  verification mail cannot be delivered, **self-service onboarding cannot
+  complete**. A platform admin can set `email_verified` manually meanwhile.
+  Configuring a real provider is a P3 item.
+- **Mail Engine absent.** Domain and mailbox actions run against the stub: they
+  succeed in MateMail's database and provision nothing real.
+
+### Pre-existing DNS finding (not created by this phase)
+
+`matemail.online` already carries `MX 10 mx.matemail.online`, and
+`mx.matemail.online` resolves to MateServer where port 25 is closed. Mail sent
+to the domain therefore fails today. Nothing was changed — mail DNS is out of
+scope until P4 — but the record advertises a service that does not exist and
+should either be removed until P4 or retained knowingly.
+
+### Post-deployment fix: CSP blocked Next.js hydration
+
+The first browser visit showed only the "Loading MateMail…" shell. Cause: the
+CSP added in P2.5 used `script-src 'self'`, but the Next.js App Router emits
+**6 inline `<script>` tags** carrying the hydration payload (`self.__next_f`).
+All were blocked, so React never hydrated and the static shell never advanced.
+`curl` never caught it because the HTML and the JS chunks both return 200 — only
+a real browser executes the CSP.
+
+**Fix applied:** `'unsafe-inline'` added to `script-src` in the nginx site.
+Verified afterwards: `/` and `/login` load, all JS chunks fetch, the bundle
+carries the correct same-origin API base, `POST /api/auth/login/` returns a
+proper 401, and the preflight succeeds.
+
+**This is a real weakening, not a cosmetic one.** `'unsafe-inline'` on
+`script-src` removes CSP's main protection against injected script, and refresh
+tokens still live in `localStorage` (also P3). Together those are exactly the
+pair that makes an XSS costly.
+
+**Proper fix is P3:** a per-request nonce issued by Next.js middleware, with
+nginx no longer setting the CSP header for the frontend. That needs a code
+change, a CI build and a redeploy, so it could not be done from the server.
+Until then this is tracked as open security debt.
+
+### Deployment gates
+
+`workflow_dispatch` only and the `MateServer` confirmation input are both
+active. The `production` environment exists, but **required reviewers are a
+paid feature for private repositories**, so that gate is present and not
+enforced on the current plan. `deploy.yml` records this.
+
+`deploy.yml` was changed to authenticate GHCR with the job-scoped
+`GITHUB_TOKEN` (`packages: read`) instead of a long-lived `GHCR_TOKEN` secret.
+**That change is uncommitted**, so the workflow-based deployment path has not
+been exercised; this deployment was performed over SSH under P2.5 authorization.

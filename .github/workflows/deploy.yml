@@ -11,8 +11,9 @@ name: Deploy to MateServer
 # Three independent gates stand between a merge and a running deployment:
 #
 #   1. workflow_dispatch only — a human starts it, on purpose.
-#   2. `environment: production` — configure a required reviewer on that
-#      environment in repo settings and GitHub will hold the job for approval.
+#   2. `environment: production` — a required reviewer there holds the job for
+#      approval. NOTE: environment protection rules need a paid plan on private
+#      repos, so on the current plan this gate is present but not enforced.
 #   3. `confirm` input — the operator must type the deployment target exactly.
 #
 # Removing any of these is a decision, not a cleanup.
@@ -76,22 +77,35 @@ jobs:
     needs: [gate]
 
     # Configure a required reviewer on this environment in repo settings to add
-    # a human approval step. That is the intended production gate.
+    # a human approval step.
+    #
+    # NOTE (P2.5): environment protection rules are a paid feature for PRIVATE
+    # repositories. On the current plan the environment exists but carries no
+    # approval rule, so this is not an active gate. workflow_dispatch and the
+    # `confirm` input are. Revisit if the repo becomes public or the plan changes.
     environment:
       name: production
       url: https://app.matemail.online
 
+    # Least privilege: read the repo, read the packages this repo published.
+    # GITHUB_TOKEN is scoped to this job and expires with it, so no long-lived
+    # GHCR_TOKEN secret is needed. The packages are linked to this repository by
+    # having been published from it, which is what makes `packages: read`
+    # sufficient here.
+    permissions:
+      contents: read
+      packages: read
+
     steps:
       - name: Verify images exist in GHCR before touching the server
-        env:
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           # Fail here rather than half-way through a deployment: if the tag was
           # never published, `docker compose pull` on the server would leave the
           # stack down with no image to fall back to.
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           for image in "${{ env.BACKEND_IMAGE }}" "${{ env.FRONTEND_IMAGE }}"; do
             echo "Checking $image:${{ inputs.image_tag }}"
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
             if ! docker manifest inspect "$image:${{ inputs.image_tag }}" > /dev/null 2>&1; then
               echo "::error::$image:${{ inputs.image_tag }} not found in GHCR. Run CI for that commit first."
               exit 1
