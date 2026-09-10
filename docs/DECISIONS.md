@@ -263,6 +263,9 @@ session. This must be resolved before webmail is built, and recorded here.
 IMAP/SMTP clients with MateMail-issued mailbox credentials, documented in
 MateMail's own UI as `imap.matemail.online` / `smtp.matemail.online`.
 
+**Launch impact:** none. Per DEC-012 webmail is explicitly *not* a launch
+blocker, and may be built before or after the public launch.
+
 ---
 
 ## DEC-007r — DKIM: MateMail owns the capability, the Mail Engine owns the key
@@ -341,6 +344,66 @@ sequenced per domain with the customer's DNS update, not run as a bulk job.
   hold. Tracked as an open security risk in `PROJECT_STATUS.md`.
 
 ---
+
+---
+
+## DEC-012 — Launch sequencing and the private beta gate
+
+**Date:** 2026-09-11
+**Status:** Accepted
+**Decision maker:** NetaMate Solutions (product direction)
+**Relates to:** DEC-005r (webmail), DEC-011 (integrated product)
+
+**Context:**
+An earlier draft roadmap proposed the earliest safe launch after P6 (backups),
+treating P7 — the operational surface — as work that could follow live traffic.
+That was wrong and is corrected here.
+
+**Decision:**
+
+1. **P0–P7 must all be complete before any real customer mail reaches the
+   platform.** No exceptions, and "started" does not count.
+2. After P7, MateMail may enter a **small controlled private beta** of roughly
+   5–10 friendly tenants on real domains.
+3. **P9 gates the broader public and commercial launch**, not the private beta.
+4. **P8 (custom MateMail webmail) is not a launch blocker.** Customers initially
+   use Outlook, Apple Mail, Thunderbird, phone mail apps and other standard
+   IMAP/SMTP clients. P8 may land before or after P9 as product priority
+   dictates.
+
+Sequence:
+
+```
+P0 → P1 → P2 → P3 → P4 → P5 → P6 → P7 → PRIVATE BETA → P9 → PUBLIC LAUNCH
+                                          (P8 anywhere after P4)
+```
+
+**Reasoning:**
+
+- P7 delivers monitoring, drift reconciliation between MateMail and the Mail
+  Engine, mail queue visibility, storage sync and operational alerting. Without
+  those, an operator cannot see what the platform is doing, cannot detect that
+  MateMail's records and the engine disagree, and is not told when mail stops
+  flowing or when outbound volume spikes.
+- Holding someone else's business email is a custody responsibility. Accepting
+  real mail without the ability to observe it is not a risk worth taking to save
+  a week, and mail problems are frequently silent — an undetected delivery
+  failure looks exactly like a quiet inbox.
+- Splitting the launch in two lets the beta expose operational reality while the
+  blast radius is 5–10 known tenants who can be contacted directly.
+- Webmail is a large build and a convenience, not a prerequisite: business
+  customers overwhelmingly already use a desktop or mobile mail client. Blocking
+  launch on it would delay revenue by weeks for no gain in safety.
+
+**Consequences:**
+
+- The private-beta entry criteria are recorded in `PROJECT_STATUS.md` under
+  *Private Beta gate*, and are checked as a gate rather than assumed.
+- P6 is a beta prerequisite, not a post-launch task.
+- Every private-beta incident feeds P9 as a test, runbook or product change.
+- **Changing item 4** — making webmail block the public launch — requires an
+  explicit successor decision recorded here. It must not be changed by
+  amending the roadmap alone.
 
 ---
 

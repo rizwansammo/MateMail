@@ -1,0 +1,235 @@
+# MateMail — PRODUCTION compose (MateServer)
+#
+# This file is self-contained. It is copied to /opt/MateMail/docker-compose.yml
+# and needs no repository checkout, no build context and no override file.
+#
+#   /opt/MateMail/
+#   ├── docker-compose.yml   ← this file
+#   └── .env                 ← secrets and per-host settings, never committed
+#
+# Deploy:
+#   docker compose pull && docker compose up -d
+#
+# Design rules (NetaMate production standard):
+#   - Images come from GHCR, pinned to a commit SHA. Never built here.
+#   - No source bind mounts. The image is the artifact.
+#   - Only the two public web services publish a host port, on 127.0.0.1.
+#     Host-native nginx is the sole public reverse proxy.
+#   - PostgreSQL and Redis publish NO host port and sit on a Docker network
+#     declared `internal: true`, which has no route off the host at all.
+#   - Persistent data lives in named volumes.
+#   - Every service: restart: unless-stopped, plus a healthcheck.
+#
+# Port allocation on MateServer (do not change without checking the registry):
+#   backend  127.0.0.1:8020
+#   frontend 127.0.0.1:3020
+#   8015 / 8016 / 3015 belong to MateConnect — never reuse them here.
+
+name: matemail
+
+x-backend-image: &backend_image
+  # Set by .env. Deliberately has no default: a missing tag must fail loudly
+  # rather than silently deploying whatever `latest` happens to point at.
+  image: ${MATEMAIL_BACKEND_IMAGE:?MATEMAIL_BACKEND_IMAGE must be set to a SHA-pinned GHCR tag}
+
+x-backend-env: &backend_env
+  DJANGO_SETTINGS_MODULE: config.settings.prod
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?required}
+  DJANGO_DEBUG: "False"
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-app.matemail.online,matemail.online,localhost,127.0.0.1}
+  DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:-matemail}
+  REDIS_URL: redis://redis:6379/0
+  INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?required}
+  # Mail Engine is not deployed until P4. The stub adapter keeps the control
+  # plane fully functional without one; do not switch this to the real engine
+  # before P4 has actually stood one up.
+  MAIL_ENGINE_ADAPTER: ${MAIL_ENGINE_ADAPTER:-stub}
+  MAIL_ENGINE_API_URL: ${MAIL_ENGINE_API_URL:-}
+  MAIL_ENGINE_API_KEY: ${MAIL_ENGINE_API_KEY:-}
+  MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
+  MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.online}
+  DKIM_SELECTOR: ${DKIM_SELECTOR:-mm1}
+  FRONTEND_URL: ${FRONTEND_URL:-https://app.matemail.online}
+  APP_BASE_URL: ${APP_BASE_URL:-https://app.matemail.online}
+  WEBMAIL_BASE_URL: ${WEBMAIL_BASE_URL:-https://webmail.matemail.online}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://app.matemail.online,https://matemail.online}
+  JWT_ACCESS_TOKEN_LIFETIME_MINUTES: ${JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
+  JWT_REFRESH_TOKEN_LIFETIME_DAYS: ${JWT_REFRESH_TOKEN_LIFETIME_DAYS:-7}
+  EMAIL_HOST: ${EMAIL_HOST:?required}
+  EMAIL_PORT: ${EMAIL_PORT:-587}
+  EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
+  EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+  EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-MateMail <noreply@matemail.online>}
+
+services:
+
+  # ── PostgreSQL — internal only, no host port ────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-matemail}
+      POSTGRES_USER: ${POSTGRES_USER:-matemail}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-matemail} -d ${POSTGRES_DB:-matemail}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [matemail_internal]
+
+  # ── Redis — internal only, no host port ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [matemail_internal]
+
+  # ── Django backend ──────────────────────────────────────────────────────────
+  backend:
+    <<: *backend_image
+    restart: unless-stopped
+    environment: *backend_env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    ports:
+      # Host-native nginx proxies to this. Bound to loopback, never 0.0.0.0.
+      - "127.0.0.1:8020:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # Datastores plus outbound: transactional email, DNS lookups, and from P4
+    # the Mail Engine API.
+    networks: [matemail_internal, matemail_app]
+
+  # ── Migrations — runs to completion before backend starts ───────────────────
+  migrate:
+    <<: *backend_image
+    restart: "no"
+    command: python manage.py migrate --noinput
+    environment: *backend_env
+    depends_on:
+      postgres: {condition: service_healthy}
+    # Schema changes touch the database and nothing else — no outbound needed.
+    networks: [matemail_internal]
+
+  # ── Celery worker — same image as the backend ───────────────────────────────
+  celery-worker:
+    <<: *backend_image
+    restart: unless-stopped
+    command: celery -A config worker --loglevel=info --concurrency=4
+    environment: *backend_env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 45s
+    # Datastores plus outbound: the worker is what actually performs DNS checks,
+    # sends transactional email and (from P4) calls the Mail Engine.
+    networks: [matemail_internal, matemail_app]
+
+  # ── Celery beat — same image as the backend ─────────────────────────────────
+  celery-beat:
+    <<: *backend_image
+    restart: unless-stopped
+    command: >
+      celery -A config beat --loglevel=info
+      --scheduler django_celery_beat.schedulers:DatabaseScheduler
+      --pidfile=/tmp/celerybeat.pid
+    environment: *backend_env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      # beat has no inspect endpoint (celery inspect targets workers), so assert
+      # the scheduler process is alive via its pidfile.
+      #
+      # Deliberately uses only shell builtins: the backend image is
+      # python:3.11-slim, which ships neither pgrep nor ps. The previous
+      # `pgrep -f 'celery.*beat'` could never succeed and would have reported a
+      # perfectly healthy beat container as unhealthy forever. `kill -0` is a
+      # dash builtin and sends no signal — it only tests that the PID exists
+      # and is signalable.
+      #
+      # Installing procps was the alternative; not adding a package to a
+      # production image for a check two builtins already cover.
+      test: ["CMD-SHELL", "test -f /tmp/celerybeat.pid && kill -0 \"$$(cat /tmp/celerybeat.pid)\""]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    # beat only reads the schedule from the database and enqueues onto Redis —
+    # it never executes a task, so it needs no outbound access.
+    networks: [matemail_internal]
+
+  # ── Next.js frontend ────────────────────────────────────────────────────────
+  frontend:
+    image: ${MATEMAIL_FRONTEND_IMAGE:?MATEMAIL_FRONTEND_IMAGE must be set to a SHA-pinned GHCR tag}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      # NEXT_PUBLIC_* are compiled into the bundle at image build time; these are
+      # present only for any server-side read and must match the build args.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://app.matemail.online}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://app.matemail.online}
+    depends_on:
+      backend: {condition: service_healthy}
+    ports:
+      - "127.0.0.1:3020:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # No datastore access: every page is client-rendered and the browser calls
+    # the public API URL directly, so the frontend never touches Postgres or
+    # Redis. Deliberately NOT on matemail_internal.
+    networks: [matemail_app]
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  # Datastore network. `internal: true` means Docker installs no route off the
+  # host for it: containers here cannot reach the Internet and nothing outside
+  # can reach them. PostgreSQL and Redis live only here, so the only way to
+  # them is from a container that has deliberately joined this network.
+  #
+  # A network merely *named* "internal" with `driver: bridge` gives full
+  # outbound access — that was the earlier mistake this replaces.
+  matemail_internal:
+    internal: true
+
+  # Application network. Provides the outbound access the app tier genuinely
+  # needs (SMTP for transactional email, DNS resolution, external APIs).
+  # Postgres and Redis must never join this network.
+  #
+  # When the Mail Engine arrives in P4 it is reached from here via an
+  # additional external network declared at that point — not by widening
+  # either of these.
+  matemail_app:
+    driver: bridge

@@ -4,8 +4,9 @@
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
 **Last updated:** 2026-09-10  
-**Current phase:** PRODUCTION READINESS P1 — COMPLETE  
-**Next phase:** P2 (deployment alignment) — awaiting assignment
+**Current phase:** PRODUCTION READINESS P2 — COMPLETE  
+**Next phase:** P3 (ownership verification + abuse prevention) — awaiting assignment  
+**Launch gate:** private beta requires all of P0–P7; public launch requires P9
 
 ---
 
@@ -39,7 +40,7 @@ without the mechanism underneath. Read this section before trusting the tables.
 | 4 | **No webmail.** No inbox/compose/thread routes exist. The SSO bridge cannot authenticate anyone, because webmail needs the mailbox IMAP password and MateMail deliberately never stores it. Direction fixed by DEC-005r (MateMail-built, not SOGo); auth mechanism still open as TBD-G. | Open |
 | 5 | **Queue, quarantine and storage usage are empty shells.** Nothing writes `QueueMessage` or `QuarantineMessage`; `storage_used_mb` is never assigned. No mailcow→MateMail sync task exists. | Open |
 | 6 | **Domain ownership is not verified** before a domain is provisioned into the mail engine. | Open |
-| 7 | **Deployment architecture is contradictory** and does not yet match the NetaMate model in `CLAUDE.md`: ports must move to 8020/3020 (8015/3015 belong to MateConnect), CI must build and push GHCR images instead of building on the VPS, and the dead containerized-nginx configs must go. | Open |
+| 7 | ~~Deployment architecture is contradictory.~~ | ✅ Closed in P2 |
 | 8 | ~~Engine detail can reach customers.~~ | ✅ Closed in P1 |
 
 Resolved in Phase 0: the four critical application-security defects and the
@@ -196,6 +197,18 @@ broken audit log. See the Phase 0 section below.
 |-------|-------|--------|
 | P0 | Trustworthy baseline + critical application security | ✅ Complete (2026-09-10) |
 | P1 | Harden the Mail Engine boundary | ✅ Complete (2026-09-11) |
+| P2 | Deployment alignment (NetaMate model, GHCR, ports 8020/3020) | ✅ Complete (2026-09-11) |
+| P3 | Domain ownership verification + abuse prevention | Pending |
+| P4 | Stand up the Mail Engine | Pending |
+| P5 | Mail policy enforcement (no open relay, rate limits, suspension) | Pending |
+| P6 | Backups, restore, safe deletion | Pending |
+| P7 | Operational surface (sync, reconciliation, monitoring, alerting) | Pending |
+| — | **PRIVATE BETA gate** — requires all of P0–P7 | Blocked on P7 |
+| P9 | Public launch readiness | Pending |
+| — | **PUBLIC LAUNCH** | Blocked on P9 |
+| P8 | MateMail webmail — before or after P9; **not a launch blocker** | Pending |
+
+Full detail, entry criteria and exit criteria: *Revised roadmap* below.
 
 ---
 
@@ -440,6 +453,43 @@ Authoritative plan. Supersedes the phase tables in `docs/TODO.md`. Ordering rule
 each phase leaves the system more defensible than it found it, and nothing
 depends on the Mail Engine until the boundary that hides it is sound.
 
+### Launch sequence
+
+```
+P0 ✅  critical security + baseline
+P1 ✅  Mail Engine boundary
+P2     deployment alignment          ─┐
+P3     ownership + abuse prevention   │ no engine, no VPS
+P4     stand up the Mail Engine      ─┤
+P5     mail policy enforcement        │ engine live, no customers
+P6     backups + safe deletion        │
+P7     operational surface           ─┘
+────────────────────────────────────────────────────────────────
+PRIVATE BETA   ~5–10 friendly tenants, real domains, real mail
+────────────────────────────────────────────────────────────────
+P9     public launch readiness
+────────────────────────────────────────────────────────────────
+PUBLIC LAUNCH
+
+P8     MateMail webmail — before or after P9, product's call.
+       NOT a launch blocker.
+```
+
+**P0–P7 must all be complete before any real customer mail reaches the
+platform.** P7 is where monitoring, reconciliation, queue visibility, storage
+sync and operational alerting arrive. Without them an operator cannot see what
+the platform is doing, cannot detect drift between MateMail and the engine, and
+would not be told when mail stops flowing or when outbound volume spikes. Real
+customer mail must not go on a platform in that state.
+
+**P8 is explicitly not a launch blocker.** Customers use Outlook, Apple Mail,
+Thunderbird, phone mail apps and any other standard IMAP/SMTP client, served by
+the Email Clients page shipped in P4. Webmail may land before or after P9 as
+product priority dictates. Changing that requires an explicit decision recorded
+in `docs/DECISIONS.md`.
+
+**P9 gates the broader public and commercial launch**, not the private beta.
+
 **P0 — Trustworthy baseline + critical app security.** Complete 2026-09-10.
 
 ---
@@ -615,7 +665,40 @@ minutes; an operator can run a normal week without touching the engine directly.
 
 ---
 
+### Private Beta gate — after P7
+
+Not a build phase: the checkpoint where real customer mail is first allowed onto
+the platform. Entry requires **every one of P0–P7 complete**, not merely started.
+
+Entry criteria:
+
+- Mail flows end to end: a mailbox created in the MateMail UI sends to and
+  receives from external providers (P4).
+- No open relay, sender-equals-authenticated enforced, suspension stops
+  outbound, rate limits apply — each proven by an automated test against real
+  SMTP (P5).
+- A tenant's mail has been **restored** from an offsite backup into a clean
+  environment, timed and documented. Soft delete with a retention hold is live
+  (P6).
+- Queue, quarantine and per-mailbox storage reflect real engine state; drift
+  reconciliation runs; alerting exists for outbound spikes, blocklist
+  appearances, disk pressure on the mail volume, and app/mail port downtime (P7).
+- An operator can run a normal week without opening the engine's own admin UI (P7).
+- Customers have a supported mail path: the Email Clients page with IMAP/SMTP
+  settings and client setup guides (P4).
+
+Beta shape: **around 5–10 friendly tenants** on real domains. Watch for at least
+two weeks before considering wider access. Treat every incident as a P9 input.
+
+Exit: no unresolved incident affecting mail delivery, and alerting has fired at
+least once on a real condition or a deliberate drill.
+
+---
+
 ### P8 — MateMail webmail
+
+**Not a launch blocker.** May be built before or after P9. Until it exists,
+customers use standard IMAP/SMTP clients (DEC-005r).
 
 DEC-005r: MateMail-built, not SOGo.
 
@@ -633,18 +716,25 @@ no engine-supplied UI is reachable by customers.
 
 ---
 
-### P9 — Launch readiness
+### P9 — Public launch readiness
 
-- Broaden test coverage past P0's security core.
+Gates the **broader public and commercial launch**. The private beta has already
+run by this point, so this phase is about being ready for customers who did not
+arrive through a personal introduction.
+
+- Broaden test coverage past P0's security core and P1's boundary contract.
 - Public front door: landing, pricing, security and docs pages. Today `/`
   redirects straight to `/login`, so there is nowhere to send a prospect.
-- Billing: no payment path exists — plans have prices but no way to pay.
+- Billing: no payment path exists — plans carry prices but nothing can be paid.
 - Runbooks: blocklist removal, restore, engine upgrade, incident response.
-- Soft launch to 5–10 friendly tenants on real domains; watch for two weeks
-  before opening signups.
+- Self-service onboarding that survives a customer with no hand-holding.
+- Capacity and rate planning against Contabo's ~25 emails/minute policy, sized
+  for the signup rate an open front door produces.
+- Fold every private-beta incident back into tests, runbooks or product.
 
-**Exit:** ten real mailboxes sending and receiving without complaint; alerting
-proven by a drill.
+**Exit:** signups can be opened without a human in the loop; a prospect can
+evaluate, buy and onboard unaided; every beta incident has a documented
+resolution.
 
 ---
 
@@ -659,10 +749,16 @@ proven by a drill.
 - **Contabo's ~25 emails/minute sending policy is a planning input**, not a
   deployment blocker. It bounds onboarding pace and per-tenant send rates, so
   factor it into the plan-tier limits set in P4 and the launch sizing in P9.
-- **P8 is the largest phase and the least urgent.** The interim Email Clients
-  page in P4 makes the product sellable without it.
-- Do not defer P6 past launch. Simulated backups plus one-call irreversible
-  deletion is the combination that turns a bad week into a closed business.
+- **No customer mail before P7 is complete.** P2–P7 all land before the private
+  beta. The operational controls in P7 — monitoring, reconciliation, queue and
+  storage visibility, alerting — are what make it responsible to hold someone
+  else's mail, so they are a prerequisite rather than a follow-up.
+- **P8 is the largest phase and the least urgent.** The Email Clients page in P4
+  makes the product usable without it, and webmail must not block the public
+  launch unless that decision is explicitly revisited in `docs/DECISIONS.md`.
+- **P6 is a beta prerequisite, not a post-launch task.** Simulated backups plus
+  one-call irreversible deletion is the combination that turns a bad week into a
+  closed business.
 
 ---
 
@@ -779,3 +875,146 @@ classification all run for real.
   dimension. The port documents that callers must map to a tenant before storing
   or displaying; the sync task that does so is P7.
 - The engine-side policy path is still not wired (blocker 2) — that is P5.
+
+---
+
+## Production Readiness Phase 2 — Deployment alignment
+
+**Completed 2026-09-11.** Scope: bring the deployment architecture in line with
+the NetaMate production standard. **Nothing was deployed**; MateServer was not
+touched; the Mail Engine was not installed.
+
+### Port allocation (final)
+
+| Service | Host binding |
+|---|---|
+| backend | `127.0.0.1:8020` |
+| frontend | `127.0.0.1:3020` |
+| postgres | none — internal network only |
+| redis | none — internal network only |
+
+`8015`, `8016`, `3015` belong to MateConnect and are referenced nowhere in the
+repository any more. Development uses 8020/3020 too, so local and production
+URLs line up.
+
+### Production architecture
+
+`deploy/docker-compose.yml` is self-contained and copied to
+`/opt/MateMail/docker-compose.yml`. No build context, no bind mounts, no
+repository checkout on the server.
+
+- GHCR images, SHA-pinned, selected by `MATEMAIL_BACKEND_IMAGE` and
+  `MATEMAIL_FRONTEND_IMAGE`. Both declared `:?` so a missing value fails the
+  command instead of starting something unintended.
+- `celery-worker` and `celery-beat` reuse the **backend image** with a different
+  command; the previous compose built the same image three times.
+- A one-shot `migrate` service runs to completion (`service_completed_successfully`)
+  before backend, worker and beat start.
+- Named volumes for postgres and redis; `restart: unless-stopped` everywhere;
+  healthchecks on every long-running service.
+- **Two networks, minimum membership per service.** `matemail_internal` is
+  declared `internal: true`, so Docker installs no route off the host for it.
+  Postgres and Redis are attached *only* there. `matemail_app` is a bridge
+  providing the outbound access the app tier needs. Verified live: postgres,
+  redis and beat cannot reach 1.1.1.1; backend and celery-worker can; all of
+  them still reach postgres and redis.
+
+  | Service | Networks | Why |
+  |---|---|---|
+  | postgres, redis | `matemail_internal` | no outbound, ever |
+  | migrate | `matemail_internal` | schema changes touch the DB only |
+  | celery-beat | `matemail_internal` | reads the schedule, enqueues; never executes a task |
+  | backend, celery-worker | both | DB/Redis **plus** outbound for email, DNS and (P4) the engine |
+  | frontend | `matemail_app` | client-rendered; never touches a datastore |
+
+  An earlier draft named a network `internal` but declared `driver: bridge`,
+  which is not isolation at all. The CI compliance check now asserts
+  `internal: true` explicitly rather than trusting the name.
+- **Celery beat healthcheck uses only shell builtins.** `--pidfile` plus
+  `test -f` and `kill -0`. The image is `python:3.11-slim`, which ships
+  neither `pgrep` nor `ps`, so the earlier `pgrep -f` check could never
+  succeed and would have reported a healthy beat container as unhealthy forever.
+  Verified inside a running beat container and confirmed by Docker'"'"'s own
+  health verdict.
+
+### CI/CD
+
+Two workflows replace the single deploy-on-push one:
+
+- **`ci.yml`** — on push/PR: backend `check`, `check --deploy`,
+  `makemigrations --check`, full test suite against real Postgres and Redis;
+  frontend `npm ci`, lint ratchet, production build; production compose
+  validation including a script asserting no host ports on datastores, no build
+  contexts, no bind mounts and no MateConnect ports. Publishes SHA-pinned GHCR
+  images **only** after all gates pass, and never from a pull request.
+- **`deploy.yml`** — `workflow_dispatch` only. **No push trigger exists.**
+
+Publishing an image is not a deployment: images wait in GHCR until an operator
+runs the deploy workflow deliberately.
+
+### Lint ratchet
+
+The 18 pre-existing `react-hooks/set-state-in-effect` errors are not hidden and
+not fixed. CI prints the count every run and fails only if it **rises** above
+`ESLINT_ERROR_BASELINE=18`, and emits a notice if it falls. New violations are
+blocked; known debt does not make the pipeline permanently red. Fixing the 18
+means restructuring effects across several pages — frontend rework outside P2.
+
+### Bug found while verifying the Dockerfile
+
+`STATICFILES_STORAGE` was **removed** in Django 5.1, not merely deprecated —
+`django.conf.global_settings` has no such attribute on 5.1.4. The project's
+`STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"`
+was therefore **silently inert**, and Django fell back to plain
+`StaticFilesStorage`. WhiteNoise's compression and content-hashing had never
+run in any environment.
+
+Fixed by moving to `STORAGES`, with the manifest backend in `prod.py` only —
+manifest storage refuses to resolve a file absent from `staticfiles.json`, so
+enabling it in `base.py` would make `manage.py test` and local development
+depend on `collectstatic` having been run.
+
+Verified in the built image: manifest present, 25 hashed CSS files, 306 gzip
+variants. This also corrects the P0 note that predicted runtime 500s from a
+missing manifest — the outcome (static worked) was right, the mechanism was not:
+the storage backend was never active to fail.
+
+### Removed
+
+| Removed | Why |
+|---|---|
+| `docker-compose.prod.yml` | An override of the dev base, so it required a checkout on the server. Replaced by the standalone `deploy/docker-compose.yml`. |
+| `docker-compose.mailengine.yml` | An nginx container returning a fake `{"status":"stub"}` on `/api/v1/info` — a path P1 no longer even calls. Misleading placeholder, not infrastructure. The real engine arrives in P4. |
+| `nginx/mailengine-stub.conf` | Served the fake payload above. |
+| `nginx/conf.d/matemail.conf`, `nginx/conf.d/matemail-tls.conf`, `nginx/nginx.conf` | A containerized nginx model with Docker-DNS upstreams. No nginx service existed in any compose file, and DEC-011 makes host-native nginx the only public proxy. |
+| `nginx/matemail-vhost.conf` | Superseded by `deploy/nginx/app.matemail.online.conf` (correct ports, CSP, `/api/internal/` deny). |
+| `scripts/init-letsencrypt.sh` | Bootstrapped certs for nginx and certbot containers that do not exist. The host's certbot owns certificates. |
+| `scripts/deploy.sh` | Built from source on the server and interpolated an admin password into a shell string. Replaced by the deploy workflow. |
+
+`scripts/postfix_policy_bridge.py`, its systemd unit and
+`scripts/apply-mailcow-config.sh` were **kept** — they are real P5 artifacts, not
+placeholders. Their `DJANGO_INTERNAL_URL` default was corrected to port 8020.
+
+### Files added
+
+`deploy/docker-compose.yml`, `deploy/env.production.example`,
+`deploy/nginx/app.matemail.online.conf`, `deploy/README.md`,
+`.github/workflows/ci.yml`.
+
+### P1 architecture preserved
+
+Untouched: the adapter boundary, DTO contract, typed errors, customer-facing
+error protection, `/api/internal/` protection, tenant isolation, DEC-007r. The
+244-test suite passes unchanged.
+
+### Still required before MateServer can be touched
+
+1. **P4** must stand up the Mail Engine. `MAIL_ENGINE_ADAPTER` stays `stub` until then.
+2. Host bootstrap, once, by hand: `/opt/MateMail/` with `docker-compose.yml` and
+   a `0600` `.env`, `docker login ghcr.io`, and the nginx vhost installed and
+   reviewed. See `deploy/README.md`.
+3. GitHub secrets configured: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT`,
+   `GHCR_TOKEN`.
+4. A required reviewer set on the `production` GitHub environment.
+5. Outbound TCP/25 verified from MateServer itself.
+6. Per **DEC-012**, no real customer mail until all of P0–P7 are complete.

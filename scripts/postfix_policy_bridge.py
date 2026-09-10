@@ -23,7 +23,7 @@ Inbound vs. outbound detection:
   - Only acts on protocol_state=RCPT to avoid duplicate checks per message
 
 Deployment (run on the VPS host, reached by mailcow Postfix via host IP):
-  DJANGO_INTERNAL_URL=http://127.0.0.1:8000 \\
+  DJANGO_INTERNAL_URL=http://127.0.0.1:8020 \\
   INTERNAL_API_SECRET=your-secret \\
   python3 /opt/matemail/scripts/postfix_policy_bridge.py
 
@@ -53,7 +53,8 @@ import urllib.error
 import urllib.request
 
 # ── Configuration (all overridable via environment) ───────────────────────────
-DJANGO_INTERNAL_URL = os.environ.get("DJANGO_INTERNAL_URL", "http://127.0.0.1:8000").rstrip("/")
+# MateMail backend publishes 127.0.0.1:8020 on MateServer (P2 port allocation).
+DJANGO_INTERNAL_URL = os.environ.get("DJANGO_INTERNAL_URL", "http://127.0.0.1:8020").rstrip("/")
 INTERNAL_API_SECRET = os.environ.get("INTERNAL_API_SECRET", "")
 LISTEN_HOST = os.environ.get("LISTEN_HOST", "127.0.0.1")
 LISTEN_PORT = int(os.environ.get("LISTEN_PORT", "10031"))

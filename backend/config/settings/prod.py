@@ -15,6 +15,20 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_BROWSER_XSS_FILTER = True
 X_FRAME_OPTIONS = "SAMEORIGIN"
 
+# ── Static files ──────────────────────────────────────────────────────────────
+# WhiteNoise with content-hashed filenames plus gzip/brotli variants, so nginx
+# can serve /static/ with a far-future cache header. The image runs collectstatic
+# at build time, so the manifest ships inside it.
+#
+# Must be set via STORAGES: STATICFILES_STORAGE was removed in Django 5.1 and is
+# silently ignored if used. See the note in base.py.
+STORAGES = {
+    **STORAGES,  # noqa: F405
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
 # ── Database — persistent connections (1 hour TTL) ────────────────────────────
 DATABASES["default"]["CONN_MAX_AGE"] = 3600  # noqa: F821
 

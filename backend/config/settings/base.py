@@ -109,7 +109,28 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# STORAGES, not STATICFILES_STORAGE.
+#
+# STATICFILES_STORAGE was deprecated in Django 4.2 and REMOVED in 5.1. It is no
+# longer a Django setting at all, so the previous
+# STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+# was silently inert: Django fell back to plain StaticFilesStorage and
+# WhiteNoise's compression and content-hashing never ran. Verified against
+# Django 5.1.4 — django.conf.global_settings has no STATICFILES_STORAGE.
+#
+# Plain storage here; prod.py swaps in WhiteNoise's manifest backend. Manifest
+# storage refuses to resolve a file that is not in staticfiles.json, so having
+# it active by default would make `manage.py test` and local development depend
+# on collectstatic having been run first.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

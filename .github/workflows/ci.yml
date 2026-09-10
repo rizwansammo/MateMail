@@ -1,0 +1,361 @@
+name: CI
+
+# Quality gates, then image publishing.
+#
+# This workflow NEVER deploys. Publishing an image is not a deployment: images
+# sit in GHCR until an operator explicitly runs the deploy workflow. See
+# .github/workflows/deploy.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend
+  FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend
+
+jobs:
+
+  # ── Backend gates ───────────────────────────────────────────────────────────
+  backend:
+    name: Backend checks and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: matemail
+          POSTGRES_USER: matemail
+          POSTGRES_PASSWORD: ci-local-postgres-password
+        options: >-
+          --health-cmd "pg_isready -U matemail"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports: ["5432:5432"]
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports: ["6379:6379"]
+
+    env:
+      # CI-only values. Not secrets: they exist solely for this ephemeral runner.
+      DJANGO_SECRET_KEY: ci-only-key-not-used-anywhere-else-0123456789abcdef
+      DATABASE_URL: postgres://matemail:ci-local-postgres-password@127.0.0.1:5432/matemail
+      REDIS_URL: redis://127.0.0.1:6379/0
+      INTERNAL_API_SECRET: ci-only-internal-secret
+      EMAIL_HOST: localhost
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: manage.py check
+        working-directory: backend
+        run: python manage.py check --settings=config.settings.dev
+
+      - name: manage.py check --deploy
+        working-directory: backend
+        run: python manage.py check --deploy --settings=config.settings.prod
+
+      # A model change without a migration is how the audit log silently stopped
+      # recording for four phases. This gate exists so that cannot recur.
+      - name: No missing migrations
+        working-directory: backend
+        run: python manage.py makemigrations --check --dry-run --settings=config.settings.dev
+
+      - name: Test suite
+        working-directory: backend
+        run: python manage.py test --settings=config.settings.dev --verbosity=2
+
+  # ── Frontend gates ──────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+
+      # ESLint runs as a RATCHET, not a hard gate.
+      #
+      # There are 18 known pre-existing react-hooks/set-state-in-effect errors,
+      # inherited from before the production-readiness work. Fixing them means
+      # restructuring effects across several pages, which is frontend rework
+      # deliberately out of scope here.
+      #
+      # Rather than hide them with --quiet or an eslintrc override, the count is
+      # printed on every run and the job fails if it goes UP. That keeps the
+      # debt visible, blocks new violations, and does not make the pipeline
+      # permanently red over known issues.
+      #
+      # Lower ESLINT_ERROR_BASELINE as the debt is paid down. It must never rise.
+      - name: ESLint (ratchet against known baseline)
+        working-directory: frontend
+        env:
+          ESLINT_ERROR_BASELINE: "18"
+        run: |
+          set -o pipefail
+          npx eslint . -f json > eslint-report.json || true
+          COUNT=$(python3 -c "
+          import json
+          with open('eslint-report.json') as fh:
+              report = json.load(fh)
+          print(sum(1 for f in report for m in f['messages'] if m['severity'] == 2))
+          ")
+          echo "ESLint errors: $COUNT (baseline $ESLINT_ERROR_BASELINE)"
+          npx eslint . || true
+          if [ "$COUNT" -gt "$ESLINT_ERROR_BASELINE" ]; then
+            echo "::error::ESLint errors rose from $ESLINT_ERROR_BASELINE to $COUNT. Fix the new violations."
+            exit 1
+          fi
+          if [ "$COUNT" -lt "$ESLINT_ERROR_BASELINE" ]; then
+            echo "::notice::ESLint errors fell to $COUNT. Lower ESLINT_ERROR_BASELINE in ci.yml to lock the improvement in."
+          fi
+          echo "### ESLint: $COUNT errors (baseline $ESLINT_ERROR_BASELINE)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+
+  # ── Compose validation ──────────────────────────────────────────────────────
+  compose:
+    name: Validate production compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Placeholders only. The real values live in /opt/MateMail/.env on the
+      # server; this proves the file is structurally valid and that every
+      # required variable is actually declared.
+      - name: docker compose config
+        working-directory: deploy
+        env:
+          MATEMAIL_BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend:ci-placeholder
+          MATEMAIL_FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend:ci-placeholder
+          DJANGO_SECRET_KEY: ci-placeholder
+          POSTGRES_PASSWORD: ci-placeholder
+          INTERNAL_API_SECRET: ci-placeholder
+          EMAIL_HOST: localhost
+        run: docker compose config --quiet && echo "production compose is valid"
+
+      - name: Assert NetaMate standard (network isolation, ports, images)
+        working-directory: deploy
+        env:
+          MATEMAIL_BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend:ci-placeholder
+          MATEMAIL_FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend:ci-placeholder
+          DJANGO_SECRET_KEY: ci-placeholder
+          POSTGRES_PASSWORD: ci-placeholder
+          INTERNAL_API_SECRET: ci-placeholder
+          EMAIL_HOST: localhost
+        run: |
+          docker compose config > resolved.yml
+          python3 - <<'PY'
+          import sys, yaml
+
+          cfg = yaml.safe_load(open('resolved.yml'))
+          services = cfg['services']
+          networks = cfg.get('networks', {})
+          failures = []
+
+          DATASTORES = {'postgres', 'redis'}
+          INTERNAL_NET = 'matemail_internal'
+          APP_NET = 'matemail_app'
+          FORBIDDEN_PORTS = {'8015', '8016', '3015'}   # MateConnect
+
+          # Networks must be actually isolated, not merely named so. A network
+          # called "internal" with driver bridge has full outbound access; only
+          # `internal: true` removes the route off the host.
+          internal_def = networks.get(INTERNAL_NET)
+          if internal_def is None:
+              failures.append("network %s is not defined" % INTERNAL_NET)
+          elif internal_def.get('internal') is not True:
+              failures.append(
+                  "network %s must be declared internal: true, got %r "
+                  "(a bridge network named internal is NOT isolated)"
+                  % (INTERNAL_NET, internal_def)
+              )
+          if APP_NET not in networks:
+              failures.append("network %s is not defined" % APP_NET)
+
+          # Datastores: isolated network only.
+          for name in sorted(DATASTORES):
+              svc = services.get(name)
+              if svc is None:
+                  failures.append("service %s is missing" % name)
+                  continue
+              attached = set(svc.get('networks') or {})
+              if attached != {INTERNAL_NET}:
+                  failures.append(
+                      "%s must be attached ONLY to %s, got %s"
+                      % (name, INTERNAL_NET, sorted(attached))
+                  )
+
+          # Services that need outbound access must have it.
+          for name in ('backend', 'celery-worker'):
+              attached = set(services[name].get('networks') or {})
+              if APP_NET not in attached:
+                  failures.append("%s needs outbound via %s, got %s" % (name, APP_NET, sorted(attached)))
+              if INTERNAL_NET not in attached:
+                  failures.append("%s needs datastores via %s, got %s" % (name, INTERNAL_NET, sorted(attached)))
+
+          # Services that need datastore access must reach it.
+          for name in ('migrate', 'celery-beat'):
+              attached = set(services[name].get('networks') or {})
+              if INTERNAL_NET not in attached:
+                  failures.append("%s needs datastores via %s, got %s" % (name, INTERNAL_NET, sorted(attached)))
+
+          # Per-service structural rules.
+          for name, svc in services.items():
+              published = svc.get('ports') or []
+              if name in DATASTORES and published:
+                  failures.append("%s publishes a host port: %s" % (name, published))
+              for p in published:
+                  host_ip = p.get('host_ip') if isinstance(p, dict) else None
+                  if host_ip != '127.0.0.1':
+                      failures.append("%s publishes on %s, expected 127.0.0.1" % (name, host_ip or '0.0.0.0'))
+                  if str(p.get('published')) in FORBIDDEN_PORTS:
+                      failures.append("%s uses %s, which belongs to MateConnect" % (name, p.get('published')))
+              if 'build' in svc:
+                  failures.append("%s declares a build context; production must use GHCR images" % name)
+              for vol in svc.get('volumes') or []:
+                  if isinstance(vol, dict) and vol.get('type') == 'bind':
+                      failures.append("%s bind-mounts %s; production must not mount source" % (name, vol.get('source')))
+              if str(svc.get('image', '')).endswith(':latest'):
+                  failures.append("%s uses :latest; production must pin an exact tag" % name)
+
+          for name, port in (('backend', 8020), ('frontend', 3020)):
+              got = [str(p.get('published')) for p in services[name].get('ports', [])]
+              if str(port) not in got:
+                  failures.append("%s should publish %s, got %s" % (name, port, got))
+
+          # Worker, beat and migrate reuse the backend image.
+          backend_image = services['backend'].get('image')
+          for name in ('celery-worker', 'celery-beat', 'migrate'):
+              if services[name].get('image') != backend_image:
+                  failures.append("%s should reuse the backend image, got %s" % (name, services[name].get('image')))
+
+          if failures:
+              print("::error::production compose violates the NetaMate standard")
+              for f in failures:
+                  print(" - %s" % f)
+              sys.exit(1)
+
+          print("production compose satisfies the NetaMate standard")
+          print("  %s: internal=True (no route off host)" % INTERNAL_NET)
+          print("  datastores attached to %s only" % INTERNAL_NET)
+          print("  backend + celery-worker also on %s for outbound" % APP_NET)
+          PY
+
+  # ── Image publishing — only after every gate passes ─────────────────────────
+  publish:
+    name: Build and push GHCR images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [backend, frontend, compose]
+    # Never publish from a pull request: a PR must not be able to produce an
+    # image that an operator could then deploy.
+    if: github.event_name != 'pull_request'
+
+    permissions:
+      contents: read
+      # Least privilege: GITHUB_TOKEN is scoped to package write for this job
+      # only. No long-lived GHCR_TOKEN secret is needed for publishing.
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # SHA-pinned tags only, plus a branch tag for humans browsing GHCR.
+      # `latest` is deliberately NOT produced: production must name the exact
+      # image it runs so a rollback can name the one it is returning to.
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            ${{ env.BACKEND_IMAGE }}:main
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://app.matemail.online
+            NEXT_PUBLIC_APP_URL=https://app.matemail.online
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+            ${{ env.FRONTEND_IMAGE }}:main
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Deployment instructions
+        run: |
+          {
+            echo "## Images published"
+            echo ""
+            echo '```'
+            echo "${{ env.BACKEND_IMAGE }}:${{ github.sha }}"
+            echo "${{ env.FRONTEND_IMAGE }}:${{ github.sha }}"
+            echo '```'
+            echo ""
+            echo "**Not deployed.** Publishing is not deployment."
+            echo ""
+            echo "To deploy, run the **Deploy to MateServer** workflow manually"
+            echo "and pass this SHA as \`image_tag\`:"
+            echo ""
+            echo '```'
+            echo "${{ github.sha }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

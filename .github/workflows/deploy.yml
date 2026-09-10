@@ -1,118 +1,210 @@
-name: Deploy to Production
+name: Deploy to MateServer
+
+# PRODUCTION DEPLOYMENT — MANUAL ONLY.
+#
+# There is deliberately no `push:` trigger. A merge to main publishes images
+# (see ci.yml) but never deploys. MateMail is not ready for MateServer: the Mail
+# Engine does not exist yet (P4), mail policy is not enforced (P5), backups are
+# simulated (P6) and there is no operational monitoring (P7). Per DEC-012, no
+# real customer mail may reach the platform until all of P0–P7 are complete.
+#
+# Three independent gates stand between a merge and a running deployment:
+#
+#   1. workflow_dispatch only — a human starts it, on purpose.
+#   2. `environment: production` — configure a required reviewer on that
+#      environment in repo settings and GitHub will hold the job for approval.
+#   3. `confirm` input — the operator must type the deployment target exactly.
+#
+# Removing any of these is a decision, not a cleanup.
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:   # allow manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Commit SHA to deploy (from a successful CI run). Not a branch name, not 'latest'."
+        required: true
+        type: string
+      confirm:
+        description: "Type MateServer to confirm you intend to deploy to production"
+        required: true
+        type: string
+      run_migrations:
+        description: "Apply database migrations (the compose stack runs them on start)"
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  # Never allow two deployments to interleave on the same host.
+  group: deploy-production
+  cancel-in-progress: false
 
 env:
-  DEPLOY_DIR: /opt/matemail
-  REPO_URL: https://github.com/rizwansammo/MateMail.git
+  DEPLOY_DIR: /opt/MateMail
+  BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend
+  FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend
 
 jobs:
+
+  gate:
+    name: Confirm deployment intent
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify confirmation phrase
+        run: |
+          if [ "${{ inputs.confirm }}" != "MateServer" ]; then
+            echo "::error::Confirmation failed. Type exactly: MateServer"
+            exit 1
+          fi
+          echo "Confirmation accepted."
+
+      - name: Verify the tag is a commit SHA
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          if ! printf '%s' "$TAG" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::image_tag must be a full 40-character commit SHA, not '$TAG'."
+            echo "Production must name the exact image it runs so a rollback can name the one it returns to."
+            exit 1
+          fi
+          echo "Deploying SHA $TAG"
+
   deploy:
-    name: Deploy to Contabo VPS
+    name: Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: [gate]
+
+    # Configure a required reviewer on this environment in repo settings to add
+    # a human approval step. That is the intended production gate.
+    environment:
+      name: production
+      url: https://app.matemail.online
 
     steps:
-      # ── 1. Basic config validation (runs in CI before touching the server) ───
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Validate Docker Compose config
-        run: |
-          docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+      - name: Verify images exist in GHCR before touching the server
         env:
-          DJANGO_SECRET_KEY: ci-placeholder
-          POSTGRES_PASSWORD: ci-placeholder
-          INTERNAL_API_SECRET: ci-placeholder
-          MAIL_ENGINE_API_KEY: ci-placeholder
-          EMAIL_HOST: localhost
-          EMAIL_HOST_USER: ci@example.com
-          EMAIL_HOST_PASSWORD: ci-placeholder
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          # Fail here rather than half-way through a deployment: if the tag was
+          # never published, `docker compose pull` on the server would leave the
+          # stack down with no image to fall back to.
+          for image in "${{ env.BACKEND_IMAGE }}" "${{ env.FRONTEND_IMAGE }}"; do
+            echo "Checking $image:${{ inputs.image_tag }}"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            if ! docker manifest inspect "$image:${{ inputs.image_tag }}" > /dev/null 2>&1; then
+              echo "::error::$image:${{ inputs.image_tag }} not found in GHCR. Run CI for that commit first."
+              exit 1
+            fi
+          done
+          echo "Both images present."
 
-      # ── 2. Deploy to VPS ──────────────────────────────────────────────────────
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Deploy to MateServer
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          RUN_MIGRATIONS: ${{ inputs.run_migrations }}
         with:
-          host: ${{ secrets.CNTB_HOST }}
-          username: ${{ secrets.CNTB_USER }}
-          key: ${{ secrets.CNTB_SSH_KEY }}
-          timeout: 300s
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: IMAGE_TAG,RUN_MIGRATIONS
+          timeout: 60s
+          command_timeout: 15m
           script: |
             set -euo pipefail
 
-            DEPLOY_DIR="/opt/matemail"
-            COMPOSE="docker compose -f $DEPLOY_DIR/docker-compose.yml -f $DEPLOY_DIR/docker-compose.prod.yml"
-
-            # ── Clone on first deploy, pull on subsequent ───────────────────
-            if [ ! -d "$DEPLOY_DIR/.git" ]; then
-              echo "▸ First deploy — cloning repository..."
-              mkdir -p "$(dirname $DEPLOY_DIR)"
-              git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/rizwansammo/MateMail.git "$DEPLOY_DIR"
-            else
-              echo "▸ Pulling latest code..."
-              cd "$DEPLOY_DIR"
-              git fetch --prune
-              git reset --hard origin/main
-            fi
+            DEPLOY_DIR=/opt/MateMail
+            BACKEND_IMAGE=ghcr.io/rizwansammo/matemail-backend
+            FRONTEND_IMAGE=ghcr.io/rizwansammo/matemail-frontend
 
             cd "$DEPLOY_DIR"
 
-            # ── Verify .env exists ──────────────────────────────────────────
-            if [ ! -f ".env" ]; then
-              echo "ERROR: .env not found at $DEPLOY_DIR/.env"
-              echo "  SSH in and run: cp .env.example .env && nano .env"
+            # No repository checkout exists here, and none is needed: the image
+            # is the artifact. Only docker-compose.yml and .env live on the host.
+            if [ ! -f docker-compose.yml ]; then
+              echo "ERROR: $DEPLOY_DIR/docker-compose.yml is missing."
+              echo "Bootstrap the host once, per deploy/README.md."
+              exit 1
+            fi
+            if [ ! -f .env ]; then
+              echo "ERROR: $DEPLOY_DIR/.env is missing."
               exit 1
             fi
 
-            chmod +x scripts/*.sh 2>/dev/null || true
+            # GHCR pull auth uses the host's existing docker login, per the
+            # NetaMate production model. The workflow does not push a registry
+            # credential to the server.
+            if ! docker system info > /dev/null 2>&1; then
+              echo "ERROR: docker is not usable by $(whoami)."
+              exit 1
+            fi
 
-            # ── Build Docker images ─────────────────────────────────────────
-            echo "▸ Building images..."
-            $COMPOSE build
+            # Back up the current .env so a rollback can restore the exact
+            # image pair that was running.
+            cp .env ".env.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+            ls -1t .env.bak.* 2>/dev/null | tail -n +11 | xargs -r rm --
 
-            # ── Start database and cache first ──────────────────────────────
-            echo "▸ Starting postgres and redis..."
-            $COMPOSE up -d postgres redis
+            PREVIOUS_BACKEND=$(grep -E '^MATEMAIL_BACKEND_IMAGE=' .env | cut -d= -f2- || true)
+            echo "Previous backend image: ${PREVIOUS_BACKEND:-none}"
 
-            # ── Wait for postgres to be ready ───────────────────────────────
-            echo "▸ Waiting for postgres..."
-            for i in $(seq 1 15); do
-              if $COMPOSE exec -T postgres pg_isready > /dev/null 2>&1; then
-                echo "  Postgres ready ✓"
-                break
-              fi
-              [ $i -eq 15 ] && { echo "ERROR: Postgres not ready after 75s"; exit 1; }
-              sleep 5
-            done
+            # Pin the new images.
+            sed -i "s|^MATEMAIL_BACKEND_IMAGE=.*|MATEMAIL_BACKEND_IMAGE=${BACKEND_IMAGE}:${IMAGE_TAG}|" .env
+            sed -i "s|^MATEMAIL_FRONTEND_IMAGE=.*|MATEMAIL_FRONTEND_IMAGE=${FRONTEND_IMAGE}:${IMAGE_TAG}|" .env
+            grep -E '^MATEMAIL_(BACKEND|FRONTEND)_IMAGE=' .env
 
-            # ── Database migrations ─────────────────────────────────────────
-            echo "▸ Running migrations..."
-            $COMPOSE run --rm --no-deps backend python manage.py migrate --noinput
+            echo "▸ Backing up the database before migrating..."
+            docker compose exec -T postgres \
+              pg_dump -U "${POSTGRES_USER:-matemail}" "${POSTGRES_DB:-matemail}" \
+              | gzip > "/opt/MateMail/backups/pre-deploy-$(date -u +%Y%m%dT%H%M%SZ).sql.gz" \
+              || echo "WARNING: pre-deploy dump failed (first deploy, or postgres not yet running)"
 
-            # ── Static files ────────────────────────────────────────────────
-            echo "▸ Collecting static files..."
-            $COMPOSE run --rm --no-deps backend python manage.py collectstatic --noinput --clear
+            echo "▸ Pulling images..."
+            docker compose pull
 
-            # ── Start / restart all services ────────────────────────────────
             echo "▸ Starting services..."
-            $COMPOSE up -d --remove-orphans
+            # The compose stack runs migrations as a one-shot `migrate` service
+            # that must complete before backend, worker and beat start.
+            docker compose up -d --remove-orphans
 
-            # ── Wait for backend health ─────────────────────────────────────
-            echo "▸ Waiting for backend..."
-            for i in $(seq 1 20); do
-              if $COMPOSE exec -T backend curl -sf http://localhost:8000/api/health/ > /dev/null 2>&1; then
-                echo "  Backend healthy ✓"
+            echo "▸ Waiting for backend health..."
+            for i in $(seq 1 30); do
+              if [ "$(docker compose ps --format json backend | grep -c '"Health":"healthy"')" -ge 1 ]; then
+                echo "  backend healthy"
                 break
               fi
-              [ $i -eq 20 ] && { echo "ERROR: Backend not healthy after 100s"; $COMPOSE logs --tail=30 backend; exit 1; }
+              if [ "$i" -eq 30 ]; then
+                echo "ERROR: backend did not become healthy."
+                docker compose ps
+                docker compose logs --tail=80 backend migrate
+                echo ""
+                echo "To roll back: set MATEMAIL_*_IMAGE in $DEPLOY_DIR/.env to the"
+                echo "previous SHA (backend was ${PREVIOUS_BACKEND:-unknown}) and re-run"
+                echo "docker compose up -d."
+                exit 1
+              fi
               sleep 5
             done
 
-            # ── Reload host nginx ───────────────────────────────────────────
-            echo "▸ Reloading nginx..."
-            nginx -t && nginx -s reload
+            echo "▸ Verifying the public health endpoint..."
+            curl -fsS http://127.0.0.1:8020/api/health/ | head -c 200
+            echo ""
 
+            docker compose ps
+            docker image prune -f --filter "until=168h" || true
             echo "══ Deployment complete ══"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Deployment"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Target | MateServer (\`${{ env.DEPLOY_DIR }}\`) |"
+            echo "| SHA | \`${{ inputs.image_tag }}\` |"
+            echo "| Triggered by | @${{ github.actor }} |"
+            echo "| Result | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

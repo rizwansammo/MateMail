@@ -16,7 +16,8 @@ EnvironmentFile=/opt/matemail/.env
 # Override listen address so mailcow Postfix can reach it from inside Docker
 Environment=LISTEN_HOST=0.0.0.0
 Environment=LISTEN_PORT=10031
-Environment=DJANGO_INTERNAL_URL=http://127.0.0.1:8000
+# MateMail backend publishes 127.0.0.1:8020 on MateServer (P2 port allocation).
+Environment=DJANGO_INTERNAL_URL=http://127.0.0.1:8020
 Environment=LOG_LEVEL=INFO
 
 ExecStart=/usr/bin/python3 /opt/matemail/scripts/postfix_policy_bridge.py

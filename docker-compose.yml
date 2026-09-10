@@ -1,17 +1,59 @@
-# MateMail application stack
-# Mail engine (mailcow) runs separately — see docker-compose.mailengine.yml
+# MateMail — LOCAL DEVELOPMENT stack.
 #
-# This server runs a shared nginx on ports 80/443.
-# MateMail services bind to localhost-only ports and the host nginx proxies to them.
-# See nginx/matemail-vhost.conf for the vhost config to add to the host nginx.
+# This file is for a developer machine only. It builds from source and bind-mounts
+# the working tree so edits are picked up without a rebuild.
+#
+# It is NOT the production configuration and must never be deployed.
+# Production is deploy/docker-compose.yml: GHCR images, no build context, no
+# bind mounts, copied to /opt/MateMail/ on MateServer. See deploy/README.md.
 #
 # Usage:
-#   cp .env.example .env && nano .env
+#   cp .env.example .env   # then fill in DJANGO_SECRET_KEY
 #   docker compose up -d
+#   docker compose run --rm backend python manage.py migrate
+#
+# Ports match the MateServer allocation so local and production URLs line up:
+#   backend  127.0.0.1:8020
+#   frontend 127.0.0.1:3020
+# 8015 / 8016 / 3015 belong to MateConnect — never use them for MateMail.
+#
+# The Mail Engine is not part of this stack. MAIL_ENGINE_ADAPTER defaults to
+# "stub", an in-memory implementation of the full adapter contract, so local
+# development needs no mail infrastructure at all.
+
+name: matemail-dev
+
+x-backend-dev: &backend_dev
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  volumes:
+    # Development convenience only. Production mounts no source.
+    - ./backend:/app
+  environment: &backend_dev_env
+    DJANGO_SETTINGS_MODULE: config.settings.dev
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set DJANGO_SECRET_KEY in .env}
+    DJANGO_DEBUG: ${DJANGO_DEBUG:-True}
+    DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+    DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:-matemail}@postgres:5432/${POSTGRES_DB:-matemail}
+    REDIS_URL: redis://redis:6379/0
+    INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-only-internal-secret}
+    MAIL_ENGINE_ADAPTER: ${MAIL_ENGINE_ADAPTER:-stub}
+    MAIL_ENGINE_API_URL: ${MAIL_ENGINE_API_URL:-}
+    MAIL_ENGINE_API_KEY: ${MAIL_ENGINE_API_KEY:-}
+    MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
+    MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.online}
+    DKIM_SELECTOR: ${DKIM_SELECTOR:-mm1}
+    FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3020}
+    APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3020}
+    WEBMAIL_BASE_URL: ${WEBMAIL_BASE_URL:-http://localhost:3020}
+    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3020}
+    JWT_ACCESS_TOKEN_LIFETIME_MINUTES: ${JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
+    JWT_REFRESH_TOKEN_LIFETIME_DAYS: ${JWT_REFRESH_TOKEN_LIFETIME_DAYS:-7}
 
 services:
 
-  # ── PostgreSQL ───────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -26,10 +68,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - matemail_internal
+    networks: [internal]
 
-  # ── Redis ────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -41,126 +81,60 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - matemail_internal
+    networks: [internal]
 
-  # ── Django backend ───────────────────────────────────────────────────────────
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.dev
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-      DJANGO_DEBUG: ${DJANGO_DEBUG:-False}
-      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend,app.matemail.online}
-      DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:-matemail}@postgres:5432/${POSTGRES_DB:-matemail}
-      REDIS_URL: redis://redis:6379/0
-      MAIL_ENGINE_API_URL: ${MAIL_ENGINE_API_URL:-http://mailcow-nginx:8080}
-      MAIL_ENGINE_API_KEY: ${MAIL_ENGINE_API_KEY:-}
-      MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
-      MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.online}
-      DKIM_SELECTOR: ${DKIM_SELECTOR:-mm1}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3015}
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3015}
-      WEBMAIL_BASE_URL: ${WEBMAIL_BASE_URL:-http://localhost:3015}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3015}
-      JWT_ACCESS_TOKEN_LIFETIME_MINUTES: ${JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
-      JWT_REFRESH_TOKEN_LIFETIME_DAYS: ${JWT_REFRESH_TOKEN_LIFETIME_DAYS:-7}
+    <<: *backend_dev
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-      - static_files:/app/staticfiles
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
     ports:
-      # Localhost-only — host nginx proxies to this port
-      - "127.0.0.1:8015:8000"
+      - "127.0.0.1:8020:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health/"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 20s
-    networks:
-      - matemail_internal
-      - matemail_external
+    networks: [internal]
 
-  # ── Celery worker ────────────────────────────────────────────────────────────
   celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: celery -A config worker --loglevel=info --concurrency=4
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.dev
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-      DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:-matemail}@postgres:5432/${POSTGRES_DB:-matemail}
-      REDIS_URL: redis://redis:6379/0
-      MAIL_ENGINE_API_URL: ${MAIL_ENGINE_API_URL:-http://mailcow-nginx:8080}
-      MAIL_ENGINE_API_KEY: ${MAIL_ENGINE_API_KEY:-}
-      MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
+    <<: *backend_dev
+    command: celery -A config worker --loglevel=info --concurrency=2
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    networks:
-      - matemail_internal
-      - matemail_external
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    networks: [internal]
 
-  # ── Celery beat (scheduler) ──────────────────────────────────────────────────
   celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    restart: unless-stopped
+    <<: *backend_dev
     command: celery -A config beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.dev
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
-      DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:-matemail}@postgres:5432/${POSTGRES_DB:-matemail}
-      REDIS_URL: redis://redis:6379/0
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    networks:
-      - matemail_internal
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    networks: [internal]
 
-  # ── Next.js frontend ─────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8020}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3020}
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8015}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3015}
-    ports:
-      # Localhost-only — host nginx proxies to this port
-      - "127.0.0.1:3015:3000"
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8020}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3020}
     depends_on:
-      - backend
-    networks:
-      - matemail_external
+      backend: {condition: service_healthy}
+    ports:
+      - "127.0.0.1:3020:3000"
+    networks: [internal]
 
 volumes:
   postgres_data:
   redis_data:
-  static_files:
 
 networks:
-  matemail_internal:
-    internal: true
-  matemail_external:
+  internal:
     driver: bridge
