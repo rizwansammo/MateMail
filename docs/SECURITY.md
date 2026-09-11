@@ -582,12 +582,26 @@ every HTML document and JS chunk returns 200 whether or not the page works.
 
 ## Transactional Email
 
-**Status: CONFIGURATION COMPLETE — real delivery NOT yet verified (P3c).**
+**Status: CODE COMPLETE (P3c). Real delivery NOT verified — DEFERRED TO P4 per
+DEC-013.** Do not read anything below as evidence that mail has been delivered;
+no transactional message has ever left this platform.
 
-Account verification, password resets, team invitations and security notices go
-out through an **external** provider over SMTP. They must never depend on
-MateMail's own Mail Engine: a platform whose password reset stops working when
-its mail system is down is a platform nobody can recover an account on.
+Account verification, password resets, team invitations and security notices are
+delivered by **MateMail's own Mail Engine**, not a third-party SMTP provider.
+DEC-013 settled this: MateMail owns its mail infrastructure end to end, and
+running the platform's own mail through a vendor contradicts that.
+
+P3c originally routed these through an external provider, on the reasoning that
+a platform whose password reset stops working when its mail system is down is a
+platform nobody can recover an account on. **That risk is accepted rather than
+solved**, and P4 owns mitigating it — at minimum, alerting that distinguishes
+"platform mail is failing" from "customer mail is failing", so the outage is
+known before customers report it.
+
+The code needs no change for this: it is plain `django.core.mail` SMTP with no
+provider-specific coupling, so pointing it at the Mail Engine is configuration.
+Note that the `EMAIL_HOST` guard rejects loopback, so the engine must be reached
+by a named host.
 
 Two defects were fixed:
 
@@ -610,10 +624,18 @@ Messages name MateMail / NetaMate and never the Mail Engine.
 
 ### Still required before this is production-complete
 
-Configuration only. **No real delivery test has been performed**, and this item
-must not be marked complete until one has. See `docs/DEPLOYMENT.md` for the
-provider account, credentials and DNS records still needed — none of which were
-created in this phase, and none of which touch customer mail DNS.
+**No real delivery test has been performed, and this item must not be marked
+complete until one has.** Deferred to the first suitable P4 milestone, where it
+depends on the Mail Engine that P4 builds.
+
+That test must verify actual inbox delivery from
+`MateMail <noreply@mail.matemail.online>`, plus SPF, DKIM, DMARC where
+applicable, PTR/HELO alignment, and no underlying engine branding leakage.
+**SMTP acceptance alone does not count.**
+
+Until then production keeps `EMAIL_HOST` unconfigured and
+`MAIL_ENGINE_ADAPTER=stub`. The application refuses to send in that state rather
+than reporting a false success, which is why it is safe to sit here.
 
 ---
 

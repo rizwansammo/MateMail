@@ -4,12 +4,13 @@
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
 **Last updated:** 2026-09-11  
-**Current phase:** P3 — IMPLEMENTED AND COMMITTED (P3a + P3b + P3c), **not yet validated end to end**  
-&nbsp;&nbsp;&nbsp;&nbsp;Committed as `5e20154`. Outstanding before P3 can be called done:  
-&nbsp;&nbsp;&nbsp;&nbsp;(a) CI is **red** — two causes found and fixed in sequence, see “P3 follow-ups” below;  
-&nbsp;&nbsp;&nbsp;&nbsp;(b) the real external transactional-email delivery test has **not** been performed;  
-&nbsp;&nbsp;&nbsp;&nbsp;(c) P3 has **not** been deployed to MateServer.  
-**Next phase:** P4 (Mail Engine install and integration) — blocked until the three items above are closed  
+**Current phase:** P3 — **implementation and CI COMPLETE** (P3a + P3b + P3c), built and published as `aad6d50`  
+&nbsp;&nbsp;&nbsp;&nbsp;CI green on `aad6d50` (run 34573674384): 506 tests, both GHCR images published.  
+&nbsp;&nbsp;&nbsp;&nbsp;**Transactional delivery validation: DEFERRED TO P4** per DEC-013 — MateMail will  
+&nbsp;&nbsp;&nbsp;&nbsp;use its own Mail Engine rather than a third-party SMTP provider, so the test now  
+&nbsp;&nbsp;&nbsp;&nbsp;depends on infrastructure P4 builds. Deferred, **not** performed, **not** passed.  
+&nbsp;&nbsp;&nbsp;&nbsp;P3 is **not deployed**; production prep is staged (see “P3 production preparation”).  
+**Next phase:** P4 — Mail Engine: customer business email **and** MateMail platform transactional mail  
 **Launch gate:** private beta requires all of P0–P7; public launch requires P9
 
 ---
@@ -47,7 +48,7 @@ without the mechanism underneath. Read this section before trusting the tables.
 | 7 | ~~Deployment architecture is contradictory.~~ | ✅ Closed in P2 |
 | 8 | ~~Engine detail can reach customers.~~ | ✅ Closed in P1 |
 | 9 | ~~Production CSP required `script-src 'unsafe-inline'`.~~ | ✅ Closed in P3c |
-| 10 | **Transactional email is unproven.** The code path is built, tested and vendor-neutral, but no message has ever been delivered through a real provider. Account verification and password reset depend on it, so a customer can neither complete signup nor recover an account until this is exercised. Needs a provider account, credentials, and SPF/DKIM for `mail.matemail.online` — none of which exist yet. | Open |
+| 10 | **Transactional email is unproven.** The code path is built and tested, but no message has ever actually been delivered. Account verification and password reset depend on it, so a customer can neither complete signup nor recover an account until it works. Per **DEC-013** this is now delivered by MateMail's own Mail Engine rather than a third-party provider, so proving it is **P4 work**. | Open — deferred to P4 |
 
 Resolved in Phase 0: the four critical application-security defects and the
 broken audit log. See the Phase 0 section below.
@@ -568,8 +569,9 @@ Must land before any real domain is provisioned into a real engine.
   frontend. Required because the App Router emits inline hydration scripts;
   see the P2.5 CSP incident. Pair this with the httpOnly cookie move — the
   two together are what make an XSS survivable.
-- Route transactional mail via an external provider on a subdomain — MateMail
-  must not depend on the engine it is bootstrapping.
+- Route transactional mail on a dedicated subdomain. *(Superseded by DEC-013:
+  the subdomain stands, but delivery is MateMail's own Mail Engine rather than
+  an external provider, and the delivery test moves to P4.)*
 - Interim mitigation only: encrypt `Domain.dkim_private_key` at rest and keep it
   out of logs and serializers. This is a stopgap — DEC-007r removes the column
   entirely in P4, so do not build anything new on it.
@@ -1551,11 +1553,12 @@ change, because a different answer for a registered address is an existence
 oracle.
 
 **This item is deliberately NOT marked production-complete.** The application
-path is built and tested; no real delivery test has been performed. The
-provider account, credentials and the SPF/DKIM records for the dedicated
-`mail.matemail.online` sending subdomain are listed in `docs/DEPLOYMENT.md` and
-are yours to create. No MX/SPF/DKIM/DMARC record was created or changed in this
-phase.
+path is built and tested; no real delivery test has been performed.
+
+*Superseded by DEC-013:* delivery is MateMail's own Mail Engine, not an external
+provider, so no provider account or credentials will be created. The test moves
+to the first suitable P4 milestone. No MX/SPF/DKIM/DMARC record was created or
+changed in this phase.
 
 ### §11 DKIM private keys — interim only
 
@@ -1758,3 +1761,45 @@ New tests: `tests/test_password_hashing.py` (18).
 Only one thing, and it is not a code problem: **no transactional email has ever
 been delivered through a real provider.** Everything else on P3 is implemented,
 tested and — after this commit — green in CI.
+
+
+---
+
+## P3 production preparation (staged, NOT deployed)
+
+**Date:** 2026-09-11 **Status:** prepared on MateServer; **P3 is not deployed.**
+
+Completed ahead of the P4 deployment and to be left in place:
+
+| Item | State |
+|------|-------|
+| `/opt/MateMail/docker-compose.yml` | Replaced with the repository version at `aad6d50`, verified byte-exact (`sha256 8ec3ec81…`, 11604 bytes, LF) |
+| `DKIM_ENCRYPTION_KEY` | Persistent production Fernet key generated on the server, stored in `.env` (mode 600), validated by an encrypt/decrypt round trip. Never printed, never committed |
+| `DEFAULT_FROM_EMAIL` | `MateMail <noreply@mail.matemail.online>` |
+| Backups | `docker-compose.yml.bak.20260911T081007Z`, `.env.bak.20260911T081007Z` |
+
+A note for whoever deploys: this repository is checked out with
+`core.autocrlf=true`, so the working copy of `deploy/docker-compose.yml` is
+CRLF (11857 bytes) while the committed file is LF (11604 bytes). Take the file
+from `git show <sha>:deploy/docker-compose.yml`, not from the working tree, or
+the server receives something that is not the repository version.
+
+**Deliberately NOT configured**, per DEC-013:
+
+- `EMAIL_HOST` remains loopback; `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD`
+  remain empty. No external SMTP credentials exist anywhere. The application
+  detects this and refuses to send rather than reporting a false success, so
+  the state is safe and visible rather than silently broken.
+- `MAIL_ENGINE_ADAPTER=stub`, until P4 explicitly replaces it.
+
+Untouched: mail ports (none listening), UFW (22/80/443 only), MX, SPF, DKIM,
+DMARC, PTR, HELO. Production still runs `07dfc5d`, healthy, and every other
+MateServer application is unaffected.
+
+### What P4 inherits
+
+The first suitable P4 milestone must perform the real end-to-end transactional
+delivery test from `MateMail <noreply@mail.matemail.online>`, verifying actual
+inbox delivery plus SPF, DKIM, DMARC where applicable, PTR/HELO alignment, and
+no underlying engine branding leakage. **SMTP acceptance alone does not count.**
+Until that passes, blocker 10 stays open.

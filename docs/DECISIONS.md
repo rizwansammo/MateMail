@@ -419,3 +419,62 @@ P0 → P1 → P2 → P3 → P4 → P5 → P6 → P7 → PRIVATE BETA → P9 → 
 | TBD-G | Webmail auth mechanism (Dovecot master user vs. alternative) — see DEC-005r | before webmail is built |
 | TBD-H | App-password model for IMAP/SMTP clients once web login uses 2FA | before general availability |
 | TBD-F | MTA-STS hosting strategy (HTTPS required) | Phase 5 |
+
+
+---
+
+## DEC-013 — MateMail owns its platform transactional email
+
+**Date:** 2026-09-11
+**Status:** Accepted
+**Decision maker:** NetaMate Solutions (product direction)
+**Relates to:** DEC-001 (mailcow), DEC-011 (integrated product), DEC-012 (launch sequencing)
+**Supersedes:** the P3c position that platform mail must go through a third-party SMTP provider
+
+**Context:**
+P3c built a vendor-neutral SMTP path for MateMail's own system mail — account
+verification, password reset, team invitations, security notices — on the
+reasoning that a platform whose password reset stops working when its mail
+system is down is a platform nobody can recover an account on. That reasoning
+led to an external provider (Postmark was evaluated) for those four message
+types.
+
+The product direction is that MateMail owns its mail infrastructure end to end.
+Running the platform's own mail through a third party contradicts that, adds a
+vendor dependency and a second reputation surface to manage, and means the
+product does not use the thing it sells.
+
+**Decision:**
+
+1. **MateMail's Mail Engine will deliver platform transactional email**, not a
+   third-party SMTP provider. No external provider account will be opened, and
+   no external SMTP credentials will be configured.
+2. **P4 must provide first-party infrastructure for both** customer business
+   email (send and receive) **and** MateMail's own platform mail from
+   `MateMail <noreply@mail.matemail.online>`.
+3. **The real transactional delivery test moves to the first suitable P4
+   milestone.** It is deferred, not waived, and P3 is not to be recorded as
+   having passed it.
+4. Until P4 replaces it, production keeps `MAIL_ENGINE_ADAPTER=stub` and
+   `EMAIL_HOST` unconfigured. The application already refuses to send rather
+   than reporting a false success, so this state is safe and visible.
+
+**Consequences:**
+
+- The application code needs **no change**. It is plain `django.core.mail` SMTP
+  with no provider-specific coupling, so pointing it at the Mail Engine is a
+  configuration change. P3c's `EMAIL_HOST` guard rejects loopback, which the
+  Mail Engine must not be reached through — it will be a named host, not
+  `localhost`.
+- **The recovery-path risk in the original reasoning is accepted, not solved.**
+  If the Mail Engine is down, password resets and verification emails stop with
+  it. P4 owns mitigating this — at minimum, alerting that distinguishes
+  "platform mail is failing" from "customer mail is failing", so the outage is
+  known before customers report it. This is the real cost of the decision and
+  is written down rather than glossed.
+- The dedicated sending identity stays `mail.matemail.online`, separate from
+  customer mail domains, so platform mail keeps its own reputation and
+  authentication story.
+- The P4 delivery test must verify actual inbox delivery plus SPF, DKIM, DMARC
+  where applicable, PTR/HELO alignment, and no underlying engine branding
+  leakage. SMTP acceptance alone does not count.
