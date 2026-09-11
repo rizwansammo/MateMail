@@ -14,3 +14,6 @@ requests==2.32.3
 gunicorn==23.0.0
 whitenoise==6.8.2
 pyotp==2.9.0
+# Argon2 password hashing. Django ships Argon2PasswordHasher but the binding
+# is an optional extra, so it has to be declared explicitly.
+argon2-cffi==23.1.0

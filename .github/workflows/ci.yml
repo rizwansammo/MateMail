@@ -75,6 +75,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      # DKIM_ENCRYPTION_KEY is required in production as of P3c — `check
+      # --deploy` fails with domains.E001 without it, and the compose file
+      # declares it `:?required`. Both must keep failing closed, so CI supplies
+      # a value rather than the checks being relaxed.
+      #
+      # Generated per run, never stored as a repository secret: a real Fernet
+      # key (32 random bytes, url-safe base64) so anything that constructs a
+      # Fernet from it succeeds, but one that exists only for the life of this
+      # runner and protects nothing. Uses the standard library so the identical
+      # step works in jobs that do not install the backend's dependencies.
+      - name: Generate an ephemeral CI-only DKIM encryption key
+        run: |
+          python3 -c "import base64, os; print('DKIM_ENCRYPTION_KEY=' + base64.urlsafe_b64encode(os.urandom(32)).decode())" >> "$GITHUB_ENV"
+
       - name: manage.py check
         working-directory: backend
         run: python manage.py check --settings=config.settings.dev
@@ -161,6 +175,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # DKIM_ENCRYPTION_KEY is required in production as of P3c — `check
+      # --deploy` fails with domains.E001 without it, and the compose file
+      # declares it `:?required`. Both must keep failing closed, so CI supplies
+      # a value rather than the checks being relaxed.
+      #
+      # Generated per run, never stored as a repository secret: a real Fernet
+      # key (32 random bytes, url-safe base64) so anything that constructs a
+      # Fernet from it succeeds, but one that exists only for the life of this
+      # runner and protects nothing. Uses the standard library so the identical
+      # step works in jobs that do not install the backend's dependencies.
+      - name: Generate an ephemeral CI-only DKIM encryption key
+        run: |
+          python3 -c "import base64, os; print('DKIM_ENCRYPTION_KEY=' + base64.urlsafe_b64encode(os.urandom(32)).decode())" >> "$GITHUB_ENV"
 
       # Placeholders only. The real values live in /opt/MateMail/.env on the
       # server; this proves the file is structurally valid and that every

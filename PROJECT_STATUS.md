@@ -4,8 +4,12 @@
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
 **Last updated:** 2026-09-11  
-**Current phase:** P3 — COMPLETE (P3a + P3b + P3c) — not deployed, not committed  
-**Next phase:** P4 (Mail Engine install and integration) — after P3 is reviewed and committed  
+**Current phase:** P3 — IMPLEMENTED AND COMMITTED (P3a + P3b + P3c), **not yet validated end to end**  
+&nbsp;&nbsp;&nbsp;&nbsp;Committed as `5e20154`. Outstanding before P3 can be called done:  
+&nbsp;&nbsp;&nbsp;&nbsp;(a) CI on that commit is **red** — fix prepared, see “P3 follow-ups” below;  
+&nbsp;&nbsp;&nbsp;&nbsp;(b) the real external transactional-email delivery test has **not** been performed;  
+&nbsp;&nbsp;&nbsp;&nbsp;(c) P3 has **not** been deployed to MateServer.  
+**Next phase:** P4 (Mail Engine install and integration) — blocked until the three items above are closed  
 **Launch gate:** private beta requires all of P0–P7; public launch requires P9
 
 ---
@@ -41,8 +45,9 @@ without the mechanism underneath. Read this section before trusting the tables.
 | 5 | **Queue, quarantine and storage usage are empty shells.** Nothing writes `QueueMessage` or `QuarantineMessage`; `storage_used_mb` is never assigned. No mailcow→MateMail sync task exists. | Open |
 | 6 | ~~Domain ownership is not verified before a domain is provisioned into the mail engine.~~ | ✅ Closed in P3a |
 | 7 | ~~Deployment architecture is contradictory.~~ | ✅ Closed in P2 |
-| 9 | ~~Production CSP required `script-src 'unsafe-inline'`.~~ | ✅ Closed in P3c |
 | 8 | ~~Engine detail can reach customers.~~ | ✅ Closed in P1 |
+| 9 | ~~Production CSP required `script-src 'unsafe-inline'`.~~ | ✅ Closed in P3c |
+| 10 | **Transactional email is unproven.** The code path is built, tested and vendor-neutral, but no message has ever been delivered through a real provider. Account verification and password reset depend on it, so a customer can neither complete signup nor recover an account until this is exercised. Needs a provider account, credentials, and SPF/DKIM for `mail.matemail.online` — none of which exist yet. | Open |
 
 Resolved in Phase 0: the four critical application-security defects and the
 broken audit log. See the Phase 0 section below.
@@ -1150,8 +1155,9 @@ been exercised; this deployment was performed over SSH under P2.5 authorization.
 
 ## P3a — Domain ownership verification, provisioning gates, async DNS
 
-**Date:** 2026-09-11 **Status:** complete, **not deployed**. No Git operation,
-no MateServer change, no mail DNS change, no Mail Engine install was performed.
+**Date:** 2026-09-11 **Status:** implemented; committed in `5e20154`.
+**Not deployed** — no MateServer change, no mail DNS change and no Mail Engine
+install was performed in this phase.
 
 P3 was split into three parts to keep each reviewable. P3a covers brief §1
 (CI/CD cleanups), §2 (domain ownership verification) and §7 (asynchronous DNS
@@ -1289,8 +1295,9 @@ CSP nonces, transactional email and interim DKIM encryption (P3c).
 
 ## P3b — Abuse limits, login and 2FA hardening, plan caps, API key scopes
 
-**Date:** 2026-09-11 **Status:** complete, **not deployed**. No Git operation,
-no MateServer change, no mail DNS change, no Mail Engine install was performed.
+**Date:** 2026-09-11 **Status:** implemented; committed in `5e20154`.
+**Not deployed** — no MateServer change, no mail DNS change and no Mail Engine
+install was performed in this phase.
 
 Covers brief §3 (rate limiting), §4 (login lockout and 2FA replay), §5
 (workspace and plan abuse controls) and §6 (API key scopes). P3c is not started.
@@ -1460,9 +1467,10 @@ P3a. §8–§11 and §13 are P3c.
 
 ## P3c — Token storage, CSP nonces, transactional email, DKIM at rest
 
-**Date:** 2026-09-11 **Status:** complete with one item explicitly NOT
-production-complete (transactional email — see below). **Not deployed.** No Git
-operation, no MateServer change, no mail DNS change, no Mail Engine install.
+**Date:** 2026-09-11 **Status:** implemented; committed in `5e20154`. One item
+is explicitly NOT production-complete (transactional email — see below).
+**Not deployed** — no MateServer change, no mail DNS change and no Mail Engine
+install was performed in this phase.
 
 Covers brief §8 (refresh token storage), §9 (CSP nonces), §10 (transactional
 email), §11 (interim DKIM encryption) and §13 (documentation).
@@ -1611,3 +1619,101 @@ cookie and is *absent* from the body.
   the brief's scope. Worth doing before private beta.
 - **`security.W019`** — `X_FRAME_OPTIONS = "SAMEORIGIN"` is deliberate, not an
   oversight.
+
+
+---
+
+## P3 follow-ups — CI fix and Argon2
+
+**Date:** 2026-09-11 **Status:** complete, **not committed**, not deployed.
+
+Three items raised on review of the pushed P3 commit `5e20154`.
+
+### 1. CI was red on `5e20154`
+
+**Root cause.** P3c made `DKIM_ENCRYPTION_KEY` required in production and CI
+never supplied one. Two jobs failed for that single reason, both behaving
+exactly as designed:
+
+| Job | Step | Failure |
+|-----|------|---------|
+| Backend checks and tests | `manage.py check --deploy` | `SystemCheckError: (domains.E001) DKIM_ENCRYPTION_KEY is not set` |
+| Validate production compose | `docker compose config` | `required variable DKIM_ENCRYPTION_KEY is missing a value` |
+
+`Publish to GHCR` needs `[backend, frontend, compose]`, so no image was built.
+The frontend job passed throughout. Nothing was wrong with the code being
+tested — the gate was new and the pipeline had not been told about it.
+
+**Fix.** Both jobs now mint their own key before the steps that need one:
+
+```yaml
+- name: Generate an ephemeral CI-only DKIM encryption key
+  run: |
+    python3 -c "import base64, os; print('DKIM_ENCRYPTION_KEY=' + base64.urlsafe_b64encode(os.urandom(32)).decode())" >> "$GITHUB_ENV"
+```
+
+Three properties worth stating:
+
+- **Generated per run, never a repository secret.** A stored secret here would
+  be a standing copy of a production-shaped credential that protects nothing —
+  CI encrypts no data that outlives the runner.
+- **A genuinely valid Fernet key** (32 random bytes, url-safe base64), verified
+  locally to round-trip through `Fernet`, so any code path that actually builds
+  a cipher from it works rather than merely passing an emptiness check.
+- **Standard library only**, so the identical step works in the compose job,
+  which never installs the backend's dependencies.
+
+**`domains.E001` was not weakened.** Re-verified after the fix: with the
+variable absent, `check --deploy` still exits 1 on `domains.E001` and
+`docker compose config` still refuses. Production still fails closed.
+
+### 2. Argon2 password hashing
+
+`PASSWORD_HASHERS` now leads with `Argon2PasswordHasher`, followed by PBKDF2,
+PBKDF2SHA1, Scrypt and BCryptSHA256; `argon2-cffi==23.1.0` added to
+`requirements.txt`.
+
+The trailing hashers are kept **deliberately**. A password hash cannot be
+converted to another algorithm without the password, so removing PBKDF2 would
+not migrate existing accounts — it would lock them out. Django re-hashes an
+account on its next successful login, the single moment it holds the plaintext.
+No data migration is involved, and none is possible.
+
+Parameters are argon2-cffi's defaults, which Django tracks. Not tuned: a memory
+or time cost picked without measuring this server is not better than the
+maintained default, and a wrong one is worse.
+
+This closes the gap found in P3b, where `docs/SECURITY.md` claimed Argon2 while
+the project used PBKDF2. That was recorded honestly at the time rather than
+quietly fixed; the claim is now true.
+
+### 3. Status documentation
+
+The header said "not committed", which stopped being true the moment P3 was
+pushed. It now names the commit and lists what is actually outstanding, and the
+readiness table gained row 10 for the unproven transactional email path, so the
+two agree instead of contradicting each other.
+
+### Validation
+
+| Check | Result |
+|-------|--------|
+| Backend suite | **506 passed** (488 + 18 new) |
+| `makemigrations --check` | No changes detected |
+| `manage.py check` | No issues |
+| `check --deploy` **with** a CI key | Passes (1 pre-existing `W019`) |
+| `check --deploy` **without** the key | Still fails `domains.E001` — fail-closed intact |
+| `docker compose config` with a CI key | Valid |
+| `docker compose config` without it | Still refuses — fail-closed intact |
+| Compose compliance assertions | Pass — `internal: true`, datastores internal-only, loopback ports |
+| Frontend lint | 34 problems (17 errors, 17 warnings) — unchanged baseline |
+| Frontend production build | Succeeds, 28 routes |
+| `ci.yml` | Parses; both affected jobs generate a key before the steps that need it |
+
+New tests: `tests/test_password_hashing.py` (18).
+
+### Still outstanding for P3
+
+Only one thing, and it is not a code problem: **no transactional email has ever
+been delivered through a real provider.** Everything else on P3 is implemented,
+tested and — after this commit — green in CI.

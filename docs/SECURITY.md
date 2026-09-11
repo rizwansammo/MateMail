@@ -11,24 +11,28 @@
 > This document mixes **verified controls** with **aspirational design that was
 > never built**. Treat an unmarked row as a claim to verify, not a fact.
 >
-> **Verified and pinned by tests** (updated 2026-09-10/11):
-> Role-Based Access Control → *Enforcement*, *Two-factor challenge tokens*,
-> *Internal endpoints*, and the Rate Limiting status banner.
+> **Verified and pinned by tests** (updated 2026-09-11):
+> Role-Based Access Control → *Enforcement*, *Two-factor challenge tokens* and
+> *Internal endpoints*; Rate Limiting; Login and Second-Factor Protection;
+> Workspace and Plan Limits; API Key Scopes; Token Storage;
+> Content-Security-Policy; DKIM Private Key Storage; Domain Ownership
+> Verification; and the Web Login table.
 >
-> **Known stale or false, pending a full pass:**
-> - The Anti-Relay, IMAP/SMTP Auth and Mail Engine Layer tables describe
->   **Stalwart**, which was never used. DEC-001 selected the Postfix/Dovecot/
->   Rspamd stack; DEC-011 names it the MateMail Mail Engine.
-> - "Password hashing — Argon2 via `django-argon2`" is false; the project uses
->   Django's default PBKDF2 and that package is not a dependency.
-> - "Session invalidation — Redis-backed token revocation list" is false; it is
->   simplejwt's database-backed blacklist.
-> - "Suspicious login alerts" and "Session listing" do not exist.
+> **Corrected in P3** — these claims were false and are no longer made:
+> - "Password hashing — Argon2 via `django-argon2`". The project used PBKDF2.
+>   It now genuinely uses Argon2id via `argon2-cffi`, with PBKDF2 retained so
+>   existing accounts keep working and are upgraded on next login.
+> - "Session invalidation — Redis-backed token revocation list". It is
+>   simplejwt's database-backed blacklist, and the table now says so.
+> - "Suspicious login alerts" and "Session listing" — marked as not built.
 > - "2FA — `django-otp` or `pyotp`" — it is `pyotp`, with a custom flow.
+> - The IMAP/SMTP Auth table described **Stalwart**, which was never used, and
+>   is now marked as target design for an engine that is not installed.
 >
-> Correcting these is scheduled with the adapter-boundary work (P1) and the
-> abuse-hardening work (P3). Until then, verify against code before relying on
-> any row.
+> **Still to verify:** the Anti-Relay and Mail Engine Layer tables describe an
+> engine that does not exist yet. They are target design, not current
+> behaviour, and nothing in them is in force. Treat them as a specification to
+> implement in P4, not as a description of today.
 
 ---
 
@@ -77,11 +81,11 @@
 
 | Control | Implementation | State |
 |---------|---------------|-------|
-| Password hashing | Django default (PBKDF2-SHA256) | ✅ |
+| Password hashing | Argon2id (`argon2-cffi`), with PBKDF2 retained for existing accounts | ✅ P3 follow-up |
 | Password reset tokens | Hashed before storage, single-use, 1-hour TTL | ✅ |
 | JWT tokens | Short-lived access (15 min) + refresh (7 days) | ✅ |
 | Refresh token storage | HttpOnly + Secure + SameSite=Strict cookie, scoped to `/api/auth/` | ✅ P3c |
-| Session invalidation | simplejwt blacklist; a password reset revokes every refresh token | ✅ |
+| Session invalidation | simplejwt's **database-backed** blacklist (not Redis); a password reset revokes every refresh token | ✅ |
 | 2FA (TOTP) | `pyotp`, RFC 6238, `valid_window=1` | ✅ |
 | Backup codes | Hashed before storage, one-time use | ✅ |
 | 2FA challenge token | Opaque, server-side, 5-min TTL, single-use, password-bound | ✅ Phase 0 |
@@ -91,11 +95,39 @@
 | Suspicious login alerts | New IP/country → email alert | ❌ Not built |
 | Session listing | Users can see and revoke active sessions | ❌ Not built |
 
-Two corrections to earlier drafts of this table. Password hashing is Django's
-default PBKDF2, not Argon2: `PASSWORD_HASHERS` is not configured and
-`argon2-cffi` is not a dependency. Moving to Argon2 is a one-line settings
-change plus a dependency, and is tracked as hardening work rather than claimed
-here. The 2FA implementation is `pyotp` — `django-otp` was never used.
+One correction to earlier drafts of this table: the 2FA implementation is
+`pyotp` — `django-otp` was never used.
+
+Password hashing was PBKDF2 while these drafts claimed Argon2. That gap was
+found during P3b and recorded honestly rather than quietly fixed; it is now
+closed for real:
+
+```python
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",   # preferred
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+    "django.contrib.auth.hashers.ScryptPasswordHasher",
+    "django.contrib.auth.hashers.BCryptSHA256PasswordHasher",
+]
+```
+
+New and changed passwords use Argon2id. **The older hashers are retained on
+purpose.** A password hash cannot be converted to another algorithm without the
+password, so removing PBKDF2 would not migrate existing accounts — it would
+lock them out. Instead Django re-hashes an account on its next successful
+login, which is the one moment it holds the plaintext. No data migration is
+involved, and none could be.
+
+Parameters are argon2-cffi's defaults, which Django tracks. They are not tuned
+here: a memory or time cost chosen without measuring this server is not better
+than the maintained default, and a wrong one is worse.
+
+Covered by `tests/test_password_hashing.py`: a new password is Argon2, a
+legacy PBKDF2 hash still authenticates, a successful login upgrades it in
+place, a wrong password still fails and does *not* trigger an upgrade, and the
+upgrade happens through the real `/api/auth/login/` path rather than only in
+ORM calls.
 
 ### IMAP/SMTP Auth
 

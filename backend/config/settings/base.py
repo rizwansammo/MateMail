@@ -98,6 +98,27 @@ DATABASES = {
 
 AUTH_USER_MODEL = "accounts.User"
 
+# Password hashing.
+#
+# Argon2 first, which makes it the *preferred* hasher: new and changed
+# passwords use it, and Django re-hashes an account on its next successful
+# login if the stored hash uses anything further down this list. That upgrade
+# is why the older hashers stay — removing PBKDF2 would not migrate existing
+# accounts, it would lock them out, since a password hash cannot be converted
+# without the password itself.
+#
+# The list is Django's own default order with Argon2 moved to the front. Its
+# parameters are argon2-cffi's defaults, which Django tracks; they are not
+# tuned here, because a number picked without measuring this server's CPU and
+# memory is not better than the maintained default.
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+    "django.contrib.auth.hashers.ScryptPasswordHasher",
+    "django.contrib.auth.hashers.BCryptSHA256PasswordHasher",
+]
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 10}},
