@@ -1,4 +1,4 @@
-import { clearTokens, getAccessToken, getRefreshToken, isTokenExpired, setTokens } from "./auth";
+import { clearTokens, getAccessToken, isTokenExpired, setAccessToken } from "./auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -11,23 +11,28 @@ export class ApiError extends Error {
 
 let _refreshPromise: Promise<string | null> | null = null;
 
+/**
+ * Exchange the refresh cookie for a new access token.
+ *
+ * There is no request body and no token read from storage: the browser
+ * attaches the HttpOnly cookie to `/api/auth/` itself, and `credentials:
+ * "include"` is what tells fetch to send it. The rotated refresh token comes
+ * back as a replacement cookie the same way — nothing here ever sees it.
+ */
 async function refreshAccessToken(): Promise<string | null> {
   if (_refreshPromise) return _refreshPromise;
   _refreshPromise = (async () => {
-    const refresh = getRefreshToken();
-    if (!refresh) return null;
     try {
       const res = await fetch(`${API_BASE}/api/auth/refresh/`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh }),
+        credentials: "include",
       });
       if (!res.ok) {
         clearTokens();
         return null;
       }
       const data = await res.json();
-      setTokens(data.access, data.refresh ?? refresh);
+      setAccessToken(data.access);
       return data.access;
     } catch {
       clearTokens();
@@ -54,7 +59,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  // `credentials: "include"` is what carries the HttpOnly refresh cookie.
+  // fetch defaults to "same-origin", which is enough in production (the API and
+  // the app share app.matemail.online) but not in development, where the app
+  // runs on :3000 and the API on :8000. The cookie's own Path limits it to
+  // /api/auth/, so this does not attach a credential to anything else.
+  const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    ...options,
+    headers,
+  });
 
   if (!res.ok) {
     const body = await res.text();
@@ -78,7 +92,11 @@ export async function apiRequest(path: string, options: RequestInit = {}): Promi
   if (options.body && !(options.headers as Record<string, string>)?.["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
-  return fetch(`${API_BASE}${path}`, { ...options, headers });
+  return fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    ...options,
+    headers,
+  });
 }
 
 export const api = {

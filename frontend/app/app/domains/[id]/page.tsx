@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, RefreshCw, Copy, CheckCircle2, XCircle, Clock, AlertCircle } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { DomainOwnership, DomainOwnershipCard } from "@/components/domain-ownership";
 
-interface Domain {
-  id: string;
-  domain: string;
+interface Domain extends DomainOwnership {
   status: string;
   dns_health_score: number;
   dkim_selector: string;
@@ -135,31 +134,62 @@ export default function DomainDetailPage() {
   const [records, setRecords] = useState<DNSRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [checkMessage, setCheckMessage] = useState("");
+  const pollTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [dRes, rRes] = await Promise.all([
-        apiRequest(`/api/domains/${params.id}/`),
-        apiRequest(`/api/domains/${params.id}/records/`),
-      ]);
-      if (dRes.ok) setDomain(await dRes.json());
-      if (rRes.ok) setRecords(await rRes.json());
-    } finally {
-      setLoading(false);
-    }
+    const [dRes, rRes] = await Promise.all([
+      apiRequest(`/api/domains/${params.id}/`),
+      apiRequest(`/api/domains/${params.id}/records/`),
+    ]);
+    if (dRes.ok) setDomain(await dRes.json());
+    if (rRes.ok) setRecords(await rRes.json());
   }, [params.id]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    (async () => {
+      try {
+        await fetchData();
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [fetchData]);
 
+  // Any scheduled poll must not outlive the page.
+  useEffect(() => {
+    const timers = pollTimers.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.length = 0;
+    };
+  }, []);
+
+  /**
+   * The check endpoint is asynchronous: it answers 202 with the *last known*
+   * state, not the result of this run. Showing that payload as if it were
+   * fresh would report a stale verdict, so the response is used only for its
+   * message and the real result is re-read once the worker has had time to
+   * finish.
+   */
   async function checkDNS() {
     setChecking(true);
+    setCheckMessage("");
     try {
       const res = await apiRequest(`/api/domains/${params.id}/check/`, { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        setDomain(data.domain);
-        setRecords(data.records);
+      const data = await res.json().catch(() => null);
+      if (res.status === 202) {
+        setCheckMessage(data?.detail ?? "DNS check started.");
+        pollTimers.current.forEach(clearTimeout);
+        pollTimers.current = [5000, 15000, 30000].map((delay) =>
+          setTimeout(() => {
+            fetchData().catch(() => {
+              /* a transient refresh failure just leaves the older result on screen */
+            });
+          }, delay)
+        );
+      } else {
+        setCheckMessage(data?.detail ?? "The DNS check could not be started. Please try again.");
       }
     } finally {
       setChecking(false);
@@ -183,7 +213,6 @@ export default function DomainDetailPage() {
     );
   }
 
-  const statusCfg = RECORD_STATUS_CONFIG[domain.status as keyof typeof RECORD_STATUS_CONFIG];
   const noRecordsYet = records.length === 0;
 
   return (
@@ -214,9 +243,26 @@ export default function DomainDetailPage() {
           className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
         >
           <RefreshCw className={`h-4 w-4 ${checking ? "animate-spin" : ""}`} />
-          {checking ? "Checking…" : "Check DNS"}
+          {checking ? "Starting…" : "Check DNS"}
         </button>
       </div>
+
+      {/* Ownership verification — the gate on everything else */}
+      <DomainOwnershipCard
+        domain={domain}
+        showRotate
+        className="rounded-lg"
+        onChange={(updated) => setDomain((prev) => (prev ? { ...prev, ...updated } : prev))}
+        onVerified={() => {
+          fetchData().catch(() => {});
+        }}
+      />
+
+      {checkMessage && (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          {checkMessage} This page refreshes on its own as results arrive.
+        </p>
+      )}
 
       {/* No records yet */}
       {noRecordsYet && (
@@ -252,10 +298,16 @@ export default function DomainDetailPage() {
               <AlertCircle className="h-4 w-4 text-amber-400" />
             )}
             <span className="text-sm font-medium text-slate-800">
-              {domain.mail_service_ready ? "Mail service active" : "Mail service setup in progress"}
+              {domain.mail_service_ready
+                ? "Mail service active"
+                : domain.ownership_verified
+                ? "Mail service setup in progress"
+                : "Mail service starts after ownership is verified"}
             </span>
           </div>
-          {!domain.mail_service_ready && (
+          {/* Provisioning is refused server-side for an unverified domain, so
+              the control is not offered until it can succeed. */}
+          {!domain.mail_service_ready && domain.ownership_verified && (
             <button
               onClick={async () => {
                 await apiRequest(`/api/domains/${params.id}/provision/`, { method: "POST" });
@@ -278,6 +330,10 @@ export default function DomainDetailPage() {
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-5 text-sm text-slate-600 space-y-2">
         <p className="font-medium text-slate-800">How to configure your domain</p>
         <ol className="list-decimal list-inside space-y-1 text-slate-500">
+          <li>
+            Publish the verification TXT record shown above and click{" "}
+            <strong>Verify ownership</strong>.
+          </li>
           <li>Log in to your domain registrar&apos;s DNS settings.</li>
           <li>Add the MX, SPF, DKIM, and DMARC records shown above.</li>
           <li>Click <strong>Check DNS</strong> once records are published (may take up to 48 h to propagate).</li>

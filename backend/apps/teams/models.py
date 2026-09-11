@@ -7,6 +7,14 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from apps.security.scopes import DEFAULT_SCOPES
+from apps.security.scopes import normalise as normalise_scopes
+
+
+def default_scopes():
+    """Callable default so the stored list is never shared between rows."""
+    return list(DEFAULT_SCOPES)
+
 
 class TeamInvite(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -69,12 +77,21 @@ class APIKey(models.Model):
     expires_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
 
+    # What this key may change. A key is NOT its creator: it holds only the
+    # scopes it was granted, never the permissions of the person who minted it.
+    # See apps.security.scopes for the model and the enforcement point.
+    scopes = models.JSONField(default=default_scopes)
+
     class Meta:
         db_table = "teams_api_key"
         ordering = ["-created_at"]
 
     @classmethod
-    def make(cls, tenant, name, created_by, expires_at=None):
+    def make(cls, tenant, name, created_by, expires_at=None, scopes=None):
+        """
+        Mint a key. Read-only unless write scopes are asked for explicitly —
+        being created by an owner or admin grants a key nothing extra.
+        """
         raw = "mm_" + secrets.token_urlsafe(40)
         key_hash = hashlib.sha256(raw.encode()).hexdigest()
         key_prefix = raw[3:11]  # 8 chars shown in UI as mm_{prefix}...
@@ -85,5 +102,10 @@ class APIKey(models.Model):
             key_hash=key_hash,
             created_by=created_by,
             expires_at=expires_at,
+            scopes=normalise_scopes(scopes if scopes is not None else DEFAULT_SCOPES),
         )
         return raw, obj
+
+    @property
+    def is_read_only(self) -> bool:
+        return normalise_scopes(self.scopes) == list(DEFAULT_SCOPES)

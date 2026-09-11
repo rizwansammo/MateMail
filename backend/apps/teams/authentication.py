@@ -13,11 +13,14 @@ class APIKeyAuthentication(BaseAuthentication):
     """
 
     def authenticate(self, request):
-        # TenantMiddleware caches the resolved user to avoid a second DB lookup
+        # TenantMiddleware caches the resolved user to avoid a second DB lookup.
+        # The key itself must come back too: DRF puts it in request.auth, which
+        # is how a permission class can tell an API key from a logged-in user.
+        # Returning None here made every key indistinguishable from a session.
         django_request = getattr(request, "_request", request)
         cached_user = getattr(django_request, "_mm_api_key_user", None)
         if cached_user is not None:
-            return (cached_user, None)
+            return (cached_user, getattr(django_request, "_mm_api_key", None))
 
         auth = request.META.get("HTTP_AUTHORIZATION", "")
         if not auth.startswith("Bearer mm_"):

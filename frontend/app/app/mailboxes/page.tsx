@@ -8,6 +8,7 @@ import { api, ApiError, apiRequest } from "@/lib/api";
 interface Domain {
   id: string;
   domain: string;
+  ownership_verified: boolean;
 }
 
 interface Mailbox {
@@ -144,11 +145,15 @@ export default function MailboxesPage() {
                   className="ml-1 rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
                 >
                   {domains.map((d) => (
-                    <option key={d.id} value={d.id}>{d.domain}</option>
+                    <option key={d.id} value={d.id}>
+                      {d.domain}
+                      {d.ownership_verified === false ? " (ownership not verified)" : ""}
+                    </option>
                   ))}
                 </select>
               </div>
               {addErrors.local_part && <p className="mt-1 text-xs text-red-600">{addErrors.local_part}</p>}
+              {addErrors.domain_id && <p className="mt-1 text-xs text-red-600">{addErrors.domain_id}</p>}
             </div>
 
             {/* Display name */}

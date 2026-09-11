@@ -11,6 +11,7 @@ from rest_framework_simplejwt.token_blacklist.models import (
 )
 
 from apps.accounts.models import PasswordResetToken
+from apps.accounts.cookies import REFRESH_COOKIE_NAME
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
     TEST_PASSWORD,
@@ -65,21 +66,24 @@ class PasswordResetSecurityTest(TestCase):
         self.assertIn("access", login.data)
 
     def test_reset_revokes_outstanding_refresh_tokens(self):
-        # Establish a session, then reset the password.
-        login = APIClient().post(
+        # Establish a session, then reset the password. The refresh token is
+        # carried by the client's cookie jar since P3c — it is never in the
+        # body — so the same client object is the session.
+        session = APIClient()
+        login = session.post(
             "/api/auth/login/",
             {"email": self.user.email, "password": TEST_PASSWORD},
             format="json",
         )
-        refresh = login.data["refresh"]
+        self.assertEqual(login.status_code, 200)
+        self.assertIn(REFRESH_COOKIE_NAME, session.cookies)
 
-        # Sanity: the refresh token works before the reset.
-        pre = APIClient().post("/api/auth/refresh/", {"refresh": refresh}, format="json")
-        self.assertEqual(pre.status_code, 200)
+        # Sanity: the session refreshes before the reset.
+        self.assertEqual(session.post("/api/auth/refresh/").status_code, 200)
 
         self.assertEqual(self._reset().status_code, 200)
 
-        post = APIClient().post("/api/auth/refresh/", {"refresh": refresh}, format="json")
+        post = session.post("/api/auth/refresh/")
         self.assertEqual(
             post.status_code, 401,
             "a refresh token issued before the password reset is still usable",

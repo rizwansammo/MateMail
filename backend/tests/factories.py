@@ -11,7 +11,10 @@ from rest_framework.test import APIClient
 from rest_framework.throttling import SimpleRateThrottle
 
 from apps.accounts.models import TwoFactorSetup, User
-from apps.domains.models import Domain, DomainStatus
+from django.utils import timezone
+
+from apps.domains.models import Domain, DomainOwnership, DomainStatus
+from apps.domains.verification import generate_verification_token
 from apps.mailboxes.models import Mailbox
 from apps.tenants.models import MemberRole, MemberStatus, Tenant, TenantMembership
 
@@ -46,8 +49,32 @@ def add_member(tenant, user, role):
     )
 
 
-def make_domain(tenant, domain="acme-test.example", status=DomainStatus.ACTIVE):
-    return Domain.objects.create(tenant=tenant, domain=domain, status=status)
+def make_domain(tenant, domain="acme-test.example", status=DomainStatus.ACTIVE, *, verified=True):
+    """
+    A domain in the state most tests need: ownership already proved.
+
+    Defaults to VERIFIED because that is what a domain looks like once it has
+    completed onboarding, and because tests about forwarding, DTOs or engine
+    leaks are not tests about ownership — they need a provisionable domain.
+
+    Tests that exercise the ownership gate itself pass verified=False, or use
+    make_unverified_domain() for clarity.
+    """
+    return Domain.objects.create(
+        tenant=tenant,
+        domain=domain,
+        status=status,
+        ownership_status=(
+            DomainOwnership.VERIFIED if verified else DomainOwnership.PENDING
+        ),
+        ownership_verified_at=timezone.now() if verified else None,
+        verification_token=generate_verification_token(),
+    )
+
+
+def make_unverified_domain(tenant, domain="unverified.example", status=DomainStatus.PENDING):
+    """A domain whose ownership has NOT been proved. Cannot be provisioned."""
+    return make_domain(tenant, domain, status, verified=False)
 
 
 def make_mailbox(tenant, domain, local_part="alice", full_name="Alice"):
@@ -96,10 +123,52 @@ def disable_throttling(testcase):
 
     Use this only in tests asserting authorization outcomes, so that per-IP
     throttling cannot turn a later request into a 429 and mask the real result.
+
+    The scopes are read from the live configuration rather than listed here: a
+    hardcoded list silently stops covering a scope the moment one is added, and
+    the symptom is an unrelated test failing with 429 somewhere far away.
     """
     patcher = mock.patch.dict(
         SimpleRateThrottle.THROTTLE_RATES,
-        {"anon": None, "user": None, "auth": None},
+        {scope: None for scope in SimpleRateThrottle.THROTTLE_RATES},
     )
     patcher.start()
     testcase.addCleanup(patcher.stop)
+
+
+def make_plan(tier, *, max_members=5, max_domains=10, max_mailboxes=50, **extra):
+    """Get or create a Plan for `tier`. Plans are a fixture-shaped singleton."""
+    from apps.billing.models import Plan
+
+    defaults = {
+        "display_name": str(tier).title(),
+        "max_domains": max_domains,
+        "max_mailboxes": max_mailboxes,
+        "max_members": max_members,
+        "max_storage_per_mailbox_mb": 10240,
+        **extra,
+    }
+    plan, _ = Plan.objects.get_or_create(tier=tier, defaults=defaults)
+    for field, value in defaults.items():
+        setattr(plan, field, value)
+    plan.save()
+    return plan
+
+
+def subscribe(tenant, plan, status="active"):
+    from apps.billing.models import Subscription
+
+    sub, _ = Subscription.objects.get_or_create(
+        tenant=tenant, defaults={"plan": plan, "status": status}
+    )
+    sub.plan = plan
+    sub.status = status
+    sub.save()
+    return sub
+
+
+def make_api_key(tenant, created_by, *, name="test key", scopes=None, **extra):
+    """Returns (raw_key, APIKey). Read-only unless scopes are given."""
+    from apps.teams.models import APIKey
+
+    return APIKey.make(tenant, name, created_by, scopes=scopes, **extra)

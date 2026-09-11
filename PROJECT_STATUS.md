@@ -3,9 +3,9 @@
 **Product:** MateMail  
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
-**Last updated:** 2026-09-10  
-**Current phase:** P2.5 — COMPLETE (control plane live at https://app.matemail.online)  
-**Next phase:** P3 (ownership verification + abuse prevention) — awaiting assignment  
+**Last updated:** 2026-09-11  
+**Current phase:** P3 — COMPLETE (P3a + P3b + P3c) — not deployed, not committed  
+**Next phase:** P4 (Mail Engine install and integration) — after P3 is reviewed and committed  
 **Launch gate:** private beta requires all of P0–P7; public launch requires P9
 
 ---
@@ -39,8 +39,9 @@ without the mechanism underneath. Read this section before trusting the tables.
 | 3 | **Backups are simulated.** `run_backup_task` counts rows, invents a size and marks the job complete. Nothing is backed up and there is no restore path. Domain deletion cascades to permanent mail destruction. | Open |
 | 4 | **No webmail.** No inbox/compose/thread routes exist. The SSO bridge cannot authenticate anyone, because webmail needs the mailbox IMAP password and MateMail deliberately never stores it. Direction fixed by DEC-005r (MateMail-built, not SOGo); auth mechanism still open as TBD-G. | Open |
 | 5 | **Queue, quarantine and storage usage are empty shells.** Nothing writes `QueueMessage` or `QuarantineMessage`; `storage_used_mb` is never assigned. No mailcow→MateMail sync task exists. | Open |
-| 6 | **Domain ownership is not verified** before a domain is provisioned into the mail engine. | Open |
+| 6 | ~~Domain ownership is not verified before a domain is provisioned into the mail engine.~~ | ✅ Closed in P3a |
 | 7 | ~~Deployment architecture is contradictory.~~ | ✅ Closed in P2 |
+| 9 | ~~Production CSP required `script-src 'unsafe-inline'`.~~ | ✅ Closed in P3c |
 | 8 | ~~Engine detail can reach customers.~~ | ✅ Closed in P1 |
 
 Resolved in Phase 0: the four critical application-security defects and the
@@ -1143,3 +1144,470 @@ enforced on the current plan. `deploy.yml` records this.
 `GITHUB_TOKEN` (`packages: read`) instead of a long-lived `GHCR_TOKEN` secret.
 **That change is uncommitted**, so the workflow-based deployment path has not
 been exercised; this deployment was performed over SSH under P2.5 authorization.
+
+
+---
+
+## P3a — Domain ownership verification, provisioning gates, async DNS
+
+**Date:** 2026-09-11 **Status:** complete, **not deployed**. No Git operation,
+no MateServer change, no mail DNS change, no Mail Engine install was performed.
+
+P3 was split into three parts to keep each reviewable. P3a covers brief §1
+(CI/CD cleanups), §2 (domain ownership verification) and §7 (asynchronous DNS
+checking). P3b and P3c are not started.
+
+### The defect this closes
+
+Adding a domain queued a mail-engine provisioning task immediately. Nothing
+checked that the person adding `competitor.example` controlled it. That is
+blocker #6 in the readiness summary, and it is the one abuse path that would
+have been visible to an outsider.
+
+### Ownership model
+
+`Domain` gained `ownership_status` (`pending` | `verified`),
+`verification_token`, `ownership_verified_at`, `verification_last_checked_at`
+and `verification_last_error`. The design is in `docs/SECURITY.md` §Domain
+Ownership Verification; the two decisions worth repeating here:
+
+**Exclusivity is a database constraint, not a code path.** The old global
+`unique=True` on `domain` was wrong in both directions: it stopped two tenants
+from even attempting the same domain, while providing no ownership meaning. It
+was replaced by two constraints — `uniq_domain_per_tenant` (a tenant lists a
+domain once) and a **partial unique index** on `domain WHERE ownership_status =
+'verified'`. Several tenants may hold a domain as pending; exactly one can hold
+it verified. The concurrent-verification race is closed by Postgres, because a
+check-then-save in Python cannot close it.
+
+**Matching is exact.** The check compares the token to each returned TXT string
+for equality, after reassembling multi-string records. A substring match would
+verify against an unrelated record in a shared zone that happens to contain the
+token.
+
+### Provisioning gates
+
+| Layer | Unverified behaviour |
+|-------|----------------------|
+| `POST /api/domains/` | domain created, token issued, **nothing queued** |
+| `POST /api/domains/:id/provision/` | `409` + customer message |
+| `POST /api/mailboxes/` | `409`, no row created |
+| `POST /api/mailboxes/:id/reprovision/` | `409` |
+| `provision_domain_task` | refuses at the task boundary, records the reason, no retry |
+
+The task-boundary check is the durable one: a future `.delay()` caller that
+skips the view still cannot provision an unclaimed domain.
+
+### Asynchronous DNS checking (§7)
+
+`POST /api/domains/:id/check/` performed up to four resolver lookups at a 5s
+timeout **inside the request**. One unresponsive nameserver held a gunicorn
+worker for ~20s; sixteen concurrent checks took the API offline. It now claims
+a per-domain slot, enqueues, and returns **202** with the last known state
+explicitly labelled as such — it never fabricates a fresh verdict.
+
+The periodic sweep fanned out serially, so one slow domain delayed every domain
+behind it. It now dispatches one task per domain, guards each dispatch so a bad
+row cannot abort the sweep, and returns `{enqueued, skipped, failed, total}`.
+
+Deduplication uses atomic `cache.add`: a 60s in-flight slot collapses repeated
+clicks and stops a sweep piling onto a manual check, and a 300s budget key
+enforces the 1-per-5-minutes background limit that `docs/SECURITY.md` already
+specified. A crash always releases the slot, so a failure cannot wedge a domain
+into a permanently un-checkable state.
+
+### CI/CD cleanups (§1)
+
+- **`run_migrations` input removed.** Migrations are mandatory: the compose
+  `migrate` service gates the others via `service_completed_successfully`, so
+  the input could not actually skip them. A control that does not control is
+  worse than no control.
+- **`docker image prune` removed.** MateServer also runs NetaMate, TalkRoom,
+  MateDesk, MateAssist, MateConnect and Portfolio. A host-global prune from a
+  MateMail deploy could delete an image another application needs to recreate a
+  container.
+
+Both are now asserted by tests rather than only by review.
+
+### Frontend
+
+- New `components/domain-ownership.tsx` renders the exact **Type / Host /
+  Value** with per-field copy buttons, the short host form for providers that
+  append the zone, the last check result, and the verify / rotate actions.
+- The onboarding wizard's steps are re-ordered to `Workspace → Domain → Verify
+  → DNS → Mailbox → Complete`. Mailbox creation is disabled until ownership is
+  verified, with the reason stated — previously the customer would have met a
+  bare `409` at the end of the wizard.
+- The mailbox form rendered `detail` and `local_part` errors but **not
+  `domain_id`**, which is the key the ownership refusal uses; the form would
+  have appeared to do nothing. Now rendered, and the domain picker labels
+  unverified domains.
+- Both DNS-check callers were rewritten for the 202 contract: they report that
+  the check started and re-read the real result, instead of presenting the
+  endpoint's last-known payload as this run's outcome.
+
+### Migrations
+
+| Migration | Effect |
+|-----------|--------|
+| `domains/0003_domain_ownership_verification` | Adds the five ownership fields; **drops** the old global unique on `domain`; adds `uniq_domain_per_tenant` and the partial `uniq_verified_domain_owner` |
+| `domains/0004_backfill_verification_tokens` | Issues a token to every existing row and leaves them all `pending`; reversible |
+
+Verified against a real Postgres 16 instance rather than trusting `sqlmigrate`
+(which did not show the constraint drop). `\d domains_domain` confirms the old
+global unique is gone and both new constraints exist.
+
+**Existing domains become `pending` on deploy.** That is deliberate — none of
+them were ever proven — but it means any domain already added must be verified
+before it can be provisioned. No production customer domains exist yet, so the
+backfill affects nothing live.
+
+### Validation
+
+| Check | Result |
+|-------|--------|
+| Backend suite | **312 passed** (244 pre-existing + 68 new) |
+| `makemigrations --check` | No changes detected |
+| `manage.py check` | No issues |
+| `check --deploy` (prod settings) | 1 warning, `security.W019`, pre-existing: `X_FRAME_OPTIONS = "SAMEORIGIN"` is set deliberately in `config/settings/prod.py` |
+| Frontend `tsc --noEmit` | Clean |
+| Frontend lint | 35 problems (17 errors, 18 warnings) — **unchanged baseline**; no problem is on a line this phase introduced, and the two new/rewritten files report none |
+| Frontend production build | Succeeds, 28 routes |
+| `docker compose config` | Valid; `matemail_internal` still `internal: true`, only 127.0.0.1:8020 and 127.0.0.1:3020 published, no mail ports, no `:latest`, `migrate` gate intact |
+
+New tests: `tests/test_domain_ownership.py` (37), `tests/test_dns_async.py`
+(19), `tests/test_deployment_workflow.py` (12).
+
+### Not done in P3a
+
+Deliberately deferred, not forgotten: rate limiting, login lockout and 2FA
+replay, workspace/plan caps and API key scopes (P3b); refresh-token cookies,
+CSP nonces, transactional email and interim DKIM encryption (P3c).
+
+
+---
+
+## P3b — Abuse limits, login and 2FA hardening, plan caps, API key scopes
+
+**Date:** 2026-09-11 **Status:** complete, **not deployed**. No Git operation,
+no MateServer change, no mail DNS change, no Mail Engine install was performed.
+
+Covers brief §3 (rate limiting), §4 (login lockout and 2FA replay), §5
+(workspace and plan abuse controls) and §6 (API key scopes). P3c is not started.
+
+### Preflight findings
+
+Verified against source before writing anything. Six defects, two of them
+larger than the brief anticipated:
+
+1. **Every per-IP limit was bypassable.** `NUM_PROXIES` was unset, so DRF's
+   `get_ident` used the whole `X-Forwarded-For` string as the throttle key. An
+   attacker varying the header got a fresh bucket per request. The audit log
+   had the same flaw from the other end — it recorded the *leftmost* entry, so
+   `MailLog.ip_address` was attacker-chosen.
+2. **`AuthThrottle` was an `AnonRateThrottle`**, which returns immediately for
+   an authenticated request. `resend-verification`, 2FA enrolment and 2FA
+   disable were therefore entirely unlimited.
+3. **`check_member_limit` was never called.** `Plan.max_members` was a number
+   in the database that no code path consulted.
+4. **Workspace creation had no cap.**
+5. **API keys authenticated as their creator**, inheriting every permission
+   that user held — `is_platform_admin` included.
+6. **`/api/internal/smtp/` was under the 60/min anon throttle**, which would
+   have capped the Mail Engine policy bridge at 60 lookups a minute.
+
+And one found while writing the tests, larger than any of the above:
+
+7. **API keys had never authenticated at all.** `JWTAuthentication` was first
+   in `DEFAULT_AUTHENTICATION_CLASSES`, and simplejwt claims every `Bearer ...`
+   header and *raises* `InvalidToken` rather than deferring, so every `mm_` key
+   got 401 before `APIKeyAuthentication` ran. `TenantMiddleware` bailed in the
+   same `except` for the same reason, so no tenant was resolved either. The
+   feature had a model, a UI, a serializer and an endpoint, and did not work.
+   Confirmed against `HEAD` — not introduced by this phase.
+
+### §3 Rate limiting
+
+New `apps.security` package: `client_ip` (trusted-proxy address resolution),
+`ratelimit` (atomic `cache.add`/`incr` over wall-clock fixed windows), `limits`
+(every number in one place, read by the views, the tests and the docs), and
+`throttling` (DRF classes keyed on the real client address, exempting
+`/api/health/` and `/api/internal/`).
+
+`TRUSTED_PROXY_COUNT` is 0 by default and **1 in production**, matching the one
+nginx hop. nginx appends the address it saw, so the rightmost entry is the only
+one our own infrastructure wrote.
+
+Limits are in `docs/SECURITY.md` §Rate Limiting. Login counts **failures** and a
+correct password clears the counters — counting every attempt would let one
+person on a shared NAT lock out an office while adding nothing against brute
+force. Refusals are 429 with `Retry-After`, raised through DRF's `Throttled`.
+
+`django-ratelimit` was evaluated and not adopted: its exception maps to 403 not
+429, and its IP keying has the same untrusted-header problem that had to be
+solved here anyway. This is a deliberate deviation from the brief's suggested
+dependency, which conditioned it on being the appropriate choice.
+
+### §4 Login and 2FA
+
+Phase 0's challenge-token design is untouched and now has regression tests
+pinning each of its properties. Added on top:
+
+- Per-IP and per-account login lockout, with one message for every refusal —
+  "wrong password", "no such account", "disabled" and "locked" are each an
+  oracle if they can be told apart. The disabled-account branch previously
+  returned a distinct message and no longer does.
+- A per-user 2FA budget spanning every challenge that user holds. The Phase 0
+  counter caps attempts against one token; an attacker with the password just
+  requests another after every fifth failure.
+- **TOTP replay prevention.** With `valid_window=1` a code is accepted for
+  ninety seconds. An accepted code is now claimed for that user until it
+  expires, so an observed code works exactly once.
+- Limits on 2FA enrolment and disable, which had none.
+
+### §5 Workspace and plan caps
+
+`MAX_WORKSPACES_PER_USER` (default 5, env-overridable) counts workspaces the
+user **owns** — being invited into other people's is not abuse. `max_members`
+is now enforced on direct member creation, member reactivation, invite creation
+and invite acceptance.
+
+**Pending invitations reserve a seat**, which is the documented decision.
+Counting only accepted members lets a three-seat workspace send thirty
+invitations, each acceptance individually passing a count taken before the
+others landed. Every check runs inside the transaction that takes the seat with
+the tenant row locked; workspace creation locks the user row, because the row
+being counted does not exist yet.
+
+### §6 API key scopes
+
+Five scopes, resource shaped: `read` (always held), `domains:write`,
+`mailboxes:write`, `routing:write`, `admin`. A new key is read-only, and
+**being created by an owner or admin grants it nothing** — write scopes must be
+named. Corrupt or empty stored scopes degrade to read-only.
+
+Enforced by `APIKeyScopeMiddleware` rather than a DRF permission class, because
+DRF *replaces* `DEFAULT_PERMISSION_CLASSES` for any view declaring its own —
+which is nearly every view here — so a global default would enforce nothing.
+It is default-deny: an unmapped mutating path is refused, so a future endpoint
+is closed to keys until somebody maps it.
+
+`/api/platform/`, `/api/internal/` and `/api/auth/` are unreachable by any key
+at any scope. `IsPlatformAdmin` refuses API-key requests as well, so the rule
+survives an endpoint moving out of that prefix. Creation, revocation and scope
+changes are audited.
+
+### Migrations
+
+| Migration | Effect |
+|-----------|--------|
+| `teams/0002_apikey_scopes` | Adds `scopes` (JSONB). Existing rows default to `["read"]` |
+
+**Behaviour change on deploy:** every existing API key becomes read-only. Any
+integration writing through one starts receiving 403 until its scopes are
+granted. That is the intended direction — grandfathering write access in would
+preserve exactly the privilege this change removes. In practice no key has ever
+worked (finding 7), so nothing real is affected.
+
+### Frontend
+
+The API keys page now picks scopes at creation, shows them per key, and edits
+them in place. Its footer previously read *"API keys carry admin-level
+access"* — true of the old behaviour, false now, and removed.
+
+No workspace-creation UI exists yet, so the workspace cap has no frontend
+surface to update. The team page already renders `detail`, so the seat-limit
+refusal displays without a change.
+
+### Validation
+
+| Check | Result |
+|-------|--------|
+| Backend suite | **415 passed** (312 pre-existing + 103 new) |
+| `makemigrations --check` | No changes detected |
+| `manage.py check` | No issues |
+| `check --deploy` (prod settings) | 1 warning, `security.W019`, pre-existing and deliberate |
+| Frontend `tsc --noEmit` | Clean |
+| Frontend lint | 34 problems (17 errors, 17 warnings) vs a 35-problem baseline — same files, same rules, **one fewer** warning; nothing new |
+| Frontend production build | Succeeds, 28 routes |
+| `docker compose config` | Valid; `internal: true` intact, only 127.0.0.1:8020 and 3020 published, no mail ports, no `:latest` |
+| Prod settings spot-check | `TRUSTED_PROXY_COUNT=1`, `MAX_WORKSPACES_PER_USER=5`, throttle rates and authenticator order as intended |
+
+New tests: `test_rate_limits.py` (35), `test_2fa_hardening.py` (16),
+`test_plan_caps.py` (18), `test_api_key_scopes.py` (34).
+
+`tests/factories.py` — `disable_throttling` derived its scope list from a
+hardcoded dict, so it silently stopped covering throttles the moment a scope
+was added. It now reads the live configuration.
+
+### Documentation corrected, not just extended
+
+`docs/SECURITY.md` claimed password hashing was "Argon2 via django-argon2".
+`PASSWORD_HASHERS` is not configured and `argon2-cffi` is not a dependency, so
+it is Django's default PBKDF2. The table now says so, and marks
+"suspicious login alerts" and "session listing" as not built. The IMAP/SMTP
+table is marked as target design for an engine that is not installed, and its
+"Stalwart" references — which predate DEC-001 — are gone.
+
+### Carried forward, not done here
+
+Moving to Argon2 is a settings line plus a dependency; it is hardening, not
+P3b's scope, and is now stated honestly rather than claimed. §7 was done in
+P3a. §8–§11 and §13 are P3c.
+
+
+---
+
+## P3c — Token storage, CSP nonces, transactional email, DKIM at rest
+
+**Date:** 2026-09-11 **Status:** complete with one item explicitly NOT
+production-complete (transactional email — see below). **Not deployed.** No Git
+operation, no MateServer change, no mail DNS change, no Mail Engine install.
+
+Covers brief §8 (refresh token storage), §9 (CSP nonces), §10 (transactional
+email), §11 (interim DKIM encryption) and §13 (documentation).
+
+### §8 Refresh token storage
+
+The refresh token was returned in the JSON body and kept in `localStorage`. It
+is the durable credential — seven days, and it mints access tokens for all of
+them — so one XSS bought a week of silent access.
+
+It is now an `HttpOnly; Secure; SameSite=Strict` cookie scoped to
+`/api/auth/`, with `Max-Age` matching the token's own lifetime. Strict rather
+than Lax because the refresh happens by same-origin XHR after load, so the one
+thing Lax buys does not apply here.
+
+**CSRF is avoided rather than accepted.** The API is not cookie-authenticated:
+every endpoint still requires a bearer access token in a header, which a
+cross-site request cannot set. The cookie authorises exactly one operation, the
+token exchange, and SameSite=Strict already prevents any cross-site request
+carrying it.
+
+There is exactly one mechanism — a token supplied in the request body is
+rejected, because two mechanisms means the weaker one defines the security of
+the pair. Login, signup, 2FA verify, refresh, logout, password reset, workspace
+switch and workspace create were all audited and all covered by tests.
+
+Browsers holding a pre-P3c `localStorage` token have it deleted on first load
+of the new build.
+
+**Residual exposure, stated rather than hidden:** the access token is still
+JavaScript-readable in `sessionStorage`. An XSS can act as the user for up to
+15 minutes and cannot extend that, because it cannot reach the refresh token.
+
+### §9 CSP nonces — and the trap that was nearly shipped
+
+`frontend/middleware.ts` issues a per-request nonce; nginx no longer sets CSP
+for frontend responses, because two CSP headers are enforced as an intersection
+and nginx cannot know the nonce.
+
+**The part worth reading.** The first working version produced a correct-looking
+header with no `unsafe-inline` — and the served HTML had **19 script tags and
+0 nonce attributes**. Next.js only stamps nonces onto routes it renders at
+request time, and the pages were statically prerendered at build time. Shipping
+that would have reproduced the P2.5 dead-shell failure, except worse: the
+policy would have been actively blocking the scripts. `app/layout.tsx` now sets
+`dynamic = "force-dynamic"`. The cost is static optimisation for the marketing
+page; everything else was an authenticated client-rendered dashboard already.
+
+Verified in a real Chromium against a production build, not from curl:
+**17/17 checks** — header shape, no `unsafe-inline`, no `unsafe-eval`, one
+policy not two, nonce present and per-request, client runtime booted, React
+attached, form updates state, client-side navigation works, unauthenticated
+root reaches the login screen, zero CSP violations, zero blocked
+script/stylesheet/document requests. The harness is kept at
+`frontend/scripts/csp-browser-check.js` and can be pointed at the deployed site
+after release.
+
+nginx now sets CSP only where it is the origin: `default-src 'none'` for
+`/api/` and `/static/`, and a policy retaining `'unsafe-inline'` for
+`/django-admin/`, which ships inline scripts and has no nonce mechanism. The
+`/static/` block already carried its own `add_header`, which under nginx's
+rules had silently dropped every inherited security header from those
+responses; they are restated. `nginx -t` passes (validated in a container).
+
+### §10 Transactional email — NOT production-complete
+
+Two defects fixed. Every send used `fail_silently=True`, so the API answered
+"Verification email sent." having sent nothing, with no trace anywhere. And
+`EMAIL_HOST` defaulted to `localhost`, where nothing listens — and if anything
+ever did, it would be the Mail Engine, which is exactly where application mail
+must not go.
+
+`apps.accounts.mailer` reports whether a message was accepted and logs the
+cause when it was not. Where an honest answer carries no risk it is given:
+`resend-verification` returns 503 on failure, invite creation reports
+`email_delivered: false`. The password-reset response deliberately does not
+change, because a different answer for a registered address is an existence
+oracle.
+
+**This item is deliberately NOT marked production-complete.** The application
+path is built and tested; no real delivery test has been performed. The
+provider account, credentials and the SPF/DKIM records for the dedicated
+`mail.matemail.online` sending subdomain are listed in `docs/DEPLOYMENT.md` and
+are yours to create. No MX/SPF/DKIM/DMARC record was created or changed in this
+phase.
+
+### §11 DKIM private keys — interim only
+
+DEC-007r is unchanged: P4 moves generation and storage into the Mail Engine and
+removes the column. Until then it is encrypted at rest with Fernet under
+`DKIM_ENCRYPTION_KEY`, deliberately separate from `DJANGO_SECRET_KEY` — a
+`SECRET_KEY` rotation that made every DKIM key undecryptable would be
+discovered by customers, as mail failing authentication.
+
+Migration `domains.0005` verifies each value decrypts back to the original
+*before* overwriting it, skips already-encrypted rows, and is reversible. Rows
+written before the change are read as plaintext transparently, so an upgrade
+cannot break signing for existing domains. An unreadable value raises rather
+than returning `""`, which would read as "no DKIM key" and provision the domain
+to send unsigned mail.
+
+With no key configured, storage degrades to plaintext with an error log rather
+than refusing to add domains — and `check --deploy` fails with `domains.E001`,
+so that state cannot reach production unnoticed.
+
+### §13 Documentation
+
+`docs/SECURITY.md` gained Token Storage, Content-Security-Policy, Transactional
+Email and DKIM Private Key Storage sections. `docs/DEPLOYMENT.md`'s environment
+block still showed `EMAIL_HOST=localhost` with a MateMail mailbox — the exact
+anti-pattern — and now shows an external provider plus the outstanding setup.
+`deploy/env.production.example` and `deploy/docker-compose.yml` carry every new
+variable. (The stale Argon2, Stalwart, suspicious-login-alert and
+session-listing claims §13 lists were already corrected in P3b.)
+
+### Validation
+
+| Check | Result |
+|-------|--------|
+| Backend suite | **488 passed** (415 after P3b + 73 new) |
+| `makemigrations --check` | No changes detected |
+| `manage.py check` | No issues |
+| `check --deploy` | 1 warning, `security.W019`, pre-existing and deliberate |
+| `check --deploy` without `DKIM_ENCRYPTION_KEY` | Fails with `domains.E001`, as intended |
+| Frontend `tsc --noEmit` | Clean |
+| Frontend lint | 34 problems (17 errors, 17 warnings) — same as the P3b baseline, same files |
+| Frontend production build | Succeeds, 28 routes, middleware registered |
+| **Browser CSP + hydration check** | **17/17** in real Chromium against a production build |
+| `nginx -t` on the template | Passes (validated in a container with stubbed certs) |
+| `docker compose config` | Valid; `internal: true` intact, 2 loopback ports, no mail ports, no `:latest` |
+
+New tests: `test_refresh_cookie.py` (27), `test_transactional_email.py` (21),
+`test_dkim_encryption.py` (25).
+
+Two existing tests were updated rather than relaxed: both asserted that the
+refresh token comes back in the response body, which is the exposure §8
+removes. They now assert the stronger property — that it arrives as an HttpOnly
+cookie and is *absent* from the body.
+
+### Carried forward
+
+- **A real transactional delivery test** (above). P3's exit criteria say this
+  item is not complete without one.
+- **Argon2 password hashing.** Found in P3b, documented honestly rather than
+  claimed; it is a settings line plus `argon2-cffi` and was left out as beyond
+  the brief's scope. Worth doing before private beta.
+- **`security.W019`** — `X_FRAME_OPTIONS = "SAMEORIGIN"` is deliberate, not an
+  oversight.

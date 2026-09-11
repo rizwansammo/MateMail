@@ -117,9 +117,24 @@ class IsTenantSupport(BasePermission):
 
 
 class IsPlatformAdmin(BasePermission):
-    """Internal MateMail staff only."""
+    """
+    Internal MateMail staff only, and only with a session credential.
+
+    An API key authenticates *as* the user who created it. Without the second
+    check below, a key minted by a member of staff would be a platform-admin
+    credential sitting in a customer's configuration file. APIKeyScopeMiddleware
+    already refuses /api/platform/ outright; this is the same rule stated where
+    the privilege is actually granted, so a future endpoint outside that prefix
+    inherits it.
+    """
 
     def has_permission(self, request, view):
+        from apps.teams.models import APIKey
+
+        if isinstance(getattr(request, "auth", None), APIKey):
+            return False
+        if getattr(request, "_mm_api_key", None) is not None:
+            return False
         return bool(
             request.user
             and request.user.is_authenticated

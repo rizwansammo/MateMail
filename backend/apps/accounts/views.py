@@ -4,15 +4,14 @@ import logging
 import pyotp
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
-from django.core.mail import send_mail
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
 from rest_framework import status
+from rest_framework.exceptions import Throttled
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -52,17 +51,76 @@ from .tokens import (
     make_tokens,
     revoke_all_refresh_tokens,
 )
+from apps.security import ratelimit
+from apps.security.client_ip import get_client_ip
+from apps.security.limits import (
+    FORGOT_PASSWORD_PER_EMAIL,
+    LOGIN_PER_ACCOUNT,
+    LOGIN_PER_IP,
+    SIGNUP_PER_IP,
+    TOTP_REPLAY_TTL,
+    TWO_FACTOR_MANAGE_PER_USER,
+    TWO_FACTOR_PER_USER,
+)
+from apps.security.throttling import AuthenticatedActionThrottle, AuthEndpointThrottle
+from .mailer import send_transactional
+from .cookies import (
+    clear_refresh_cookie,
+    read_refresh_cookie,
+    set_refresh_cookie,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-class AuthThrottle(AnonRateThrottle):
-    scope = "auth"
+#: Per-IP volume cap on the unauthenticated auth endpoints. The named limits
+#: in apps.security.limits are the real controls; this is the coarse brake in
+#: front of them.
+AuthThrottle = AuthEndpointThrottle
+
+#: One message for every refused sign-in, whatever the reason. A caller must
+#: not be able to tell "wrong password" from "this account is locked" from "no
+#: such account" — each distinction is an oracle.
+_GENERIC_LOGIN_FAILURE = "Invalid credentials."
+_TOO_MANY_ATTEMPTS = (
+    "Too many sign-in attempts. Please wait a few minutes and try again."
+)
+
+
+def _rate_limit_email_key(value) -> str:
+    """
+    Case-insensitive key for per-account limits.
+
+    Used ONLY as a bucket identity. It is deliberately not what gets passed to
+    authenticate() or to a database lookup: UserManager.normalize_email
+    lowercases the domain and leaves the local part alone, so folding the whole
+    address here and using it for lookups would lock out every account with a
+    capital letter before the @.
+    """
+    return (value or "").strip().lower()
+
+
+def _enforce(decision, detail):
+    """Raise DRF's Throttled — which sets Retry-After — when over the limit."""
+    if not decision.allowed:
+        raise Throttled(wait=decision.retry_after, detail=detail)
 
 
 def _tenant_brief(tenant):
     return {"id": str(tenant.id), "name": tenant.name, "slug": tenant.slug, "status": tenant.status}
+
+
+def authenticated_response(tokens: dict, payload: dict, *, status: int = 200):
+    """
+    Return the access token in the body and the refresh token in a cookie.
+
+    The refresh token is deliberately absent from `payload`: leaving it in the
+    body as well would put it straight back into any script's reach, and the
+    weaker of two mechanisms is the one that defines the security of the pair.
+    """
+    response = Response({"access": tokens["access"], **payload}, status=status)
+    return set_refresh_cookie(response, tokens["refresh"])
 
 
 class SignupView(APIView):
@@ -70,6 +128,19 @@ class SignupView(APIView):
     throttle_classes = [AuthThrottle]
 
     def post(self, request):
+        # Counted before validation: a signup flood does not become cheaper by
+        # being malformed, and the account this would create is the resource
+        # being protected.
+        _enforce(
+            ratelimit.hit(
+                SIGNUP_PER_IP.bucket,
+                get_client_ip(request),
+                limit=SIGNUP_PER_IP.limit,
+                window=SIGNUP_PER_IP.window,
+            ),
+            "Too many workspaces created from this address. Please try again later.",
+        )
+
         serializer = SignupSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -110,8 +181,12 @@ class SignupView(APIView):
         _send_verification_email(user)
         tokens = make_tokens(user, tenant_id=tenant.id)
 
-        return Response(
-            {**tokens, "user": UserProfileSerializer(user).data, "tenant": _tenant_brief(tenant)},
+        return authenticated_response(
+            tokens,
+            {
+                "user": UserProfileSerializer(user).data,
+                "tenant": _tenant_brief(tenant),
+            },
             status=201,
         )
 
@@ -125,11 +200,45 @@ class LoginView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        user = authenticate(request, username=data["email"], password=data["password"])
-        if user is None:
-            return Response({"detail": "Invalid credentials."}, status=401)
-        if not user.is_active:
-            return Response({"detail": "Account is disabled."}, status=401)
+        email = data["email"]
+        account_key = _rate_limit_email_key(email)
+        client_ip = get_client_ip(request)
+
+        # Read the counters before spending an attempt. Failures are what get
+        # counted (see below), so someone who signs in correctly never
+        # accumulates a lockout, and one NAT gateway cannot lock out an office.
+        for decision in (
+            ratelimit.check(
+                LOGIN_PER_IP.bucket, client_ip,
+                limit=LOGIN_PER_IP.limit, window=LOGIN_PER_IP.window,
+            ),
+            ratelimit.check(
+                LOGIN_PER_ACCOUNT.bucket, account_key,
+                limit=LOGIN_PER_ACCOUNT.limit, window=LOGIN_PER_ACCOUNT.window,
+            ),
+        ):
+            _enforce(decision, _TOO_MANY_ATTEMPTS)
+
+        user = authenticate(request, username=email, password=data["password"])
+        if user is None or not user.is_active:
+            # Both branches count and both answer identically. An inactive
+            # account previously returned a distinct message, which told an
+            # attacker the address was registered.
+            ratelimit.hit(
+                LOGIN_PER_IP.bucket, client_ip,
+                limit=LOGIN_PER_IP.limit, window=LOGIN_PER_IP.window,
+            )
+            ratelimit.hit(
+                LOGIN_PER_ACCOUNT.bucket, account_key,
+                limit=LOGIN_PER_ACCOUNT.limit, window=LOGIN_PER_ACCOUNT.window,
+            )
+            return Response({"detail": _GENERIC_LOGIN_FAILURE}, status=401)
+
+        # The password was right. Clear the counters even when a second factor
+        # is still outstanding — the credential under brute-force attack here
+        # is the password, and it has just been presented correctly.
+        ratelimit.reset(LOGIN_PER_IP.bucket, client_ip, window=LOGIN_PER_IP.window)
+        ratelimit.reset(LOGIN_PER_ACCOUNT.bucket, account_key, window=LOGIN_PER_ACCOUNT.window)
 
         membership = (
             TenantMembership.objects.select_related("tenant")
@@ -146,13 +255,63 @@ class LoginView(APIView):
             return Response({"requires_2fa": True, "partial_token": partial})
 
         tokens = make_tokens(user, tenant_id=tenant_id)
-        return Response(
+        return authenticated_response(
+            tokens,
             {
-                **tokens,
                 "user": UserProfileSerializer(user).data,
                 "tenant": _tenant_brief(membership.tenant) if membership else None,
-            }
+            },
         )
+
+
+class RefreshView(APIView):
+    """
+    POST /api/auth/refresh/ — exchange the refresh cookie for a new access token.
+
+    Replaces simplejwt's `TokenRefreshView`, which reads the token from the
+    request body. Reading it from the body would mean JavaScript still had to
+    hold it, which is the exposure this endpoint exists to remove.
+
+    Rotation is on (`ROTATE_REFRESH_TOKENS`), so the response also replaces the
+    cookie. A refresh that fails clears the cookie rather than leaving the
+    browser to retry a credential the server has already rejected.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [AuthThrottle]
+
+    def post(self, request):
+        raw = read_refresh_cookie(request)
+        if not raw:
+            return Response({"detail": "Not authenticated."}, status=401)
+
+        try:
+            token = RefreshToken(raw)
+            access = str(token.access_token)
+            # BLACKLIST_AFTER_ROTATION is on: blacklisting must happen before a
+            # replacement is issued, so a stolen token cannot be exchanged twice.
+            token.blacklist()
+            new_refresh = RefreshToken.for_user(_user_for(token))
+            if token.get("tenant_id"):
+                new_refresh["tenant_id"] = token["tenant_id"]
+                access = str(new_refresh.access_token)
+        except (InvalidToken, TokenError, User.DoesNotExist):
+            # Expired, blacklisted, tampered with, or the account is gone.
+            return clear_refresh_cookie(
+                Response({"detail": "Session expired. Please sign in again."}, status=401)
+            )
+
+        return authenticated_response({"access": access, "refresh": str(new_refresh)}, {})
+
+
+def _user_for(token):
+    """The account a refresh token belongs to, or raise User.DoesNotExist."""
+    from rest_framework_simplejwt.settings import api_settings
+
+    return User.objects.get(
+        **{api_settings.USER_ID_FIELD: token[api_settings.USER_ID_CLAIM]},
+        is_active=True,
+    )
 
 
 class LogoutView(APIView):
@@ -163,10 +322,13 @@ class LogoutView(APIView):
         # the caller's intent (end this session) is satisfied either way. Anything
         # else is a real failure and must not be swallowed.
         try:
-            RefreshToken(request.data.get("refresh", "")).blacklist()
+            RefreshToken(read_refresh_cookie(request)).blacklist()
         except (InvalidToken, TokenError):
             logger.info("Logout called with an invalid or already-revoked refresh token.")
-        return Response({"detail": "Logged out."})
+        # The cookie goes whether or not the token was still valid. Leaving it
+        # in place would keep a credential in the browser that the user has
+        # explicitly asked to be rid of.
+        return clear_refresh_cookie(Response({"detail": "Logged out."}))
 
 
 class ForgotPasswordView(APIView):
@@ -178,19 +340,44 @@ class ForgotPasswordView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
 
+        # Counted for every request, whether or not the address is registered.
+        # A limit that only applied to real accounts would answer 429 for those
+        # and 200 for the rest — the existence oracle this endpoint's uniform
+        # response exists to avoid.
+        _enforce(
+            ratelimit.hit(
+                FORGOT_PASSWORD_PER_EMAIL.bucket,
+                _rate_limit_email_key(email),
+                limit=FORGOT_PASSWORD_PER_EMAIL.limit,
+                window=FORGOT_PASSWORD_PER_EMAIL.window,
+            ),
+            "Too many reset requests for that address. Please try again later.",
+        )
+
         try:
             user = User.objects.get(email=email, is_active=True)
+        except User.DoesNotExist:
+            user = None
+
+        if user is not None:
             raw, _ = PasswordResetToken.make(user)
             reset_url = f"{settings.FRONTEND_URL}/reset-password?token={raw}"
-            send_mail(
+            send_transactional(
                 subject="Reset your MateMail password",
-                message=f"Click this link to reset your password (expires in 1 hour):\n\n{reset_url}",
-                from_email=f"MateMail <noreply@{settings.MAIL_DOMAIN}>",
-                recipient_list=[email],
-                fail_silently=True,
+                body=(
+                    f"Someone asked to reset the password for your MateMail "
+                    f"account.\n\n"
+                    f"Use this link within the next hour:\n\n{reset_url}\n\n"
+                    f"If it wasn't you, no action is needed — your password has "
+                    f"not changed.\n\n"
+                    f"— MateMail, by NetaMate Solutions"
+                ),
+                to=email,
+                purpose="password-reset",
             )
-        except User.DoesNotExist:
-            pass  # Never reveal whether the email exists
+        # The response below is identical either way. A failure to send is
+        # logged by the mailer; it must not change what the caller is told,
+        # because a different answer for a real address is an existence oracle.
 
         return Response({"detail": "If that email is registered you will receive a reset link."})
 
@@ -241,7 +428,11 @@ class ResetPasswordView(APIView):
             user.pk, revoked, also_used,
         )
 
-        return Response({"detail": "Password updated. You can now log in."})
+        # Every refresh token was just blacklisted; drop this browser's copy so
+        # it does not sit there being rejected.
+        return clear_refresh_cookie(
+            Response({"detail": "Password updated. You can now log in."})
+        )
 
 
 class VerifyEmailView(APIView):
@@ -272,18 +463,35 @@ class VerifyEmailView(APIView):
 
 
 class ResendVerificationView(APIView):
+    # AuthThrottle is an AnonRateThrottle: it returns immediately for an
+    # authenticated request, so this endpoint used to have no limit at all.
     permission_classes = [IsAuthenticated]
-    throttle_classes = [AuthThrottle]
+    throttle_classes = [AuthenticatedActionThrottle]
 
     def post(self, request):
         if request.user.email_verified:
             return Response({"detail": "Email is already verified."})
-        _send_verification_email(request.user)
+
+        # Unlike the password-reset endpoint there is no existence oracle here
+        # — the caller is authenticated and already knows the address — so the
+        # honest answer is available and is given. Saying "sent" when nothing
+        # was sent leaves the customer waiting at a wall they cannot pass.
+        if not _send_verification_email(request.user):
+            return Response(
+                {
+                    "detail": (
+                        "We could not send the verification email just now. "
+                        "Please try again in a few minutes."
+                    )
+                },
+                status=503,
+            )
         return Response({"detail": "Verification email sent."})
 
 
 class TwoFactorSetupView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [AuthenticatedActionThrottle]
 
     def get(self, request):
         user = request.user
@@ -311,9 +519,31 @@ class TwoFactorSetupView(APIView):
         except TwoFactorSetup.DoesNotExist:
             return Response({"detail": "2FA setup not initiated. Call GET first."}, status=400)
 
+        # Enrolment confirms possession of the secret, so wrong codes are
+        # counted the same way a failed login is: without this, a signed-in
+        # session could grind the six-digit space against a known secret.
+        _enforce(
+            ratelimit.check(
+                TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+                limit=TWO_FACTOR_MANAGE_PER_USER.limit,
+                window=TWO_FACTOR_MANAGE_PER_USER.window,
+            ),
+            _TOO_MANY_ATTEMPTS,
+        )
+
         totp = pyotp.TOTP(setup.totp_secret)
         if not totp.verify(code, valid_window=1):
+            ratelimit.hit(
+                TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+                limit=TWO_FACTOR_MANAGE_PER_USER.limit,
+                window=TWO_FACTOR_MANAGE_PER_USER.window,
+            )
             return Response({"detail": "Invalid code."}, status=400)
+
+        ratelimit.reset(
+            TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+            window=TWO_FACTOR_MANAGE_PER_USER.window,
+        )
 
         # Enable 2FA and generate backup codes
         raw_codes = generate_backup_codes(10)
@@ -355,22 +585,53 @@ class TwoFactorVerifyView(APIView):
             discard_challenge(raw_challenge)
             return Response({"detail": "Invalid or expired token."}, status=401)
 
+        # The per-challenge counter in apps.accounts.challenge caps attempts
+        # against one token. It does not stop an attacker who holds the
+        # password: after five failures they simply log in again for a fresh
+        # challenge. This limit follows the user, not the token.
+        _enforce(
+            ratelimit.check(
+                TWO_FACTOR_PER_USER.bucket, user.pk,
+                limit=TWO_FACTOR_PER_USER.limit, window=TWO_FACTOR_PER_USER.window,
+            ),
+            _TOO_MANY_ATTEMPTS,
+        )
+
         code = data["code"]
         try:
             setup = user.two_factor_setup
         except TwoFactorSetup.DoesNotExist:
             return Response({"detail": "2FA not configured."}, status=401)
 
+        def _count_failure():
+            register_failed_attempt(raw_challenge)
+            ratelimit.hit(
+                TWO_FACTOR_PER_USER.bucket, user.pk,
+                limit=TWO_FACTOR_PER_USER.limit, window=TWO_FACTOR_PER_USER.window,
+            )
+
         totp = pyotp.TOTP(setup.totp_secret)
         backup = None
-        if not totp.verify(code, valid_window=1):
+        if totp.verify(code, valid_window=1):
+            # A TOTP code stays valid for its whole timestep — with
+            # valid_window=1, for ninety seconds. Anyone who observes one
+            # (a phishing relay, a shoulder surf, a screen share) can present
+            # it again inside that window against a challenge of their own.
+            # Accepting a code claims it for that user until it expires.
+            if not ratelimit.claim_once(
+                "2fa:totp", f"{user.pk}:{code}", ttl=TOTP_REPLAY_TTL
+            ):
+                logger.warning("Replayed TOTP code rejected for user %s", user.pk)
+                _count_failure()
+                return Response({"detail": "Invalid authentication code."}, status=401)
+        else:
             # Try backup code
             code_hash = hash_token(code)
             backup = TwoFactorBackupCode.objects.filter(
                 user=user, code_hash=code_hash, is_used=False
             ).first()
             if not backup:
-                register_failed_attempt(raw_challenge)
+                _count_failure()
                 return Response({"detail": "Invalid authentication code."}, status=401)
 
         # Claim the challenge before issuing credentials. delete() returns False if
@@ -382,6 +643,10 @@ class TwoFactorVerifyView(APIView):
             backup.is_used = True
             backup.save(update_fields=["is_used"])
 
+        ratelimit.reset(
+            TWO_FACTOR_PER_USER.bucket, user.pk, window=TWO_FACTOR_PER_USER.window
+        )
+
         tenant_id = payload.get("tenant_id")
         tokens = make_tokens(user, tenant_id=tenant_id)
         membership = (
@@ -390,25 +655,46 @@ class TwoFactorVerifyView(APIView):
             .first()
         ) if tenant_id else None
 
-        return Response(
+        return authenticated_response(
+            tokens,
             {
-                **tokens,
                 "user": UserProfileSerializer(user).data,
                 "tenant": _tenant_brief(membership.tenant) if membership else None,
-            }
+            },
         )
 
 
 class TwoFactorDisableView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [AuthenticatedActionThrottle]
 
     def post(self, request):
         serializer = TwoFactorDisableSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         user = request.user
+        # Turning off the second factor takes the account password. A stolen
+        # access token must not be able to guess it without a brake.
+        _enforce(
+            ratelimit.check(
+                TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+                limit=TWO_FACTOR_MANAGE_PER_USER.limit,
+                window=TWO_FACTOR_MANAGE_PER_USER.window,
+            ),
+            _TOO_MANY_ATTEMPTS,
+        )
         if not user.check_password(serializer.validated_data["password"]):
+            ratelimit.hit(
+                TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+                limit=TWO_FACTOR_MANAGE_PER_USER.limit,
+                window=TWO_FACTOR_MANAGE_PER_USER.window,
+            )
             return Response({"detail": "Incorrect password."}, status=400)
+
+        ratelimit.reset(
+            TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+            window=TWO_FACTOR_MANAGE_PER_USER.window,
+        )
 
         TwoFactorBackupCode.objects.filter(user=user).delete()
         TwoFactorSetup.objects.filter(user=user).delete()
@@ -444,17 +730,20 @@ def _unique_slug(base: str) -> str:
     return slug
 
 
-def _send_verification_email(user):
+def _send_verification_email(user) -> bool:
+    """Send the address-verification link. Returns whether it was accepted."""
     raw, _ = EmailVerificationToken.make(user)
     verify_url = f"{settings.FRONTEND_URL}/verify-email?token={raw}"
-    send_mail(
+    return send_transactional(
         subject="Verify your MateMail email address",
-        message=(
-            f"Welcome to MateMail!\n\n"
-            f"Click this link to verify your email address (expires in 24 hours):\n\n"
-            f"{verify_url}"
+        body=(
+            f"Welcome to MateMail.\n\n"
+            f"Confirm this address to finish setting up your workspace. The "
+            f"link is good for 24 hours:\n\n{verify_url}\n\n"
+            f"If you did not create a MateMail account, you can ignore this "
+            f"message.\n\n"
+            f"— MateMail, by NetaMate Solutions"
         ),
-        from_email=f"MateMail <noreply@{settings.MAIL_DOMAIN}>",
-        recipient_list=[user.email],
-        fail_silently=True,
+        to=user.email,
+        purpose="email-verification",
     )

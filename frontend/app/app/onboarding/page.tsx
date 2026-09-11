@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -18,12 +18,15 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { api, ApiError, apiRequest } from "@/lib/api";
+import {
+  DomainOwnership,
+  DomainOwnershipCard,
+  OwnershipRequiredNotice,
+} from "@/components/domain-ownership";
 
-const STEPS = ["Workspace", "Domain", "DNS", "Verify", "Mailbox", "Complete"];
+const STEPS = ["Workspace", "Domain", "Verify", "DNS", "Mailbox", "Complete"];
 
-interface Domain {
-  id: string;
-  domain: string;
+interface Domain extends DomainOwnership {
   status: string;
   dns_health_score: number;
   dkim_selector: string;
@@ -62,6 +65,8 @@ export default function OnboardingPage() {
   const [dnsRecordResults, setDnsRecordResults] = useState<DNSRecord[]>([]);
   const [dnsChecking, setDnsChecking] = useState(false);
   const [dnsChecked, setDnsChecked] = useState(false);
+  const [dnsMessage, setDnsMessage] = useState("");
+  const pollTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Step 4 state
   const [mbLocalPart, setMbLocalPart] = useState("");
@@ -69,6 +74,14 @@ export default function OnboardingPage() {
   const [mbPassword, setMbPassword] = useState("");
   const [mbError, setMbError] = useState("");
   const [mbLoading, setMbLoading] = useState(false);
+
+  useEffect(() => {
+    const timers = pollTimers.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.length = 0;
+    };
+  }, []);
 
   // Copy to clipboard helper
   const [copied, setCopied] = useState("");
@@ -79,17 +92,50 @@ export default function OnboardingPage() {
     });
   }
 
+  /** Re-read the domain and its record results from the server. */
+  async function refreshDomainState(domainId: string) {
+    const [dRes, rRes] = await Promise.all([
+      apiRequest(`/api/domains/${domainId}/`),
+      apiRequest(`/api/domains/${domainId}/records/`),
+    ]);
+    if (dRes.ok) {
+      const fresh = await dRes.json();
+      setDomain((prev) => (prev ? { ...prev, ...fresh } : fresh));
+    }
+    if (rRes.ok) {
+      setDnsRecordResults(await rRes.json());
+      setDnsChecked(true);
+    }
+  }
+
+  /**
+   * The check endpoint answers 202 with the *last known* state, not the result
+   * of this run — the lookups happen in a worker. Treating that payload as the
+   * outcome would show a stale verdict, so we report that the check started
+   * and re-read the real result as it lands.
+   */
   async function handleCheckDNS() {
     if (!domain) return;
+    const domainId = domain.id;
     setDnsChecking(true);
+    setDnsMessage("");
     try {
-      const res = await apiRequest(`/api/domains/${domain.id}/check/`, { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        setDnsRecordResults(data.records ?? []);
-        setDnsChecked(true);
-        // Update domain state with fresh score/status
-        setDomain((prev) => prev ? { ...prev, ...data.domain } : data.domain);
+      const res = await apiRequest(`/api/domains/${domainId}/check/`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (res.status === 202) {
+        setDnsMessage(data?.detail ?? "DNS check started.");
+        pollTimers.current.forEach(clearTimeout);
+        pollTimers.current = [5000, 15000, 30000].map((delay) =>
+          setTimeout(() => {
+            refreshDomainState(domainId).catch(() => {
+              /* a transient refresh failure leaves the previous result on screen */
+            });
+          }, delay)
+        );
+      } else {
+        setDnsMessage(
+          data?.detail ?? "The DNS check could not be started. Please try again shortly."
+        );
       }
     } finally {
       setDnsChecking(false);
@@ -282,16 +328,69 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* ── Step 2: DNS Records ─────────────────────────────────── */}
+        {/* ── Step 2: Verify ownership ────────────────────── */}
         {step === 2 && domain && (
           <div>
+            <ShieldCheck className="mb-4 h-8 w-8 text-cyan-600" />
             <h1 className="text-3xl font-black tracking-tight text-slate-950">
-              Configure DNS records
+              Verify domain ownership
+            </h1>
+            <p className="mt-2 text-slate-600">
+              Before MateMail will handle mail for{" "}
+              <strong>{domain.domain}</strong>, you need to prove the domain is
+              yours. Publish the TXT record below in your DNS provider, then run
+              the check. This is what stops anyone else from claiming your
+              domain.
+            </p>
+
+            <DomainOwnershipCard
+              className="mt-6"
+              domain={domain}
+              onChange={(updated) =>
+                setDomain((prev) => (prev ? { ...prev, ...updated } : prev))
+              }
+            />
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setStep(1)}
+                className="border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => setStep(3)}
+                disabled={!domain.ownership_verified}
+                title={
+                  domain.ownership_verified
+                    ? undefined
+                    : "Verify ownership to continue"
+                }
+                className="bg-cyan-500 px-6 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Continue to DNS setup
+              </button>
+            </div>
+
+            {!domain.ownership_verified && (
+              <p className="mt-3 text-xs text-slate-400">
+                DNS changes can take a few minutes to appear. You can leave this
+                page and finish from the Domains page at any time.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── Step 3: Mail DNS records + health check ──────── */}
+        {step === 3 && domain && (
+          <div>
+            <h1 className="text-3xl font-black tracking-tight text-slate-950">
+              Configure mail records
             </h1>
             <p className="mt-2 text-slate-600">
               Add these records in your DNS provider for{" "}
-              <strong>{domain.domain}</strong>. Verification is automatic once
-              records propagate (usually within a few minutes).
+              <strong>{domain.domain}</strong>, then run the health check.
+              Propagation usually completes within minutes.
             </p>
 
             <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -339,36 +438,6 @@ export default function OnboardingPage() {
               ))}
             </div>
 
-            <div className="mt-6 flex gap-3">
-              <button
-                onClick={() => setStep(1)}
-                className="border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              >
-                Back
-              </button>
-              <button
-                onClick={() => setStep(3)}
-                className="bg-cyan-500 px-6 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
-              >
-                I&apos;ve added these records
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── Step 3: Verify ──────────────────────────────────────── */}
-        {step === 3 && domain && (
-          <div>
-            <ShieldCheck className="mb-4 h-8 w-8 text-cyan-600" />
-            <h1 className="text-3xl font-black tracking-tight text-slate-950">
-              Verify DNS records
-            </h1>
-            <p className="mt-2 text-slate-600">
-              Once you&apos;ve published the DNS records, click{" "}
-              <strong>Check DNS</strong> to verify them. Propagation can take
-              up to 48 hours but usually completes within minutes.
-            </p>
-
             {/* Check button */}
             <div className="mt-6">
               <button
@@ -377,9 +446,15 @@ export default function OnboardingPage() {
                 className="inline-flex items-center gap-2 bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:opacity-60"
               >
                 <RefreshCw className={`h-4 w-4 ${dnsChecking ? "animate-spin" : ""}`} />
-                {dnsChecking ? "Checking…" : dnsChecked ? "Re-check DNS" : "Check DNS now"}
+                {dnsChecking ? "Starting…" : dnsChecked ? "Re-check DNS" : "Check DNS now"}
               </button>
             </div>
+
+            {dnsMessage && (
+              <p className="mt-3 border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                {dnsMessage} Results appear here as they arrive.
+              </p>
+            )}
 
             {/* Results */}
             <div className="mt-4 space-y-2">
@@ -472,6 +547,15 @@ export default function OnboardingPage() {
             </p>
 
             <div className="mt-8 max-w-md space-y-4">
+              {/* The API refuses a mailbox on an unverified domain, so say why
+                  here rather than letting the customer meet a bare 409. */}
+              {!domain.ownership_verified && (
+                <OwnershipRequiredNotice
+                  domain={domain.domain}
+                  action="Mailbox creation"
+                />
+              )}
+
               {mbError && (
                 <div className="flex items-start gap-3 border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -536,6 +620,7 @@ export default function OnboardingPage() {
                 <button
                   onClick={handleCreateMailbox}
                   disabled={
+                    !domain.ownership_verified ||
                     !mbLocalPart.trim() ||
                     !mbFullName.trim() ||
                     mbPassword.length < 10 ||

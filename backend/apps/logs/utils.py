@@ -19,11 +19,13 @@ def log_event(
 
     ip_address = None
     if request is not None:
-        x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-        if x_forwarded_for:
-            ip_address = x_forwarded_for.split(",")[0].strip()
-        else:
-            ip_address = request.META.get("REMOTE_ADDR")
+        # The leftmost X-Forwarded-For entry is whatever the caller put there.
+        # An audit trail that records an attacker-chosen address is worse than
+        # one that records none, because it reads as evidence. get_client_ip
+        # trusts only the hops our own infrastructure added.
+        from apps.security.client_ip import get_client_ip
+
+        ip_address = get_client_ip(request)
         if not source and hasattr(request, "user") and request.user.is_authenticated:
             source = request.user.email
 

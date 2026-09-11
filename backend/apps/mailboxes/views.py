@@ -1,12 +1,16 @@
 import logging
 
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.domains.models import Domain
+from apps.domains.verification import DomainNotVerified, assert_provisionable
 from apps.mail_engine.errors import MailEngineError
 from apps.billing.utils import check_mailbox_limit
+from apps.security import ratelimit
+from apps.security.limits import MAILBOX_CREATE_PER_TENANT
 from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
 from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
@@ -53,6 +57,24 @@ class MailboxListCreateView(APIView):
         return Response(MailboxSerializer(mailboxes, many=True).data)
 
     def post(self, request):
+        # Plan limits cap the total; this caps the rate. A tenant whose plan
+        # allows many mailboxes should still not be able to script thousands of
+        # provisioning calls into the Mail Engine in a minute.
+        decision = ratelimit.hit(
+            MAILBOX_CREATE_PER_TENANT.bucket,
+            str(request.tenant.id),
+            limit=MAILBOX_CREATE_PER_TENANT.limit,
+            window=MAILBOX_CREATE_PER_TENANT.window,
+        )
+        if not decision.allowed:
+            raise Throttled(
+                wait=decision.retry_after,
+                detail=(
+                    "Too many mailboxes created recently. Please wait a little "
+                    "before creating more."
+                ),
+            )
+
         allowed, msg = check_mailbox_limit(request.tenant)
         if not allowed:
             return Response({"detail": msg}, status=402)
@@ -65,6 +87,13 @@ class MailboxListCreateView(APIView):
         domain = Domain.objects.for_tenant(request.tenant).filter(pk=data["domain_id"]).first()
         if not domain:
             return Response({"domain_id": "Domain not found in this workspace."}, status=400)
+
+        # GATE: creating a mailbox provisions its domain into the engine as a
+        # side effect, so the same ownership rule applies here.
+        try:
+            assert_provisionable(domain)
+        except DomainNotVerified as exc:
+            return Response({"domain_id": exc.customer_message}, status=409)
 
         if Mailbox.objects.for_tenant(request.tenant).filter(
             local_part=data["local_part"], domain=domain
@@ -176,6 +205,12 @@ class MailboxReProvisionView(APIView):
         mb = Mailbox.objects.for_tenant(request.tenant).select_related("domain").filter(pk=pk).first()
         if not mb:
             return Response({"detail": "Not found."}, status=404)
+
+        # GATE: re-provisioning talks to the engine too.
+        try:
+            assert_provisionable(mb.domain)
+        except DomainNotVerified as exc:
+            return Response({"detail": exc.customer_message}, status=409)
 
         serializer = MailboxReProvisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

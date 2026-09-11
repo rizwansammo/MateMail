@@ -8,4 +8,5 @@ urlpatterns = [
     path("invites/<uuid:invite_id>/", views.TeamInviteRevokeView.as_view(), name="invite-revoke"),
     path("apikeys/", views.APIKeyListView.as_view(), name="apikey-list"),
     path("apikeys/<uuid:key_id>/", views.APIKeyRevokeView.as_view(), name="apikey-revoke"),
+    path("apikeys/<uuid:key_id>/scopes/", views.APIKeyDetailView.as_view(), name="apikey-update"),
 ]

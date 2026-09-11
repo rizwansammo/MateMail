@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Globe, ChevronRight, RefreshCw } from "lucide-react";
+import { Plus, Globe, ChevronRight, RefreshCw, ShieldAlert } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 
 interface Domain {
@@ -12,6 +12,7 @@ interface Domain {
   dns_health_score: number;
   dkim_selector: string;
   mail_service_ready: boolean;
+  ownership_verified: boolean;
   added_at: string;
   verified_at: string | null;
 }
@@ -156,7 +157,14 @@ export default function DomainsPage() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-slate-900">{d.domain}</p>
                 <div className="mt-1">
-                  <HealthBar score={d.dns_health_score} />
+                  {d.ownership_verified ? (
+                    <HealthBar score={d.dns_health_score} />
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700">
+                      <ShieldAlert className="h-3.5 w-3.5" />
+                      Verify ownership to start mail setup
+                    </span>
+                  )}
                 </div>
               </div>
               <span

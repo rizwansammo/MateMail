@@ -19,6 +19,8 @@ export interface Tenant {
   plan: string;
 }
 
+export type DomainOwnershipStatus = "pending" | "verified";
+
 export interface Domain {
   id: string;
   domain: string;
@@ -26,6 +28,19 @@ export interface Domain {
   dns_health_score: number;
   dkim_selector: string;
   dkim_public_key: string;
+  /**
+   * Ownership proof. A domain stays `pending` until its verification TXT
+   * record resolves, and nothing is provisioned for it until then.
+   */
+  ownership_status: DomainOwnershipStatus;
+  ownership_verified: boolean;
+  ownership_verified_at: string | null;
+  verification_record_type: string;
+  verification_record_name: string;
+  verification_record_value: string;
+  verification_instructions: string;
+  verification_last_checked_at: string | null;
+  verification_last_error: string;
   added_at: string;
   verified_at: string | null;
 }

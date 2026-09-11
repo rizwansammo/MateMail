@@ -67,14 +67,46 @@ def check_mailbox_limit(tenant):
     return True, ""
 
 
-def check_member_limit(tenant):
-    """Returns (allowed: bool, error_message: str)."""
+def count_member_slots(tenant) -> int:
+    """
+    Seats currently spoken for: active members plus outstanding invites.
+
+    A pending invite reserves a seat. The alternative — counting only accepted
+    members — lets a workspace on a three-seat plan send thirty invites and end
+    up with thirty members, because each acceptance individually looks fine
+    against a count taken before any of them landed. Reserving means an admin
+    must revoke an invite to free a seat, which is the behaviour a customer can
+    reason about. Documented in docs/SECURITY.md.
+    """
+    from django.utils import timezone
+
+    active = tenant.memberships.filter(status="active").count()
+    pending = tenant.invites.filter(
+        is_revoked=False,
+        accepted_at__isnull=True,
+        expires_at__gt=timezone.now(),
+    ).count()
+    return active + pending
+
+
+def check_member_limit(tenant, *, additional: int = 1):
+    """
+    Returns (allowed: bool, error_message: str).
+
+    `additional` is how many seats the caller is about to take. Callers must
+    run this inside the same transaction that creates the membership or invite,
+    with the tenant row locked — see `apps.tenants.views` — or two concurrent
+    invites can both read the same count and both succeed.
+    """
     plan = get_plan(tenant)
     if not plan:
         return True, ""
     if is_trial_expired(tenant):
         return False, "Your free trial has expired."
-    current = tenant.memberships.filter(status="active").count()
-    if current >= plan.max_members:
-        return False, f"Your {plan.display_name} plan allows up to {plan.max_members} team member(s). Upgrade to add more."
+    if count_member_slots(tenant) + additional > plan.max_members:
+        return False, (
+            f"Your {plan.display_name} plan allows up to {plan.max_members} "
+            f"team member(s), including pending invitations. Remove a member "
+            f"or revoke an invitation, or upgrade your plan."
+        )
     return True, ""

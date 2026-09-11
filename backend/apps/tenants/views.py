@@ -1,5 +1,7 @@
 import logging
 
+from django.conf import settings
+from django.db import transaction
 from django.db.models import Sum
 from django.utils.text import slugify
 from rest_framework import status
@@ -7,8 +9,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from django.contrib.auth import get_user_model
+
 from apps.accounts.serializers import WorkspaceSwitchSerializer
 from apps.accounts.tokens import make_tokens
+from apps.accounts.views import authenticated_response
+from apps.billing.utils import check_member_limit
 from .models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
 from .permissions import IsTenantAdmin, IsTenantOwner
 from .serializers import (
@@ -49,7 +55,17 @@ class WorkspaceListView(APIView):
 
 
 class WorkspaceCreateView(APIView):
-    """Create an additional workspace for the authenticated user."""
+    """
+    Create an additional workspace for the authenticated user.
+
+    Capped by MAX_WORKSPACES_PER_USER. Each workspace carries a trial
+    subscription and its own domains and mailboxes, so an uncapped endpoint is
+    both a trial-abuse path and a way for one account to consume the platform's
+    provisioning capacity.
+
+    Only workspaces the user *owns* count. Being invited into other people's
+    workspaces is not abuse and must not stop someone creating their own.
+    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -57,23 +73,45 @@ class WorkspaceCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         name = serializer.validated_data["name"]
 
-        slug = _unique_slug(slugify(name))
-        tenant = Tenant.objects.create(
-            name=name,
-            slug=slug,
-            owner=request.user,
-            status=TenantStatus.TRIAL,
-        )
-        TenantMembership.objects.create(
-            tenant=tenant,
-            user=request.user,
-            role=MemberRole.OWNER,
-            status=MemberStatus.ACTIVE,
-        )
+        cap = getattr(settings, "MAX_WORKSPACES_PER_USER", 5)
+
+        with transaction.atomic():
+            # Lock the user row so two simultaneous requests cannot both read
+            # the same count and both create. There is no natural row to lock
+            # on the tenant side — the row being counted does not exist yet.
+            User = get_user_model()
+            User.objects.select_for_update().filter(pk=request.user.pk).first()
+
+            owned = Tenant.objects.filter(owner=request.user).count()
+            if owned >= cap:
+                return Response(
+                    {
+                        "detail": (
+                            f"You can create up to {cap} workspaces. "
+                            f"Delete one you no longer need, or contact support "
+                            f"if you need more."
+                        )
+                    },
+                    status=403,
+                )
+
+            slug = _unique_slug(slugify(name))
+            tenant = Tenant.objects.create(
+                name=name,
+                slug=slug,
+                owner=request.user,
+                status=TenantStatus.TRIAL,
+            )
+            TenantMembership.objects.create(
+                tenant=tenant,
+                user=request.user,
+                role=MemberRole.OWNER,
+                status=MemberStatus.ACTIVE,
+            )
+
         tokens = make_tokens(request.user, tenant_id=tenant.id)
-        return Response(
-            {**tokens, "tenant": TenantSerializer(tenant).data},
-            status=201,
+        return authenticated_response(
+            tokens, {"tenant": TenantSerializer(tenant).data}, status=201
         )
 
 
@@ -130,9 +168,12 @@ class WorkspaceSwitchView(APIView):
             return Response({"detail": "Workspace not found or access denied."}, status=404)
 
         tokens = make_tokens(request.user, tenant_id=tenant_id)
-        return Response(
+        # Switching workspace mints a new pair, so the cookie is replaced as
+        # well — otherwise the refresh token would still carry the old
+        # tenant_id and the next refresh would silently switch back.
+        return authenticated_response(
+            tokens,
             {
-                **tokens,
                 "tenant": {
                     "id": str(membership.tenant.id),
                     "name": membership.tenant.name,
@@ -140,7 +181,7 @@ class WorkspaceSwitchView(APIView):
                     "status": membership.tenant.status,
                     "role": membership.role,
                 },
-            }
+            },
         )
 
 
@@ -245,23 +286,37 @@ class WorkspaceMemberListView(APIView):
         if target_user == request.user:
             return Response({"detail": "You are already a member of this workspace."}, status=400)
 
-        existing = TenantMembership.objects.filter(tenant_id=pk, user=target_user).first()
-        if existing:
-            if existing.status == MemberStatus.ACTIVE:
-                return Response({"detail": "That user is already a member."}, status=400)
-            existing.role = role
-            existing.status = MemberStatus.ACTIVE
-            existing.invited_by = request.user
-            existing.save(update_fields=["role", "status", "invited_by", "updated_at"])
-            return Response(TenantMembershipSerializer(existing).data)
+        # Seat accounting runs inside the transaction that takes the seat, with
+        # the tenant row locked: two admins adding members at once would
+        # otherwise both read the pre-change count and both be allowed.
+        with transaction.atomic():
+            tenant = Tenant.objects.select_for_update().get(pk=pk)
 
-        new_mem = TenantMembership.objects.create(
-            tenant_id=pk,
-            user=target_user,
-            role=role,
-            status=MemberStatus.ACTIVE,
-            invited_by=request.user,
-        )
+            existing = TenantMembership.objects.filter(tenant_id=pk, user=target_user).first()
+            if existing:
+                if existing.status == MemberStatus.ACTIVE:
+                    return Response({"detail": "That user is already a member."}, status=400)
+                # Reactivating a removed member takes a seat just as a new one does.
+                allowed, msg = check_member_limit(tenant)
+                if not allowed:
+                    return Response({"detail": msg}, status=403)
+                existing.role = role
+                existing.status = MemberStatus.ACTIVE
+                existing.invited_by = request.user
+                existing.save(update_fields=["role", "status", "invited_by", "updated_at"])
+                return Response(TenantMembershipSerializer(existing).data)
+
+            allowed, msg = check_member_limit(tenant)
+            if not allowed:
+                return Response({"detail": msg}, status=403)
+
+            new_mem = TenantMembership.objects.create(
+                tenant_id=pk,
+                user=target_user,
+                role=role,
+                status=MemberStatus.ACTIVE,
+                invited_by=request.user,
+            )
         return Response(TenantMembershipSerializer(new_mem).data, status=201)
 
 

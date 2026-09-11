@@ -42,6 +42,24 @@ def provision_domain_task(self, domain_id: str):
         logger.warning("provision_domain_task: domain %s no longer exists", domain_id)
         return
 
+    # GATE (task boundary): fail closed regardless of which caller enqueued
+    # this. A view-only check could be bypassed by any future code path that
+    # calls .delay() directly, so the refusal lives here too — and this is the
+    # last place before the adapter is reached.
+    from apps.domains.verification import DomainNotVerified, assert_provisionable
+
+    try:
+        assert_provisionable(domain)
+    except DomainNotVerified as exc:
+        logger.error(
+            "REFUSED provisioning unverified domain %s (tenant %s) — %s",
+            domain.domain, domain.tenant_id, exc.technical_detail,
+        )
+        domain.mail_engine_error = exc.customer_message
+        domain.save(update_fields=["mail_engine_error"])
+        # Deliberately not retried: ownership will not appear by waiting.
+        return
+
     plan = None
     try:
         from apps.billing.utils import get_plan

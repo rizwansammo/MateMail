@@ -29,11 +29,6 @@ on:
         description: "Type MateServer to confirm you intend to deploy to production"
         required: true
         type: string
-      run_migrations:
-        description: "Apply database migrations (the compose stack runs them on start)"
-        required: false
-        type: boolean
-        default: true
 
 concurrency:
   # Never allow two deployments to interleave on the same host.
@@ -117,13 +112,12 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
-          RUN_MIGRATIONS: ${{ inputs.run_migrations }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: IMAGE_TAG,RUN_MIGRATIONS
+          envs: IMAGE_TAG
           timeout: 60s
           command_timeout: 15m
           script: |
@@ -178,8 +172,17 @@ jobs:
             docker compose pull
 
             echo "▸ Starting services..."
-            # The compose stack runs migrations as a one-shot `migrate` service
-            # that must complete before backend, worker and beat start.
+            # Migrations are MANDATORY on every production deployment and are
+            # not optional. The compose stack runs them as a one-shot `migrate`
+            # service whose successful completion gates backend, worker and beat
+            # (`condition: service_completed_successfully`). A failed migration
+            # therefore stops the deployment instead of starting code against a
+            # stale schema.
+            #
+            # There is deliberately no `run_migrations` input: it existed, did
+            # nothing, and setting it to false would have implied a skip that
+            # could not happen. A control that does not control is worse than
+            # no control.
             docker compose up -d --remove-orphans
 
             echo "▸ Waiting for backend health..."
@@ -206,7 +209,17 @@ jobs:
             echo ""
 
             docker compose ps
-            docker image prune -f --filter "until=168h" || true
+
+            # NO image prune here. MateServer is a shared production host
+            # running NetaMate, TalkRoom, MateDesk, MateAssist, MateConnect and
+            # Portfolio. `docker image prune` is host-global — it would delete
+            # images belonging to applications this workflow has no business
+            # touching, and a pruned image that another stack later needs to
+            # recreate a container is an outage in someone else's service.
+            #
+            # Image cleanup belongs to MateServer's own maintenance process,
+            # which can reason about every application on the host. Do not add
+            # any host-global docker command to this workflow.
             echo "══ Deployment complete ══"
 
       - name: Summary

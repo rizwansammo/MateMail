@@ -49,6 +49,11 @@ x-backend-env: &backend_env
   MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
   MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.online}
   DKIM_SELECTOR: ${DKIM_SELECTOR:-mm1}
+  # INTERIM (DEC-007r, removed in P4): encrypts the DKIM private keys Django
+  # still stores. Required — `manage.py check --deploy` fails without it
+  # (domains.E001) rather than silently storing signing keys in plaintext.
+  # Must be distinct from DJANGO_SECRET_KEY.
+  DKIM_ENCRYPTION_KEY: ${DKIM_ENCRYPTION_KEY:?required}
   FRONTEND_URL: ${FRONTEND_URL:-https://app.matemail.online}
   APP_BASE_URL: ${APP_BASE_URL:-https://app.matemail.online}
   WEBMAIL_BASE_URL: ${WEBMAIL_BASE_URL:-https://webmail.matemail.online}
@@ -60,7 +65,20 @@ x-backend-env: &backend_env
   EMAIL_USE_TLS: ${EMAIL_USE_TLS:-True}
   EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
   EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
-  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-MateMail <noreply@matemail.online>}
+  EMAIL_USE_SSL: ${EMAIL_USE_SSL:-False}
+  EMAIL_TIMEOUT: ${EMAIL_TIMEOUT:-10}
+  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-MateMail <noreply@mail.matemail.online>}
+
+  # ── Abuse controls (P3b) ─────────────────────────────────────────────────
+  # Proxy hops whose X-Forwarded-For may be trusted. Host-native nginx is one.
+  # Raising this lets a caller forge the address every per-IP limit keys on.
+  TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}
+  MAX_WORKSPACES_PER_USER: ${MAX_WORKSPACES_PER_USER:-5}
+
+  # ── Refresh-token cookie (P3c) ───────────────────────────────────────────
+  # Must stay True in production: the cookie carries the durable credential.
+  REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-True}
+  REFRESH_COOKIE_SAMESITE: ${REFRESH_COOKIE_SAMESITE:-Strict}
 
 services:
 

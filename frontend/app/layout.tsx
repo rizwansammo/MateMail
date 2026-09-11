@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import { AuthProvider } from "@/contexts/auth-context";
 import "./globals.css";
 
@@ -25,11 +26,35 @@ export const metadata: Metadata = {
   ),
 };
 
-export default function RootLayout({
+/**
+ * Every route renders per request.
+ *
+ * The CSP nonce in `middleware.ts` is generated per request, and Next.js can
+ * only stamp it onto script tags for a route it renders at request time. A
+ * statically prerendered page has its HTML — and its inline hydration scripts
+ * — fixed at build time, with no nonce in them. Serving those under a nonce
+ * policy blocks the scripts and the page renders as a dead shell, which is the
+ * P2.5 failure with the protection now actively working against us.
+ *
+ * Verified rather than assumed: before this line the production server emitted
+ * 19 script tags and 0 nonce attributes.
+ *
+ * The cost is the static optimisation for the marketing page. Everything under
+ * /app and /admin is an authenticated client-rendered dashboard that was never
+ * meaningfully static, and the pages remain cheap to render — nothing here
+ * fetches during SSR.
+ */
+export const dynamic = "force-dynamic";
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Reading the request headers is what tells Next.js this tree is dynamic and
+  // makes the nonce available to its script emission.
+  await headers();
+
   return (
     <html
       lang="en"

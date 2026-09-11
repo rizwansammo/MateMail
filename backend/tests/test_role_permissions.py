@@ -261,11 +261,10 @@ class RolePermissionMatrixTest(TestCase):
     # ── Explicitly narrower: DNS re-check is allowed for support ─────────────
 
     def test_dns_check_allows_support_but_not_readonly(self):
-        # Stub the resolver: this test is about authorization, and the suite must
-        # not depend on outbound DNS (four lookups x 5s timeout per call).
-        with mock.patch(
-            "apps.dnshealth.views.check_dns_for_domain", side_effect=lambda d: d
-        ):
+        # The check is asynchronous since P3: the view enqueues a task rather
+        # than resolving inline. Patch the dispatch, so this stays a test about
+        # authorization and never touches DNS or a broker.
+        with mock.patch("apps.dnshealth.views.check_domain_dns.delay"):
             self.assert_roles(
                 (MemberRole.OWNER, MemberRole.ADMIN, MemberRole.SUPPORT),
                 lambda c: c.post(f"/api/domains/{self.domain.id}/check/"),

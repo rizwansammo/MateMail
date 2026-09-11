@@ -147,18 +147,64 @@ MAIL_STORAGE_PATH=/var/mail/vhosts
 MAILCOW_API_URL=http://mailcow-nginx:8080
 MAILCOW_API_KEY=<internal secret>
 
-# Email sending (for Django transactional email)
-EMAIL_HOST=localhost
+# Transactional application email — EXTERNAL PROVIDER ONLY.
+#
+# Not localhost, and not MateMail's own Mail Engine. These messages are how a
+# customer verifies an address and recovers an account; routing them through
+# the system they might be trying to recover makes recovery impossible exactly
+# when it is needed. EMAIL_HOST has no default — an unset or loopback value is
+# detected and logged as an error rather than silently discarding mail.
+EMAIL_HOST=smtp.<your-provider>.example
 EMAIL_PORT=587
 EMAIL_USE_TLS=True
-EMAIL_HOST_USER=noreply@matemail.online
-EMAIL_HOST_PASSWORD=<mailbox password>
+EMAIL_USE_SSL=False
+EMAIL_TIMEOUT=10
+EMAIL_HOST_USER=<provider username / API key id>
+EMAIL_HOST_PASSWORD=<provider password / API key>
+DEFAULT_FROM_EMAIL=MateMail <noreply@mail.matemail.online>
+
+# DKIM private-key encryption at rest (INTERIM — DEC-007r, removed in P4).
+# REQUIRED: `manage.py check --deploy` fails with domains.E001 without it.
+# Must differ from DJANGO_SECRET_KEY. Generate on the server:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+DKIM_ENCRYPTION_KEY=<fernet key>
+
+# Abuse controls (P3b)
+TRUSTED_PROXY_COUNT=1          # host-native nginx is exactly one hop
+MAX_WORKSPACES_PER_USER=5
+
+# Refresh-token cookie (P3c)
+REFRESH_COOKIE_SECURE=True     # must stay True in production
+REFRESH_COOKIE_SAMESITE=Strict
 
 # JWT
 JWT_SECRET_KEY=<strong secret>
 JWT_ACCESS_TOKEN_LIFETIME_MINUTES=15
 JWT_REFRESH_TOKEN_LIFETIME_DAYS=7
 ```
+
+### Transactional email — external setup still required
+
+The application side is complete and tested. **No real delivery test has been
+performed**, and this must not be treated as production-ready until one has.
+
+Still to be done, outside the code and outside this phase:
+
+1. **Choose and open a transactional provider account.** Anything speaking
+   SMTP works — nothing provider-specific is compiled in, so switching later is
+   a change of environment variables.
+2. **Create credentials** and set `EMAIL_HOST`, `EMAIL_HOST_USER` and
+   `EMAIL_HOST_PASSWORD` on the server. Never in Git.
+3. **Add the sending subdomain `mail.matemail.online`** at the DNS provider,
+   with the SPF and DKIM records the provider specifies. A dedicated subdomain
+   keeps application mail's reputation separate from customer mail: a customer
+   incident must not stop password resets going out.
+4. **Send one real message end to end** — trigger a password reset to an
+   address you control and confirm it arrives and passes SPF/DKIM.
+
+**No MX, SPF, DKIM or DMARC record was created or changed in this phase.** The
+records above are for the dedicated *application* sending subdomain and are
+separate from customer mail DNS.
 
 ---
 

@@ -11,6 +11,7 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts.challenge import MAX_ATTEMPTS
+from apps.accounts.cookies import REFRESH_COOKIE_NAME
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
     TEST_PASSWORD,
@@ -90,14 +91,20 @@ class TwoFactorChallengeTest(TestCase):
 
     def test_valid_2fa_returns_usable_tokens(self):
         challenge = self._challenge()
-        res = APIClient().post(
+        client = APIClient()
+        res = client.post(
             "/api/auth/2fa/verify/",
             {"partial_token": challenge, "code": totp_now(self.secret)},
             format="json",
         )
         self.assertEqual(res.status_code, 200)
         self.assertIn("access", res.data)
-        self.assertIn("refresh", res.data)
+        # Since P3c the refresh token is an HttpOnly cookie, never a body
+        # field. Asserting both halves: it arrived, and it did not arrive
+        # somewhere a script could read it.
+        self.assertNotIn("refresh", res.data)
+        self.assertIn(REFRESH_COOKIE_NAME, client.cookies)
+        self.assertTrue(client.cookies[REFRESH_COOKIE_NAME]["httponly"])
 
         # The issued access token must actually work.
         me = bearer_client(res.data["access"]).get("/api/auth/me/")

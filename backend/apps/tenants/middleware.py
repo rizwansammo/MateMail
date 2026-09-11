@@ -34,6 +34,16 @@ class TenantMiddleware:
         if path.startswith("/api/platform/") or path.startswith("/api/auth/") or path.startswith("/api/health/"):
             return self.get_response(request)
 
+        # An API key is not a JWT, and simplejwt cannot be asked politely.
+        # It claims every "Bearer ..." header and *raises* InvalidToken when
+        # the value will not parse, so an `mm_` key used to take the `except`
+        # branch below and return with no tenant resolved — which made every
+        # role-aware permission class refuse the request. Dispatch on the
+        # credential type rather than discovering it from an exception.
+        if request.META.get("HTTP_AUTHORIZATION", "").startswith("Bearer mm_"):
+            self._try_api_key_auth(request)
+            return self.get_response(request)
+
         # Attempt JWT authentication.
         #
         # This middleware runs outside DRF's exception handling, so any exception
@@ -48,8 +58,6 @@ class TenantMiddleware:
             return self.get_response(request)
 
         if result is None:
-            # No JWT — try API key authentication
-            self._try_api_key_auth(request)
             return self.get_response(request)
 
         user, token = result
@@ -102,9 +110,12 @@ class TenantMiddleware:
             return
         if api_key.expires_at and timezone.now() > api_key.expires_at:
             return
-        # Cache user so APIKeyAuthentication (DRF) avoids a second DB lookup
+        # Cache user so APIKeyAuthentication (DRF) avoids a second DB lookup.
+        # The key object is attached as well: APIKeyScopeMiddleware runs before
+        # DRF and needs the scopes, and DRF needs it for request.auth.
         request._mm_api_key_user = api_key.created_by
         request._mm_api_key_id = api_key.id
+        request._mm_api_key = api_key
         request.tenant = api_key.tenant
         try:
             membership = TenantMembership.objects.select_related("tenant").get(

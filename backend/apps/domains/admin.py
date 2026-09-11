@@ -17,4 +17,6 @@ class DomainAdmin(admin.ModelAdmin):
 
     @admin.display(boolean=True, description="DKIM private key present")
     def has_dkim_private_key(self, obj):
-        return bool(obj.dkim_private_key)
+        # Presence only. The value is encrypted at rest and must never be
+        # rendered here — the admin is the easiest place to leak a signing key.
+        return obj.has_dkim_private_key

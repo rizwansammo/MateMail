@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { api, ApiError } from "@/lib/api";
-import { clearTokens, getRefreshToken, setTokens } from "@/lib/auth";
+import { clearTokens, purgeLegacyRefreshToken, setAccessToken } from "@/lib/auth";
 
 export interface AuthUser {
   id: string;
@@ -45,7 +45,7 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   verify2fa: (partial_token: string, code: string) => Promise<void>;
   switchWorkspace: (tenant_id: string) => Promise<void>;
-  setAuthResult: (data: { access: string; refresh: string; user: AuthUser; tenant: AuthTenant }) => void;
+  setAuthResult: (data: { access: string; user: AuthUser; tenant: AuthTenant }) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -56,28 +56,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const setAuthResult = useCallback(
-    (data: { access: string; refresh: string; user: AuthUser; tenant: AuthTenant }) => {
-      setTokens(data.access, data.refresh);
+    (data: { access: string; user: AuthUser; tenant: AuthTenant }) => {
+      // The refresh token is not here to be stored — it arrived as an
+      // HttpOnly cookie the server set on this response.
+      setAccessToken(data.access);
       setUser(data.user);
       setTenant(data.tenant);
     },
     []
   );
 
-  // Restore session from stored refresh token on mount
+  // Restore the session on mount by exchanging the refresh cookie.
+  //
+  // There is nothing to check beforehand: the cookie is invisible to this
+  // code, so the only way to know whether a session exists is to ask. A 401
+  // simply means "not signed in" and is not an error worth surfacing.
   useEffect(() => {
     const restore = async () => {
-      const refresh = getRefreshToken();
-      if (!refresh) {
-        setIsLoading(false);
-        return;
-      }
+      // A browser that used a pre-P3c build still holds a live refresh token
+      // in localStorage. Clear it on the first load of the new build.
+      purgeLegacyRefreshToken();
       try {
-        const data = await api.post<{
-          access: string;
-          refresh: string;
-        }>("/api/auth/refresh/", { refresh });
-        setTokens(data.access, data.refresh ?? refresh);
+        const data = await api.post<{ access: string }>("/api/auth/refresh/");
+        setAccessToken(data.access);
         const me = await api.get<AuthUser>("/api/auth/me/");
         setUser(me);
         // Restore tenant from stored token payload
@@ -106,7 +107,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         requires_2fa?: boolean;
         partial_token?: string;
         access?: string;
-        refresh?: string;
         user?: AuthUser;
         tenant?: AuthTenant;
       }>("/api/auth/login/", { email, password });
@@ -115,7 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { requires_2fa: true, partial_token: data.partial_token };
       }
 
-      setTokens(data.access!, data.refresh!);
+      setAccessToken(data.access!);
       setUser(data.user!);
       setTenant(data.tenant!);
       return { requires_2fa: false };
@@ -132,12 +132,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     ) => {
       const data = await api.post<{
         access: string;
-        refresh: string;
         user: AuthUser;
         tenant: AuthTenant;
       }>("/api/auth/signup/", { email, password, full_name, workspace_name });
 
-      setTokens(data.access, data.refresh);
+      setAccessToken(data.access);
       setUser(data.user);
       setTenant(data.tenant);
     },
@@ -145,11 +144,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    const refresh = getRefreshToken();
     try {
-      if (refresh) await api.post("/api/auth/logout/", { refresh });
+      // No body: the server reads the refresh cookie, blacklists the token and
+      // clears the cookie in its response. Always attempted, because this
+      // client cannot tell whether a cookie is present.
+      await api.post("/api/auth/logout/");
     } catch {
-      // best-effort
+      // best-effort — the local session is cleared either way
     }
     clearTokens();
     setUser(null);
@@ -160,11 +161,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (partial_token: string, code: string) => {
       const data = await api.post<{
         access: string;
-        refresh: string;
         user: AuthUser;
         tenant: AuthTenant;
       }>("/api/auth/2fa/verify/", { partial_token, code });
-      setTokens(data.access, data.refresh);
+      setAccessToken(data.access);
       setUser(data.user);
       setTenant(data.tenant);
     },
@@ -174,10 +174,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const switchWorkspace = useCallback(async (tenant_id: string) => {
     const data = await api.post<{
       access: string;
-      refresh: string;
       tenant: AuthTenant;
     }>("/api/workspaces/switch/", { tenant_id });
-    setTokens(data.access, data.refresh);
+    setAccessToken(data.access);
     setTenant(data.tenant);
   }, []);
 

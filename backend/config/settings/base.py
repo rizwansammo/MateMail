@@ -51,6 +51,7 @@ LOCAL_APPS = [
     "apps.webmail",
     "apps.mail_engine",
     "apps.smtp_policy",
+    "apps.security",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -66,6 +67,8 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "apps.tenants.middleware.TenantMiddleware",
+    # Must follow TenantMiddleware: that is where an API key is resolved.
+    "apps.security.middleware.APIKeyScopeMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -169,21 +172,37 @@ CELERY_BEAT_SCHEDULE = {
 
 # DRF
 REST_FRAMEWORK = {
+    # Order matters. simplejwt's JWTAuthentication accepts any "Bearer ..."
+    # header and *raises* InvalidToken when the value is not a JWT — it does
+    # not return None and pass to the next authenticator. With it first, every
+    # `mm_` API key was rejected with 401 before APIKeyAuthentication ever ran,
+    # so API keys had never worked at all. APIKeyAuthentication returns None
+    # for anything that is not an `mm_` token, so JWTs still reach simplejwt.
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
         "apps.teams.authentication.APIKeyAuthentication",
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    # The stock classes key on DRF's get_ident, which trusts X-Forwarded-For
+    # wholesale unless NUM_PROXIES is set — an attacker varying the header
+    # defeats every per-IP limit. These subclasses key on the trusted client
+    # address and exempt the health and internal prefixes. See
+    # apps.security.throttling.
     "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
+        "apps.security.throttling.MateMailAnonThrottle",
+        "apps.security.throttling.MateMailUserThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
         "anon": "60/min",
-        "user": "120/min",
+        # 60/min per authenticated user, per the P3 rate-limit plan. The
+        # previous 120/min predates that plan.
+        "user": "60/min",
         "auth": "5/min",
+        # Authenticated auth actions: resend verification, 2FA enrol, 2FA
+        # disable. Previously unlimited — see AuthenticatedActionThrottle.
+        "auth_action": "10/min",
     },
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
@@ -220,6 +239,48 @@ DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 APP_BASE_URL = env("APP_BASE_URL", default="http://localhost:3000")
 WEBMAIL_BASE_URL = env("WEBMAIL_BASE_URL", default="http://localhost:3000")
+
+# Transactional application email. prod.py overrides these with the external
+# provider; the default here keeps every other environment from falling back to
+# Django's global "webmaster@localhost", which names no product and would be a
+# confusing From address in a console-backend dev message.
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL", default="MateMail <noreply@mail.matemail.online>"
+)
+
+# DKIM private-key encryption at rest (INTERIM — see DEC-007r).
+#
+# P4 moves DKIM key generation and storage into the Mail Engine and drops
+# Domain.dkim_private_key entirely. Until then the existing column is
+# encrypted rather than left as plaintext in every database backup.
+#
+# Deliberately NOT derived from DJANGO_SECRET_KEY: that key signs sessions and
+# JWTs and will be rotated for unrelated reasons, and a rotation that made
+# every DKIM key undecryptable would surface as customer mail failing
+# authentication. Generate with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+#
+# Comma-separated to allow rotation: the first key encrypts, all are tried when
+# decrypting.
+DKIM_ENCRYPTION_KEYS = env("DKIM_ENCRYPTION_KEY", default="")
+
+# Refresh-token cookie. See apps.accounts.cookies for the full rationale.
+# Secure is off by default so development over plain HTTP works at all; prod.py
+# turns it on and a deployment must never override it back.
+REFRESH_COOKIE_SECURE = env.bool("REFRESH_COOKIE_SECURE", default=False)
+REFRESH_COOKIE_SAMESITE = env("REFRESH_COOKIE_SAMESITE", default="Strict")
+
+# Reverse proxies between the public internet and this application whose
+# X-Forwarded-For entries may be trusted. Host-native nginx is one hop and
+# appends the address it actually saw, so with a value of 1 the rightmost
+# entry is the real client. 0 means no proxy: only REMOTE_ADDR is trusted.
+# Setting this too high lets a caller forge their own address.
+TRUSTED_PROXY_COUNT = env.int("TRUSTED_PROXY_COUNT", default=0)
+
+# How many workspaces one user may own. Free signup plus unlimited workspace
+# creation is a trial-abuse and resource-exhaustion path, so this is capped and
+# overridable per environment without a code change.
+MAX_WORKSPACES_PER_USER = env.int("MAX_WORKSPACES_PER_USER", default=5)
 
 # Internal API secret — used by the Mail Engine policy bridge and the webmail
 # front end to call /api/internal/. nginx denies that prefix at the edge.
