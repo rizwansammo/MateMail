@@ -5,3 +5,23 @@ pytest-cov==6.0.0
 factory-boy==3.3.1
 django-stubs==5.1.1
 djangorestframework-stubs==3.15.1
+
+# Test-only. tests/test_deployment_workflow.py parses .github/workflows/*.yml
+# and deploy/docker-compose.yml to assert the deployment invariants — that the
+# deploy is manual-only, that no host-global docker prune runs on a shared box,
+# that no `:latest` tag is published. Nothing in the application imports yaml,
+# so this stays out of requirements.txt.
+#
+# It was undeclared until now and CI caught it: the module failed to import, so
+# its 12 tests were silently never discovered and the suite reported 495
+# instead of 506. A local environment that happened to have PyYAML installed
+# directly hid this.
+PyYAML==6.0.2
+
+# Test-only, and declared for the same reason. tests/test_refresh_cookie.py
+# decodes an access token to assert the tenant_id claim survives a refresh.
+# PyJWT arrives anyway as a dependency of djangorestframework-simplejwt, so CI
+# does not currently fail without this line — but a direct import that relies
+# on someone else's transitive dependency breaks silently the day that library
+# changes its JWT backend. Declare what you import.
+PyJWT==2.13.0

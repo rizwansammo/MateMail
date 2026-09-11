@@ -6,7 +6,7 @@
 **Last updated:** 2026-09-11  
 **Current phase:** P3 — IMPLEMENTED AND COMMITTED (P3a + P3b + P3c), **not yet validated end to end**  
 &nbsp;&nbsp;&nbsp;&nbsp;Committed as `5e20154`. Outstanding before P3 can be called done:  
-&nbsp;&nbsp;&nbsp;&nbsp;(a) CI on that commit is **red** — fix prepared, see “P3 follow-ups” below;  
+&nbsp;&nbsp;&nbsp;&nbsp;(a) CI is **red** — two causes found and fixed in sequence, see “P3 follow-ups” below;  
 &nbsp;&nbsp;&nbsp;&nbsp;(b) the real external transactional-email delivery test has **not** been performed;  
 &nbsp;&nbsp;&nbsp;&nbsp;(c) P3 has **not** been deployed to MateServer.  
 **Next phase:** P4 (Mail Engine install and integration) — blocked until the three items above are closed  
@@ -1625,7 +1625,8 @@ cookie and is *absent* from the body.
 
 ## P3 follow-ups — CI fix and Argon2
 
-**Date:** 2026-09-11 **Status:** complete, **not committed**, not deployed.
+**Date:** 2026-09-11 **Status:** the CI-key fix and Argon2 are committed in
+`4c79c00`; the PyYAML fix below is **not committed**. Not deployed.
 
 Three items raised on review of the pushed P3 commit `5e20154`.
 
@@ -1666,6 +1667,46 @@ Three properties worth stating:
 **`domains.E001` was not weakened.** Re-verified after the fix: with the
 variable absent, `check --deploy` still exits 1 on `domains.E001` and
 `docker compose config` still refuses. Production still fails closed.
+
+### 1b. CI was still red on `4c79c00` — a second, unrelated cause
+
+The DKIM fix worked: production compose, `check --deploy`, the migration check
+and the frontend all passed. The backend test job then failed on something the
+first fix had been hiding behind it.
+
+```
+ImportError: Failed to import test module: tests.test_deployment_workflow
+ModuleNotFoundError: No module named 'yaml'
+```
+
+**Root cause.** `tests/test_deployment_workflow.py` (added in P3a) parses the
+workflow and compose YAML, but `requirements-dev.txt` never declared PyYAML.
+The module failed to import, so unittest reported it as one failing test and
+**silently never discovered its other 12** — which is why CI counted 495 tests
+where the suite has 506. A test that does not run is worse than a missing one:
+the count looked plausible and the deployment invariants were unguarded.
+
+**Why the earlier local run did not catch it.** Verified rather than assumed:
+PyYAML 6.0.3 was present in the local scratchpad venv with `Required-by:`
+**empty** — nothing in the dependency tree pulls it in, so it had been
+installed directly at some point and masked the gap. Confirmed from the other
+direction too: installing the exact pre-fix dependency set into a bare venv
+gives Django 5.1.4 and no `yaml`, and running the suite there reports **495
+tests** and reproduces CI's `ModuleNotFoundError` verbatim.
+
+**Fix.** `PyYAML==6.0.2` added to `requirements-dev.txt` only — nothing in the
+application imports yaml, so it stays out of `requirements.txt`. A cp311 wheel
+exists, so CI's Python 3.11 installs a binary with no compiler.
+
+`PyJWT==2.13.0` was declared at the same time. `tests/test_refresh_cookie.py`
+imports `jwt` directly while PyJWT only arrives as a dependency of
+djangorestframework-simplejwt. CI does not fail on it today, but a direct
+import resting on someone else's transitive dependency breaks silently the day
+that library changes its JWT backend — the same bug class, one declarer away
+from the same outcome.
+
+An audit of every third-party import across the backend (13 top-level modules,
+checked by import in a clean venv) found no others.
 
 ### 2. Argon2 password hashing
 
