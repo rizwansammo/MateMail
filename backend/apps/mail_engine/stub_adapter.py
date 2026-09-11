@@ -25,7 +25,7 @@ from .dto import (
     MailboxSpec,
     MailboxUsage,
 )
-from .errors import Rejected
+from .errors import EngineCapabilityMissing, Rejected
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +182,18 @@ class StubAdapter(MailEngineAdapter):
         logger.debug("[stub] cancel_queue_message %s", engine_message_id)
 
     def release_quarantine_item(self, engine_message_id: str) -> None:
-        logger.debug("[stub] release_quarantine_item %s", engine_message_id)
+        """
+        Refused, matching the real engine.
+
+        The stub exists so code can be written and tested without an engine. It
+        is only useful if it refuses what the engine refuses — a stub that
+        cheerfully succeeds here would let a feature be built, tested and
+        merged against a capability mailcow 2026-07b does not have.
+        """
+        raise EngineCapabilityMissing(
+            "no quarantine release endpoint at the pinned engine version",
+            operation="release_quarantine_item",
+        )
 
     # ── Health ──────────────────────────────────────────────────────────────
 

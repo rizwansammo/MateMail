@@ -86,10 +86,80 @@ def provision_domain_task(self, domain_id: str):
         domain.save(update_fields=["mail_engine_error"])
         return
 
+    # DKIM is part of provisioning, not an optional extra. A domain marked
+    # provisioned without it would be advertised to the customer as ready while
+    # being unable to sign a single message — and unsigned mail from a new
+    # domain is how a sending reputation is destroyed before it exists. This
+    # raises on failure, so the lines below are not reached.
+    _adopt_engine_dkim(domain, task=self)
+
     domain.mail_engine_provisioned = True
     domain.mail_engine_error = ""
     domain.save(update_fields=["mail_engine_provisioned", "mail_engine_error"])
     logger.info("Domain %s provisioned in the Mail Engine", domain.domain)
+
+
+def _adopt_engine_dkim(domain, *, task=None) -> None:
+    """
+    Record the engine's public DKIM material for `domain` (DEC-007r).
+
+    **Fails closed.** Successful DKIM adoption is part of successful
+    provisioning: this raises rather than returning when the material cannot be
+    obtained, so `mail_engine_provisioned` is never set behind a domain that
+    cannot sign mail.
+
+    Generation happens **only when the engine holds no key**. That condition is
+    the whole safety property: `rotate_dkim_key` is not idempotent — every call
+    mints a new pair and invalidates the DNS record the customer has already
+    published. Calling it unconditionally from a retryable task would silently
+    break DKIM for a working domain on every retry. So: read first, generate
+    only on absence, never replace.
+
+    Transient failures reuse the caller's retry semantics; an explicit
+    rejection is terminal, exactly as for `ensure_domain`.
+    """
+    from .factory import get_adapter
+
+    adapter = get_adapter()
+    try:
+        info = adapter.get_dkim_public_key(domain.domain)
+        if info is None:
+            info = adapter.rotate_dkim_key(domain.domain, selector=domain.dkim_selector)
+            logger.info("Engine generated a DKIM key for %s", domain.domain)
+
+        # Raised inside the try on purpose: an engine that answers without
+        # usable material is a failure like any other, and must reach the same
+        # handlers below. Validating after the try would give this one case its
+        # own error path — and it would be the path that forgets to record
+        # mail_engine_error, leaving the customer with a domain that is not
+        # provisioned and no explanation of why.
+        if not info or not info.public_key:
+            raise MailEngineError(
+                "engine returned no DKIM public key", operation="adopt_engine_dkim"
+            )
+    except EngineUnavailable as exc:
+        logger.warning(
+            "DKIM material unavailable for %s: %s", domain.domain, exc.log_message
+        )
+        domain.mail_engine_error = exc.customer_message
+        domain.save(update_fields=["mail_engine_error"])
+        if task is not None:
+            raise task.retry(exc=exc)
+        raise
+    except MailEngineError as exc:
+        logger.error(
+            "DKIM adoption failed for %s: %s", domain.domain, exc.log_message
+        )
+        domain.mail_engine_error = exc.customer_message
+        domain.save(update_fields=["mail_engine_error"])
+        raise
+
+    # Public material only. DkimKeyInfo has no field that can carry a private
+    # key, and the adapter strips private fields on read — see
+    # tests/test_engine_capabilities.py.
+    domain.dkim_selector = info.selector
+    domain.dkim_public_key = info.public_key
+    domain.save(update_fields=["dkim_selector", "dkim_public_key"])
 
 
 @shared_task(

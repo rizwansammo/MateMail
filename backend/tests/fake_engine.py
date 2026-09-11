@@ -102,11 +102,16 @@ class FakeEngineSession:
     def _route(self, method, path, body):
         if path.startswith("/api/v1/get/"):
             return self._handle_get(path)
-        if method == "DELETE":
+        # The real engine routes deletes by PATH, not by HTTP verb, and its
+        # API refuses anything but POST with 405 ("only POST method is
+        # allowed" — json_api.php @ 2026-07b). This fake previously accepted
+        # DELETE, which is how the adapter's wrong verb went unnoticed: the
+        # fake was modelling a contract the engine does not offer.
+        if method != "POST":
+            return FakeResponse(405, None, text="only POST method is allowed")
+        if path.startswith("/api/v1/delete/"):
             return self._handle_delete(path, body)
-        if method == "POST":
-            return self._handle_post(path, body)
-        return FakeResponse(405, None, text="method not allowed")
+        return self._handle_post(path, body)
 
     def _handle_get(self, path):
         rest = path[len("/api/v1/get/"):].rstrip("/")

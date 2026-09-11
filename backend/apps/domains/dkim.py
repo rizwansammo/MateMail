@@ -1,3 +1,11 @@
+"""
+DEPRECATED (DEC-007r stage 1) — nothing calls this any more.
+
+MateMail no longer generates DKIM keypairs: the Mail Engine does, and it
+keeps the private half. This module is retained only so stage 2 has a
+reference for what the legacy rows contain, and is removed in stage 3
+together with Domain.dkim_private_key. Do not call it from new code.
+"""
 import base64
 
 from cryptography.hazmat.backends import default_backend

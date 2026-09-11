@@ -280,8 +280,9 @@ class AdapterContractTests:
     def test_queue_and_quarantine_actions_are_idempotent(self):
         self.adapter.cancel_queue_message("no-such-id")
         self.adapter.cancel_queue_message("no-such-id")
-        self.adapter.release_quarantine_item("no-such-id")
-        self.adapter.release_quarantine_item("no-such-id")
+        # Quarantine release is deliberately NOT part of the idempotency
+        # contract: mailcow 2026-07b has no endpoint for it, so both adapters
+        # refuse rather than pretending. Asserted in test_engine_capabilities.py.
 
     # ── Health ──────────────────────────────────────────────────────────────
 

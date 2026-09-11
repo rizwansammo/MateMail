@@ -31,6 +31,7 @@ from .dto import (
 )
 from .errors import (
     AlreadyExists,
+    EngineCapabilityMissing,
     EngineUnavailable,
     MailEngineError,
     NotFound,
@@ -39,6 +40,12 @@ from .errors import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: The engine release this endpoint mapping was verified against, by reading
+#: that tag's own OpenAPI specification and source — not from memory. When the
+#: engine is upgraded, re-run that comparison before trusting this file.
+#: See docs/MAIL_ENGINE.md § "API mapping".
+VERIFIED_AGAINST_ENGINE_VERSION = "2026-07b"
 
 _TIMEOUT = 10
 
@@ -211,10 +218,16 @@ class MailcowAdapter(MailEngineAdapter):
             operation="set_domain_active",
         )
 
+    # NOTE on HTTP method: the engine's API router rejects anything but POST
+    # on every /delete/ endpoint with 405 "only POST method is allowed"
+    # (json_api.php @ 2026-07b). These three calls previously used DELETE,
+    # which is the RESTful choice and the wrong one here — every delete would
+    # have failed against a real engine. The body is a bare JSON array: for a
+    # delete the router assigns the whole request body to $_POST['items'].
     def delete_domain(self, domain_name: str) -> None:
         try:
             data = self._request(
-                "DELETE", "/api/v1/delete/domain", json=[domain_name],
+                "POST", "/api/v1/delete/domain", json=[domain_name],
                 operation="delete_domain",
             )
             self._raise_for_body(data, operation="delete_domain")
@@ -299,7 +312,7 @@ class MailcowAdapter(MailEngineAdapter):
     def delete_mailbox(self, address: str) -> None:
         try:
             data = self._request(
-                "DELETE", "/api/v1/delete/mailbox", json=[address],
+                "POST", "/api/v1/delete/mailbox", json=[address],
                 operation="delete_mailbox",
             )
             self._raise_for_body(data, operation="delete_mailbox")
@@ -397,7 +410,7 @@ class MailcowAdapter(MailEngineAdapter):
             return
         try:
             data = self._request(
-                "DELETE", "/api/v1/delete/alias", json=[existing],
+                "POST", "/api/v1/delete/alias", json=[existing],
                 operation="delete_alias",
             )
             self._raise_for_body(data, operation="delete_alias")
@@ -420,10 +433,39 @@ class MailcowAdapter(MailEngineAdapter):
 
     # ── DKIM — public material only (DEC-007r) ──────────────────────────────
 
+    #: Response fields that carry, or could carry, private key material. The
+    #: engine's DKIM read returns a `privkey` field on every call — empty under
+    #: a default configuration, but populated if an operator ever sets
+    #: SHOW_DKIM_PRIV_KEYS. Verified by reading the engine's own
+    #: functions.dkim.inc.php at 2026-07b.
+    _PRIVATE_DKIM_FIELDS = ("privkey", "private_key", "priv_key", "key")
+
     def _dkim_info(self, domain_name: str, payload) -> Optional[DkimKeyInfo]:
+        """
+        Build public DKIM material, discarding anything private.
+
+        DEC-007r says the private key never crosses this boundary. That is not
+        left to the engine's configuration: the read path strips private fields
+        unconditionally, so a mailcow instance running with
+        SHOW_DKIM_PRIV_KEYS=y cannot leak through MateMail. DkimKeyInfo has no
+        field capable of carrying one either, which is the second line of
+        defence.
+        """
         row = payload[0] if isinstance(payload, list) and payload else payload
         if not isinstance(row, dict):
             return None
+
+        # Drop private material before anything else touches the row, and say
+        # so loudly — a populated privkey means the engine is misconfigured.
+        for field in self._PRIVATE_DKIM_FIELDS:
+            if row.get(field):
+                logger.error(
+                    "Mail engine returned private DKIM material in %r for %s — "
+                    "discarded. Set SHOW_DKIM_PRIV_KEYS=n on the engine.",
+                    field, domain_name,
+                )
+            row.pop(field, None)
+
         public_key = row.get("pubkey") or row.get("dkim_txt") or ""
         if not public_key:
             return None
@@ -475,23 +517,46 @@ class MailcowAdapter(MailEngineAdapter):
         return data if isinstance(data, list) else []
 
     def cancel_queue_message(self, engine_message_id: str) -> None:
+        """
+        Drop one queued message.
+
+        The body is a bare array of queue ids. The engine's router assigns the
+        whole request body to $_POST['items'] and then calls
+        `mailq('delete', array('qid' => $items))` — so `{"id": [...]}`, which
+        this previously sent, arrived as a nested dict under `qid` and matched
+        no queue id at all. Verified in json_api.php and functions.mailq.inc.php
+        at 2026-07b.
+        """
         try:
-            self._write(
-                "/api/v1/delete/mailq", {"id": [engine_message_id]},
+            data = self._request(
+                "POST", "/api/v1/delete/mailq", json=[engine_message_id],
                 operation="cancel_queue_message",
             )
+            self._raise_for_body(data, operation="cancel_queue_message")
         except NotFound:
             logger.info("Queued message already gone — treating cancel as done")
 
     def release_quarantine_item(self, engine_message_id: str) -> None:
-        try:
-            self._write(
-                "/api/v1/set/quarantine/release",
-                {"item": engine_message_id, "action": "deliver"},
-                operation="release_quarantine_item",
-            )
-        except NotFound:
-            logger.info("Quarantined item already actioned — treating release as done")
+        """
+        Not available at the pinned engine version.
+
+        This previously POSTed to `/api/v1/set/quarantine/release`, which does
+        not exist in mailcow 2026-07b — its API defines only
+        `GET /api/v1/get/quarantine/all` and
+        `POST /api/v1/edit/quarantine_notification`. A call would have 404'd,
+        been classified as NotFound, and been swallowed by the handler below as
+        "already actioned": the operator would have seen a success and the
+        message would have stayed in quarantine.
+
+        Raising is the honest behaviour. Releasing quarantined mail is a P5
+        concern (quarantine is an empty shell today — nothing writes
+        QuarantineMessage), and when it is built it needs either a newer engine
+        API or a direct Rspamd path, decided then rather than guessed now.
+        """
+        raise EngineCapabilityMissing(
+            "mailcow 2026-07b exposes no quarantine release endpoint",
+            operation="release_quarantine_item",
+        )
 
     # ── Health ──────────────────────────────────────────────────────────────
 

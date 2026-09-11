@@ -104,6 +104,22 @@ class Rejected(MailEngineError):
     )
 
 
+class EngineCapabilityMissing(MailEngineError):
+    """
+    The engine has no API for this operation at the pinned version.
+
+    Distinct from `Rejected` (the engine understood and refused) and from
+    `NotFound` (the object is absent). This one means MateMail asked for
+    something the engine does not implement, which is a gap in *our* plan, not
+    a runtime failure — and it must surface loudly rather than be swallowed as
+    a no-op success.
+    """
+
+    customer_message = (
+        "That action is not available yet. Our team has been notified."
+    )
+
+
 class QuotaExceeded(MailEngineError):
     """The request would exceed a limit enforced by the engine."""
 

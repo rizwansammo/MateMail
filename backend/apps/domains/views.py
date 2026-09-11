@@ -8,7 +8,6 @@ from rest_framework.views import APIView
 
 from apps.billing.utils import check_domain_limit
 from apps.security import ratelimit
-from .keystore import encrypt as encrypt_dkim_key
 from apps.security.limits import DOMAIN_CHECK_PER_DOMAIN
 from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
@@ -17,7 +16,6 @@ from apps.tenants.permissions import (
     TenantReadAdminWrite,
     TenantReadSupportWrite,
 )
-from .dkim import generate_dkim_keypair
 from .verification import (
     DomainNotVerified,
     assert_provisionable,
@@ -48,14 +46,23 @@ class DomainListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
 
         selector = getattr(settings, "DKIM_SELECTOR", "mm1")
-        private_pem, public_key = generate_dkim_keypair()
 
+        # DEC-007r stage 1: MateMail no longer generates DKIM keys.
+        #
+        # Django used to mint an RSA keypair here and keep the private half.
+        # That key signed nothing — no engine ever held it — so the DKIM record
+        # shown to the customer was decorative, while the private key was a real
+        # liability sitting in our database. The engine now generates the pair
+        # at provisioning time and keeps the private half; MateMail records only
+        # the public material.
+        #
+        # Both DKIM fields therefore start empty. Provisioning is gated on
+        # ownership verification (P3a), so nothing is displayed as publishable
+        # before the domain is proven anyway.
         domain = Domain.objects.create(
             tenant=request.tenant,
             domain=serializer.validated_data["domain"],
             dkim_selector=selector,
-            dkim_public_key=public_key,
-            dkim_private_key=encrypt_dkim_key(private_pem.decode()),
             # Issued up front so the domain page can show the exact TXT record
             # the moment the domain is added.
             verification_token=generate_verification_token(),

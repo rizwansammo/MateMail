@@ -174,19 +174,29 @@ class ModelAndExposureTest(TestCase):
         domain.dkim_private_key_pem = SAMPLE_PEM
         self.assertTrue(domain.has_dkim_private_key)
 
-    def test_a_created_domain_stores_its_key_encrypted(self):
+    def test_a_created_domain_stores_no_private_key_at_all(self):
+        """
+        DEC-007r stage 1 (P4A). This previously asserted that creation stored an
+        *encrypted* private key. It now asserts the stronger property: MateMail
+        no longer generates one, so there is nothing to encrypt.
+
+        The old key signed nothing — no engine ever held it — so it was pure
+        liability. The engine generates the pair at provisioning and keeps the
+        private half.
+        """
         res = auth_client(self.owner, self.tenant).post(
             "/api/domains/", {"domain": "created.example"}
         )
         self.assertEqual(res.status_code, 201)
 
         domain = Domain.objects.get(domain="created.example")
-        self.assertTrue(domain.dkim_private_key, "no DKIM key was generated")
-        self.assertTrue(
-            is_encrypted(domain.dkim_private_key),
-            "the DKIM private key was stored in plaintext",
+        self.assertEqual(
+            domain.dkim_private_key, "", "MateMail generated a DKIM private key"
         )
-        self.assertIn("BEGIN", domain.dkim_private_key_pem)
+        self.assertFalse(domain.has_dkim_private_key)
+        self.assertEqual(
+            domain.dkim_public_key, "", "public material must come from the engine"
+        )
 
     def test_the_private_key_is_not_in_the_api_response(self):
         res = auth_client(self.owner, self.tenant).post(
