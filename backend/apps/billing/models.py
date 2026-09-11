@@ -18,7 +18,39 @@ class Plan(models.Model):
     max_domains = models.PositiveIntegerField()
     max_mailboxes = models.PositiveIntegerField()
     max_members = models.PositiveIntegerField(default=5)
-    max_storage_per_mailbox_mb = models.PositiveIntegerField()
+
+    # ── Storage ──────────────────────────────────────────────────────────────
+    #
+    # Three separate numbers, because the Mail Engine enforces three separate
+    # things and refuses a domain whose values contradict each other:
+    #
+    #     default_storage_per_mailbox_mb  <=  max_storage_per_mailbox_mb
+    #                                     <=  max_storage_total_mb
+    #
+    # Measured against the live engine, not assumed: a domain created with a
+    # per-mailbox ceiling above the domain total is rejected outright
+    # (`mailbox_quota_exceeds_domain_quota`), as is a default above the
+    # ceiling (`mailbox_defquota_exceeds_mailbox_maxquota`).
+    #
+    # The total is stored rather than derived. Deriving it — total =
+    # mailboxes x ceiling — hard-codes a policy that every mailbox may
+    # simultaneously reach its maximum, which forecloses the shared-pool plans
+    # this field exists to allow (10 mailboxes, 5 GB each, 25 GB shared). The
+    # Mail Engine adapter must never invent this number.
+    default_storage_per_mailbox_mb = models.PositiveIntegerField(
+        default=1024,
+        help_text="Storage a new mailbox starts with, in MB. Must not exceed the per-mailbox maximum.",
+    )
+    max_storage_per_mailbox_mb = models.PositiveIntegerField(
+        help_text="Largest a single mailbox may grow, in MB. Must not exceed the domain total.",
+    )
+    max_storage_total_mb = models.PositiveIntegerField(
+        default=10240,
+        help_text=(
+            "Total storage shared by every mailbox on a domain, in MB. Set "
+            "deliberately — it is a commercial limit, not mailboxes x ceiling."
+        ),
+    )
     includes_spam_quarantine = models.BooleanField(default=False)
     includes_audit_logs = models.BooleanField(default=False)
     includes_queue_visibility = models.BooleanField(default=False)

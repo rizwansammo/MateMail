@@ -2046,3 +2046,56 @@ The deploy still refuses to create `matemail_engine_link`. A network made with
 Docker's defaults is routable rather than internal, which would silently reopen
 the cross-application exposure the dedicated link exists to close.
 
+---
+
+## P4C-B in progress — activation, and the quota contract fix (2026-09-11)
+
+### Done and live
+
+- **`f787f039` deployed through the exact-revision workflow** (run 34645106354).
+  The installed `/opt/MateMail/docker-compose.yml` is byte-identical to that
+  commit's blob. Its first attempt failed safely in preflight on a first-run
+  pruning bug, fixed in `aa549b46`; nothing had been transferred or changed.
+- **The real Mail Engine adapter is active in production.**
+  `MAIL_ENGINE_ADAPTER=mailcow`, `MailcowAdapter` constructed by both backend
+  and worker, `check_health()` reachable.
+- Private path verified from the live backend: `mx.matemail.online` resolves
+  only to the private gateway, and both HTTPS 8453 and SMTP 587 STARTTLS
+  validate the real certificate. Isolation re-tested — every unrelated Docker
+  network still blocked.
+
+### The defect activation found
+
+MateMail **could not create a domain at all**. The adapter sent a hard-coded
+domain total of `0` with a positive per-mailbox ceiling; the engine reads that
+as a contradiction and refused every domain
+(`mailbox_quota_exceeds_domain_quota`), after which every mailbox call failed
+with `access_denied` because the domain did not exist.
+
+Fixed per **DEC-016**: storage is now three explicit `Plan` fields, carried on
+`DomainSpec` and sent verbatim, with the relationship validated by MateMail
+before the engine is called. The total is stored, never derived, so shared-pool
+plans remain expressible.
+
+### Current Private Beta policy (temporary — not public pricing)
+
+```
+Price        : free
+Provisioning : admin approval required
+Mailbox size : 1 GB default, 1 GB maximum
+```
+
+Applied to the free `trial` plan. The commercial tiers keep their own ceilings.
+**Admin approval is policy only — no enforcement mechanism exists yet**; the
+missing point is workspace creation at signup, and it belongs with P5.
+
+### Still open in P4C-B
+
+The quota fix is **not yet deployed**. Remaining, in order: commit and push →
+CI → redeploy → re-run the disposable lifecycle test → platform sender →
+DNS/PTR external-action gate (**PTR is still `vmi3482362.contaboserver.net`**)
+→ first real delivery and recipient confirmation.
+
+No domain, mailbox, platform sender or DNS record has been created. No mail has
+been sent. No public mail port is open. UFW unchanged.
+

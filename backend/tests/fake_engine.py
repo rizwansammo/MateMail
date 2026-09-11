@@ -124,6 +124,50 @@ class FakeEngineSession:
 
         return self._route(method, path, json or {})
 
+    # ── Quotas ──────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _reject_invalid_quotas(body):
+        """
+        The engine's storage invariant: ``defquota <= maxquota <= quota``.
+
+        This fake used to accept any combination, which is exactly why the
+        adapter shipped sending ``quota: 0`` alongside a positive per-mailbox
+        ceiling. Every request-contract test passed; the first real domain
+        creation against the live engine failed with
+        ``mailbox_quota_exceeds_domain_quota``, and every mailbox call after it
+        failed with ``access_denied`` because the domain did not exist.
+
+        A test double that accepts what the real thing refuses is worse than no
+        double at all — it converts a loud production failure into a green
+        suite. The messages below are the engine's own.
+
+        Returns a rejection response, or ``None`` when the values are valid.
+        """
+        values = {}
+        for key in ("defquota", "maxquota", "quota"):
+            raw = body.get(key)
+            if raw is None:
+                continue
+            try:
+                values[key] = int(raw)
+            except (TypeError, ValueError):
+                return _engine_error(f"{key}_invalid")
+            if values[key] < 0:
+                return _engine_error(f"{key}_invalid")
+
+        defquota = values.get("defquota")
+        maxquota = values.get("maxquota")
+        quota = values.get("quota")
+
+        # The real engine reads quota=0 as a hard total of zero, NOT unlimited.
+        # Any positive per-mailbox ceiling then exceeds it.
+        if quota is not None and maxquota is not None and maxquota > quota:
+            return _engine_error("mailbox_quota_exceeds_domain_quota")
+        if maxquota is not None and defquota is not None and defquota > maxquota:
+            return _engine_error("mailbox_defquota_exceeds_mailbox_maxquota")
+        return None
+
     # ── DKIM ────────────────────────────────────────────────────────────────
 
     def _mint_dkim(self, domain: str, selector=None, key_size=None) -> None:
@@ -209,6 +253,9 @@ class FakeEngineSession:
             name = body["domain"]
             if name in self.domains:
                 return _engine_error(f"domain {name} already exists")
+            invalid = self._reject_invalid_quotas(body)
+            if invalid is not None:
+                return invalid
             self.domains[name] = {
                 "domain_name": name,
                 "active": body.get("active", "1"),

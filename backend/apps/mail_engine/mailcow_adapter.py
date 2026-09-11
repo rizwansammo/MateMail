@@ -212,9 +212,26 @@ class MailcowAdapter(MailEngineAdapter):
             "description": "MateMail-managed",
             "aliases": spec.max_aliases,
             "mailboxes": spec.max_mailboxes,
+            # The engine's three storage numbers, all carried on the spec and
+            # none invented here:
+            #
+            #   defquota  what a new mailbox starts with
+            #   maxquota  the largest a single mailbox may grow
+            #   quota     the pool shared by the whole domain
+            #
+            # `quota` was hard-coded to 0 on the assumption that zero meant
+            # unlimited. It does not — the engine reads it as a hard total, so
+            # a positive per-mailbox ceiling above it is a contradiction and it
+            # refused EVERY domain creation with
+            # `mailbox_quota_exceeds_domain_quota`. Measured against the live
+            # engine; no test caught it because the fake accepted any values.
+            #
+            # DomainSpec has already validated defquota <= maxquota <= quota,
+            # so a contradiction fails as MateMail's error before it reaches
+            # the wire.
             "defquota": spec.default_quota_mb,
             "maxquota": spec.max_quota_mb,
-            "quota": 0,
+            "quota": spec.total_quota_mb,
             "active": "1" if spec.active else "0",
             "relay_all_recipients": "0",
             "relay_unknown_only": "0",
@@ -242,8 +259,14 @@ class MailcowAdapter(MailEngineAdapter):
                     "attr": {
                         "aliases": spec.max_aliases,
                         "mailboxes": spec.max_mailboxes,
+                        # All three again. Reconciling only two would leave the
+                        # domain total at whatever it was and could recreate the
+                        # very contradiction the create path now avoids — for
+                        # instance after a plan upgrade raises the per-mailbox
+                        # ceiling above the old pool.
                         "defquota": spec.default_quota_mb,
                         "maxquota": spec.max_quota_mb,
+                        "quota": spec.total_quota_mb,
                         "active": "1" if spec.active else "0",
                     },
                 },

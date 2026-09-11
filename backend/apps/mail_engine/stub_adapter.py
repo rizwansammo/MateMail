@@ -10,6 +10,7 @@ State lives on the instance and is discarded when the process ends. Tests that
 need a clean slate call `factory.reset_adapter()`.
 """
 import logging
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -60,15 +61,12 @@ class StubAdapter(MailEngineAdapter):
     def set_domain_active(self, domain_name: str, active: bool) -> None:
         existing = self._domains.get(domain_name)
         if existing is not None:
-            self._domains[domain_name] = DomainSpec(
-                name=existing.name,
-                dkim_selector=existing.dkim_selector,
-                max_mailboxes=existing.max_mailboxes,
-                max_aliases=existing.max_aliases,
-                default_quota_mb=existing.default_quota_mb,
-                max_quota_mb=existing.max_quota_mb,
-                active=active,
-            )
+            # `replace` rather than rebuilding field by field. The hand-written
+            # version silently dropped every field it did not mention, so each
+            # new field on DomainSpec reset to its default here — which for the
+            # storage numbers could turn a valid domain into one whose ceiling
+            # exceeds its own pool just by toggling `active`.
+            self._domains[domain_name] = replace(existing, active=active)
 
     def delete_domain(self, domain_name: str) -> None:
         # Idempotent: absent is an acceptable end state.

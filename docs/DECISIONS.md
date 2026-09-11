@@ -719,3 +719,115 @@ building P7.5 or on including free accounts in a limited Private Beta.
   tenant model to answer in P7.5.
 - Abuse controls designed in P5 must be written with free accounts in view, not
   only business tenants, or they will need redesigning at P7.5.
+
+---
+
+## DEC-016 — Storage is three explicit plan limits; Private Beta is free, approved, 1 GB
+
+**Date:** 2026-09-11
+**Status:** Accepted. Implemented. **The beta policy is temporary and is not public-launch pricing.**
+
+### The problem
+
+Activating the real Mail Engine proved MateMail could not create a single
+domain. The adapter sent a hard-coded domain total of `0` alongside a positive
+per-mailbox ceiling, on the assumption that zero meant unlimited.
+
+It does not. The engine reads three storage numbers and enforces all of them:
+
+```
+default per mailbox  <=  maximum per mailbox  <=  total for the domain
+```
+
+A ceiling above the total is a contradiction, and the engine refuses the whole
+domain (`mailbox_quota_exceeds_domain_quota`). Every mailbox call afterwards
+then failed with `access_denied`, because the domain did not exist — one root
+cause, two symptoms.
+
+The `Plan` model had only one of the three numbers (`max_storage_per_mailbox_mb`).
+The other two did not exist anywhere, so the adapter was inventing them.
+
+### Decision
+
+**Storage is three explicit fields on `Plan`**, carried on `DomainSpec`, sent
+verbatim by the adapter:
+
+| Field | Meaning |
+|---|---|
+| `default_storage_per_mailbox_mb` | what a new mailbox starts with |
+| `max_storage_per_mailbox_mb` | the largest a single mailbox may grow |
+| `max_storage_total_mb` | the pool shared by every mailbox on the domain |
+
+**The total is stored, never derived.** `total = mailboxes x ceiling` is one
+plan shape, not the only one. Deriving it in the adapter would hard-code a
+policy that every mailbox may simultaneously reach its maximum and would
+foreclose a genuinely shared pool — 10 mailboxes, 5 GB each, 25 GB shared — for
+no benefit. The adapter's job is to send what the plan says, not to decide
+commercial limits.
+
+**Validation is MateMail's, not the engine's.** `DomainSpec` checks the
+relationship and raises a typed `InvalidStorageConfiguration` before any request
+is built, so an impossible plan fails as our error in our words. Nothing is
+silently clamped: lowering a ceiling to fit a pool would quietly sell less than
+the plan promises, so the contradiction has to surface for an operator to fix.
+
+### Private Beta policy — temporary
+
+```
+Price         : free
+Provisioning  : admin approval required
+Mailbox size  : 1 GB default and 1 GB maximum
+```
+
+Applied to the **`trial` plan** (the free tier), whose per-mailbox ceiling rises
+from 512 MB to 1024 MB, with a pool of `max_mailboxes x 1 GB`.
+
+The `starter`, `business` and `infrastructure` tiers were **deliberately not
+flattened** to this policy. They have zero subscriptions today, but they are the
+intended commercial ladder, and rewriting Business from 5 GB mailboxes to 1 GB
+would be discarding a product decision this work has no business making. They
+keep their ceilings, gain a 1 GB starting default, and get a pool that lets
+every mailbox reach its ceiling.
+
+Resulting values:
+
+| tier | mailboxes | default | max/mailbox | total |
+|---|---|---|---|---|
+| trial *(beta)* | 5 | 1024 | 1024 | 5120 |
+| starter | 10 | 1024 | 1024 | 10240 |
+| business | 50 | 1024 | 5120 | 256000 |
+| infrastructure | 500 | 1024 | 20480 | 10240000 |
+
+Storage may be increased later. **None of this is final public pricing**, and
+prices and feature flags were not touched.
+
+### Admin approval — policy recorded, enforcement missing
+
+The beta requires admin approval before a workspace is provisioned. **No such
+mechanism exists in the codebase.** Signup at `apps/accounts/views.py`
+(`SignupView`) creates a workspace immediately, and `TenantStatus` has no
+pending-approval state — its values are trial / active / past_due / suspended /
+cancelled.
+
+This is recorded rather than built: adding an approval workflow is a real
+feature, not a side effect of a quota fix. Until it exists the policy is
+enforced operationally (nobody is invited), which is adequate while there are
+zero tenants and is **not** adequate once signup is reachable. The enforcement
+point is workspace creation, and it belongs with the P5 policy work.
+
+### Not this decision
+
+This says the current beta costs nothing and needs approval. It does **not**
+implement DEC-015's free `@matemail.online` addresses — that remains P5 for
+policy design and P7.5 for implementation. Business custom-domain hosting
+remains the product architecture.
+
+### Consequences
+
+- `Plan` gains two fields; migrations `billing.0004` (schema) and
+  `billing.0005` (data).
+- The fake engine now enforces the same invariant, because a double that
+  accepts what production refuses converts an outage into a green suite —
+  which is exactly what let this ship.
+- A plan whose numbers contradict each other cannot provision a domain, and
+  says so on the domain record instead of failing silently.

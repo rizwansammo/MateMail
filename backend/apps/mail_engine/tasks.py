@@ -70,9 +70,15 @@ def provision_domain_task(self, domain_id: str):
         # requirement; fall back to spec defaults rather than failing the task.
         logger.warning("provision_domain_task: could not resolve plan for %s", domain.domain)
 
-    spec = DomainSpec.from_model(domain, plan=plan)
-
     try:
+        # Built INSIDE the try on purpose. DomainSpec validates the plan's
+        # storage limits against each other and raises a typed error when they
+        # contradict, and that failure has to reach the same handler that
+        # records a customer-safe reason on the domain. Constructed above the
+        # try, an impossible plan would escape as an unhandled exception and
+        # the customer would see a domain stuck at "provisioning" with nothing
+        # explaining why.
+        spec = DomainSpec.from_model(domain, plan=plan)
         get_adapter().ensure_domain(spec)
     except EngineUnavailable as exc:
         logger.warning("Domain provisioning deferred for %s: %s", domain.domain, exc.log_message)

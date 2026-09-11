@@ -34,16 +34,68 @@ DEFAULT_DKIM_KEY_SIZE = 2048
 
 @dataclass(frozen=True)
 class DomainSpec:
-    """A domain's desired state in the engine."""
+    """
+    A domain's desired state in the engine.
+
+    ## The three storage numbers
+
+    The engine enforces all three at once and refuses a domain whose values
+    contradict each other:
+
+        default_quota_mb <= max_quota_mb <= total_quota_mb
+
+    `total_quota_mb` is the pool shared by every mailbox on the domain. It is
+    **carried, never derived.** Computing it as `max_mailboxes * max_quota_mb`
+    inside the adapter would hard-code a policy that every mailbox may reach its
+    ceiling simultaneously, which forecloses the shared-pool plans this field
+    exists to express — 10 mailboxes, 5 GB each, 25 GB shared is a legitimate
+    commercial shape, and the adapter has no business inventing or overriding
+    it.
+
+    Validated here rather than at the adapter, so an impossible plan fails
+    before a request reaches the engine and the error is MateMail's own.
+    """
 
     name: str
     dkim_selector: str = "mm1"
     dkim_key_size: int = DEFAULT_DKIM_KEY_SIZE
     max_mailboxes: int = 10
     max_aliases: int = 400
-    default_quota_mb: int = 3072
-    max_quota_mb: int = 51200
+    default_quota_mb: int = 1024
+    max_quota_mb: int = 1024
+    total_quota_mb: int = 10240
     active: bool = True
+
+    def __post_init__(self):
+        from .errors import InvalidStorageConfiguration
+
+        for label, value in (
+            ("default_quota_mb", self.default_quota_mb),
+            ("max_quota_mb", self.max_quota_mb),
+            ("total_quota_mb", self.total_quota_mb),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise InvalidStorageConfiguration(
+                    f"{label} must be a positive whole number of MB, got {value!r}",
+                    operation="DomainSpec",
+                )
+
+        # Deliberately NOT clamped. Silently lowering a customer's ceiling to
+        # fit a pool would make MateMail quietly sell less than the plan says;
+        # an operator has to see the contradiction and decide which number is
+        # wrong.
+        if self.default_quota_mb > self.max_quota_mb:
+            raise InvalidStorageConfiguration(
+                f"default mailbox storage ({self.default_quota_mb} MB) exceeds the "
+                f"per-mailbox maximum ({self.max_quota_mb} MB)",
+                operation="DomainSpec",
+            )
+        if self.max_quota_mb > self.total_quota_mb:
+            raise InvalidStorageConfiguration(
+                f"per-mailbox maximum ({self.max_quota_mb} MB) exceeds the domain "
+                f"total ({self.total_quota_mb} MB)",
+                operation="DomainSpec",
+            )
 
     @classmethod
     def from_model(cls, domain, *, plan=None) -> "DomainSpec":
@@ -66,7 +118,13 @@ class DomainSpec:
         }
         if plan is not None:
             kwargs["max_mailboxes"] = plan.max_mailboxes
+            # All three come from the plan. Taking only the ceiling and leaving
+            # the other two at dataclass defaults is what produced a plan with a
+            # 512 MB ceiling and a 3072 MB default — an impossible domain the
+            # engine rejected outright.
+            kwargs["default_quota_mb"] = plan.default_storage_per_mailbox_mb
             kwargs["max_quota_mb"] = plan.max_storage_per_mailbox_mb
+            kwargs["total_quota_mb"] = plan.max_storage_total_mb
         return cls(**kwargs)
 
 

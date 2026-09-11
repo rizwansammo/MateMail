@@ -129,6 +129,29 @@ class QuotaExceeded(MailEngineError):
     )
 
 
+class InvalidStorageConfiguration(MailEngineError):
+    """
+    A plan's storage limits contradict each other, so no domain can be built
+    from them.
+
+    Distinct from `QuotaExceeded`, which is a customer running out of room they
+    legitimately have. This is MateMail's own configuration being impossible:
+    a default larger than the per-mailbox ceiling, or a ceiling larger than the
+    domain total. The engine enforces
+    `default <= per-mailbox <= total` and refuses the domain outright.
+
+    Raised **before** the engine is called, by `DomainSpec`, so the failure is
+    MateMail's and carries MateMail's words. Nothing is silently clamped to make
+    the numbers fit: lowering a ceiling to match a pool would quietly sell less
+    than the plan promises, and an operator has to see which number is wrong.
+    """
+
+    customer_message = (
+        "Mail storage limits are misconfigured for this plan, so the domain "
+        "could not be set up. Our team has been notified."
+    )
+
+
 #: Every concrete type, for exhaustiveness tests.
 #:
 #: `tests/test_engine_leak.py` walks this tuple to assert that no type's
@@ -144,4 +167,5 @@ ALL_ERROR_TYPES = (
     Rejected,
     EngineCapabilityMissing,
     QuotaExceeded,
+    InvalidStorageConfiguration,
 )
