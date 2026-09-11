@@ -430,18 +430,121 @@ class RequestContractTest(SimpleTestCase):
 
     def test_dkim_generation_sends_the_documented_fields(self):
         adapter = MailcowAdapter()
+        info = DkimKeyInfo(
+            selector="mm1", public_key="P", dns_record_name="n", dns_record_value="v",
+        )
         with mock.patch.object(adapter, "_write") as write, \
-             mock.patch.object(
-                 adapter, "get_dkim_public_key",
-                 return_value=DkimKeyInfo(
-                     selector="mm1", public_key="P",
-                     dns_record_name="n", dns_record_value="v",
-                 ),
-             ):
+             mock.patch.object(adapter, "delete_dkim_key"), \
+             mock.patch.object(adapter, "get_dkim_public_key", return_value=info):
             adapter.rotate_dkim_key("example.test", selector="mm1")
         payload = write.call_args[0][1]
         self.assertEqual(set(payload), {"domains", "dkim_selector", "key_size"})
         self.assertEqual(payload["domains"], "example.test")
+
+    def test_delete_dkim_posts_a_bare_array(self):
+        call = self._capture(lambda a: a.delete_dkim_key("example.test"))
+        self.assertEqual(call[0][0], "POST", "the engine rejects non-POST with 405")
+        self.assertEqual(call[0][1], "/api/v1/delete/dkim")
+        self.assertEqual(call[1]["json"], ["example.test"])
+
+    def test_domain_creation_carries_the_dkim_selector_and_key_size(self):
+        """
+        The engine generates the keypair inside its domain-add handler using
+        exactly these two fields. Sending them later is not an option: add/dkim
+        refuses a domain that already has a key.
+        """
+        from apps.mail_engine.dto import DomainSpec
+
+        adapter = MailcowAdapter()
+        with mock.patch.object(adapter, "_write") as write:
+            adapter.ensure_domain(
+                DomainSpec(name="example.test", dkim_selector="mm1", dkim_key_size=2048)
+            )
+        path, payload = write.call_args[0][0], write.call_args[0][1]
+        self.assertEqual(path, "/api/v1/add/domain")
+        self.assertEqual(payload["dkim_selector"], "mm1")
+        self.assertEqual(payload["key_size"], 2048)
+
+    def test_rotation_deletes_the_existing_key_before_generating(self):
+        """
+        add/dkim is refused while a key exists, so a bare add is not a rotation
+        — it is a guaranteed failure. Assert the order, not just the calls.
+        """
+        adapter = MailcowAdapter()
+        existing = DkimKeyInfo(
+            selector="mm1", public_key="OLD", dns_record_name="n", dns_record_value="v",
+        )
+        fresh = DkimKeyInfo(
+            selector="mm1", public_key="NEW", dns_record_name="n", dns_record_value="v",
+        )
+        order = []
+        with mock.patch.object(
+                 adapter, "delete_dkim_key",
+                 side_effect=lambda d: order.append("delete")), \
+             mock.patch.object(
+                 adapter, "_write",
+                 side_effect=lambda *a, **k: order.append("add")), \
+             mock.patch.object(
+                 adapter, "get_dkim_public_key", side_effect=[existing, fresh]):
+            result = adapter.rotate_dkim_key("example.test", selector="mm1")
+
+        self.assertEqual(order, ["delete", "add"])
+        self.assertEqual(result.public_key, "NEW")
+
+    def test_rotation_without_an_existing_key_does_not_delete(self):
+        """
+        The retry case. A previous rotation deleted the old key and then failed
+        to add the new one; the retry must not issue a delete it does not need,
+        and must certainly not delete a replacement key on a later retry.
+        """
+        adapter = MailcowAdapter()
+        fresh = DkimKeyInfo(
+            selector="mm1", public_key="NEW", dns_record_name="n", dns_record_value="v",
+        )
+        with mock.patch.object(adapter, "delete_dkim_key") as delete, \
+             mock.patch.object(adapter, "_write"), \
+             mock.patch.object(
+                 adapter, "get_dkim_public_key", side_effect=[None, fresh]):
+            adapter.rotate_dkim_key("example.test", selector="mm1")
+
+        delete.assert_not_called()
+
+    def test_rotation_refuses_an_unusable_selector_before_touching_the_engine(self):
+        """Fail closed *before* deleting a working key for a request we cannot honour."""
+        from apps.mail_engine.errors import Rejected
+
+        adapter = MailcowAdapter()
+        # "" is deliberately absent: the port documents an empty selector as
+        # "use the deployment default", not as a malformed value. That case is
+        # covered by the test below.
+        for bad in (" ", ".", "..", "a b", "a/b", "sel.", ".sel", "a..b", "@"):
+            with mock.patch.object(adapter, "delete_dkim_key") as delete, \
+                 mock.patch.object(adapter, "_write") as write, \
+                 mock.patch.object(adapter, "get_dkim_public_key") as read:
+                with self.assertRaises(Rejected, msg=f"accepted selector {bad!r}"):
+                    adapter.rotate_dkim_key("example.test", selector=bad)
+                delete.assert_not_called()
+                write.assert_not_called()
+                read.assert_not_called()
+
+    def test_an_omitted_selector_uses_the_configured_default(self):
+        """
+        Empty means "whatever this deployment publishes", which is
+        DKIM_SELECTOR — never a literal baked into the adapter, because a
+        literal silently disagrees with the setting the day anyone changes it.
+        """
+        from django.test import override_settings
+
+        adapter = MailcowAdapter()
+        info = DkimKeyInfo(
+            selector="dep7", public_key="P", dns_record_name="n", dns_record_value="v",
+        )
+        with override_settings(DKIM_SELECTOR="dep7"), \
+             mock.patch.object(adapter, "_write") as write, \
+             mock.patch.object(adapter, "get_dkim_public_key", side_effect=[None, info]):
+            adapter.rotate_dkim_key("example.test")
+
+        self.assertEqual(write.call_args[0][1]["dkim_selector"], "dep7")
 
     def test_the_api_key_header_is_sent(self):
         adapter = MailcowAdapter()

@@ -170,22 +170,79 @@ def _adopt_engine_dkim(domain, *, task=None) -> None:
 )
 def deprovision_domain_task(self, domain_name: str):
     """
-    Remove a domain from the Mail Engine.
+    Remove a domain from the Mail Engine, signing key first.
 
-    Idempotent: deleting an already-absent domain succeeds, so a retry after a
-    partial failure is safe.
+    **The DKIM key is the security-relevant part of this task**, not the domain
+    record. Removing a domain does not remove its key — measured against the
+    real engine in P4B — and the surviving key is adopted by whoever registers
+    that domain name next. A domain legitimately changes hands; the previous
+    holder's private signing key must not travel with it.
+
+    Order is deactivate → delete DKIM → delete domain:
+
+    - deactivating first means the domain never sits in the window where it
+      still accepts mail but can no longer sign it;
+    - deleting the key before the domain means the dangerous artifact goes
+      first, so a failure partway through leaves the *recoverable* problem
+      (an orphaned domain record) rather than the dangerous one.
+
+    Idempotent throughout, so a retry after a partial failure is safe. A
+    domain that is already gone does **not** short-circuit the key deletion:
+    that combination — no domain, stale key — is exactly the state this task
+    exists to clean up, and it is the state a previously failed run leaves
+    behind.
     """
     from .factory import get_adapter
 
+    adapter = get_adapter()
+
     try:
-        get_adapter().delete_domain(domain_name)
+        # Best-effort hardening, not the security property.
+        #
+        # Deliberately tolerant of ANY engine rejection. Asked to deactivate a
+        # domain it does not hold, the engine answers `domain_invalid` — which
+        # classifies as Rejected, not NotFound, because "invalid" legitimately
+        # also covers a malformed name. Catching only NotFound here (the obvious
+        # guess, and what this did first) meant an already-absent domain aborted
+        # the task before the DKIM key was deleted: precisely the state this
+        # task exists to clean up, and precisely the state a previously failed
+        # run leaves behind.
+        #
+        # Verified against the live engine rather than inferred. EngineUnavailable
+        # is re-raised because a transport failure is a real failure and belongs
+        # on the retry path below.
+        try:
+            adapter.set_domain_active(domain_name, False)
+        except EngineUnavailable:
+            raise
+        except MailEngineError as exc:
+            logger.info(
+                "Could not deactivate %s before removal (continuing to key "
+                "deletion, which is the part that matters): %s",
+                domain_name, exc.log_message,
+            )
+
+        # Unconditional. Not guarded by "did the domain exist", because the
+        # whole point is that the key outlives the domain.
+        adapter.delete_dkim_key(domain_name)
+        adapter.delete_domain(domain_name)
     except EngineUnavailable as exc:
         logger.warning("Domain removal deferred for %s: %s", domain_name, exc.log_message)
         raise self.retry(exc=exc)
     except MailEngineError as exc:
-        logger.error("Domain removal failed for %s: %s", domain_name, exc.log_message)
-        return
-    logger.info("Domain %s removed from the Mail Engine", domain_name)
+        # Deliberately raises rather than returning. A silent return here would
+        # report clean removal while a usable signing key for a domain MateMail
+        # no longer controls stayed in the engine. Let the task fail visibly.
+        logger.error(
+            "Domain removal FAILED for %s — a DKIM signing key may remain in the "
+            "engine and would be inherited by the next owner of this domain: %s",
+            domain_name, exc.log_message,
+        )
+        raise
+
+    logger.info(
+        "Domain %s and its DKIM signing key removed from the Mail Engine", domain_name
+    )
 
 
 @shared_task(

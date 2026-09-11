@@ -22,12 +22,23 @@ from typing import Optional
 # ─── Inputs: instructions to the engine ──────────────────────────────────────
 
 
+#: DKIM key size requested for new domains, in bits.
+#:
+#: Carried on the spec rather than hard-coded in an adapter because it is a
+#: product decision (what MateMail publishes for its customers), not an engine
+#: detail. 2048 is the interoperability sweet spot: 1024 is deprecated and
+#: increasingly distrusted, while 4096 produces a TXT record that must be split
+#: across strings and is mishandled by some DNS providers customers use.
+DEFAULT_DKIM_KEY_SIZE = 2048
+
+
 @dataclass(frozen=True)
 class DomainSpec:
     """A domain's desired state in the engine."""
 
     name: str
     dkim_selector: str = "mm1"
+    dkim_key_size: int = DEFAULT_DKIM_KEY_SIZE
     max_mailboxes: int = 10
     max_aliases: int = 400
     default_quota_mb: int = 3072
@@ -42,9 +53,16 @@ class DomainSpec:
         Plan-derived limits are deliberately resolved here in the product layer,
         not inside the adapter: what a plan permits is MateMail's business rule.
         """
+        from django.conf import settings
+
         kwargs = {
             "name": domain.domain,
-            "dkim_selector": domain.dkim_selector or "mm1",
+            # The deployment-wide selector is the fallback, not a literal. A
+            # hard-coded "mm1" here would disagree with DKIM_SELECTOR the moment
+            # anyone changed it, and the disagreement would surface as published
+            # DNS that does not match what the engine signs with.
+            "dkim_selector": domain.dkim_selector
+            or getattr(settings, "DKIM_SELECTOR", "mm1"),
         }
         if plan is not None:
             kwargs["max_mailboxes"] = plan.max_mailboxes

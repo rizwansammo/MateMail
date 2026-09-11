@@ -132,9 +132,10 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    # Datastores plus outbound: transactional email, DNS lookups, and from P4
-    # the Mail Engine API.
-    networks: [matemail_internal, matemail_app]
+    # Datastores, outbound access, and the private engine link. The link is
+    # here because this service sends transactional mail and serves the API
+    # that reads engine state.
+    networks: [matemail_internal, matemail_app, matemail_engine_link]
 
   # ── Migrations — runs to completion before backend starts ───────────────────
   migrate:
@@ -163,9 +164,10 @@ services:
       timeout: 20s
       retries: 3
       start_period: 45s
-    # Datastores plus outbound: the worker is what actually performs DNS checks,
-    # sends transactional email and (from P4) calls the Mail Engine.
-    networks: [matemail_internal, matemail_app]
+    # Datastores, outbound access, and the private engine link. Every
+    # provisioning and deprovisioning task runs here, so this is the service
+    # that makes most engine calls.
+    networks: [matemail_internal, matemail_app, matemail_engine_link]
 
   # ── Celery beat — same image as the backend ─────────────────────────────────
   celery-beat:
@@ -231,23 +233,54 @@ volumes:
   postgres_data:
   redis_data:
 
+# ── Networks ──────────────────────────────────────────────────────────────────
+#
+# Three networks, each with one job.
+#
+#   matemail_internal    datastores. internal: true, so Docker installs no route
+#                        off the host: Postgres and Redis cannot reach the
+#                        Internet and nothing outside can reach them.
+#   matemail_app         the app tier's outbound access — DNS, external APIs.
+#   matemail_engine_link the ONLY path to the Mail Engine. Externally managed.
+#
+# WHY THE ENGINE LINK IS A SEPARATE, EXTERNAL NETWORK
+#
+# The engine used to be reached at a host-published socket on this stack's own
+# bridge gateway, 172.24.0.1. That was implemented, measured, and rejected: a
+# published bind address selects a DESTINATION address, never a permitted
+# SOURCE. Six unrelated application networks on the same host — NetaMate,
+# MateDesk, MateAssist, MateConnect, the portfolio stack and the default bridge
+# — could all open TCP connections to the engine's API and submission ports.
+# Docker's userland proxy accepts on that socket whichever bridge the traffic
+# arrives from, so no amount of subnet pinning or DOCKER-USER filtering fixes
+# it; the measured traffic does not even traverse the chain where DOCKER-USER
+# would apply.
+#
+# The fix removes the socket rather than filtering it. A dedicated internal
+# network carries a single TCP passthrough gateway that owns the alias
+# mx.matemail.online, so there is nothing for another bridge to reach, and
+# MateMail addresses the engine by hostname with TLS verification fully intact.
+#
+# It is declared `external` so neither this stack's lifecycle nor the engine's
+# can delete a network the other still depends on. Create it once, on the host:
+#
+#   docker network create --internal matemail_engine_link
+#
+# The deploy workflow refuses to proceed if it is missing or not internal — it
+# does not create one, because a network conjured with default settings would
+# silently be a routable bridge rather than an internal one.
+#
+# NO SUBNET IS PINNED ANYWHERE.
+# An earlier revision pinned matemail_internal and matemail_app to fixed /16s,
+# purely because the engine bound to this stack's gateway address. That coupling
+# is gone, so the pins are gone with it: Docker allocates, and nothing outside
+# this file depends on which range it picks.
 networks:
-  # Datastore network. `internal: true` means Docker installs no route off the
-  # host for it: containers here cannot reach the Internet and nothing outside
-  # can reach them. PostgreSQL and Redis live only here, so the only way to
-  # them is from a container that has deliberately joined this network.
-  #
-  # A network merely *named* "internal" with `driver: bridge` gives full
-  # outbound access — that was the earlier mistake this replaces.
   matemail_internal:
     internal: true
 
-  # Application network. Provides the outbound access the app tier genuinely
-  # needs (SMTP for transactional email, DNS resolution, external APIs).
-  # Postgres and Redis must never join this network.
-  #
-  # When the Mail Engine arrives in P4 it is reached from here via an
-  # additional external network declared at that point — not by widening
-  # either of these.
   matemail_app:
     driver: bridge
+
+  matemail_engine_link:
+    external: true

@@ -45,6 +45,16 @@ class StubAdapter(MailEngineAdapter):
 
     def ensure_domain(self, spec: DomainSpec) -> None:
         self._domains[spec.name] = spec
+        # The real engine mints the DKIM keypair as part of creating a domain,
+        # honouring the selector and key size sent on that same call. The stub
+        # mirrors it so the shared contract suite exercises the lifecycle both
+        # adapters actually have — and so provisioning code that relies on the
+        # key already existing is tested, not just hoped for.
+        #
+        # Only on first creation: an ensure_domain against an existing domain is
+        # a reconcile, and the engine does not re-key a domain it already holds.
+        if spec.name not in self._dkim:
+            self._dkim[spec.name] = self._mint_dkim(spec.name, spec.dkim_selector)
         logger.debug("[stub] ensure_domain %s", spec.name)
 
     def set_domain_active(self, domain_name: str, active: bool) -> None:
@@ -66,7 +76,12 @@ class StubAdapter(MailEngineAdapter):
         for address in [a for a in self._mailboxes if a.endswith(f"@{domain_name}")]:
             self._mailboxes.pop(address, None)
             self._passwords.pop(address, None)
-        self._dkim.pop(domain_name, None)
+        # The DKIM key is deliberately NOT removed here. The real engine keeps
+        # it after the domain is gone — measured in P4B — and a stub that
+        # cleaned up tidily would make the deprovisioning tests pass while
+        # production leaked a signing key to the domain's next owner. The stub
+        # keeps the hazard so the tests have something to catch. Callers must
+        # use delete_dkim_key() explicitly.
 
     def list_domains(self) -> list[EngineDomain]:
         return [EngineDomain(name=s.name, active=s.active) for s in self._domains.values()]
@@ -150,23 +165,38 @@ class StubAdapter(MailEngineAdapter):
 
     # ── DKIM — public material only (DEC-007r) ──────────────────────────────
 
-    def get_dkim_public_key(self, domain_name: str) -> Optional[DkimKeyInfo]:
-        return self._dkim.get(domain_name)
+    def _mint_dkim(self, domain_name: str, selector: str = "") -> DkimKeyInfo:
+        """
+        Generate fresh public material for a domain.
 
-    def rotate_dkim_key(self, domain_name: str, selector: str = "") -> DkimKeyInfo:
+        A monotonic counter rather than a timestamp: two rotations can land in
+        the same microsecond and would then be indistinguishable. No private key
+        is generated or stored, because none may cross this boundary.
+        """
         selector = selector or "mm1"
-        # A new opaque public value each call, mirroring the real adapter's
-        # non-idempotent behaviour. A monotonic counter rather than a timestamp:
-        # two rotations can land in the same microsecond. No private key is
-        # generated or stored, because none may cross this boundary.
         self._dkim_rotations += 1
         public_key = f"STUBPUBLICKEY{self._dkim_rotations:06d}"
-        info = DkimKeyInfo(
+        return DkimKeyInfo(
             selector=selector,
             public_key=public_key,
             dns_record_name=f"{selector}._domainkey.{domain_name}",
             dns_record_value=f"v=DKIM1;k=rsa;p={public_key}",
         )
+
+    def get_dkim_public_key(self, domain_name: str) -> Optional[DkimKeyInfo]:
+        return self._dkim.get(domain_name)
+
+    def delete_dkim_key(self, domain_name: str) -> None:
+        # Idempotent: no key is the desired end state.
+        self._dkim.pop(domain_name, None)
+
+    def rotate_dkim_key(self, domain_name: str, selector: str = "") -> DkimKeyInfo:
+        # Mirrors the real adapter's delete-then-add sequence and its
+        # non-idempotent result: every call yields new public material.
+        existing = self._dkim.get(domain_name)
+        selector = selector or (existing.selector if existing else "") or "mm1"
+        self.delete_dkim_key(domain_name)
+        info = self._mint_dkim(domain_name, selector)
         self._dkim[domain_name] = info
         return info
 

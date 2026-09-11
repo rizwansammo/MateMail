@@ -1,0 +1,84 @@
+# Mail Engine - MateMail private link gateway.
+#
+# WHY THIS FILE EXISTS
+#   MateMail's backend and Celery worker need the engine's API (8453) and SMTP
+#   submission (587). The obvious route - publish both on a host bridge address
+#   and point MateMail at it - was implemented, measured, and rejected: a
+#   published bind address selects a DESTINATION ip, never a permitted SOURCE,
+#   so every other Docker network on this host could open TCP connections to
+#   both ports. Six unrelated application networks could, and did, in testing.
+#
+#   This override replaces that path with a dedicated internal network carrying
+#   a single TCP passthrough gateway. No host port is published, so there is no
+#   socket for an unrelated bridge to reach.
+#
+# WHY AN OVERRIDE FILE
+#   docker-compose.override.yml is mailcow's supported extension point and is
+#   listed in its .gitignore, so update.sh does not touch it. Upstream's
+#   docker-compose.yml is never edited - that file is replaced wholesale on
+#   every upgrade, and a local edit there would be reverted silently at the
+#   worst possible moment.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO
+#   It does not attach the mailcow stack to MateMail's networks, and it does not
+#   attach MateMail to the mailcow network. The gateway is the only container on
+#   both, and it forwards two ports and nothing else.
+
+services:
+
+  matemail-engine-gateway:
+    # Pinned to an explicit LTS point release and its digest. HAProxy 3.2 is a
+    # long-term supported branch receiving fixes until Q2 2030 - confirmed from
+    # haproxy.org and from the binary's own version banner, not from memory.
+    # Never `latest`: this sits in the path of customer mail, and an unattended
+    # image change is an outage nobody chose the timing of.
+    image: haproxy:3.2.23-alpine@sha256:6343ce34a132a5dceaa24767d739df2bd519f8f7c1079ae39e4821334e8eb42e
+    restart: unless-stopped
+    # Read-only: the config is the only input, and nothing here should ever
+    # write to its own filesystem.
+    volumes:
+      - ./data/conf/matemail-gateway/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro,z
+    networks:
+      # Upstream side: reaches nginx-mailcow and postfix-mailcow by name.
+      #
+      # The address is pinned because the engine's API ACL is scoped to it. The
+      # gateway is what connects to the API, so the engine sees the gateway's
+      # address and nothing else; a DHCP address would move on recreation and
+      # silently lock MateMail out of its own mail engine.
+      #
+      # .247 sits in the block mailcow reserves for its own static assignments
+      # (.248 sogo, .249 redis, .250 dovecot, .253 postfix, .254 unbound) and is
+      # free. Dynamic allocation runs upward from .2, so a high static cannot
+      # collide. Verified against the live network, not assumed.
+      mailcow-network:
+        ipv4_address: 10.244.0.247
+        aliases:
+          - matemail-engine-gateway
+      # Downstream side: the only address MateMail ever connects to. The alias
+      # is the engine's canonical hostname so the certificate MateMail
+      # validates matches what it dialled - no extra_hosts, no IP in settings.
+      matemail_engine_link:
+        aliases:
+          - mx.matemail.online
+    # No `ports:`. Publishing one would rebuild the exact hole this replaces.
+    healthcheck:
+      # Both listeners must be accepting. `nc -z` connects and closes without
+      # speaking either protocol, so a health check can never look like an API
+      # call or a delivery attempt.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8453 && nc -z 127.0.0.1 587 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  # Created and owned OUTSIDE both Compose projects, so neither MateMail's nor
+  # mailcow's lifecycle can remove it while the other still depends on it:
+  #
+  #   docker network create --internal matemail_engine_link
+  #
+  # `internal: true` means Docker installs no route off the host for it. The
+  # link carries MateMail-to-engine traffic and nothing else; it is not a path
+  # to the Internet for either side.
+  matemail_engine_link:
+    external: true

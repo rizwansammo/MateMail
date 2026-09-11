@@ -103,14 +103,55 @@ class DomainDetailView(APIView):
         if not domain:
             return Response({"detail": "Not found."}, status=404)
 
-        # Fire-and-forget deprovision in mail engine
-        if domain.mail_engine_provisioned:
-            try:
-                from apps.mail_engine.tasks import deprovision_domain_task
-                deprovision_domain_task.delay(domain.domain)
-            except Exception:
-                pass
+        # ── Queue engine cleanup BEFORE deleting the local row, and fail closed
+        #    if it cannot be queued. ────────────────────────────────────────────
+        #
+        # This task is what removes the domain's DKIM signing key. The engine
+        # keeps that key after the domain itself is gone and issues it to
+        # whoever registers the name next, so losing the task loses custody of a
+        # private key that can sign mail as this domain.
+        #
+        # The local row is the only durable record that cleanup is owed. Delete
+        # it before the task is safely queued and there is nothing left to
+        # reconcile against: no domain in MateMail, a live signing key in the
+        # engine, and no job anywhere that will ever remove it. Logging and
+        # deleting anyway — which this did first — records the problem in a file
+        # nobody reads while creating exactly that state.
+        #
+        # So a broker failure blocks the delete. A customer who cannot remove a
+        # domain for a few minutes is a far smaller problem than an orphaned
+        # signing key, and it is recoverable by retrying; the orphan is not.
+        #
+        # Enqueued unconditionally, not only when `mail_engine_provisioned` is
+        # set. That flag is cleared at the START of a re-provision, so a domain
+        # can hold engine state — including a key — while the flag reads False.
+        # The task is idempotent and costs nothing for a domain the engine never
+        # held: deleting an absent domain and an absent key both succeed,
+        # verified against the live engine.
+        try:
+            from apps.mail_engine.tasks import deprovision_domain_task
+            deprovision_domain_task.delay(domain.domain)
+        except Exception as exc:
+            logger.error(
+                "SECURITY: refusing to delete domain %s (tenant %s) — engine "
+                "deprovisioning could not be queued: %s. The local record is "
+                "being kept deliberately: it is the only durable reference to a "
+                "DKIM signing key that may still exist in the Mail Engine.",
+                domain.domain, request.tenant.id, exc,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "This domain could not be removed right now. Nothing has "
+                        "been changed — please try again in a few minutes."
+                    )
+                },
+                status=503,
+            )
 
+        # From here the cleanup is durably queued. If the local delete now fails,
+        # the engine loses the domain while MateMail keeps the row — recoverable
+        # by reprovisioning, and strictly preferable to the reverse.
         log_event(request.tenant, LogEventType.DOMAIN_DELETED, request=request, domain=domain)
         domain.delete()
         return Response(status=204)

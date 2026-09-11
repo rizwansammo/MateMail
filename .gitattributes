@@ -13,6 +13,7 @@
 *.yaml      text eol=lf
 *.conf      text eol=lf
 *.cfg       text eol=lf
+*.php       text eol=lf
 *.ini       text eol=lf
 Dockerfile  text eol=lf
 .env*       text eol=lf

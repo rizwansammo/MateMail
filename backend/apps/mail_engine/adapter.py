@@ -32,6 +32,7 @@ converge rather than duplicate.
 | `set_domain_active` / `set_mailbox_active` | Assignment, not toggle. Setting the current value is a no-op success. |
 | `set_mailbox_password` / `set_mailbox_quota` | Assignment. Naturally idempotent. |
 | `delete_domain` / `delete_mailbox` / `delete_alias` | Idempotent. Deleting something already absent succeeds; it does **not** raise `NotFound`, because the caller's intent (it should not exist) is satisfied. |
+| `delete_dkim_key` | Idempotent. An already-absent key is the desired end state. |
 | `rotate_dkim_key` | **NOT idempotent.** Each call generates a new keypair and invalidates the previously published DNS record. Never call it from an automatic retry path. |
 | `cancel_queue_message` / `release_quarantine_item` | Idempotent by message id; acting on an already-actioned message succeeds. |
 
@@ -42,9 +43,16 @@ not the ordinary outcome of a retry.
 ## DKIM
 
 Per DEC-007r the engine owns the private key. This port exposes only
-`get_dkim_public_key()` and `rotate_dkim_key()`, both of which return public
-material. There is no method that reads or writes a private key, and none may be
-added.
+`get_dkim_public_key()`, `rotate_dkim_key()` and `delete_dkim_key()`. The first
+two return public material; the third returns nothing. There is no method that
+reads or writes a private key, and none may be added.
+
+`delete_dkim_key` exists because of a property measured against the real engine
+in P4B, not deduced: **removing a domain does not remove its DKIM key.** The key
+outlives the domain, and a later re-registration of the same domain name adopts
+the surviving key. In a multi-tenant product that means a new tenant can inherit
+a previous tenant's private signing key, so deprovisioning must delete the key
+explicitly. See `docs/MAIL_ENGINE.md` § "DKIM lifecycle".
 """
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -178,6 +186,23 @@ class MailEngineAdapter(ABC):
         record, so the customer must republish. Never call from a retry path.
         The private key is generated and retained inside the engine and must
         never be returned.
+
+        Implementations must tolerate being called when the engine holds no key
+        — that is the state a retry sees after a rotation failed partway — and
+        must not destroy a replacement key they have just created.
+        """
+
+    @abstractmethod
+    def delete_dkim_key(self, domain_name: str) -> None:
+        """
+        Remove the engine's DKIM keypair for a domain. Idempotent.
+
+        Deleting a key the engine does not have succeeds: the caller's intent
+        (no signing key must remain for this domain) is already satisfied.
+
+        This is a security operation, not housekeeping. A key left behind after
+        a domain is removed is inherited by whoever registers that domain name
+        next — see the module docstring.
         """
 
     # ── Queue and quarantine ────────────────────────────────────────────────

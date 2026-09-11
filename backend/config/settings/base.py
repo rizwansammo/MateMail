@@ -244,8 +244,17 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS", default="http://localhost:3000").split(",")
 CORS_ALLOW_CREDENTIALS = True
 
-# Mail engine integration
-MAIL_ENGINE_API_URL = env("MAIL_ENGINE_API_URL", default="http://localhost:8080")
+# Mail engine integration.
+#
+# The URL deliberately has NO default. It used to default to
+# "http://localhost:8080", which is wrong in every environment that matters:
+# MateMail runs in a container, so loopback is the container itself, never the
+# engine. Worse, the plausible-looking default masked the deploy check meant to
+# catch a missing URL — a production deployment that forgot to set it would pass
+# `check --deploy` and then fail on the first customer action.
+#
+# Empty means "not configured", which is exactly what mail_engine.E001 reports.
+MAIL_ENGINE_API_URL = env("MAIL_ENGINE_API_URL", default="")
 MAIL_ENGINE_API_KEY = env("MAIL_ENGINE_API_KEY", default="")
 # "stub" (default) = in-memory adapter, no engine needed (local dev + CI)
 # "mailcow" = the real MateMail Mail Engine (Postfix/Dovecot/Rspamd via mailcow)

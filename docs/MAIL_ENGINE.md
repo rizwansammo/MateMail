@@ -148,11 +148,110 @@ Mailcow exposes a mature REST API at `/api/v1/` for managing all objects: domain
 
 ---
 
-## Mailcow REST API Endpoints Used by MateMail
+## Engine runtime as installed (P4B)
+
+The engine is installed and validated on MateServer. It is **not yet activated**
+— production MateMail still runs `MAIL_ENGINE_ADAPTER=stub`.
+
+| | |
+|---|---|
+| Release | `2026-07b`, commit `02552ffefdf0869f988edf4a7e03822e8b467b34` |
+| Install path | `/opt/mailcow-dockerized` |
+| Hostname | `mx.matemail.online` (Let's Encrypt certificate, host Certbot) |
+| Engine network | `10.244.0.0/24` — chosen to avoid mailcow's default `172.22.1.0/24`, which collides with `portfolio_default` on this host |
+| IPv6 | disabled |
+| ClamAV / SOGo / FTS | all enabled |
+| `network_mode: host` | used by `netfilter-mailcow` only — the single approved upstream exception. No application or mail service uses host networking. |
+
+### The private path from MateMail to the engine
 
 ```
-Base URL: http://mailcow:8080 (internal Docker network only)
-Auth: X-API-Key: <internal secret>
+backend / celery-worker
+    │        (and only those two — nothing else joins the link)
+    ▼
+matemail_engine_link          dedicated, external, internal: true
+    │  mx.matemail.online  →  the gateway's alias on this network
+    ▼
+matemail-engine-gateway       HAProxy 3.2 LTS, TCP passthrough only
+    │  10.244.0.247           pinned identity on the engine's network
+    ▼
+nginx-mailcow:8453            engine HTTPS API
+postfix-mailcow:587           SMTP submission, STARTTLS
+```
+
+No host port is published anywhere on this path, and no address appears in
+MateMail's configuration: `MAIL_ENGINE_API_URL` and `EMAIL_HOST` name
+`mx.matemail.online`, the link network's alias resolves it, and the certificate
+validates because the name is real.
+
+**Why one gateway rather than two aliases.** Attaching `nginx-mailcow` and
+`postfix-mailcow` to the link under the same alias would let Docker's DNS return
+either address, while 8453 exists only on one and 587 only on the other — a
+routing coin-flip. One ingress owning the name makes the destination
+deterministic.
+
+**Why TCP passthrough and not a proxy that understands the protocols.** The
+gateway is layer 4. It does not terminate, inspect or re-originate TLS, and it
+is not an SMTP relay. The certificate MateMail validates is the real one
+presented by nginx and by Postfix, so hostname verification stays meaningful end
+to end and the gateway never holds key material or parses a mail command.
+
+**Why not nginx-mailcow itself.** Its image has nginx's stream module compiled
+in, but there is no update-safe place to put a `stream {}` block: the only
+writable, bind-mounted nginx path is `/etc/nginx/conf.d`, which upstream
+includes *inside* `http {}` where `stream {}` is invalid, and the one file with
+a top-level context — `nginx.conf.j2` — is tracked in mailcow's git and restored
+by `update.sh`.
+
+The gateway is defined in mailcow's `docker-compose.override.yml`, which is
+listed in mailcow's own `.gitignore` and is the supported extension point.
+Upstream's `docker-compose.yml` is never edited.
+
+### Why binding to a Docker bridge gateway address was rejected
+
+This is worth keeping, because the rejected design looks correct and is what
+most guidance suggests.
+
+The engine originally published its API and submission ports on MateMail's own
+app-network gateway, `172.24.0.1`, on the reasoning that a private bridge
+address is private. It is not. **A published bind address selects a destination
+address; it never restricts the source.** Measured on this host, containers on
+`netamate_internal`, `matedesk_internal`, `mateassist_internal`,
+`mateconnect_internal`, `portfolio_default` and the default bridge all opened
+TCP connections to both ports.
+
+The mechanism, confirmed by rule counters rather than inferred: `docker-proxy`
+holds a userland socket on that address and accepts on it whichever bridge the
+traffic arrived from. During the test the DNAT rule did not fire at all while
+the filter ACCEPT did, once per connection — so the traffic never traverses
+`DOCKER-USER`, and a rule there would not have helped. Filtering would have had
+to happen in `INPUT`, a host firewall change, and the socket would still be
+published.
+
+The same re-origination is why the engine saw `10.244.0.1` as the client for
+every request regardless of who sent it, which made its own `allow_from` ACL
+unable to identify the caller. **One root cause, two symptoms**, and both
+disappear when the socket does.
+
+---
+
+## Mailcow REST API Endpoints Used by MateMail
+
+> **Wire contract.** Verified against `2026-07b`'s OpenAPI specification, its
+> `json_api.php` router, and the live engine. Three shapes are easy to get wrong
+> and fail only against a real engine:
+>
+> - every `/delete/` endpoint **rejects non-POST with HTTP 405**;
+> - `/delete/*` takes a **bare JSON array**, not an object — the router assigns
+>   the whole request body to `$_POST['items']`;
+> - `/edit/*` takes `{"items": [...], "attr": {...}}`.
+>
+> `set/quarantine/release` **does not exist** at this version; the adapter
+> raises `EngineCapabilityMissing` rather than silently reporting success.
+
+```
+Base URL: https://mx.matemail.online:8453   (private; see the path above)
+Auth: X-API-Key: <issued by the engine, never in the repository>
 
 # Domain management
 GET    /api/v1/get/domain/all
@@ -229,17 +328,96 @@ This interface is implementation-agnostic. A `MailcowAdapter` implements it for 
 
 ---
 
-## DKIM Integration
+## DKIM lifecycle
 
-Mailcow manages DKIM via Rspamd. MateMail workflow:
+**Verified against the running engine in P4B, not inferred.** Four of MateMail's
+assumptions about this lifecycle were wrong, and every one of them looked
+reasonable in code review. The four facts that matter:
 
-1. Admin adds domain in MateMail UI
-2. Django calls `POST /api/v1/add/dkim` with domain name and key length (2048)
-3. Mailcow generates keypair internally, Rspamd handles signing
-4. Django calls `GET /api/v1/get/dkim/{domain}` to retrieve the public key
-5. Public key is stored in `Domain.dkim_public_key` and shown to the user as a DNS TXT record
-6. After user adds the record, Django verifies via DNS lookup
-7. Domain status updated accordingly
+| Fact | Consequence for MateMail |
+|---|---|
+| `add/domain` **generates the keypair**, using the `dkim_selector` and `key_size` sent on that same call | Those fields must be on the domain-create request. There is no second chance. |
+| `add/dkim` is **refused** while a key already exists (`dkim_domain_or_sel_invalid`, `functions.dkim.inc.php:21`) | A bare `add/dkim` is not rotation. It is a guaranteed failure. |
+| `delete/domain` does **not** delete the key | Deprovisioning must delete it explicitly, or the next owner of the domain inherits it. |
+| `delete/dkim` is the only thing that removes a key, and is idempotent | It is the remedy, and it is safe to call unconditionally. |
+
+### Provisioning
+
+1. The customer adds a domain in MateMail and proves ownership (P3a).
+2. `ensure_domain` sends `POST /api/v1/add/domain` **including `dkim_selector`
+   and `key_size`**. The engine creates the domain and mints the keypair,
+   keeping the private half (DEC-007r).
+3. `_adopt_engine_dkim` **reads** the key with `GET /api/v1/get/dkim/{domain}`.
+   It does not generate one — generation only runs in the recovery case where
+   the engine somehow holds none.
+4. The public material is stored in `Domain.dkim_public_key` and shown as a DNS
+   TXT record. The selector recorded is **the one the engine reports**, never
+   the one MateMail asked for: the engine is what signs, so if the two ever
+   disagree the engine wins.
+5. The customer publishes the record; MateMail verifies it by DNS lookup.
+
+Omitting the selector in step 2 does not skip generation — it makes the engine
+use its own default, `dkim`. MateMail would then publish `mm1._domainkey` for a
+key signed under `dkim._domainkey`, and every outgoing message would fail DKIM
+with nothing in MateMail reporting a problem.
+
+### Rotation
+
+```
+read current key → delete/dkim (only if one exists) → add/dkim → read back
+```
+
+The conditional delete is what makes rotation retry-safe. After a rotation that
+deleted the old key and then failed to add the new one, the engine holds
+nothing; deleting unconditionally would be harmless there but would destroy the
+*replacement* key on any later retry that ran after a successful add.
+
+Rotation is **not idempotent** and deliberately **not a Celery task** — it
+invalidates the DNS record the customer has published, and a retry would mint
+another key and leave DNS permanently stale. It lives in
+`apps.mail_engine.services.rotate_domain_dkim`, is called synchronously, and is
+serialized per domain with `select_for_update` so two concurrent rotations
+cannot destroy one another's keys.
+
+### Deprovisioning — a security operation
+
+```
+set_domain_active(False) → delete_dkim_key → delete_domain
+```
+
+Measured in P4B: tenant A registers a domain and is issued a key; tenant A
+removes the domain; the domain record disappears but the key remains; tenant B
+later registers the same domain and **inherits tenant A's private signing key**,
+along with tenant A's selector rather than the one tenant B asked for.
+
+Domains legitimately change hands, so this is not a hypothetical. The key
+deletion is therefore unconditional and runs **even when the domain is already
+absent** — no domain plus stale key is exactly the state a previously failed
+cleanup leaves behind, and short-circuiting on "domain not found" would make the
+cleanup permanently unable to repair itself.
+
+A transient failure retries. A terminal failure **raises** rather than returning
+quietly, because a silent return would report clean removal over a usable
+signing key for a domain MateMail no longer controls.
+
+### Private key exposure
+
+The engine returns a `privkey` field on every DKIM read. It is empty while
+`$SHOW_DKIM_PRIV_KEYS` is `false`, which P4B verified as the effective value
+inside the running php-fpm container.
+
+That is a **PHP variable, not a `mailcow.conf` setting** — an earlier version of
+this documentation said otherwise, and configuring it there would have had no
+effect at all:
+
+| | |
+|---|---|
+| Upstream default | `data/web/inc/vars.inc.php` (ships `false`) |
+| Persistent override | `data/web/inc/vars.local.inc.php` |
+| Required effective value | `$SHOW_DKIM_PRIV_KEYS = false;` |
+
+The adapter strips private fields unconditionally regardless, and `DkimKeyInfo`
+has no field able to hold one. See `MAIL_ENGINE_P4A.md` §6 for the three layers.
 
 ---
 

@@ -108,6 +108,147 @@ jobs:
           done
           echo "Both images present."
 
+      # ── The Compose file is part of the release, not part of the server ──
+      #
+      # deploy/docker-compose.yml now carries security-critical topology: which
+      # services join the private engine link, that the link is external, and
+      # that the datastore network stays internal. Deploying new images against
+      # whatever Compose file happened to be sitting on the server is how those
+      # drift apart silently.
+      #
+      # Images, Compose and revision are one unit. The Compose file therefore
+      # comes from the SAME commit as the images — `git show <IMAGE_TAG>:...`,
+      # not the checkout's working tree, because a manual deployment of an older
+      # published SHA must receive that SHA's Compose file, and workflow HEAD is
+      # not necessarily IMAGE_TAG.
+      #
+      # Extracting the blob on this Linux runner also keeps line endings correct:
+      # the file is never sourced from a Windows working tree, where
+      # core.autocrlf would rewrite it.
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          # Full history: `git show <sha>` and the ancestry check below both
+          # need the commit, and a shallow clone would not have it.
+          fetch-depth: 0
+
+      - name: Extract the Compose file from the exact release commit
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          # Re-asserted here as well as in the gate job. This value is about to
+          # select a Git object; a format check at the boundary that uses it is
+          # worth the duplicated line.
+          if ! printf '%s' "$IMAGE_TAG" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::image_tag must be a full 40-character lowercase commit SHA."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${IMAGE_TAG}^{commit}" 2>/dev/null; then
+            echo "::error::Commit ${IMAGE_TAG} does not exist in this repository."
+            exit 1
+          fi
+
+          # Reachability, so the deploy cannot be pointed at an arbitrary object
+          # that was pushed but never merged — a dangling commit, or one from an
+          # abandoned branch.
+          if ! git merge-base --is-ancestor "$IMAGE_TAG" "origin/${DEFAULT_BRANCH}"; then
+            echo "::error::Commit ${IMAGE_TAG} is not an ancestor of origin/${DEFAULT_BRANCH}."
+            echo "Only commits merged to the default branch may be deployed."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${IMAGE_TAG}:deploy/docker-compose.yml" 2>/dev/null; then
+            echo "::error::deploy/docker-compose.yml does not exist in commit ${IMAGE_TAG}."
+            exit 1
+          fi
+
+          mkdir -p candidate
+          git show "${IMAGE_TAG}:deploy/docker-compose.yml"             > "candidate/docker-compose.${IMAGE_TAG}.yml"
+
+          echo "Extracted from ${IMAGE_TAG}:"
+          sha256sum "candidate/docker-compose.${IMAGE_TAG}.yml"
+          wc -l "candidate/docker-compose.${IMAGE_TAG}.yml"
+
+      - name: Preflight MateServer before transferring anything
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: IMAGE_TAG
+          timeout: 60s
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            DEPLOY_DIR=/opt/MateMail
+            cd "$DEPLOY_DIR"
+
+            if ! docker system info > /dev/null 2>&1; then
+              echo "ERROR: docker is not usable by $(whoami)."
+              exit 1
+            fi
+            [ -f docker-compose.yml ] || { echo "ERROR: $DEPLOY_DIR/docker-compose.yml is missing. Bootstrap the host once, per deploy/README.md."; exit 1; }
+            [ -f .env ]              || { echo "ERROR: $DEPLOY_DIR/.env is missing."; exit 1; }
+
+            # ── The private Mail Engine link must already exist ──
+            #
+            # backend and celery-worker join `matemail_engine_link`, declared
+            # `external`. Compose will not create it, but it fails late and with
+            # a message that reads like a transient Docker fault rather than a
+            # missing prerequisite.
+            #
+            # Checked here, and deliberately NEVER created here. A network made
+            # on the fly gets Docker's defaults, which means a routable bridge
+            # rather than an internal one — and a routable engine link silently
+            # reopens the cross-application exposure the dedicated network
+            # exists to close.
+            if ! docker network inspect matemail_engine_link >/dev/null 2>&1; then
+              echo "FATAL: the Docker network 'matemail_engine_link' does not exist."
+              echo "       backend and celery-worker cannot reach the Mail Engine without it."
+              echo "       Create it on the server, once:"
+              echo "         docker network create --internal matemail_engine_link"
+              exit 1
+            fi
+            LINK_INTERNAL=$(docker network inspect matemail_engine_link --format '{{.Internal}}')
+            if [ "${LINK_INTERNAL}" != "true" ]; then
+              echo "FATAL: 'matemail_engine_link' exists but is NOT internal (Internal=${LINK_INTERNAL})."
+              echo "       A routable engine link reopens the cross-application exposure"
+              echo "       the dedicated network exists to close. Recreate it:"
+              echo "         docker network rm matemail_engine_link"
+              echo "         docker network create --internal matemail_engine_link"
+              exit 1
+            fi
+            echo "  matemail_engine_link present and internal=true"
+
+            mkdir -p "$DEPLOY_DIR/.deploy" "$DEPLOY_DIR/backups"
+            chmod 755 "$DEPLOY_DIR/.deploy"
+            # Keep the last few staged candidates for forensics, not all of them.
+            ls -1t "$DEPLOY_DIR"/.deploy/docker-compose.*.yml 2>/dev/null               | tail -n +6 | xargs -r rm --
+            echo "  staging directory ready"
+
+      - name: Stage the exact-revision Compose on MateServer
+        # Pinned to the current release of the action (v1.0.0, 2025-04-27),
+        # checked against its releases rather than recalled. Same maintainer and
+        # same VPS secrets as the ssh-action already used below, so this adds a
+        # transfer mechanism rather than a new trust relationship.
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: candidate/docker-compose.${{ inputs.image_tag }}.yml
+          target: /opt/MateMail/.deploy/
+          strip_components: 1
+          overwrite: true
+
       - name: Deploy to MateServer
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -121,46 +262,161 @@ jobs:
           timeout: 60s
           command_timeout: 15m
           script: |
-            set -euo pipefail
+            set -Eeuo pipefail
 
             DEPLOY_DIR=/opt/MateMail
             BACKEND_IMAGE=ghcr.io/rizwansammo/matemail-backend
             FRONTEND_IMAGE=ghcr.io/rizwansammo/matemail-frontend
+            STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+            CANDIDATE="$DEPLOY_DIR/.deploy/docker-compose.${IMAGE_TAG}.yml"
+            COMPOSE_BACKUP="$DEPLOY_DIR/backups/docker-compose.${STAMP}.yml"
+            ENV_BACKUP="$DEPLOY_DIR/.env.bak.${STAMP}"
 
             cd "$DEPLOY_DIR"
 
-            # No repository checkout exists here, and none is needed: the image
-            # is the artifact. Only docker-compose.yml and .env live on the host.
-            if [ ! -f docker-compose.yml ]; then
-              echo "ERROR: $DEPLOY_DIR/docker-compose.yml is missing."
-              echo "Bootstrap the host once, per deploy/README.md."
-              exit 1
-            fi
-            if [ ! -f .env ]; then
-              echo "ERROR: $DEPLOY_DIR/.env is missing."
-              exit 1
-            fi
+            # The host holds no repository checkout and needs none: the image is
+            # the artifact. Only docker-compose.yml and .env live here, and the
+            # Compose file now arrives with the release rather than persisting
+            # across releases. Existence of .env, the live Compose file, a usable
+            # Docker daemon and the engine-link network were all verified in the
+            # preflight step, before anything was transferred.
+            [ -f "$CANDIDATE" ] || { echo "ERROR: staged candidate $CANDIDATE is missing."; exit 1; }
 
-            # GHCR pull auth uses the host's existing docker login, per the
-            # NetaMate production model. The workflow does not push a registry
-            # credential to the server.
-            if ! docker system info > /dev/null 2>&1; then
-              echo "ERROR: docker is not usable by $(whoami)."
-              exit 1
-            fi
+            # ── 1. Validate the candidate BEFORE it replaces anything ────────
+            #
+            # Against the real .env, because a Compose file that resolves on a
+            # runner but not on the server is a deployment that fails after the
+            # working one has already been replaced.
+            echo "▸ Validating the candidate Compose file..."
+            docker compose --env-file "$DEPLOY_DIR/.env" -f "$CANDIDATE" config --quiet
+            docker compose --env-file "$DEPLOY_DIR/.env" -f "$CANDIDATE" config --format json > /tmp/candidate.json
 
-            # Back up the current .env so a rollback can restore the exact
-            # image pair that was running.
-            cp .env ".env.bak.$(date -u +%Y%m%dT%H%M%SZ)"
-            ls -1t .env.bak.* 2>/dev/null | tail -n +11 | xargs -r rm --
+            # ── 2. Security invariants, read from the RESOLVED candidate ─────
+            #
+            # Asserted against Compose's own resolved output rather than the
+            # file text, so an anchor, an override or a variable cannot hide a
+            # change. Python's stdlib json only — nothing here depends on a
+            # package that happens to be installed on this host today.
+            echo "▸ Checking security invariants..."
+            python3 - <<'PYCHECK'
+            import json, sys
+
+            with open("/tmp/candidate.json") as fh:
+                doc = json.load(fh)
+
+            services = doc.get("services", {})
+            networks = doc.get("networks", {})
+            problems = []
+
+            def want(condition, message):
+                if not condition:
+                    problems.append(message)
+
+            published = {
+                name: [(p.get("host_ip"), str(p.get("published"))) for p in (svc.get("ports") or [])]
+                for name, svc in services.items()
+            }
+            want(published.get("backend") == [("127.0.0.1", "8020")],
+                 "backend must publish only 127.0.0.1:8020, got %r" % (published.get("backend"),))
+            want(published.get("frontend") == [("127.0.0.1", "3020")],
+                 "frontend must publish only 127.0.0.1:3020, got %r" % (published.get("frontend"),))
+            for datastore in ("postgres", "redis"):
+                want(not published.get(datastore),
+                     "%s must publish no host port, got %r" % (datastore, published.get(datastore)))
+
+            for name, svc in services.items():
+                want(svc.get("network_mode") != "host", "%s uses host networking" % name)
+                want(":latest" not in (svc.get("image") or ""), "%s uses a :latest image" % name)
+
+            want(networks.get("matemail_internal", {}).get("internal") is True,
+                 "matemail_internal must stay internal")
+            want(networks.get("matemail_engine_link", {}).get("external") is True,
+                 "matemail_engine_link must be an external network")
+
+            on_link = sorted(n for n, s in services.items()
+                             if "matemail_engine_link" in (s.get("networks") or {}))
+            want(on_link == ["backend", "celery-worker"],
+                 "only backend and celery-worker may join the engine link, got %r" % (on_link,))
+
+            if problems:
+                print("CANDIDATE REJECTED:")
+                for problem in problems:
+                    print("  - " + problem)
+                sys.exit(1)
+            print("  all invariants hold")
+            PYCHECK
+
+            # ── 3. Back up what is about to be replaced ──────────────────────
+            #
+            # Compose and .env together. They are one deployment unit now, and a
+            # rollback restoring only one would leave new topology against old
+            # images, or the reverse.
+            echo "▸ Backing up the current Compose file and .env..."
+            cp -a docker-compose.yml "$COMPOSE_BACKUP"
+            cp -a .env "$ENV_BACKUP"
+            # Bounded retention, matching the existing .env policy: keep 10.
+            ls -1t "$DEPLOY_DIR"/backups/docker-compose.*.yml 2>/dev/null | tail -n +11 | xargs -r rm --
+            ls -1t "$DEPLOY_DIR"/.env.bak.* 2>/dev/null | tail -n +11 | xargs -r rm --
+            echo "  compose -> $COMPOSE_BACKUP"
 
             PREVIOUS_BACKEND=$(grep -E '^MATEMAIL_BACKEND_IMAGE=' .env | cut -d= -f2- || true)
             echo "Previous backend image: ${PREVIOUS_BACKEND:-none}"
 
-            # Pin the new images.
+            # ── Rollback, armed only once the live state has actually changed ─
+            #
+            # Restores Compose AND .env together, then brings the previous stack
+            # back using the previous file. Deliberately never destructive: no
+            # `down -v`, no prune, no volume removal. A rollback must not be able
+            # to destroy data that the failed deployment left intact.
+            #
+            # TWO WAYS IN, and they are not interchangeable:
+            #
+            #   unexpected command failure  → the ERR trap below calls rollback
+            #   deliberate health timeout   → that branch calls rollback itself
+            #
+            # bash fires ERR when a command returns non-zero, NOT when the script
+            # calls `exit`. Anything that decides to fail on purpose therefore
+            # has to call rollback before exiting; the trap will not do it.
+            #
+            # Safe to reach both ways: the guard returns immediately unless
+            # ROLLBACK_ARMED is 1, and clears it before doing any work, so
+            # rollback runs at most once however it is entered.
+            ROLLBACK_ARMED=0
+            rollback() {
+              [ "$ROLLBACK_ARMED" = "1" ] || return 0
+              ROLLBACK_ARMED=0
+              echo "══ Deployment failed — rolling back Compose and images together ══"
+              cp -a "$COMPOSE_BACKUP" "$DEPLOY_DIR/.docker-compose.yml.rollback"
+              mv -f "$DEPLOY_DIR/.docker-compose.yml.rollback" "$DEPLOY_DIR/docker-compose.yml"
+              cp -a "$ENV_BACKUP" "$DEPLOY_DIR/.env.rollback"
+              mv -f "$DEPLOY_DIR/.env.rollback" "$DEPLOY_DIR/.env"
+              echo "  restored Compose and .env (backend was ${PREVIOUS_BACKEND:-unknown})"
+              if docker compose up -d --remove-orphans; then
+                echo "  previous stack restored"
+              else
+                echo "  WARNING: the previous stack did not come back cleanly — inspect the host"
+              fi
+              docker compose ps || true
+            }
+            trap rollback ERR
+
+            # ── 4. Pin the new images ────────────────────────────────────────
             sed -i "s|^MATEMAIL_BACKEND_IMAGE=.*|MATEMAIL_BACKEND_IMAGE=${BACKEND_IMAGE}:${IMAGE_TAG}|" .env
             sed -i "s|^MATEMAIL_FRONTEND_IMAGE=.*|MATEMAIL_FRONTEND_IMAGE=${FRONTEND_IMAGE}:${IMAGE_TAG}|" .env
             grep -E '^MATEMAIL_(BACKEND|FRONTEND)_IMAGE=' .env
+
+            # ── 5. Install the validated candidate atomically ────────────────
+            #
+            # Written to a sibling on the same filesystem, flushed, then renamed.
+            # rename(2) is atomic, so no reader — including a concurrent
+            # `docker compose` — can observe a half-written Compose file.
+            echo "▸ Installing the exact-revision Compose file..."
+            install -o root -g root -m 644 "$CANDIDATE" "$DEPLOY_DIR/.docker-compose.yml.new"
+            sync "$DEPLOY_DIR/.docker-compose.yml.new" 2>/dev/null || sync
+            mv -f "$DEPLOY_DIR/.docker-compose.yml.new" "$DEPLOY_DIR/docker-compose.yml"
+            ROLLBACK_ARMED=1
+            echo "  installed from ${IMAGE_TAG}, mode $(stat -c '%a %U:%G' docker-compose.yml)"
+            sha256sum docker-compose.yml
 
             echo "▸ Backing up the database before migrating..."
             docker compose exec -T postgres \
@@ -193,12 +449,26 @@ jobs:
               fi
               if [ "$i" -eq 30 ]; then
                 echo "ERROR: backend did not become healthy."
-                docker compose ps
-                docker compose logs --tail=80 backend migrate
+                # Diagnostics must not decide the outcome: `|| true` so a failing
+                # `logs` cannot pre-empt the explicit rollback below.
+                docker compose ps || true
+                docker compose logs --tail=80 backend migrate || true
                 echo ""
-                echo "To roll back: set MATEMAIL_*_IMAGE in $DEPLOY_DIR/.env to the"
-                echo "previous SHA (backend was ${PREVIOUS_BACKEND:-unknown}) and re-run"
-                echo "docker compose up -d."
+                # Rollback is called EXPLICITLY here.
+                #
+                # `exit` does not fire bash's ERR trap — the trap runs on a
+                # command returning non-zero, not on deliberate termination. An
+                # earlier version of this branch relied on `exit 1` reaching
+                # `trap rollback ERR` and therefore exited leaving the new
+                # Compose file and new image pins in place over a backend that
+                # never came up: the single state this whole mechanism exists to
+                # prevent.
+                #
+                # rollback() guards on ROLLBACK_ARMED and clears it immediately,
+                # so calling it here and having the trap fire later cannot
+                # roll back twice.
+                rollback
+                trap - ERR
                 exit 1
               fi
               sleep 5
@@ -220,6 +490,11 @@ jobs:
             # Image cleanup belongs to MateServer's own maintenance process,
             # which can reason about every application on the host. Do not add
             # any host-global docker command to this workflow.
+            # Past this point the deployment is good. Disarm the rollback so a
+            # failure in reporting cannot tear down a healthy stack.
+            ROLLBACK_ARMED=0
+            trap - ERR
+
             echo "══ Deployment complete ══"
 
       - name: Summary

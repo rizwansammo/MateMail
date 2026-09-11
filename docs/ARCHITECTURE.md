@@ -90,6 +90,40 @@ The engine provides mechanism — message transport, delivery, storage,
 authentication, spam scoring, signing. MateMail provides every policy decision
 about who may do what, and every pixel a customer sees.
 
+### Two mailbox models (DEC-015 — the second is roadmap, not built)
+
+Every row above is written for **business** mailboxes, where the customer owns
+the domain and proves it:
+
+```
+rizwan@netamate.com        customer owns the domain, ownership verified
+```
+
+DEC-015 adds a second model at P7.5, where **MateMail owns the domain** and a
+user claims a name on it:
+
+```
+rizwan@matemail.online     MateMail owns the domain, user claims a username
+```
+
+The engine sees no difference — a domain is a domain, and no adapter or boundary
+change is anticipated. The architectural difference is entirely on MateMail's
+side of the port, and it is one row in the table above:
+
+| | Business | Free |
+|---|---|---|
+| Who owns the domain | the customer | MateMail |
+| What authorises a mailbox | proof of domain control | claiming an unused, unreserved username |
+
+That replaces MateMail's strongest authorisation gate with its weakest, which is
+why "Domain onboarding and ownership verification" cannot simply be skipped for
+free accounts — it has to be *substituted* by username policy, reserved names
+and signup abuse controls. Those are designed in P5 and built in P7.5; see
+`SECURITY.md` for why the existing abuse table does not transfer unchanged.
+
+The platform's own transactional sender is a third identity and stays separate
+from both: `noreply@mail.matemail.online` (DEC-013).
+
 ---
 
 ## Deployment topology

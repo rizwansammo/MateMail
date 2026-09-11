@@ -682,6 +682,180 @@ The key is never exposed through the API, the serializer, or Django admin
 
 ---
 
+## Stale DKIM keys and cross-tenant inheritance
+
+**Status: fixed in P4C-A. Found by measuring the real engine in P4B.**
+
+The engine does **not** delete a domain's DKIM keypair when the domain is
+deleted. The key outlives the domain, and re-registering the same domain name
+adopts the surviving key.
+
+Demonstrated end to end against the live engine:
+
+1. Tenant A registers `example.com`; the engine mints a keypair.
+2. Tenant A removes the domain. The domain record disappears. **The key does
+   not.**
+3. Tenant B legitimately acquires `example.com` and registers it.
+4. Tenant B is silently issued **tenant A's private signing key**, and tenant
+   A's selector rather than the one tenant B requested.
+
+Domains change hands in the ordinary course of business, so this is not a
+contrived scenario. Its effect is that a former owner retains the ability to
+sign mail as the new owner's domain — with DNS that validates, because the
+published record still matches the inherited key.
+
+MateMail's own ownership verification (P3a) narrows but does not close this:
+it ensures tenant B genuinely controls the domain, which is precisely the case
+above.
+
+**The fix.** Deprovisioning deletes the key explicitly, before the domain:
+
+```
+set_domain_active(False) → delete_dkim_key → delete_domain
+```
+
+Three properties make it hold rather than merely usually work:
+
+- **Unconditional.** The key deletion runs even when the engine reports no such
+  domain. "No domain, stale key" is exactly the state a previously failed
+  cleanup leaves behind; short-circuiting on not-found would make the cleanup
+  permanently unable to repair itself.
+- **Key before domain.** Failing partway leaves an orphaned domain record, which
+  is recoverable, rather than an orphaned signing key, which is the hazard.
+- **Loud on failure.** A terminal failure raises instead of returning. A silent
+  return would report clean removal over a usable key for a domain MateMail no
+  longer controls.
+
+Regression coverage is in `tests/test_dkim_lifecycle.py`, including a control
+test asserting the hazard is still reproducible without the fix — if the engine's
+behaviour ever changes, that test fails and tells us to re-check deprovisioning
+rather than leaving dead defences in place.
+
+---
+
+## Mail Engine network exposure
+
+**Status: CLOSED in P4C-A2.** Kept in full, because the rejected design looks
+correct and is what most guidance recommends.
+
+### What was wrong
+
+The engine's private API and submission ports were published on MateMail's own
+Docker bridge gateway, `172.24.0.1:8453` and `:587`, on the reasoning that a
+private bridge address is private. They were never public — verified by scanning
+the host from outside — but they were reachable from **every other Docker
+network on the host**: `netamate_internal`, `matedesk_internal`,
+`mateassist_internal`, `mateconnect_internal`, `portfolio_default` and the
+default bridge all established TCP connections to both ports. Only
+`matemail_internal` could not, and only because `internal: true` left it no
+route at all.
+
+**A published bind address selects a destination address. It never restricts the
+source.** `docker-proxy` holds a userland socket on that address and accepts on
+it whichever bridge the traffic arrived from.
+
+The mechanism was confirmed with rule counters rather than inferred: during the
+test the DNAT rule did not fire at all (25 → 25 packets) while the filter ACCEPT
+did (87 → 90, exactly one per connection), and mailcow's own isolation rule saw
+zero. So the traffic never traverses `DOCKER-USER`, and a rule there — the
+obvious fix — would have done nothing. Filtering would have had to happen in
+`INPUT`, a host firewall change, and the socket would still have been published.
+
+The same re-origination made the engine see `10.244.0.1` as the client for every
+request regardless of origin, which is why its `allow_from` ACL could not
+identify the caller. **One root cause, two symptoms.**
+
+### What replaced it
+
+The socket was removed rather than filtered.
+
+```
+backend / celery-worker  ──▶  matemail_engine_link  ──▶  gateway  ──▶  engine
+                              external, internal:true    TCP passthrough
+```
+
+- **A dedicated link network**, `matemail_engine_link`, declared `external` and
+  created with `--internal`. Only `backend` and `celery-worker` join it.
+- **One TCP passthrough gateway** (HAProxy 3.2 LTS, pinned by digest) owning the
+  alias `mx.matemail.online` and forwarding 8453 to `nginx-mailcow` and 587 to
+  `postfix-mailcow`. Layer 4 only: it does not terminate TLS, does not relay
+  SMTP, and holds no key material.
+- **No host port is published** on the application path. The engine's own
+  loopback bindings remain for operator access over an SSH tunnel.
+
+Measured after the change — the control passes and everything else fails:
+
+| Source network | 8453 | 587 |
+|---|---|---|
+| `matemail_engine_link` (control) | reachable | reachable |
+| `matemail_app` | blocked | blocked |
+| `matemail_internal` | blocked | blocked |
+| `netamate_internal` | blocked | blocked |
+| `matedesk_internal` | blocked | blocked |
+| `mateassist_internal` | blocked | blocked |
+| `mateconnect_internal` | blocked | blocked |
+| `portfolio_default` | blocked | blocked |
+| default `bridge` | blocked | blocked |
+
+The old `172.24.0.1` socket no longer exists and is unreachable from everywhere,
+including the link itself.
+
+### The boundary, stated precisely
+
+| Layer | Control |
+|---|---|
+| Reachability | only containers on `matemail_engine_link` can open a connection at all |
+| Network | the link is `internal`, so it is not a route to or from the Internet |
+| Transport | TLS with hostname verification, terminated by the engine itself — the gateway passes it through untouched |
+| Authentication | the engine's API key |
+| Engine ACL | `allow_from` scoped to the gateway's pinned address, `10.244.0.247` |
+
+The ACL identifies the **gateway**, not the calling container — the gateway
+originates the connection, so that is the honest scope. It is defence in depth
+behind reachability, not a substitute for it. `skip_ip_check` stays `0`.
+
+---
+
+## Domain deletion must not lose key custody
+
+**Status: implemented in P4C-A2.**
+
+The engine keeps a domain's DKIM keypair after the domain is deleted, so
+`deprovision_domain_task` is what removes it. That makes queuing the task the
+only thing standing between a domain deletion and an orphaned private key that
+can sign mail as that domain.
+
+The local `Domain` row is the only durable record that cleanup is owed. Delete
+it while the task failed to reach the broker and nothing is left to reconcile:
+no domain in MateMail, a live key in the engine, and no job anywhere that will
+remove it.
+
+**Rule: the local row is deleted only after the cleanup task is durably queued.**
+If the enqueue fails the deletion is refused — the row stays, the API returns a
+customer-safe `503` saying nothing was changed, and the failure is logged as a
+security event. A customer who cannot remove a domain for a few minutes is a far
+smaller problem than an orphaned signing key, and it is recoverable by retrying;
+the orphan is not.
+
+Two earlier versions of this code were both wrong: `except Exception: pass`
+discarded the failure entirely, and its replacement logged the failure and
+deleted anyway — recording the problem in a file nobody reads while creating
+exactly the state above.
+
+The task is enqueued **unconditionally**, not only when `mail_engine_provisioned`
+is set: that flag is cleared at the start of a re-provision, so a domain can hold
+engine state while the flag reads `False`. Deleting an absent domain and an
+absent key both succeed, verified against the live engine, so the call costs
+nothing when there is nothing to clean up.
+
+The reverse ordering failure — task queued, local delete then fails — leaves the
+row while the engine loses the domain. That is recoverable by reprovisioning and
+is deliberately the preferred direction.
+
+Covered by `tests/test_domain_delete_durability.py`.
+
+---
+
 ## Secrets Management
 
 | Secret | Storage |
@@ -812,6 +986,43 @@ Both write audit events (`domain_ownership_verified`, `domain_ownership_failed`,
 | DNS abuse | DNS verification re-checks, domain pause on repeated failures |
 | Domain hijack / squatting | TXT ownership proof required before provisioning; verified ownership is exclusive, enforced by a partial unique index (P3a) |
 | Suspended tenant bypass | Celery task enforces suspension in Stalwart within 60 seconds of status change |
+
+### Free `@matemail.online` accounts — a future threat surface, not a current one
+
+**Nothing here is built. No free account exists.** Recorded so the controls
+above are designed with this case in view rather than retrofitted around it.
+
+DEC-015 puts free `username@matemail.online` mailboxes at P7.5, after the policy
+framework (P5) and operational tooling (P7). The reason is a difference in kind,
+not degree: **every control in the table above assumes an attacker who had to
+prove control of a domain.** That assumption costs money, leaves a paper trail,
+and makes a burned account expensive. A free mailbox costs a signup form.
+
+What changes when that assumption goes away:
+
+| Control above | Why free signup breaks it |
+|---|---|
+| Trial abuse / mass signup | Per-IP signup limits do not stop distributed automated signup, and there is no domain purchase to act as a cost floor |
+| Spam sending | Per-tenant limits assume a tenant is a business; a free user is a tenant of one, so the same limit permits far more aggregate outbound |
+| Domain hijack / squatting | Does not apply — but its replacement does: username squatting, and claiming addresses that appear to speak for MateMail |
+| Reputation | Business tenants sending badly damage their own domain first; free users send from `matemail.online`, so damage is immediately shared with every other free user and with the platform |
+
+Two requirements that follow directly:
+
+- **Reserved addresses must exist before any username can be claimed.**
+  `postmaster` and `abuse` are mandated by RFC 2142 and are how other operators
+  report problems to us. `admin`, `administrator`, `support`, `security`,
+  `billing`, `noreply`, `no-reply`, `hostmaster`, `webmaster` and `root` are
+  addresses a recipient would reasonably read as speaking for MateMail — letting
+  a stranger claim one hands them the platform's voice. Illustrative, not final;
+  P7.5 defines the complete policy, including how the list is extended without
+  breaking already-issued accounts.
+- **Platform transactional mail stays on `mail.matemail.online`** (DEC-013) and
+  must never be collapsed into the free-user domain. They have to be able to
+  fail separately: a free user who gets `matemail.online` blocklisted must not be
+  able to take password resets and verification mail down with them.
+
+P5 designs these controls. P7.5 implements them. Neither is in scope before then.
 
 ---
 

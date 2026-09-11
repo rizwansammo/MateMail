@@ -342,3 +342,123 @@ Before sending production email:
 - [ ] MTA-STS policy published and valid
 - [ ] Not listed on major RBLs (check mxtoolbox.com)
 - [ ] Test with mail-tester.com (target 9+ / 10)
+
+---
+
+## Mail Engine deployment facts (measured on MateServer, P4B / P4C-A)
+
+Everything in this section was measured on the production host, not planned.
+The engine is installed and validated; MateMail is **not yet pointed at it**.
+
+### The private engine link
+
+MateMail reaches the Mail Engine over a **dedicated internal Docker network**
+carrying a single TCP passthrough gateway. Nothing is published on a host port,
+and no address appears in MateMail's configuration.
+
+```
+backend / celery-worker  ──▶  matemail_engine_link  ──▶  matemail-engine-gateway  ──▶  nginx-mailcow:8453
+   (and nothing else)         external, internal:true     HAProxy 3.2 LTS, TCP only    postfix-mailcow:587
+                              alias: mx.matemail.online
+```
+
+| | |
+|---|---|
+| Link network | `matemail_engine_link` — external, `internal: true`, subnet allocated by Docker |
+| Members from MateMail | `backend`, `celery-worker` only |
+| Gateway image | `haproxy:3.2.23-alpine`, pinned by digest. HAProxy 3.2 is an LTS branch supported to Q2 2030 |
+| Gateway definition | `/opt/mailcow-dockerized/docker-compose.override.yml` (mailcow's supported extension point, in its own `.gitignore`) |
+| Gateway config | `/opt/mailcow-dockerized/data/conf/matemail-gateway/haproxy.cfg` |
+| Gateway identity on the engine network | `10.244.0.247`, pinned — the engine's API ACL is scoped to it |
+| Host-published ports on this path | **none** |
+
+Engine ports remain bound to `127.0.0.1` on the host for operator access over an
+SSH tunnel. The application path does not use them.
+
+#### One-time creation — do this before the first deploy
+
+```bash
+docker network create --internal matemail_engine_link
+```
+
+Created by hand, once, and owned outside both Compose projects so neither
+stack's lifecycle can delete a network the other depends on. The deploy workflow
+**verifies** it exists and is internal, and refuses to continue otherwise. It
+deliberately does **not** create one: a network made with Docker's defaults is a
+routable bridge, not an internal one, which silently reopens the exposure the
+dedicated link exists to close.
+
+#### Why the engine is not bound to a Docker bridge gateway address
+
+Worth keeping, because the rejected design looks correct.
+
+The engine previously published its ports on MateMail's own app-network gateway,
+`172.24.0.1`. They were never public, but they were reachable from **every other
+Docker network on this host** — six unrelated application networks opened TCP
+connections to them in testing.
+
+**A published bind address selects a destination address; it never restricts the
+source.** `docker-proxy` accepts on that socket whichever bridge the traffic
+arrives from. Rule counters confirmed the DNAT rule never fired during the test,
+so the traffic does not traverse `DOCKER-USER` and a rule there would not have
+helped; filtering would have had to happen in `INPUT`, and the socket would
+still have been published.
+
+That design also required pinning `matemail_internal` and `matemail_app` to
+fixed subnets, because the engine's bind address depended on one of them. **Both
+pins have been removed** along with the coupling: Docker allocates, and nothing
+outside the compose file depends on which range it picks.
+
+### Outbound TCP/25
+
+Reachable. Connection-and-banner tests from the engine's own network:
+
+| Destination | Result |
+|---|---|
+| Google (`gmail-smtp-in.l.google.com`, `aspmx.l.google.com`) | reachable |
+| Yandex | reachable |
+| Apple (`mx01.mail.icloud.com`) | reachable |
+| Microsoft (`mx1.hotmail.com`) | **timeout** |
+
+Three independent providers answering establishes that **the hosting provider
+imposes no general outbound TCP/25 block** — the question that actually gates
+launch.
+
+The Microsoft timeout is consistent with Microsoft-side filtering or reputation
+behaviour on a fresh hosting IP, but **the cause was not proven** and should not
+be recorded as though it were. It needs investigating before customer mail,
+alongside SNDS/JMRP enrollment. No workaround is warranted now.
+
+The IP is not listed on Spamhaus zen, SpamCop or Barracuda.
+
+### PTR — a hard launch blocker, still open
+
+```
+169.58.114.252  →  vmi3482362.contaboserver.net     (current)
+169.58.114.252  →  mx.matemail.online               (required)
+```
+
+Not changed, and deliberately out of scope until the deliverability milestone.
+**Do not record this as done.** Forward-confirmed reverse DNS is checked by
+every major receiver; a generic hosting PTR that does not match the HELO name is
+one of the most reliable ways to land in spam.
+
+### Resources
+
+| | |
+|---|---|
+| Host RAM | ~11 GiB usable |
+| Engine footprint | ~2.3 GB idle (ClamAV ~1.0 GB of it) |
+| Available with the engine running | ~6.0 GiB |
+| Swap | present, essentially unused |
+| Disk | 24 GB of 193 GB |
+
+**Decision:** a 16 GB upgrade is **not** required for engineering and private
+validation, and **is** required before enabling real customer mail or a private
+beta. The measurement above is of an idle engine — no mailboxes, no queue, no
+full-text indexing, no ClamAV scanning under load — while seven other
+applications already run on the host.
+
+Do **not** reclaim memory by disabling ClamAV or full-text search. Both are
+product requirements, and turning off malware scanning to save a gigabyte on a
+mail host is not a trade worth making.

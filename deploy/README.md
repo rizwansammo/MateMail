@@ -113,17 +113,44 @@ sudo cp deploy/nginx/app.matemail.online.conf /etc/nginx/sites-available/matemai
 sudo ln -s /etc/nginx/sites-available/matemail /etc/nginx/sites-enabled/
 sudo certbot --nginx -d app.matemail.online -d matemail.online
 sudo nginx -t && sudo systemctl reload nginx
+
+# 5. The private Mail Engine link. REQUIRED — backend and celery-worker join it,
+#    and the deploy refuses to run without it.
+#
+#    --internal is not optional. Without it Docker creates a routable bridge,
+#    and a routable engine link is reachable from every other Docker network on
+#    this host, which is the exposure the dedicated network exists to remove.
+#
+#    Created by hand, once, and owned outside both Compose projects so that
+#    neither MateMail's nor the engine's `docker compose down` can delete a
+#    network the other still depends on. The deploy VERIFIES it and never
+#    creates one — see deploy/engine/README.md.
+docker network create --internal matemail_engine_link
+docker network inspect matemail_engine_link --format '{{.Name}} internal={{.Internal}}'
 ```
+
+The Mail Engine's own gateway configuration is versioned separately in
+[`deploy/engine/`](engine/README.md), which covers installing it, validating the
+private path, and the checks required before every engine upgrade.
 
 Resulting layout — deliberately minimal:
 
 ```
 /opt/MateMail/
-├── docker-compose.yml
-├── .env                    (0600)
-├── .env.bak.<timestamp>    (last 10, written by each deploy)
-└── backups/                (pre-deploy database dumps)
+├── docker-compose.yml          (installed by each deploy, from that release's commit)
+├── .env                        (0600)
+├── .env.bak.<timestamp>        (last 10, written by each deploy)
+├── .deploy/                    (staged Compose candidates, last 5)
+└── backups/
+    ├── docker-compose.<timestamp>.yml   (last 10, written by each deploy)
+    └── pre-deploy-<timestamp>.sql.gz    (database dumps)
 ```
+
+Note that `docker-compose.yml` is **not** a file the host owns any more. Each
+deployment installs the exact file from the commit being deployed, because the
+Compose file now carries security-critical topology and must not drift from the
+images it runs. The bootstrap copy above is only there to make the very first
+deployment possible.
 
 ---
 

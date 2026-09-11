@@ -130,11 +130,18 @@ class QuotaExceeded(MailEngineError):
 
 
 #: Every concrete type, for exhaustiveness tests.
+#:
+#: `tests/test_engine_leak.py` walks this tuple to assert that no type's
+#: customer-facing message can carry engine detail. A type missing from here is
+#: therefore a type nothing checks — which is what happened to
+#: EngineCapabilityMissing between its introduction and P4C-A. Add new error
+#: types here in the same commit that defines them.
 ALL_ERROR_TYPES = (
     MailEngineError,
     EngineUnavailable,
     AlreadyExists,
     NotFound,
     Rejected,
+    EngineCapabilityMissing,
     QuotaExceeded,
 )

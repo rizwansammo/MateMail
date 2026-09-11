@@ -10,9 +10,24 @@ classification.
 It models the engine's quirks that the adapter must cope with:
 
 - Application-level failure is reported inside a **200** response body as
-  ``[{"type": "error", "msg": ...}]``, not via the status code.
+  ``[{"type": "error", "msg": ...}]``, not via the status code, and ``msg`` is
+  sometimes a list rather than a string.
 - ``add`` on an existing object reports "already exists" rather than replacing.
 - Quotas are returned in **bytes**, while the API accepts them in MB.
+
+It also models the DKIM lifecycle measured against the live engine in P4B.
+These four behaviours belong together and are the reason this file was wrong
+before:
+
+- ``add/domain`` generates the DKIM keypair, using the selector and key size
+  sent on that call.
+- ``add/dkim`` **refuses** a domain that already has a key.
+- ``delete/domain`` does **not** remove the key.
+- ``delete/dkim`` is the only thing that does.
+
+A fake that quietly cleaned up after ``delete/domain``, or let ``add/dkim``
+overwrite, is a fake that agrees with the bugs instead of catching them — which
+is what happened. See ``docs/MAIL_ENGINE.md`` § "DKIM lifecycle".
 
 `fail_next` and `fail_all` inject transport and rejection failures so the
 error-mapping tests drive the genuine adapter code rather than a mock of it.
@@ -45,6 +60,17 @@ def _engine_error(message: str):
     return FakeResponse(200, [{"type": "error", "msg": message}])
 
 
+def _engine_error_list(message: list):
+    """
+    The same envelope with a *list* `msg`.
+
+    The engine returns `msg` as an array for its translated messages — e.g.
+    `["dkim_domain_or_sel_invalid", "example.com"]` — and as a plain string
+    elsewhere. The adapter has to cope with both, so the fake produces both.
+    """
+    return FakeResponse(200, [{"type": "error", "msg": message}])
+
+
 class FakeEngineSession:
     """Stands in for `requests.Session` inside MailcowAdapter."""
 
@@ -57,6 +83,7 @@ class FakeEngineSession:
         self.queue: list[dict] = []
         self.quarantine: list[dict] = []
         self._next_alias_id = 1
+        self._dkim_serial = 0
 
         #: Raise a transport error on the next call.
         self.fail_next_transport = False
@@ -96,6 +123,32 @@ class FakeEngineSession:
             return _engine_error(message)
 
         return self._route(method, path, json or {})
+
+    # ── DKIM ────────────────────────────────────────────────────────────────
+
+    def _mint_dkim(self, domain: str, selector=None, key_size=None) -> None:
+        """
+        Generate public DKIM material for a domain.
+
+        The private key never leaves the engine, so the fake does not model one
+        at all — there is nothing here that a leak test could find, which is the
+        point. `privkey` is still present and empty, because the real engine
+        returns that field on every read (empty while SHOW_DKIM_PRIV_KEYS is
+        false) and the adapter must strip it regardless.
+
+        An unset selector falls back to the engine's own default of "dkim", NOT
+        to MateMail's "mm1". That difference is the whole reason ensure_domain
+        has to send the selector explicitly.
+        """
+        self._dkim_serial += 1
+        public = f"FAKEPUB{self._dkim_serial:03d}"
+        self.dkim[domain] = {
+            "dkim_selector": selector or "dkim",
+            "pubkey": public,
+            "dkim_txt": f"v=DKIM1;k=rsa;p={public}",
+            "length": str(key_size or 2048),
+            "privkey": "",
+        }
 
     # ── Routing ─────────────────────────────────────────────────────────────
 
@@ -162,12 +215,30 @@ class FakeEngineSession:
                 "mailboxes": body.get("mailboxes"),
                 "maxquota": body.get("maxquota"),
             }
+            # Creating a domain also mints its DKIM keypair. The engine does
+            # this from inside its own domain-add handler, passing through the
+            # dkim_selector and key_size sent on THIS call — which is why those
+            # fields have to be here and cannot be supplied later.
+            #
+            # Only when the domain has no key yet: a domain re-added after a
+            # delete that did not clear DKIM keeps the surviving key. That is
+            # the cross-tenant hazard, modelled deliberately (see delete/domain).
+            if name not in self.dkim:
+                self._mint_dkim(name, body.get("dkim_selector"), body.get("key_size"))
             return _ok()
 
         if path == "/api/v1/edit/domain":
             missing = [d for d in body["items"] if d not in self.domains]
             if missing:
-                return _engine_error(f"domain {missing[0]} not found")
+                # The engine's actual message, measured: "domain_invalid", NOT
+                # anything containing "not found". That matters, because the
+                # adapter classifies by message text — so this rejection becomes
+                # Rejected, not NotFound, and a caller that catches only
+                # NotFound for an absent domain does not catch it.
+                #
+                # The invented "domain ... not found" this used to return made
+                # exactly that mistake look correct in tests.
+                return _engine_error("domain_invalid")
             for name in body["items"]:
                 self.domains[name].update(
                     {k: v for k, v in body.get("attr", {}).items()}
@@ -233,17 +304,16 @@ class FakeEngineSession:
         # ── dkim ──
         if path == "/api/v1/add/dkim":
             domain = body["domains"]
-            selector = body.get("dkim_selector", "mm1")
-            # Each rotation yields a new public key; the private key never
-            # leaves the engine, so the fake does not even model one.
-            serial = len(self.dkim.get(domain, {}).get("_history", [])) + 1
-            public = f"FAKEPUB{serial:03d}"
-            self.dkim[domain] = {
-                "dkim_selector": selector,
-                "pubkey": public,
-                "dkim_txt": f"v=DKIM1;k=rsa;p={public}",
-                "_history": [public] * serial,
-            }
+            # The engine REFUSES to generate a key for a domain that already has
+            # one (functions.dkim.inc.php:21 @ 2026-07b — it checks Redis for an
+            # existing public key and bails before validating anything else).
+            # This fake used to overwrite happily, which is precisely why the
+            # adapter's "rotation = add/dkim" bug survived review: against this
+            # double it worked, against the real engine it could never work.
+            # The message shape is the engine's own: a list, not a string.
+            if domain in self.dkim:
+                return _engine_error_list(["dkim_domain_or_sel_invalid", domain])
+            self._mint_dkim(domain, body.get("dkim_selector"), body.get("key_size"))
             return _ok()
 
         # ── queue / quarantine ──
@@ -269,7 +339,25 @@ class FakeEngineSession:
                 self.domains.pop(name, None)
                 for address in [a for a in self.mailboxes if a.endswith(f"@{name}")]:
                     self.mailboxes.pop(address, None)
+                # The DKIM key is deliberately NOT removed. Deleting a domain
+                # leaves its keypair behind in the real engine — measured
+                # directly in P4B, where a domain was deleted and its key was
+                # still readable afterwards, and re-adding the same domain
+                # adopted it. That is how one tenant can end up holding the
+                # signing key for a domain a different tenant now owns.
+                #
+                # This fake used to pop it here, which made the deprovisioning
+                # path look correct in tests while production leaked the key.
+                # Removing a key requires an explicit delete/dkim, below.
+            return _ok()
+
+        if path == "/api/v1/delete/dkim":
+            names = body if isinstance(body, list) else [body]
+            for name in names:
                 self.dkim.pop(name, None)
+            # Idempotent: deleting a key that is not there is a success, so no
+            # not-found branch. Matches the engine, which reports success for a
+            # domain it holds no key for.
             return _ok()
 
         if path == "/api/v1/delete/mailbox":

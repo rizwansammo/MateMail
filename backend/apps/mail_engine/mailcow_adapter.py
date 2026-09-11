@@ -11,6 +11,7 @@ typed exception from `errors.py`. Engine response text is logged and discarded,
 never returned.
 """
 import logging
+import re
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -19,6 +20,7 @@ from django.conf import settings
 
 from .adapter import MailEngineAdapter
 from .dto import (
+    DEFAULT_DKIM_KEY_SIZE,
     AliasSpec,
     DkimKeyInfo,
     DomainSpec,
@@ -66,6 +68,28 @@ _ERROR_SIGNATURES: tuple[tuple[str, type[MailEngineError]], ...] = (
 )
 
 
+#: A DKIM selector MateMail is willing to publish.
+#:
+#: Two constraints have to hold at once. The engine accepts alphanumerics plus
+#: `- _ .` (it strips those three, then requires ctype_alnum — see
+#: functions.dkim.inc.php @ 2026-07b). DNS requires the result to work as the
+#: leftmost labels of `<selector>._domainkey.<domain>`, which rules out an empty
+#: string, a leading or trailing dot, and an empty label in the middle.
+_SELECTOR_CHARS = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _is_valid_selector(selector: str) -> bool:
+    if not selector or not _SELECTOR_CHARS.match(selector):
+        return False
+    # Must survive being used as DNS labels.
+    if selector.startswith(".") or selector.endswith("."):
+        return False
+    if any(not label for label in selector.split(".")):
+        return False
+    # The engine's own test: something must remain after the separators.
+    return any(ch.isalnum() for ch in selector)
+
+
 def _classify(message: str, *, operation: str) -> MailEngineError:
     """
     Translate an engine rejection into a MateMail error type.
@@ -83,7 +107,12 @@ def _classify(message: str, *, operation: str) -> MailEngineError:
 
 class MailcowAdapter(MailEngineAdapter):
     def __init__(self):
-        base = getattr(settings, "MAIL_ENGINE_API_URL", "http://localhost:8080")
+        # No loopback fallback. Loopback is this container, never the engine, so
+        # a default here would turn a missing setting into confusing connection
+        # errors against ourselves instead of the configuration error it is.
+        # `manage.py check --deploy` refuses this adapter without a URL
+        # (mail_engine.E001).
+        base = getattr(settings, "MAIL_ENGINE_API_URL", "") or ""
         self._base = base.rstrip("/")
         self._host = urlparse(self._base).hostname or "mail-engine"
         self._session = requests.Session()
@@ -189,6 +218,16 @@ class MailcowAdapter(MailEngineAdapter):
             "active": "1" if spec.active else "0",
             "relay_all_recipients": "0",
             "relay_unknown_only": "0",
+            # Creating a domain also mints its DKIM keypair: the engine calls
+            # dkim('add', ...) from its own domain-add handler and passes these
+            # two fields straight through (functions.mailbox.inc.php @ 2026-07b,
+            # confirmed against the live engine in P4B). Omitting them does not
+            # skip generation — it makes the engine fall back to its default
+            # selector "dkim", so MateMail would publish DNS for a selector it
+            # never chose. They must be sent here; there is no second chance,
+            # because add/dkim refuses a domain that already has a key.
+            "dkim_selector": spec.dkim_selector,
+            "key_size": spec.dkim_key_size,
         }
         # Idempotent: an existing domain is reconciled to the spec instead of
         # being treated as a conflict.
@@ -461,15 +500,39 @@ class MailcowAdapter(MailEngineAdapter):
             if row.get(field):
                 logger.error(
                     "Mail engine returned private DKIM material in %r for %s — "
-                    "discarded. Set SHOW_DKIM_PRIV_KEYS=n on the engine.",
+                    "discarded. Set $SHOW_DKIM_PRIV_KEYS = false on the engine.",
                     field, domain_name,
                 )
             row.pop(field, None)
 
         public_key = row.get("pubkey") or row.get("dkim_txt") or ""
-        if not public_key:
+        selector = (row.get("dkim_selector") or "").strip()
+
+        # Absence: the engine holds no key for this domain. A legitimate state —
+        # the caller decides whether to generate one. Distinguished from a
+        # malformed answer by the row carrying nothing that describes a key.
+        if not public_key and not selector:
             return None
-        selector = row.get("dkim_selector") or "mm1"
+
+        # Anything else purports to describe a key, so it must describe one
+        # completely. A half-answer is a failure, never something to patch up.
+        if not public_key:
+            raise MailEngineError(
+                f"engine returned a DKIM record with no public key (selector={selector!r})",
+                operation="read_dkim",
+            )
+        if not _is_valid_selector(selector):
+            # This used to default to "mm1" when the engine said nothing. That
+            # guess is the most dangerous line this file could contain: the
+            # engine signs with whatever selector it actually holds, so a wrong
+            # guess publishes mm1._domainkey pointing at a key nobody signs
+            # with, and every outgoing message fails DKIM for the customer with
+            # no error anywhere in MateMail. Fail closed instead.
+            raise MailEngineError(
+                f"engine returned DKIM material with an unusable selector {selector!r}",
+                operation="read_dkim",
+            )
+
         return DkimKeyInfo(
             selector=selector,
             public_key=public_key,
@@ -486,19 +549,63 @@ class MailcowAdapter(MailEngineAdapter):
             return None
         return self._dkim_info(domain_name, data)
 
+    def delete_dkim_key(self, domain_name: str) -> None:
+        """
+        Remove the engine's keypair for a domain. Idempotent.
+
+        POST with a bare array, like every other delete at this engine version.
+        """
+        try:
+            data = self._request(
+                "POST", "/api/v1/delete/dkim", json=[domain_name],
+                operation="delete_dkim_key",
+            )
+            self._raise_for_body(data, operation="delete_dkim_key")
+        except NotFound:
+            logger.info("Mail engine had no DKIM key to delete — treating as done")
+
     def rotate_dkim_key(self, domain_name: str, selector: str = "") -> DkimKeyInfo:
         """
-        Ask the engine to generate a fresh keypair. The private half stays inside
-        the engine — we read back only the public record.
+        Replace the engine's keypair for a domain and return the new public half.
+
+        The engine refuses `add/dkim` outright while a key already exists
+        (`dkim_domain_or_sel_invalid` — functions.dkim.inc.php:21 @ 2026-07b,
+        reproduced against the live engine in P4B). A bare add is therefore not
+        rotation; it is a no-op that reports failure. The working sequence is
+        read → delete if present → add → read back.
+
+        The conditional delete is what makes this safe to retry. After a
+        rotation that deleted the old key and then failed to add the new one,
+        the engine holds nothing; a retry that deleted unconditionally would be
+        harmless there but would destroy the *replacement* key on any later
+        retry that ran after a successful add. Deleting only what we actually
+        observed keeps every retry converging on one valid key.
         """
-        selector = selector or "mm1"
+        selector = selector or getattr(settings, "DKIM_SELECTOR", "") or "mm1"
+        if not _is_valid_selector(selector):
+            raise Rejected(
+                f"refusing to request an unusable DKIM selector {selector!r}",
+                operation="rotate_dkim_key",
+            )
+
+        if self.get_dkim_public_key(domain_name) is not None:
+            self.delete_dkim_key(domain_name)
+
         self._write(
             "/api/v1/add/dkim",
-            {"domains": domain_name, "dkim_selector": selector, "key_size": 2048},
+            {
+                "domains": domain_name,
+                "dkim_selector": selector,
+                "key_size": DEFAULT_DKIM_KEY_SIZE,
+            },
             operation="rotate_dkim_key",
         )
+
         info = self.get_dkim_public_key(domain_name)
         if info is None:
+            # Fails closed: the old key is gone and no new one is readable, so
+            # the domain has no valid DKIM configuration and must not be
+            # presented as though it has.
             raise MailEngineError(
                 "engine reported no DKIM key after rotation", operation="rotate_dkim_key"
             )

@@ -282,8 +282,26 @@ requires: MateMail asks, the engine generates and keeps.
 ### The hazard
 
 Reading `functions.dkim.inc.php` at `2026-07b`: the `details` branch always
-sets a `privkey` field. It is `''` normally — but if an operator sets
-`SHOW_DKIM_PRIV_KEYS`, the API returns the real base64-encoded private key.
+sets a `privkey` field. It is `''` normally — but if an operator enables
+`$SHOW_DKIM_PRIV_KEYS`, the API returns the real base64-encoded private key.
+
+> **Correction (P4B).** This document originally described
+> `SHOW_DKIM_PRIV_KEYS` as a `mailcow.conf` variable set to `n`. That was
+> wrong, and setting it there would have had no effect whatsoever — the
+> preflight would have "passed" against a setting the engine never reads.
+>
+> It is a **PHP variable**, not an environment variable:
+>
+> | | |
+> |---|---|
+> | Upstream default | `data/web/inc/vars.inc.php` — ships as `false` |
+> | Persistent override | `data/web/inc/vars.local.inc.php` |
+> | Required effective value | `$SHOW_DKIM_PRIV_KEYS = false;` |
+>
+> `vars.local.inc.php` is the file to write, because `vars.inc.php` is
+> overwritten on upgrade. The value that matters is the **effective** one in
+> the running php-fpm container, which is what P4B verified rather than
+> inferring it from either file.
 
 ### The guarantee, stated precisely
 
@@ -294,14 +312,19 @@ guarantee therefore has three layers, and only the first is a real boundary:
 
 | Layer | Control | What it actually guarantees |
 |---|---|---|
-| **1 — primary** | The engine is configured never to expose private keys: **`SHOW_DKIM_PRIV_KEYS=n`** | The key never crosses the engine boundary at all |
+| **1 — primary** | The engine is configured never to expose private keys: **`$SHOW_DKIM_PRIV_KEYS = false;`** in `data/web/inc/vars.local.inc.php` | The key never crosses the engine boundary at all |
 | **2 — defence in depth** | The adapter discards `privkey`, `private_key`, `priv_key`, `key` unconditionally on every read and logs the misconfiguration without printing the key | If layer 1 is wrong, the material is dropped at the edge of MateMail rather than propagating |
 | **3 — structural** | `DkimKeyInfo` has no field capable of holding private material; no port method reads or writes one; no serializer or API response exposes one | Even a future coding error has nowhere to put it |
 
-**P4B preflight requirement:** before the real adapter is enabled, verify that
-the engine's configuration has `SHOW_DKIM_PRIV_KEYS=n`. If it is enabled, that
-is an **engine security misconfiguration** — do not proceed with production
-activation until it is corrected. This is a go/no-go check, not a warning.
+**P4B preflight requirement (satisfied):** before the real adapter is enabled,
+verify the **effective** value of `$SHOW_DKIM_PRIV_KEYS` inside the running
+php-fpm container — not the contents of a config file, which may not be the
+file the engine reads. If it is enabled, that is an **engine security
+misconfiguration** — do not proceed with production activation until it is
+corrected. This is a go/no-go check, not a warning.
+
+P4B ran this check against the live engine: the effective value is `false`, and
+the DKIM read returns `privkey` as an empty string. Layer 1 holds.
 
 Layer 2 stays regardless. It is cheap, it is tested, and it converts a silent
 configuration mistake into a loud log line.

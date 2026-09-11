@@ -78,8 +78,10 @@ def send_transactional(
     if not transactional_email_configured():
         logger.error(
             "Transactional email (%s) NOT sent: EMAIL_HOST is unset or points at "
-            "this machine. Set EMAIL_HOST/EMAIL_HOST_USER/EMAIL_HOST_PASSWORD to "
-            "an external provider — see docs/DEPLOYMENT.md.",
+            "this machine. Set EMAIL_HOST to the Mail Engine's submission "
+            "hostname (mx.matemail.online:587, STARTTLS) with the platform "
+            "service credential in EMAIL_HOST_USER/EMAIL_HOST_PASSWORD — see "
+            "docs/DEPLOYMENT.md and DEC-013.",
             purpose,
         )
         return False

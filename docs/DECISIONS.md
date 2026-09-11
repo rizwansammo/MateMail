@@ -343,6 +343,33 @@ sequenced per domain with the customer's DNS update, not run as a bulk job.
 - Until migration completes, MateMail holds a high-value secret it should not
   hold. Tracked as an open security risk in `PROJECT_STATUS.md`.
 
+### Amendment (P4C-A) — the engine owning the key implies owning its deletion
+
+Handing key custody to the engine was the right call, and it carries an
+obligation that was not obvious until the engine was measured: **the engine does
+not delete a domain's key when the domain is deleted.** Custody without a
+deletion contract means a key with no owner, which the next registrant of that
+domain name inherits.
+
+So DEC-007r now reads: the engine owns the private key *for as long as MateMail
+says the domain exists, and not one moment longer.*
+
+Three additions:
+
+- The port gains `delete_dkim_key(domain_name)` — idempotent, engine-neutral,
+  and a **security operation rather than housekeeping**. Deprovisioning calls it
+  unconditionally, including when the domain is already gone.
+- `rotate_dkim_key` is `delete/dkim` → `add/dkim`, because the engine refuses to
+  generate over an existing key. The previous single `add/dkim` could never have
+  succeeded against a real engine.
+- The selector MateMail publishes is **the one the engine reports**, never a
+  default substituted when the engine says nothing. The engine is what signs; a
+  guessed selector publishes a record for a key nobody signs with, and every
+  message fails DKIM silently.
+
+Detail in `MAIL_ENGINE.md` § "DKIM lifecycle"; the cross-tenant scenario and its
+regression coverage in `SECURITY.md`.
+
 ---
 
 ---
@@ -478,3 +505,217 @@ product does not use the thing it sells.
 - The P4 delivery test must verify actual inbox delivery plus SPF, DKIM, DMARC
   where applicable, PTR/HELO alignment, and no underlying engine branding
   leakage. SMTP acceptance alone does not count.
+
+---
+
+## DEC-014 — MateMail reaches the Mail Engine over a dedicated private link, not a host-published port
+
+**Date:** 2026-09-11
+**Status:** Accepted
+**Supersedes:** the P4A/P4C-A assumption that a Docker bridge gateway address is a private boundary
+
+### Context
+
+MateMail's backend and worker need the engine's API (8453) and SMTP submission
+(587). The engine runs in its own Compose project on the same host, so the two
+stacks have to meet somewhere.
+
+The first implementation published both ports on MateMail's own app-network
+gateway, `172.24.0.1`. It was never public, and it worked.
+
+### The measurement that changed the decision
+
+Containers on `netamate_internal`, `matedesk_internal`, `mateassist_internal`,
+`mateconnect_internal`, `portfolio_default` and the default bridge **all opened
+TCP connections to both ports.** Only `matemail_internal` could not, and only
+because `internal: true` left it no route at all.
+
+**A published bind address selects a destination address. It never restricts the
+source.** `docker-proxy` holds a userland socket on that address and accepts on
+it whichever bridge the traffic arrived from.
+
+Rule counters showed the DNAT rule never fired during the test while the filter
+ACCEPT did, once per connection — so the traffic does not traverse `DOCKER-USER`
+and a rule there, the obvious remedy, would have done nothing. The same
+re-origination made the engine observe one NAT address as the client for every
+request, which is why its `allow_from` ACL could not identify the caller. One
+root cause, two symptoms.
+
+### Decision
+
+Remove the socket rather than filter it.
+
+- A **dedicated network**, `matemail_engine_link`, declared `external` and
+  created `--internal`. Only `backend` and `celery-worker` join it.
+- **One TCP passthrough gateway** owning the alias `mx.matemail.online`,
+  forwarding 8453 to `nginx-mailcow` and 587 to `postfix-mailcow`.
+- **No host port** on the application path.
+
+### Reasoning
+
+- **One ingress, because two would be non-deterministic.** Attaching both engine
+  containers under one alias lets Docker's DNS return either address, while each
+  port exists on only one of them.
+- **Layer 4, because layer 7 would take custody of TLS.** Passthrough keeps the
+  certificate MateMail validates the real one presented by the engine, so
+  hostname verification stays meaningful end to end and the gateway holds no key
+  material and parses no mail command.
+- **Not nginx-mailcow itself**, despite its image having the stream module: the
+  only writable, bind-mounted nginx path is included *inside* `http {}` where
+  `stream {}` is invalid, and the one file with a top-level context is tracked
+  in mailcow's git and restored by `update.sh`.
+- **External network**, so neither stack's lifecycle can delete a network the
+  other depends on. Verified by a deploy preflight, never created by one — a
+  network made with Docker's defaults is routable, not internal, which would
+  silently restore the problem.
+
+### Consequences
+
+- `extra_hosts` and both pinned application subnets are removed. They existed
+  only to serve the rejected design; nothing outside the compose file now
+  depends on which ranges Docker allocates.
+- The engine's `allow_from` is scoped to the gateway's pinned address. It
+  identifies the **gateway**, not the calling container, because the gateway
+  originates the connection — that is the honest scope, and it is defence in
+  depth behind reachability rather than a substitute for it.
+- A new pinned image sits in the mail path and must be kept current like any
+  other dependency.
+- The engine's own loopback bindings remain for operator access by SSH tunnel.
+
+---
+
+## DEC-015 — MateMail Free: `@matemail.online` accounts, built after P7
+
+**Date:** 2026-09-11
+**Status:** Accepted — roadmap only. **Nothing is implemented.**
+
+### Decision
+
+MateMail will offer two mailbox models.
+
+| | Address | Domain owned by | Status |
+|---|---|---|---|
+| **MateMail Business** | `rizwan@netamate.com` | the customer | built; the primary product |
+| **MateMail Free** | `rizwan@matemail.online` | MateMail | roadmap, P7.5 |
+
+Free accounts are conceptually what `@gmail.com` is to Gmail: a mailbox on a
+domain the provider owns, claimed by username rather than by proving control of
+a domain.
+
+**The business model is not changing.** Custom-domain hosting remains the
+primary enterprise product, and nothing about the current domain architecture is
+altered to accommodate free accounts.
+
+### Three identities, deliberately separate
+
+```
+user@matemail.online          free customer mailboxes          (P7.5)
+user@customer-domain.com      business customer mailboxes      (built)
+noreply@mail.matemail.online  platform transactional mail      (DEC-013)
+```
+
+`mail.matemail.online` stays the platform's own sending identity and must not be
+collapsed into the free-user domain. They fail differently and they must fail
+separately: a free user who gets a domain blocklisted must not be able to take
+password resets and verification mail down with them, and reputation on the
+subdomain that delivers account recovery is not something to share with public
+signups.
+
+### Placement: P7.5, after P7 and before Private Beta
+
+```
+P4     Mail Engine integration and activation
+P5     mail policy, abuse controls, quotas, sending rules
+       — INCLUDING the policy design for free accounts
+P6     backup, restore, retention, safe deletion, disaster recovery
+P7     operations: monitoring, alerting, queues, admin tooling
+P7.5   MateMail Free — implement username@matemail.online
+────────────────────────────────────────────────────────────────
+PRIVATE BETA   both models: business custom domains AND free accounts
+────────────────────────────────────────────────────────────────
+P8     custom MateMail webmail
+P9     public-launch readiness
+PUBLIC LAUNCH
+```
+
+**Why not sooner.** Free public email carries a categorically higher abuse risk
+than business hosting. A business mailbox requires someone to prove control of a
+domain they paid for — an attacker who abuses it burns an asset with a cost and
+a paper trail. A free mailbox costs a signup form, and the natural result is
+automated signups, throwaway senders, and outbound spam that destroys the
+sending reputation every *paying* customer depends on.
+
+So the controls have to exist first, not be retrofitted:
+
+- **P5** is where the policy framework is designed — sending limits, quotas,
+  signup abuse controls, suspension. Without it there is nothing to enforce.
+- **P7** is where an operator can actually *see* the platform — queue
+  visibility, outbound volume, alerting. Without it, abuse is discovered by a
+  blocklist rather than by us.
+
+Opening free signup before both would be launching the highest-risk surface with
+the fewest defences, on shared sending reputation.
+
+**Why not later.** Private Beta should test both models. They exercise different
+paths — signup and username claiming versus domain verification — and finding
+out after launch that the free path was never exercised would be the wrong order
+of discovery.
+
+### P5 — design, do not implement
+
+P5 designs the policy framework P7.5 needs. Topics to cover: free mailbox
+storage quota; daily and hourly sending limits; recipient limits per message and
+per period; anti-spam thresholds; signup abuse controls and bot protection;
+account suspension; inactive-account policy; reserved usernames; username
+lifecycle and re-use; recovery and verification rules; abuse reporting; rate
+limits; and how all of it protects the shared sending reputation.
+
+**No numeric limit is fixed here.** Picking a daily send cap before P5 has
+analysed real behaviour would be inventing a number and then defending it.
+
+### P7.5 — expected scope
+
+Public username availability; reservation and normalisation rules; reserved and
+system usernames; mailbox creation on `matemail.online`; free plan assignment
+and quota enforcement; sending policy integration; signup verification; account
+recovery; suspension and deactivation; inactive-account handling; admin
+controls; abuse controls; mailbox lifecycle; and how a free account maps onto
+MateMail's tenant/account ownership model.
+
+### Reserved addresses are mandatory
+
+P7.5 must ship a reserved-address system before any username can be claimed.
+Illustrative, **not** a final list:
+
+```
+admin  administrator  postmaster  hostmaster  webmaster  root
+abuse  security  support  billing  noreply  no-reply
+```
+
+`postmaster` and `abuse` are required by RFC 2142 and are where other operators
+report problems; the rest are addresses a recipient would reasonably read as
+speaking for MateMail. Letting a stranger claim any of them hands them the
+platform's voice. P7.5 defines the complete policy, including how the list is
+extended without breaking accounts already issued.
+
+### Relationship to P8 (webmail)
+
+P7.5 does **not** pull P8 forward. They are separate concerns, and the ordering
+above stands unless a later product decision changes it.
+
+The dependency worth naming: a free account is only worth launching broadly when
+there is a practical supported way to *use* the mailbox. Business customers
+already have IMAP/SMTP and their own clients; a free consumer audience largely
+expects webmail. That makes P8 a gate on **broad** free availability, not on
+building P7.5 or on including free accounts in a limited Private Beta.
+
+### Consequences
+
+- Free signup is not publicly available before Private Beta succeeds. The beta
+  may cap the number of free accounts.
+- The engine treats `matemail.online` as one more hosted domain, so no adapter
+  or boundary change is anticipated — but `matemail.online` becomes a domain
+  MateMail itself owns in the engine, which is a new ownership case for the
+  tenant model to answer in P7.5.
+- Abuse controls designed in P5 must be written with free accounts in view, not
+  only business tenants, or they will need redesigning at P7.5.

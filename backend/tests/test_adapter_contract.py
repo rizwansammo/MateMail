@@ -233,9 +233,89 @@ class AdapterContractTests:
 
     # ── DKIM: public material only (DEC-007r) ───────────────────────────────
 
-    def test_get_dkim_returns_none_before_any_key(self):
+    def test_get_dkim_returns_none_for_a_domain_the_engine_does_not_hold(self):
+        self.assertIsNone(self.adapter.get_dkim_public_key("never-created.example"))
+
+    def test_creating_a_domain_also_creates_its_dkim_key(self):
+        """
+        The engine mints the keypair as part of creating the domain — there is
+        no separate generation step, and asking for one afterwards is refused.
+
+        This test asserted the opposite until P4C-A (that no key existed after
+        ensure_domain). It passed only because both test doubles had been
+        written to match the adapter's assumption rather than the engine's
+        behaviour.
+        """
         self.adapter.ensure_domain(domain_spec())
+        info = self.adapter.get_dkim_public_key(DOMAIN)
+        self.assertIsNotNone(info, "the engine generates a key at domain creation")
+        self.assertTrue(info.public_key)
+
+    def test_the_selector_on_the_spec_is_the_one_the_engine_uses(self):
+        """
+        The selector has to travel on the domain-create call. If it does not,
+        the engine picks its own default and MateMail publishes DNS for a
+        selector the engine never signs with.
+        """
+        self.adapter.ensure_domain(domain_spec(dkim_selector="sel7"))
+        info = self.adapter.get_dkim_public_key(DOMAIN)
+        self.assertEqual(info.selector, "sel7")
+        self.assertEqual(info.dns_record_name, f"sel7._domainkey.{DOMAIN}")
+
+    def test_delete_dkim_removes_the_key_and_is_idempotent(self):
+        self.adapter.ensure_domain(domain_spec())
+        self.assertIsNotNone(self.adapter.get_dkim_public_key(DOMAIN))
+
+        self.adapter.delete_dkim_key(DOMAIN)
         self.assertIsNone(self.adapter.get_dkim_public_key(DOMAIN))
+
+        # Already absent is the desired end state, not an error.
+        self.adapter.delete_dkim_key(DOMAIN)
+        self.adapter.delete_dkim_key("never-created.example")
+
+    def test_deleting_a_domain_does_not_delete_its_dkim_key(self):
+        """
+        The behaviour that makes `delete_dkim_key` necessary, pinned so it
+        cannot be quietly "fixed" in a test double again.
+
+        Measured against the real engine in P4B: the key survives the domain,
+        and re-adding the domain adopts the surviving key. Both adapters must
+        reproduce it, because deprovisioning code is written against this.
+        """
+        self.adapter.ensure_domain(domain_spec())
+        original = self.adapter.get_dkim_public_key(DOMAIN)
+
+        self.adapter.delete_domain(DOMAIN)
+
+        survivor = self.adapter.get_dkim_public_key(DOMAIN)
+        self.assertIsNotNone(survivor, "the engine keeps DKIM keys after the domain")
+        self.assertEqual(survivor.public_key, original.public_key)
+
+    def test_recreating_a_domain_inherits_a_surviving_key(self):
+        """
+        The cross-tenant hazard itself: tenant B re-registers a domain tenant A
+        gave up and silently gets tenant A's signing key.
+        """
+        self.adapter.ensure_domain(domain_spec(dkim_selector="tenanta"))
+        leaked = self.adapter.get_dkim_public_key(DOMAIN).public_key
+
+        self.adapter.delete_domain(DOMAIN)
+        self.adapter.ensure_domain(domain_spec(dkim_selector="tenantb"))
+
+        inherited = self.adapter.get_dkim_public_key(DOMAIN)
+        self.assertEqual(
+            inherited.public_key, leaked,
+            "if this ever stops being true the engine changed; re-check "
+            "deprovisioning before relaxing anything",
+        )
+        # And the remedy: deleting the key first gives the new owner a new key.
+        self.adapter.delete_domain(DOMAIN)
+        self.adapter.delete_dkim_key(DOMAIN)
+        self.adapter.ensure_domain(domain_spec(dkim_selector="tenantb"))
+
+        clean = self.adapter.get_dkim_public_key(DOMAIN)
+        self.assertNotEqual(clean.public_key, leaked)
+        self.assertEqual(clean.selector, "tenantb")
 
     def test_rotate_dkim_returns_public_material(self):
         self.adapter.ensure_domain(domain_spec())

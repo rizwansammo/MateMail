@@ -4,13 +4,16 @@
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
 **Last updated:** 2026-09-11  
-**Current phase:** P3 — **implementation and CI COMPLETE** (P3a + P3b + P3c), built and published as `aad6d50`  
-&nbsp;&nbsp;&nbsp;&nbsp;CI green on `aad6d50` (run 34573674384): 506 tests, both GHCR images published.  
-&nbsp;&nbsp;&nbsp;&nbsp;**Transactional delivery validation: DEFERRED TO P4** per DEC-013 — MateMail will  
-&nbsp;&nbsp;&nbsp;&nbsp;use its own Mail Engine rather than a third-party SMTP provider, so the test now  
-&nbsp;&nbsp;&nbsp;&nbsp;depends on infrastructure P4 builds. Deferred, **not** performed, **not** passed.  
-&nbsp;&nbsp;&nbsp;&nbsp;P3 is **not deployed**; production prep is staged (see “P3 production preparation”).  
-**Next phase:** P4 — Mail Engine: customer business email **and** MateMail platform transactional mail  
+**Current phase:** P4C-A → A3 — **implementation complete; production activation pending**  
+&nbsp;&nbsp;&nbsp;&nbsp;P4A (design + adapter) committed as `9594376`, CI green.  
+&nbsp;&nbsp;&nbsp;&nbsp;P4B installed and validated the real Mail Engine privately on MateServer.  
+&nbsp;&nbsp;&nbsp;&nbsp;P4C-A fixed the four adapter defects P4B exposed.  
+&nbsp;&nbsp;&nbsp;&nbsp;P4C-A2 replaced the rejected host-socket topology with a dedicated private link,  
+&nbsp;&nbsp;&nbsp;&nbsp;and made domain deletion fail closed when engine cleanup cannot be queued.  
+&nbsp;&nbsp;&nbsp;&nbsp;Production MateMail is **unchanged**: still `MAIL_ENGINE_ADAPTER=stub`, still on its  
+&nbsp;&nbsp;&nbsp;&nbsp;previous image. No mail port is public. No DNS or PTR record has been changed.  
+&nbsp;&nbsp;&nbsp;&nbsp;**Transactional delivery validation: still DEFERRED.** Not performed, **not** passed.  
+**Next phase:** P4C-B — activation: point MateMail at the engine and prove delivery  
 **Launch gate:** private beta requires all of P0–P7; public launch requires P9
 
 ---
@@ -206,15 +209,21 @@ broken audit log. See the Phase 0 section below.
 | P1 | Harden the Mail Engine boundary | ✅ Complete (2026-09-11) |
 | P2 | Deployment alignment (NetaMate model, GHCR, ports 8020/3020) | ✅ Complete (2026-09-11) |
 | P2.5 | Controlled production deployment of the control plane | ✅ Complete (2026-09-10) — Mail Engine NOT deployed |
-| P3 | Domain ownership verification + abuse prevention | Pending |
-| P4 | Stand up the Mail Engine | Pending |
+| P3 | Domain ownership verification + abuse prevention | ✅ Complete (2026-09-11) — implementation + CI; delivery validation deferred |
+| P4A | Mail Engine architecture, adapter boundary | ✅ Complete (2026-09-11) — committed `9594376` |
+| P4B | Private Mail Engine installation and validation | ✅ Complete (2026-09-11) — engine live and private, **not activated** |
+| P4C-A | Engine contract remediation | ✅ Implementation complete (2026-09-11) |
+| P4C-A2 | Private engine boundary + durable deprovisioning | ✅ Implementation complete (2026-09-11) |
+| P4C-A3 | Versioned engine infrastructure + exact-revision Compose deployment | ✅ Implementation complete (2026-09-11) |
+| P4C-B | Activation: real adapter, delivery validation | Pending |
 | P5 | Mail policy enforcement (no open relay, rate limits, suspension) | Pending |
 | P6 | Backups, restore, safe deletion | Pending |
 | P7 | Operational surface (sync, reconciliation, monitoring, alerting) | Pending |
-| — | **PRIVATE BETA gate** — requires all of P0–P7 | Blocked on P7 |
+| P7.5 | **MateMail Free** — `username@matemail.online` accounts (DEC-015) | Pending |
+| — | **PRIVATE BETA gate** — requires all of P0–P7.5; tests **both** business and free mailboxes | Blocked on P7.5 |
 | P9 | Public launch readiness | Pending |
 | — | **PUBLIC LAUNCH** | Blocked on P9 |
-| P8 | MateMail webmail — before or after P9; **not a launch blocker** | Pending |
+| P8 | MateMail webmail — before or after P9; **not a launch blocker**, but gates *broad* free availability (DEC-015) | Pending |
 
 Full detail, entry criteria and exit criteria: *Revised roadmap* below.
 
@@ -470,10 +479,13 @@ P2     deployment alignment          ─┐
 P3     ownership + abuse prevention   │ no engine, no VPS
 P4     stand up the Mail Engine      ─┤
 P5     mail policy enforcement        │ engine live, no customers
+       + free-account policy DESIGN   │
 P6     backups + safe deletion        │
 P7     operational surface           ─┘
+P7.5   MateMail Free — implement username@matemail.online
 ────────────────────────────────────────────────────────────────
 PRIVATE BETA   ~5–10 friendly tenants, real domains, real mail
+               PLUS a capped number of free @matemail.online accounts
 ────────────────────────────────────────────────────────────────
 P9     public launch readiness
 ────────────────────────────────────────────────────────────────
@@ -484,7 +496,7 @@ P8     MateMail webmail — before or after P9, product's call.
 ```
 
 **P0–P7 must all be complete before any real customer mail reaches the
-platform.** P7 is where monitoring, reconciliation, queue visibility, storage
+platform, and P7.5 before any free @matemail.online account exists.**
 sync and operational alerting arrive. Without them an operator cannot see what
 the platform is doing, cannot detect drift between MateMail and the engine, and
 would not be told when mail stops flowing or when outbound volume spikes. Real
@@ -637,8 +649,24 @@ Closes blocker 2 — the phase that protects sending reputation.
 - Require destination confirmation before a forwarding rule activates; notify
   the mailbox owner and the workspace owner.
 
+Also in P5, **design only**: the policy framework free `@matemail.online`
+accounts will need at P7.5 (DEC-015). Free public email carries a categorically
+higher abuse risk than business hosting — a business mailbox costs a domain
+someone paid for, a free one costs a signup form — and these controls cannot be
+retrofitted under load onto reputation shared with paying customers.
+
+Topics to cover: free mailbox storage quota; daily and hourly sending limits;
+recipient limits per message and per period; anti-spam thresholds; signup abuse
+controls and bot protection; account suspension; inactive-account policy;
+reserved usernames; username lifecycle and re-use; recovery and verification
+rules; abuse reporting; rate limits.
+
+**No numeric limit is fixed in advance.** Choosing a daily send cap before P5
+has analysed real behaviour would be inventing a number and then defending it.
+
 **Exit:** every box in the `SECURITY.md` no-open-relay checklist is ticked by an
-automated test that speaks real SMTP.
+automated test that speaks real SMTP, and the free-account policy framework is
+designed and written down — not implemented.
 
 ---
 
@@ -701,11 +729,51 @@ Entry criteria:
 - Customers have a supported mail path: the Email Clients page with IMAP/SMTP
   settings and client setup guides (P4).
 
-Beta shape: **around 5–10 friendly tenants** on real domains. Watch for at least
-two weeks before considering wider access. Treat every incident as a P9 input.
+Beta shape: **around 5–10 friendly tenants** on real domains, **plus a capped
+number of free `@matemail.online` accounts** so both product paths are exercised
+(DEC-015). Watch for at least two weeks before considering wider access. Treat
+every incident as a P9 input.
 
 Exit: no unresolved incident affecting mail delivery, and alerting has fired at
 least once on a real condition or a deliberate drill.
+
+---
+
+### P7.5 — MateMail Free accounts
+
+**Roadmap only. Nothing is implemented, and nothing about this belongs in P4.**
+Full rationale in DEC-015.
+
+Implements free `username@matemail.online` mailboxes on a domain MateMail owns —
+conceptually what `@gmail.com` is to Gmail — alongside, not instead of, the
+business custom-domain product.
+
+Expected scope: public username availability; reservation and normalisation
+rules; reserved and system usernames; mailbox creation on `matemail.online`;
+free plan assignment and quota enforcement; sending policy integration; signup
+verification; account recovery; suspension and deactivation; inactive-account
+handling; admin controls; abuse controls; mailbox lifecycle; and how a free
+account maps onto MateMail's tenant/account ownership model.
+
+**A reserved-address system must ship before any username can be claimed.**
+`postmaster` and `abuse` are required by RFC 2142 and are how other operators
+report problems; `admin`, `support`, `billing`, `security`, `noreply` and
+similar are addresses a recipient would reasonably read as speaking for
+MateMail. Letting a stranger claim any of them hands them the platform's voice.
+
+**Why it sits here and not earlier.** It needs P5's policy framework to have
+something to enforce, and P7's operational tooling so abuse is discovered by us
+rather than by a blocklist. Opening free signup before both would be launching
+the highest-risk surface with the fewest defences, on the sending reputation
+every paying customer depends on.
+
+**Why not later than the beta.** The beta should exercise both models. Signup
+and username claiming is a different path from domain verification, and
+discovering after launch that it was never tested would be the wrong order.
+
+The platform's own sender stays separate: `noreply@mail.matemail.online` is the
+transactional identity (DEC-013) and must not be collapsed into the free-user
+domain.
 
 ---
 
@@ -1149,8 +1217,9 @@ enforced on the current plan. `deploy.yml` records this.
 
 `deploy.yml` was changed to authenticate GHCR with the job-scoped
 `GITHUB_TOKEN` (`packages: read`) instead of a long-lived `GHCR_TOKEN` secret.
-**That change is uncommitted**, so the workflow-based deployment path has not
-been exercised; this deployment was performed over SSH under P2.5 authorization.
+At the time of that deployment the change was not yet committed, so the
+workflow-based deployment path was not exercised; this deployment was performed
+over SSH under P2.5 authorization.
 
 
 ---
@@ -1803,3 +1872,177 @@ delivery test from `MateMail <noreply@mail.matemail.online>`, verifying actual
 inbox delivery plus SPF, DKIM, DMARC where applicable, PTR/HELO alignment, and
 no underlying engine branding leakage. **SMTP acceptance alone does not count.**
 Until that passes, blocker 10 stays open.
+
+---
+
+## P4B — private Mail Engine installation (2026-09-11)
+
+The real engine is installed on MateServer and validated. **It is not activated**:
+production MateMail still runs `MAIL_ENGINE_ADAPTER=stub` on its previous image.
+
+| | |
+|---|---|
+| Release | mailcow `2026-07b`, commit `02552ffefdf0869f988edf4a7e03822e8b467b34` |
+| Containers | 18/18 running, none unhealthy; ClamAV, SOGo and FTS all enabled |
+| Public mail exposure | **zero** — verified by scanning the host from off-server |
+| TLS | Let's Encrypt for `mx.matemail.online`; all 8 services present it, hostname verification passes |
+| Certificate renewal | host Certbot deploy hook, exercised for real, restarts only postfix/dovecot/nginx |
+| DKIM private-key exposure | disabled; effective `$SHOW_DKIM_PRIV_KEYS = false` verified inside the running php-fpm container |
+| API validation | 27/28 CRUD checks over verified TLS from a disposable container |
+| Firewall delta | 63 rules added, 0 removed; all protective or standard Docker; none touch another application's network. UFW and `DOCKER-USER` unchanged; FORWARD policy still DROP |
+| Other applications | all 30 non-engine containers healthy; public sites unaffected |
+
+Full rollback runbook: `/root/matemail-p4b-ROLLBACK.md` on MateServer.
+
+---
+
+## P4C-A — engine contract remediation (2026-09-11)
+
+P4B's validation against a real engine falsified four adapter assumptions. All
+four looked correct in review and would have failed only in production.
+
+| # | Defect | Effect if shipped | Status |
+|---|---|---|---|
+| 1 | `rotate_dkim_key` called `add/dkim`, which the engine refuses while a key exists | DKIM rotation could never succeed | Fixed — `delete/dkim` → `add/dkim`, retry-safe |
+| 2 | `ensure_domain` omitted `dkim_selector`/`key_size`, which the engine reads at domain creation | Engine picks selector `dkim`; MateMail publishes `mm1` | Fixed — both fields sent on `add/domain` |
+| 3 | A missing selector in the engine's reply was replaced with a guessed `"mm1"` | DNS published for a key nobody signs with; every message fails DKIM silently | Fixed — fails closed, with selector validation |
+| 4 | Domain deletion left the DKIM key in the engine | **A new tenant inherits the previous tenant's private signing key** | Fixed — deprovisioning deletes the key first, unconditionally |
+
+Defect 4 is the significant one and is written up in `SECURITY.md`.
+
+**Why the test suite did not catch these.** `tests/fake_engine.py` had been
+written to match the adapter's assumptions rather than the engine's behaviour:
+it let `add/dkim` overwrite freely and tidily removed DKIM keys on
+`delete/domain`. A test double that agrees with the bug cannot find it. It now
+models all four real behaviours, with comments explaining why.
+
+### Also in P4C-A
+
+- **Production subnets pinned** (`matemail_internal` 172.23.0.0/16,
+  `matemail_app` 172.24.0.0/16) — the engine binds to the app network's gateway,
+  so an unpinned subnet made a routine network recreation a mail outage.
+- **`extra_hosts: mx.matemail.online:172.24.0.1`** on `backend` and
+  `celery-worker` only, so the engine is reached by hostname and TLS verifies.
+- **Deploy checks** `mail_engine.E001/E002/E003/W001` — a real-engine
+  configuration missing its URL or key, or using plain HTTP, now fails
+  `check --deploy`. The stub is unaffected, so CI is untouched.
+- **A swallowed exception removed** in the domain-delete view: a failure to queue
+  engine cleanup was silently discarded, and that cleanup is what removes the
+  signing key.
+- Platform transactional mail configuration prepared for the engine (DEC-013),
+  including correcting guidance that still said to use an external provider.
+
+### Open, and blocking P4C-B
+
+Item 1 of the original P4C-A list — cross-application reachability of the engine
+— was **closed in P4C-A2** and is no longer a blocker. What remains:
+
+| # | Item | Required before |
+|---|---|---|
+| 1 | A dedicated platform service mailbox and credential in the engine | the transactional delivery test |
+| 2 | `MAIL_ENGINE_ADAPTER=mailcow` plus URL and key in production `.env` | real-adapter activation |
+| 3 | PTR `169.58.114.252 -> mx.matemail.online` (currently `vmi3482362.contaboserver.net`) | real customer mail / private beta |
+| 4 | 16 GB RAM upgrade | real customer mail / private beta |
+| 5 | Full DNS authentication work: MX, SPF, DKIM publication, DMARC | real customer mail / private beta |
+| 6 | Customer-facing mail ports and the abuse/policy gates that must precede them | real customer mail / private beta |
+| — | Microsoft does not answer on TCP/25 | **not a blocker.** Outbound 25 works to Google, Yandex and Apple, so there is no general provider block. The cause of Microsoft's timeout is **not known** and must not be recorded as though it were; it is a deliverability investigation item before broad customer mail. |
+
+---
+
+## P4C-A2 — private engine boundary (2026-09-11)
+
+Two things P4C-A left open.
+
+### 1. The engine boundary was not actually isolated
+
+The engine's ports were published on MateMail's own bridge gateway
+(`172.24.0.1`). Measured: **every other Docker network on the host could reach
+them** — six unrelated application networks plus the default bridge. A published
+bind address selects a destination address, never a permitted source.
+
+Replaced with a dedicated internal network and one TCP passthrough gateway:
+
+```
+backend / celery-worker ─▶ matemail_engine_link ─▶ HAProxy 3.2 LTS ─▶ nginx-mailcow:8453
+   (and nothing else)      external, internal      TCP only, no TLS    postfix-mailcow:587
+                           alias mx.matemail.online                 termination
+```
+
+After the change the control passes and **every** other network fails, including
+`matemail_app` and `matemail_internal`. The old socket no longer exists. TLS
+hostname verification succeeds on both protocols against the engine's real
+certificate — the gateway passes it through untouched.
+
+Consequences: the `extra_hosts` mapping and both pinned subnets are **removed**
+(they existed only to serve the rejected design), and the engine's API ACL is
+now scoped to the gateway's pinned identity rather than a NAT gateway address.
+
+### 2. Domain deletion could lose key custody
+
+Deleting a domain logged a failure to queue engine cleanup and then deleted the
+local row anyway. Since that task is what removes the DKIM signing key, and the
+local row is the only durable record that cleanup is owed, a broker failure at
+that moment left an orphaned private key with nothing to reconcile against.
+
+The local row is now deleted **only after** the task is durably queued. If the
+enqueue fails the deletion is refused: the row stays, the API returns a
+customer-safe `503` saying nothing changed, and the failure is logged as a
+security event. The task is enqueued unconditionally, because
+`mail_engine_provisioned` is cleared at the start of a re-provision and so can
+read `False` while the engine still holds a key.
+
+---
+
+## P4C-A3 — versioned engine infrastructure + exact-revision Compose (2026-09-11)
+
+Two reproducibility gaps closed before commit.
+
+### 1. The engine gateway existed only on the server
+
+The private link to the Mail Engine was configured entirely on MateServer.
+Losing the host meant reconstructing MateMail's only path to its own mail engine
+from prose.
+
+`deploy/engine/` now versions the exact, non-secret configuration — five files,
+each verified byte-identical to production by SHA256, each scanned for
+credentials, plus a README covering installation, validation, rollback and
+upgrade. Nothing secret-bearing is included: `mailcow.conf`, the API key, the
+admin credential and all certificate material stay on the server.
+
+The gateway holds a **static address on the engine network** (`10.244.0.247`)
+because the engine's API ACL is scoped to it. That address is not guaranteed
+free forever — the README documents checking it against every future engine
+release before upgrading, and what to do if upstream claims it.
+
+### 2. The deployment used whatever Compose file was on the server
+
+`deploy/docker-compose.yml` now carries security-critical topology: which
+services join the private engine link, that the link is external, that the
+datastore network stays internal. Deploying new images against a stale Compose
+file on the host lets those drift apart silently — the stack comes up, and the
+boundary is not what the release says it is.
+
+Compose and images are now one unit. The deployment:
+
+1. verifies the requested SHA exists **and is an ancestor of the default
+   branch**, so a dangling or abandoned commit cannot be deployed;
+2. extracts `deploy/docker-compose.yml` from **that commit** via
+   `git show <SHA>:...` on the Linux runner — not from the workflow checkout,
+   because deploying an older published SHA must get that SHA's Compose file,
+   and not from a Windows working tree, where line endings would be rewritten;
+3. checks the engine-link network exists and is internal **before transferring
+   anything**;
+4. stages the candidate under `/opt/MateMail/.deploy/`;
+5. validates it against the production `.env`, then asserts security invariants
+   against Compose's own resolved JSON — port bindings, no host networking, no
+   `:latest`, the internal datastore network, the external engine link, and that
+   only `backend` and `celery-worker` join it;
+6. backs up the live Compose file and `.env` (timestamped, bounded retention);
+7. installs the candidate **atomically** via rename, then pulls and starts;
+8. on any failure past that point, restores **both** Compose and `.env` and
+   brings the previous stack back — never destructively.
+
+The deploy still refuses to create `matemail_engine_link`. A network made with
+Docker's defaults is routable rather than internal, which would silently reopen
+the cross-application exposure the dedicated link exists to close.
+
