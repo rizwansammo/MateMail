@@ -230,7 +230,14 @@ jobs:
             mkdir -p "$DEPLOY_DIR/.deploy" "$DEPLOY_DIR/backups"
             chmod 755 "$DEPLOY_DIR/.deploy"
             # Keep the last few staged candidates for forensics, not all of them.
-            ls -1t "$DEPLOY_DIR"/.deploy/docker-compose.*.yml 2>/dev/null               | tail -n +6 | xargs -r rm --
+            #
+            # `|| true` on the `ls` ONLY. A glob that matches nothing makes `ls`
+            # exit 2, `pipefail` adopts that as the pipeline status and `set -e`
+            # aborts the script — which is exactly what happened on the first
+            # real run, when .deploy/ had just been created and was empty. The
+            # guard covers "nothing to prune"; a failure of tail, xargs or rm
+            # still propagates.
+            { ls -1t "$DEPLOY_DIR"/.deploy/docker-compose.*.yml 2>/dev/null || true; }               | tail -n +6 | xargs -r rm --
             echo "  staging directory ready"
 
       - name: Stage the exact-revision Compose on MateServer
@@ -355,8 +362,10 @@ jobs:
             cp -a docker-compose.yml "$COMPOSE_BACKUP"
             cp -a .env "$ENV_BACKUP"
             # Bounded retention, matching the existing .env policy: keep 10.
-            ls -1t "$DEPLOY_DIR"/backups/docker-compose.*.yml 2>/dev/null | tail -n +11 | xargs -r rm --
-            ls -1t "$DEPLOY_DIR"/.env.bak.* 2>/dev/null | tail -n +11 | xargs -r rm --
+            # Same `|| true` guard, same reason: on a host with no prior backups
+            # these globs match nothing and would abort the deployment.
+            { ls -1t "$DEPLOY_DIR"/backups/docker-compose.*.yml 2>/dev/null || true; }               | tail -n +11 | xargs -r rm --
+            { ls -1t "$DEPLOY_DIR"/.env.bak.* 2>/dev/null || true; }               | tail -n +11 | xargs -r rm --
             echo "  compose -> $COMPOSE_BACKUP"
 
             PREVIOUS_BACKEND=$(grep -E '^MATEMAIL_BACKEND_IMAGE=' .env | cut -d= -f2- || true)

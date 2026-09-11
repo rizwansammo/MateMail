@@ -372,3 +372,110 @@ class BashErrTrapSemanticsTest(SimpleTestCase):
     def test_calling_it_explicitly_before_exit_is_what_works(self):
         """The fix, in miniature."""
         self.assertIn("ROLLBACK_RAN", self._run("rollback\ntrap - ERR\nexit 1\n"))
+
+
+class RetentionPruneTest(SimpleTestCase):
+    """
+    The retention-prune pipelines must survive matching nothing.
+
+    This is the defect that failed the first real deployment. The staging
+    directory had just been created and was empty, so the glob matched nothing,
+    `ls` exited 2, `set -o pipefail` adopted that as the pipeline status and
+    `set -e` aborted the deployment.
+
+    It is a first-run-only bug, which is why every static check and every
+    earlier test passed: on a host that already had backups the globs matched
+    and the same lines worked fine. Nothing exercised the empty case.
+    """
+
+    def setUp(self):
+        self.raw = DEPLOY.read_text(encoding="utf-8")
+        with open(DEPLOY, encoding="utf-8") as fh:
+            wf = yaml.safe_load(fh)
+        self.script = "\n".join(
+            (s.get("with") or {}).get("script") or s.get("run") or ""
+            for job in ("gate", "deploy")
+            for s in wf["jobs"][job]["steps"]
+        )
+
+    def _prune_lines(self):
+        return [
+            line.strip() for line in self.script.splitlines()
+            if "ls -1t" in line and "xargs -r rm" in line
+        ]
+
+    def test_the_workflow_still_prunes_something(self):
+        self.assertTrue(self._prune_lines(), "no retention pruning found at all")
+
+    def test_every_prune_tolerates_a_glob_that_matches_nothing(self):
+        for line in self._prune_lines():
+            self.assertIn(
+                "|| true", line,
+                "an unguarded `ls` on an empty glob exits 2, and under "
+                f"pipefail that aborts the deployment: {line}",
+            )
+
+    def test_the_guard_covers_the_ls_only(self):
+        """
+        `|| true` must sit inside the braces around `ls`. Applied to the whole
+        pipeline it would also swallow a genuine `rm` failure, which is a real
+        problem quietly ignored rather than a harmless empty directory.
+        """
+        for line in self._prune_lines():
+            self.assertTrue(
+                line.startswith("{ ls -1t") and "|| true; }" in line,
+                f"the tolerance must be scoped to the ls, not the pipeline: {line}",
+            )
+            self.assertFalse(
+                line.rstrip().endswith("|| true"),
+                f"the whole pipeline is tolerated, hiding rm failures: {line}",
+            )
+
+    def test_pruning_still_keeps_a_bounded_number(self):
+        for line in self._prune_lines():
+            self.assertRegex(line, r"tail -n \+\d+", f"no retention bound: {line}")
+
+
+class PruneShellSemanticsTest(SimpleTestCase):
+    """
+    The shell behaviour behind the bug, pinned by running bash — the same
+    approach used for the ERR-trap semantics, and for the same reason: this was
+    an assumption, it was wrong, and nothing executable was checking it.
+    """
+
+    BASH = shutil.which("bash")
+
+    def setUp(self):
+        if not self.BASH:
+            self.skipTest("bash is not available on this machine")
+
+    def _run(self, body):
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = pathlib.Path(tmp) / "empty"
+            empty.mkdir()
+            script = pathlib.Path(tmp) / "t.sh"
+            script.write_text(
+                "#!/bin/bash\nset -Eeuo pipefail\n"
+                + body.replace("@DIR@", str(empty).replace("\\", "/"))
+                + '\necho REACHED_END\n',
+                encoding="utf-8", newline="\n",
+            )
+            proc = subprocess.run(
+                [self.BASH, str(script)], capture_output=True, text=True, timeout=30
+            )
+        return proc.stdout
+
+    def test_an_unguarded_prune_aborts_on_an_empty_directory(self):
+        """The bug, reproduced."""
+        out = self._run(
+            "ls -1t @DIR@/docker-compose.*.yml 2>/dev/null | tail -n +6 | xargs -r rm --"
+        )
+        self.assertNotIn("REACHED_END", out)
+
+    def test_the_guarded_prune_continues(self):
+        """The fix, in miniature."""
+        out = self._run(
+            "{ ls -1t @DIR@/docker-compose.*.yml 2>/dev/null || true; } "
+            "| tail -n +6 | xargs -r rm --"
+        )
+        self.assertIn("REACHED_END", out)
