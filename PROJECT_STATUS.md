@@ -4,13 +4,12 @@
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
 **Last updated:** 2026-09-12  
-**Current phase:** **P5 IMPLEMENTATION COMPLETE** (2026-09-12) — mail policy, approval, abuse  
-&nbsp;&nbsp;&nbsp;&nbsp;controls, and the engine-side SMTP policy integration.  
-&nbsp;&nbsp;&nbsp;&nbsp;Application policy **and** the Postfix integration are built and tested in  
-&nbsp;&nbsp;&nbsp;&nbsp;the repository; **not committed, not deployed**. Blocker 2 is closed in code:  
-&nbsp;&nbsp;&nbsp;&nbsp;the policy hook precedes `permit_sasl_authenticated`, with a second hook at  
-&nbsp;&nbsp;&nbsp;&nbsp;end-of-data so the rate limit counts once per message.  
-&nbsp;&nbsp;&nbsp;&nbsp;**What remains is deployment**, a separate authorized step.  
+**Current phase:** **P5 COMPLETE** (2026-09-13) — mail policy activated in production  
+&nbsp;&nbsp;&nbsp;&nbsp;Release `307c81c` deployed. Policy bridge live at 10.244.0.246:10031, private only.  
+&nbsp;&nbsp;&nbsp;&nbsp;Postfix consults MateMail before `permit_sasl_authenticated`, and once per  
+&nbsp;&nbsp;&nbsp;&nbsp;message at end-of-data. Relay, spoof, approval, suspension, rate-limit and  
+&nbsp;&nbsp;&nbsp;&nbsp;fail-closed behaviour verified against the live engine.  
+&nbsp;&nbsp;&nbsp;&nbsp;**No public mail port is open. No customer mail is enabled. Private Beta has not started.**  
 **Previous phase:** **P4 COMPLETE** (2026-09-12) — Mail Engine live, activated, and delivering  
 &nbsp;&nbsp;&nbsp;&nbsp;P4A design + adapter · P4B private engine install · P4C-A/A2/A3 remediation  
 &nbsp;&nbsp;&nbsp;&nbsp;· P4C-B activation, released as `b8e0fe3b`.  
@@ -223,7 +222,7 @@ broken audit log. See the Phase 0 section below.
 | P4C-A3 | Versioned engine infrastructure + exact-revision Compose deployment | ✅ Implementation complete (2026-09-11) |
 | P4C-B | Activation: real adapter, delivery validation | ✅ Complete (2026-09-12) — real mail delivered, SPF/DKIM/DMARC pass |
 | **P4** | **Mail Engine: customer email + platform transactional mail** | **✅ COMPLETE (2026-09-12)** |
-| P5 | Mail policy, approval, abuse controls, product enforcement | ✅ Implementation complete (2026-09-12) — application policy **and** engine integration; awaiting deployment |
+| P5 | Mail policy, approval, abuse controls, product enforcement | ✅ **COMPLETE (2026-09-13)** — activated in production at `307c81c`; policy bridge live, Postfix hook enforcing |
 | P6 | Backups, restore, safe deletion | Pending |
 | P7 | Operational surface (sync, reconciliation, monitoring, alerting) | Pending |
 | P7.5 | **MateMail Free** — `username@matemail.online` accounts (DEC-015) | Pending |
@@ -233,6 +232,25 @@ broken audit log. See the Phase 0 section below.
 | P8 | MateMail webmail — before or after P9; **not a launch blocker**, but gates *broad* free availability (DEC-015) | Pending |
 
 Full detail, entry criteria and exit criteria: *Revised roadmap* below.
+
+### Native Engine Migration (NE0–NE8) — planned, NOT started
+
+A **separate** engineering track that replaces mailcow as the Mail Engine
+orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It does
+**not** renumber or replace any P phase.
+
+```
+Native Engine implementation:  NONE — no phase started
+mailcow:                       live production dependency, unmodified
+```
+
+The port boundary means this is an adapter swap, not a rewrite: every mailcow
+reference in `backend/` outside `mailcow_adapter.py`, `factory.py` and
+`checks.py` is a comment.
+
+Plan, acceptance gates, rollback strategy and the P6–P9 interaction analysis:
+**`docs/NATIVE_MAIL_ENGINE.md`**. mailcow may be removed only at NE8, under its
+own explicit authorization.
 
 ---
 
