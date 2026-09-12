@@ -1278,3 +1278,141 @@ defending them.
   module, precisely so that P7.5 implements it once with normalisation attached
   rather than inheriting a half-built constant.
 - DEC-015's P5 obligation is discharged by this entry.
+
+---
+
+## DEC-019 — MateMail Native Mail Engine architecture
+
+**Date:** 2026-09-13
+**Status:** Accepted as architecture (NE0). **Nothing is implemented.** mailcow
+remains the live production engine until NE8 explicitly retires it.
+
+### Context
+
+P4 chose mailcow (DEC-001) and built the `MailEngineAdapter` port around it.
+P5 proved the port held: every mailcow reference in `backend/` outside
+`mailcow_adapter.py`, `factory.py` and `checks.py` is a comment. The product
+decision is now that the **Private Beta runs on a MateMail-native engine**, so
+the orchestration layer mailcow provides has to be rebuilt on Postfix, Dovecot
+and Rspamd directly.
+
+Full design: `docs/NATIVE_MAIL_ENGINE.md` § NE0.
+
+### The decisions
+
+**Engine state lives in an engine-owned PostgreSQL**, written only by the
+adapter, with MateMail remaining authoritative.
+
+The alternative — having Postfix and Dovecot query MateMail's own database —
+was rejected on two independent grounds. It would put every mail lookup on the
+application database, so a routine Django migration holding a lock would stop
+inbound mail for existing mailboxes; P5 deliberately accepted MateMail's
+availability in the mail path for *policy decisions* and made that fail closed,
+which is a far narrower coupling. And it would hand the Internet-facing
+processes credentials to the database holding users, sessions, API keys and
+billing. Generated flat files were rejected because provisioning would become
+generate-and-reload, with atomicity and staleness to solve and a Postfix reload
+per mailbox.
+
+**Mailbox authentication is bcrypt (BLF-CRYPT) in the engine database**, matching
+what mailcow stores today so the platform sender migrates without a password
+reset. Mailbox passwords stay separate from MateMail account passwords; the
+control plane stores neither the password nor the hash.
+
+**Storage is Maildir++ at `/var/vmail/<domain>/<local_part>/`, uid:gid 5000:5000**,
+matching mailcow's layout so the platform sender's maildir can be copied
+verbatim. Quota is enforced by maildirsize rather than a database dict, so
+enforcement has no database dependency.
+
+**DKIM keeps DEC-007r exactly**: keys are generated inside the engine, stored
+0600 on the Rspamd volume, and only public material crosses the port. Domain
+deletion deletes the key first — the cross-tenant inheritance defect measured in
+P4B must not return.
+
+**Aliases separate three concepts mailcow conflates**: delivery alias, send-as
+grant, and forwarding. `ensure_alias` writes both the delivery alias and the
+send-as grant. This is the direct fix for the defect P5's production activation
+found, where MateMail authorised alias sending but the engine rejected it at
+MAIL FROM because the alias carried `sender_allowed=0`.
+
+**The P5 policy integration is carried over unchanged** — the hook before
+`permit_sasl_authenticated`, the end-of-data hook for once-per-message counting,
+`DUNNO` and never `OK`, and fail-closed deferral. It is proven in production as
+of 2026-09-13; there is no reason to redesign it. The policy bridge becomes a
+first-class service rather than a sidecar in another project's Compose file.
+
+**Rspamd gets a dedicated Redis**, not MateMail's application Redis, because the
+application Redis is a Celery broker whose flush is routine and would destroy
+accumulated spam training.
+
+**Seven services**, all digest-pinned, no public ports through NE4, with only the
+provisioning API and the policy bridge joining `matemail_engine_link`. Postfix,
+Dovecot, Rspamd, the database and Redis have no route to MateMail at all.
+
+### Malware scanning, DNS and the write path (NE0 addendum, 2026-09-13)
+
+**ClamAV and Olefy are both retained.** Read-only inventory found `clamd-mailcow`
+and `olefy-mailcow` running, wired into Rspamd at `clamd:3310` and `olefy:10055`,
+with current signatures. MateMail sells business email; shipping a native engine
+without the malware scanning the platform already has would be a security
+regression customers could neither see nor consent to. Olefy in particular scans
+OLE/macro content, the dominant malware vector in this market. A scanner that is
+unreachable or slow causes a **deferral, never acceptance of unscanned mail**.
+`freshclam` needs outbound HTTPS and is the only native service granted general
+egress; signature age belongs in P7 monitoring.
+
+**A dedicated validating resolver (Unbound) is required, not optional.** Postfix
+runs `smtp_tls_security_level = dane`, and DANE derives its security entirely
+from DNSSEC validation — verified in production, where `dnssec-failed.org`
+correctly returns SERVFAIL through the engine's Unbound. Pointing the native
+engine at the host resolver or a public one would leave outbound mail flowing
+while the TLSA guarantee silently disappeared. The resolver is engine-network
+only, never publicly exposed, and a resolver failure defers mail rather than
+falling back to unvalidated answers.
+
+These two decisions take the topology from seven services to **ten**.
+
+**The engine database write path is stated precisely:**
+
+```
+MateMail                   is authoritative for all product state
+NativeMailEngineAdapter    is the only EXTERNAL provisioning client
+matemail-native-api        is the only DIRECT writer to the engine database
+```
+
+Postfix and Dovecot hold read-only credentials; Django never connects to the
+engine database at all. An earlier draft said the engine DB was "written only by
+the adapter", which was imprecise — the adapter does not touch it directly.
+
+**NE6 moves three artifacts engine-to-engine on the host**, never through Django,
+never through `MailEngineAdapter`, never through a workstation: the DKIM private
+key (root staging, 0600 preserved, verified against the *public* DNS record and
+the staging copy shredded), the bcrypt mailbox hash (SQL to SQL as an opaque
+value, never in MateMail's database, verified by authenticating rather than by
+inspection), and the maildir (`rsync -aHAX --numeric-ids`). DEC-007r and the
+"MateMail stores no mailbox credential" rule both hold unchanged. mailcow keeps
+a complete working copy of all three until NE8, which is what makes the cutover
+reversible.
+
+### What is not changing
+
+**The `MailEngineAdapter` contract.** All 26 methods map to native mechanisms
+with no change to the interface, the DTOs or the typed errors, so
+`tests/test_adapter_contract.py` applies to the native adapter unmodified. That
+is what keeps NE5 an adapter swap rather than a rewrite, and it is the whole
+return on the P4A boundary work.
+
+### Consequences
+
+- MateMail takes on the upgrade burden mailcow carries today for Postfix,
+  Dovecot and Rspamd. This is a real, accepted cost; NE4's validation suite is
+  what makes it manageable, which is why NE4 is its own phase.
+- Two data stores exist, so they can disagree. Mitigated by a single writer,
+  idempotent `ensure_*` upserts, and P7's reconciliation pass.
+- Sequencing: NE1–NE5, then P6 and P7, then NE6–NE7, then P7.5 and the Private
+  Beta. P6 waits so backup tooling is written once against the store customers
+  will actually use; NE6 waits because moving the platform sender moves the
+  sending reputation, and that should not happen before backups and monitoring
+  exist.
+- mailcow removal (NE8) remains separately authorised and is never a side effect
+  of another phase.

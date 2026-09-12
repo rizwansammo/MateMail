@@ -240,9 +240,16 @@ orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It doe
 **not** renumber or replace any P phase.
 
 ```
-Native Engine implementation:  NONE — no phase started
+NE0 — architecture design:     COMPLETE (2026-09-13) — see DEC-019
+NE1–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
 ```
+
+**Product decision (2026-09-13): the Private Beta runs on the Native Engine, not
+on mailcow.** Sequencing is therefore NE1–NE5 → P6 → P7 → NE6 → NE7 → P7.5 →
+Private Beta → NE8. P6 waits so backup tooling is written once against the store
+customers will actually use; NE6 waits because moving the platform sender moves
+the sending reputation.
 
 The port boundary means this is an adapter swap, not a rewrite: every mailcow
 reference in `backend/` outside `mailcow_adapter.py`, `factory.py` and
