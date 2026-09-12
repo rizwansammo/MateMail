@@ -24,8 +24,8 @@
 # Re-run after any mailcow update that regenerates extra.cf.
 #
 # Usage:
-#   sudo ./scripts/install-policy-bridge.sh              # install
-#   sudo ./scripts/install-policy-bridge.sh --check      # verify only, change nothing
+#   sudo bash scripts/install-policy-bridge.sh              # install
+#   sudo bash scripts/install-policy-bridge.sh --check      # verify only, change nothing
 set -euo pipefail
 
 MAILCOW_DIR="${MAILCOW_DIR:-/opt/mailcow-dockerized}"

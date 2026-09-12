@@ -309,8 +309,8 @@ address Compose binds, starts the bridge *before* reloading Postfix, and ends by
 printing the engine's effective configuration.
 
 ```bash
-sudo ./scripts/install-policy-bridge.sh --check    # verify, change nothing
-sudo ./scripts/install-policy-bridge.sh            # install
+sudo bash scripts/install-policy-bridge.sh --check    # verify, change nothing
+sudo bash scripts/install-policy-bridge.sh            # install
 ```
 
 ### Verifying it afterwards

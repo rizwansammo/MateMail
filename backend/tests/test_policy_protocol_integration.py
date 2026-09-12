@@ -123,6 +123,7 @@ class PolicyProtocolTestCase(LiveServerTestCase):
         )
         self.bridge.REQUEST_TIMEOUT = 5
 
+        self._bridges = []
         self._start_bridge()
         self._build_workspace()
         self._reset_rate_limit_counters()
@@ -137,7 +138,11 @@ class PolicyProtocolTestCase(LiveServerTestCase):
         """
         import asyncio
 
-        self.loop = asyncio.new_event_loop()
+        # Held in locals and captured by the closures below, NOT on self. Each
+        # call owns its own loop, task and thread, so a second start cannot
+        # leave the first one's cleanup pointing at the second one's loop —
+        # which would silently abandon a running server.
+        loop = asyncio.new_event_loop()
         ready = threading.Event()
         started = {}
 
@@ -154,26 +159,63 @@ class PolicyProtocolTestCase(LiveServerTestCase):
                 pass
 
         def run():
-            asyncio.set_event_loop(self.loop)
-            self.task = self.loop.create_task(serve())
+            asyncio.set_event_loop(loop)
+            started["task"] = loop.create_task(serve())
             try:
-                self.loop.run_until_complete(self.task)
+                loop.run_until_complete(started["task"])
             except asyncio.CancelledError:
                 pass
             finally:
-                self.loop.close()
+                loop.close()
 
-        self.thread = threading.Thread(target=run, daemon=True)
-        self.thread.start()
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
         self.assertTrue(ready.wait(10), "bridge did not start")
 
         def shutdown():
-            server = started.get("server")
-            if server is not None:
-                self.loop.call_soon_threadsafe(server.close)
-            self.loop.call_soon_threadsafe(self.task.cancel)
-            self.thread.join(timeout=10)
+            """
+            Stop the server and cancel the task in ONE scheduled callback.
 
+            Scheduling them as two separate `call_soon_threadsafe` calls is a
+            race, and it is the race that failed CI. Closing the server ends
+            `serve_forever`, which ends `run_until_complete`, which runs the
+            `finally` above and closes the loop — so by the time the second call
+            is made the loop can already be closed, and `call_soon_threadsafe`
+            raises `RuntimeError: Event loop is closed`.
+
+            It is timing-dependent, which is why it survived a local run on
+            Windows (proactor loop, slower teardown) and errored 8 of these 34
+            tests on Linux. Doing both inside one callback means they happen in
+            the same loop iteration, before the loop has any opportunity to
+            close.
+
+            The guard covers the remaining window: the loop could in principle
+            have finished on its own between the check and the call, and there
+            is nothing left to stop if it has.
+            """
+            def stop():
+                server = started.get("server")
+                if server is not None:
+                    server.close()
+                task = started.get("task")
+                if task is not None:
+                    task.cancel()
+
+            try:
+                loop.call_soon_threadsafe(stop)
+            except RuntimeError:
+                pass
+            thread.join(timeout=10)
+            self.assertFalse(
+                thread.is_alive(),
+                "the bridge thread did not stop — a later test would share the port",
+            )
+
+        # Recorded so `BridgeHarnessTeardownTest` can drive a real bridge's own
+        # teardown rather than re-implementing it. Nothing else reads this.
+        self._bridges.append(
+            {"loop": loop, "thread": thread, "started": started, "shutdown": shutdown}
+        )
         self.addCleanup(shutdown)
 
     def _build_workspace(self):
@@ -698,3 +740,99 @@ class ProtocolFramingTest(PolicyProtocolTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BridgeHarnessTeardownTest(PolicyProtocolTestCase):
+    """
+    Regression cover for the teardown defect that failed CI.
+
+    The original cleanup scheduled `server.close()` and `task.cancel()` as two
+    separate `call_soon_threadsafe` calls. Closing the server ends
+    `serve_forever`, which ends `run_until_complete`, which closes the loop — so
+    if the loop thread completes all of that between the two calls, the second
+    lands on a closed loop and raises `RuntimeError: Event loop is closed`.
+
+    ## Why this is asserted structurally rather than by stress
+
+    The first attempt at this test ran 25 start/stop cycles and asserted no
+    error. That was measured against the buggy teardown on Linux/Python 3.11 and
+    **it passed** — the race needs the main thread to be preempted in the
+    one-bytecode window between the two calls, which needs contention this test
+    does not create. CI lost it 8 times in 34 only because the full 977-test
+    suite was running on a two-core runner.
+
+    A test that can only fail by losing a race is not coverage, so it was
+    replaced with the two properties below, both of which fail deterministically
+    on any machine if the defect returns.
+    """
+
+    def _handles(self):
+        self.assertTrue(self._bridges, "no bridge was recorded")
+        return self._bridges[-1]
+
+    def test_the_teardown_schedules_exactly_one_threadsafe_callback(self):
+        """
+        One call, so nothing can happen to the loop between two of them.
+
+        This is the invariant, stated directly: the defect was a *second*
+        `call_soon_threadsafe`, and there is no safe number of them above one.
+        """
+        handles = self._handles()
+        loop = handles["loop"]
+
+        calls = []
+        real = loop.call_soon_threadsafe
+
+        def counting(callback, *args, **kwargs):
+            calls.append(callback)
+            return real(callback, *args, **kwargs)
+
+        loop.call_soon_threadsafe = counting
+        try:
+            # Run the cleanup this bridge registered, for real.
+            self.doCleanups()
+        finally:
+            loop.call_soon_threadsafe = real
+
+        self.assertEqual(
+            len(calls), 1,
+            f"teardown scheduled {len(calls)} threadsafe callbacks; exactly one "
+            "is required, because the loop can close between any two",
+        )
+
+    def test_the_teardown_tolerates_a_loop_that_has_already_closed(self):
+        """
+        The remaining window: the loop could finish on its own just before the
+        cleanup runs. Scheduling onto it must not raise out of teardown — an
+        exception there is reported as an ERROR on a test whose body passed,
+        which is exactly how the original defect presented in CI.
+        """
+        handles = self._handles()
+
+        # Shut the bridge down for real: the thread exits and the loop closes.
+        self.doCleanups()
+        self.assertTrue(
+            handles["loop"].is_closed(), "the loop should be closed after teardown"
+        )
+
+        # Now run that same teardown again, against a genuinely closed loop.
+        # This is the real situation, not a simulated one, and it must not raise.
+        handles["shutdown"]()
+
+    def test_each_start_gets_its_own_loop_thread_and_port(self):
+        """
+        Proves the cleanups are independent rather than all pointing at the most
+        recent loop — the latent bug that made instance attributes unsafe here,
+        and which WOULD have silently abandoned a running server.
+        """
+        ports = {self.port}
+        loops = {id(self._handles()["loop"])}
+        for _ in range(4):
+            self._start_bridge()
+            ports.add(self.port)
+            loops.add(id(self._handles()["loop"]))
+            self.assertPermitted(
+                self.submit(sasl=self.mailbox.email, sender=self.mailbox.email)
+            )
+        self.assertEqual(len(ports), 5, f"ports were reused: {ports}")
+        self.assertEqual(len(loops), 5, "a loop object was shared between starts")

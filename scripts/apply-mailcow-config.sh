@@ -13,8 +13,8 @@
 #   3. login_greeting = MateMail IMAP ready  (Dovecot extra.conf)
 #
 # Usage:
-#   sudo ./scripts/apply-mailcow-config.sh
-#   sudo MAILCOW_DIR=/custom/path ./scripts/apply-mailcow-config.sh
+#   sudo bash scripts/apply-mailcow-config.sh
+#   sudo MAILCOW_DIR=/custom/path bash scripts/apply-mailcow-config.sh
 
 set -euo pipefail
 
@@ -28,7 +28,7 @@ fi
 if [[ ! -d "$MAILCOW_DIR" ]]; then
     echo "ERROR: mailcow not found at $MAILCOW_DIR"
     echo "  Set MAILCOW_DIR if installed elsewhere, e.g.:"
-    echo "  sudo MAILCOW_DIR=/home/user/mailcow-dockerized ./scripts/apply-mailcow-config.sh"
+    echo "  sudo MAILCOW_DIR=/home/user/mailcow-dockerized bash scripts/apply-mailcow-config.sh"
     exit 1
 fi
 
