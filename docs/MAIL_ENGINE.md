@@ -448,6 +448,62 @@ has no field able to hold one. See `MAIL_ENGINE_P4A.md` §6 for the three layers
 
 ---
 
+## Suspension and rate limits at the boundary (P5)
+
+Two P5 capabilities cross the port. Both exist because MateMail's own decision is
+not, by itself, enforcement.
+
+### Engine-side suspension
+
+`apply_tenant_suspension_task` calls `set_domain_active(name, False)` for every
+provisioned domain of a suspended workspace.
+
+Before P5, suspension set a database column and nothing else. The only thing
+standing between a suspended workspace and the Internet was the SMTP policy
+bridge — one service, one configuration line and one restart away from not
+running, and at the time of writing **not yet wired into the engine's submission
+restrictions at all**. An abuse suspension that quietly does nothing is worse
+than none, because an operator believes the problem is handled.
+
+Suspension is therefore two independent mechanisms, and the customer stops
+sending if either works.
+
+Properties worth keeping in mind when changing this:
+
+- **Deactivate, never delete.** Suspension is reversible by design and
+  frequently is reversed. Deleting the domain would destroy stored mail to
+  enforce a temporary state, and would also delete the DKIM key.
+- **Every domain is attempted even if one fails**, so one bad record cannot
+  leave the rest of a workspace sending. The task then raises, so Celery retries
+  and an operator sees it, rather than reporting success over a workspace that
+  is still half-live.
+- **`EngineUnavailable` retries the whole task.** `set_domain_active` is an
+  idempotent assignment, so re-running over domains that already succeeded costs
+  nothing.
+- The caller is told whether the task was **queued**, and surfaces that to the
+  operator. A broker failure must not be swallowed into a log file.
+
+### Per-mailbox rate limits
+
+`set_mailbox_rate_limit` / `get_mailbox_rate_limit` / `clear_mailbox_rate_limit`
+carry a `RateLimit(messages, window)` DTO. The window is one of second, minute,
+hour or day.
+
+This is deliberately **separate from MateMail's own limiter**. The application
+limiter is consulted by the policy bridge, reads its numbers from the plan, and
+can be reasoned about in product terms. This one lives in the engine and holds
+even for a client that somehow reaches submission without passing through
+MateMail — which, until the restriction ordering is fixed, is every client.
+
+`messages=0` means no limit, matching how engines conventionally clear one. That
+is not the same as having no `RateLimit` at all, which means "we did not ask".
+
+The engine's own vocabulary for this is a value plus a single-letter frame
+(`rl_value`, `rl_frame="h"`). That vocabulary stops at the adapter: product code
+that had to know `rl_frame` would be product code coupled to mailcow.
+
+---
+
 ## Webmail Integration
 
 MateMail uses its own Next.js webmail. It does NOT use SoGo (mailcow's built-in webmail).

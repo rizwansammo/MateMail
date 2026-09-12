@@ -159,7 +159,10 @@ class SignupView(APIView):
                 name=data["workspace_name"],
                 slug=slug,
                 owner=user,
-                status=TenantStatus.TRIAL,
+                # Signup does NOT grant mail access. The workspace exists and
+                # can be configured; a platform admin must approve it before
+                # anything reaches the Mail Engine (DEC-017, Private Beta).
+                status=TenantStatus.PENDING_APPROVAL,
             )
             TenantMembership.objects.create(
                 tenant=tenant,

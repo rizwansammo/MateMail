@@ -84,6 +84,9 @@ class FakeEngineSession:
         self.quarantine: list[dict] = []
         self._next_alias_id = 1
         self._dkim_serial = 0
+        #: address -> {"value": str, "frame": str}. The engine stores a cleared
+        #: limit by deleting the key, so 0 removes rather than stores.
+        self.rate_limits: dict[str, dict] = {}
 
         #: Raise a transport error on the next call.
         self.fail_next_transport = False
@@ -240,6 +243,14 @@ class FakeEngineSession:
             row = self.aliases.get(address)
             return _ok([row]) if row else FakeResponse(404, None, text="not found")
 
+        if rest.startswith("rl-mbox/"):
+            address = rest[len("rl-mbox/"):]
+            row = self.rate_limits.get(address)
+            # The engine answers with an EMPTY SHAPE, not 404, when no limit is
+            # set. A fake that 404'd here would let an adapter treat "no limit"
+            # and "no mailbox" as the same thing.
+            return _ok(row if row else {})
+
         if rest.startswith("dkim/"):
             domain = rest[len("dkim/"):]
             row = self.dkim.get(domain)
@@ -361,6 +372,27 @@ class FakeEngineSession:
             if domain in self.dkim:
                 return _engine_error_list(["dkim_domain_or_sel_invalid", domain])
             self._mint_dkim(domain, body.get("dkim_selector"), body.get("key_size"))
+            return _ok()
+
+        # ── rate limits ──
+        if path == "/api/v1/edit/rl-mbox":
+            attr = body.get("attr", {}) or {}
+            frame = str(attr.get("rl_frame", ""))
+            # The engine accepts exactly these four frames and rejects anything
+            # else with `rl_timeframe` (functions.ratelimit.inc.php @ 2026-07b).
+            if frame not in ("s", "m", "h", "d"):
+                return _engine_error("rl_timeframe")
+            try:
+                value = int(attr.get("rl_value", 0))
+            except (TypeError, ValueError):
+                return _engine_error("rl_value_invalid")
+            for address in body.get("items", []):
+                if value <= 0:
+                    # Zero clears. Modelled because the adapter's
+                    # clear_mailbox_rate_limit relies on exactly this.
+                    self.rate_limits.pop(address, None)
+                else:
+                    self.rate_limits[address] = {"value": str(value), "frame": frame}
             return _ok()
 
         # ── queue / quarantine ──

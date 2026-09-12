@@ -29,7 +29,11 @@ class MailboxCreateSerializer(serializers.Serializer):
     local_part = serializers.CharField(max_length=64)
     domain_id = serializers.UUIDField()
     full_name = serializers.CharField(max_length=255)
-    quota_mb = serializers.IntegerField(default=10240, min_value=100)
+    # No default and not required: an omitted value means "use the plan's
+    # default", resolved server-side by billing.utils.resolve_mailbox_quota.
+    # A default here would be a storage policy living in a serializer, which is
+    # how a 1 GB trial workspace ended up able to request 10 GB mailboxes.
+    quota_mb = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     password = serializers.CharField(min_length=10, write_only=True)
 
     def validate_local_part(self, value):

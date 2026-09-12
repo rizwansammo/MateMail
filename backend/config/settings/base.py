@@ -185,6 +185,13 @@ CELERY_BEAT_SCHEDULE = {
         "task": "dnshealth.check_all_active_domains_dns",
         "schedule": crontab(minute="*/15"),
     },
+    # Ownership is proved once at onboarding; this is what notices when the
+    # proof later disappears — a domain that has changed hands. Daily, because
+    # the signal is sustained absence over about a week, not a single miss.
+    "reverify-domain-ownership": {
+        "task": "domains.reverify_ownership",
+        "schedule": crontab(hour="4", minute="30"),  # daily at 04:30 UTC
+    },
     "expire-trials": {
         "task": "billing.expire_trials",
         "schedule": crontab(hour="3", minute="0"),  # daily at 03:00 UTC
@@ -270,13 +277,46 @@ FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 APP_BASE_URL = env("APP_BASE_URL", default="http://localhost:3000")
 WEBMAIL_BASE_URL = env("WEBMAIL_BASE_URL", default="http://localhost:3000")
 
-# Transactional application email. prod.py overrides these with the external
-# provider; the default here keeps every other environment from falling back to
+# Transactional application email, sent through MateMail's own Mail Engine
+# (DEC-013). The default here keeps every environment from falling back to
 # Django's global "webmaster@localhost", which names no product and would be a
 # confusing From address in a console-backend dev message.
 DEFAULT_FROM_EMAIL = env(
     "DEFAULT_FROM_EMAIL", default="MateMail <noreply@mail.matemail.online>"
 )
+
+# ── The platform sender (P5) ─────────────────────────────────────────────────
+#
+# MateMail's own service identity. It authenticates to the Mail Engine exactly
+# like a customer does, so the outbound policy bridge sees it on every
+# verification email, password reset and invitation — and it has no Mailbox row,
+# no Domain row and no tenant, because it is not a customer.
+#
+# Without an explicit allowance the bridge rejects it as "Sender mailbox not
+# found", which would take down account recovery for every customer the moment
+# the policy service is enforced in the submission restrictions. Listing it here
+# is how MateMail says "this identity is ours" in one place both the mailer and
+# the policy bridge read.
+#
+# It is an allowance, NOT a bypass. The platform sender is still held to
+# sender == sasl_username, so a stolen credential cannot send as anyone else,
+# and it has its own rate limit below.
+PLATFORM_SENDER_ADDRESSES = env.list(
+    "PLATFORM_SENDER_ADDRESSES", default=["noreply@mail.matemail.online"]
+)
+
+# The platform sender's own hourly cap. Deliberately finite: "we trust this
+# identity" is not the same as "this identity may send without limit", and the
+# realistic failure here is a credential leak or a retry loop, both of which a
+# ceiling contains.
+#
+# Set to match the limit the Mail Engine already holds on the platform mailbox
+# — measured as 60/hour against the live engine, not assumed. The two must
+# agree, and MateMail's must not be the higher of the pair: a MateMail limit
+# above the engine's would never bind, so a looping sender would meet the
+# engine's hard rejection instead of MateMail's DEFER, and a retryable
+# condition would present as a permanent failure on a password reset.
+PLATFORM_SENDER_MAX_PER_HOUR = env.int("PLATFORM_SENDER_MAX_PER_HOUR", default=60)
 
 # DKIM private-key encryption at rest (INTERIM — see DEC-007r).
 #

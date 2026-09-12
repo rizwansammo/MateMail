@@ -14,6 +14,8 @@ from django.core import mail
 from django.test import TestCase, override_settings
 
 from apps.accounts.mailer import (
+    make_message_id,
+    message_id_domain,
     send_transactional,
     transactional_email_configured,
     transactional_from_address,
@@ -247,3 +249,59 @@ class NoEngineLeakTest(TestCase):
         self.assertIn("matemail", blob)
         for leak in ("mailcow", "postfix", "dovecot", "rspamd", "sogo"):
             self.assertNotIn(leak, blob)
+
+
+@override_settings(
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    DEFAULT_FROM_EMAIL="MateMail <noreply@mail.matemail.online>",
+)
+class MessageIdHygieneTest(TestCase):
+    """
+    The Message-ID header (P5, Stage 15).
+
+    Django builds one from the LOCAL hostname when none is supplied. In a
+    container that is the container id, so real delivered mail carried
+    `<...@00a3f41e29d7>`: a public header advertising an internal identifier,
+    different after every deploy, and not a resolvable domain — which some
+    receivers treat as a spam signal and which makes threading unreliable.
+    """
+
+    def setUp(self):
+        mail.outbox = []
+
+    def test_the_message_id_is_rooted_at_our_sending_domain(self):
+        send_transactional(subject="Subject", body="Body", to=["someone@example.test"])
+
+        message_id = mail.outbox[0].extra_headers["Message-ID"]
+        self.assertTrue(message_id.startswith("<"))
+        self.assertTrue(message_id.endswith(">"))
+        self.assertTrue(message_id.endswith("@mail.matemail.online>"), message_id)
+
+    def test_it_never_carries_the_local_hostname(self):
+        import socket
+
+        send_transactional(subject="Subject", body="Body", to=["someone@example.test"])
+        message_id = mail.outbox[0].extra_headers["Message-ID"]
+        self.assertNotIn(socket.gethostname(), message_id)
+
+    def test_every_message_gets_a_distinct_id(self):
+        """
+        A repeated Message-ID makes receivers silently drop the second message
+        as a duplicate — so two password resets would become one.
+        """
+        for _ in range(25):
+            send_transactional(subject="Subject", body="Body", to=["someone@example.test"])
+
+        ids = [m.extra_headers["Message-ID"] for m in mail.outbox]
+        self.assertEqual(len(set(ids)), len(ids))
+
+    def test_the_domain_is_taken_from_the_from_address(self):
+        self.assertEqual(
+            message_id_domain("MateMail <noreply@mail.matemail.online>"),
+            "mail.matemail.online",
+        )
+        self.assertEqual(message_id_domain("plain@example.test"), "example.test")
+
+    def test_a_from_address_without_a_domain_falls_back_to_the_mail_hostname(self):
+        with override_settings(MAIL_HOSTNAME="mx.matemail.online"):
+            self.assertEqual(message_id_domain("not-an-address"), "mx.matemail.online")

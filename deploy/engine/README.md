@@ -1,9 +1,14 @@
-# Private Mail Engine gateway
+# Private Mail Engine integration
 
 The Mail Engine runs as its own Compose project (mailcow) in
-`/opt/mailcow-dockerized`, separate from MateMail. These two files are the
-**only** part of it that MateMail owns, and they are the entire mechanism by
-which MateMail reaches the engine.
+`/opt/mailcow-dockerized`, separate from MateMail. The files here are the
+**only** part of it that MateMail owns, and together they are the entire
+two-way path between MateMail and the engine:
+
+- **MateMail → engine** — the HAProxy gateway. Provisioning calls and the
+  platform sender's own submission.
+- **engine → MateMail** — the SMTP policy bridge (P5). Postfix asking MateMail
+  whether a message may be accepted or sent.
 
 They live here so the path is recoverable from this repository. Losing
 MateServer must not mean reconstructing them from prose.
@@ -12,6 +17,8 @@ MateServer must not mean reconstructing them from prose.
 |---|---|---|
 | `docker-compose.override.yml` | `/opt/mailcow-dockerized/docker-compose.override.yml` | `644 root:root` |
 | `haproxy.cfg` | `/opt/mailcow-dockerized/data/conf/matemail-gateway/haproxy.cfg` | `644 root:root` |
+| `postfix-extra.cf` | `/opt/mailcow-dockerized/data/conf/postfix/extra.cf` | `644 root:root` |
+| `../../scripts/postfix_policy_bridge.py` | `/opt/mailcow-dockerized/data/conf/matemail-gateway/postfix_policy_bridge.py` | `644 root:root` |
 | `certbot-deploy-hook-mailcow-mx.sh` | `/etc/letsencrypt/renewal-hooks/deploy/mailcow-mx.sh` | `750 root:root` |
 | `nginx-mx.matemail.online.conf` | `/etc/nginx/sites-available/mx.matemail.online` (symlinked into `sites-enabled/`) | `644 root:root` |
 | `vars.local.inc.php` | `/opt/mailcow-dockerized/data/web/inc/vars.local.inc.php` | `644 root:root` |
@@ -204,6 +211,137 @@ If the new release claims `.247`:
 A silent collision presents as the gateway failing to start, or — worse — as the
 gateway starting on a different address and every MateMail API call being
 refused by an ACL that no longer matches.
+
+---
+
+## The SMTP policy bridge (P5)
+
+### What it is
+
+Postfix cannot call an HTTP API. It speaks the `check_policy_service` protocol —
+`key=value` lines over a socket, answered with one `action=` line — so something
+has to translate. `scripts/postfix_policy_bridge.py` is that translation and
+nothing else: every decision it relays comes from MateMail, and it holds no
+policy of its own.
+
+It runs as a sidecar in the engine's Compose project, on the engine network at
+`10.244.0.246:10031` and on `matemail_engine_link`, so it can reach the MateMail
+backend by service name. **No host port is published**, for exactly the reason
+the gateway publishes none — see "Why no host ports are published" above. This
+socket decides whether mail may be sent; a published one would be reachable from
+every other Docker network on the host.
+
+An earlier design ran the bridge on the host and opened a firewall hole for the
+Docker subnet. That is the arrangement DEC-014 measured and rejected, and its
+systemd unit has been deleted rather than left in the repository beside the
+replacement.
+
+### Where it hooks into Postfix
+
+`postfix-extra.cf` is installed as mailcow's `extra.cf`, which its `postfix.sh`
+appends to the generated `main.cf` on every start. Postfix takes the last
+definition of a parameter, so this overrides without editing a file that is
+regenerated on upgrade.
+
+Two hooks, at two stages, for two different reasons:
+
+| Parameter | Fires | MateMail is asked | Counts? |
+|---|---|---|---|
+| `smtpd_recipient_restrictions` | once per RCPT TO | `stage=rcpt` | no |
+| `smtpd_end_of_data_restrictions` | once per message | `stage=end_of_data` | yes |
+
+**Ordering in the recipient chain is the entire point.** The hook sits *after*
+`permit_mynetworks` and *before* `permit_sasl_authenticated`:
+
+- after `permit_sasl_authenticated`, Postfix stops evaluating the moment a
+  client authenticates, so every authenticated submission — the traffic MateMail
+  exists to rule on — would short-circuit before reaching the hook. Installed,
+  running, and never asked;
+- before `permit_mynetworks`, the engine's own unauthenticated injections
+  (watchdog probes, quarantine digests) would be put to customer policy, which
+  knows nothing about their recipients and would refuse them.
+
+The end-of-data list has no permit in front of it, so every message reaches
+MateMail there — including the platform sender's, which the recipient hook lets
+past via mynetworks.
+
+### Why the bridge answers DUNNO and never OK
+
+In Postfix, a policy service answering `OK` means *permit and stop evaluating
+this list*. The entry after ours is `reject_unauth_destination` — the check that
+stops MateMail relaying for domains it does not host. `OK` would skip it.
+
+`DUNNO` means "no objection, carry on", leaving every later restriction in
+force. There is a test asserting no code path can emit `OK`.
+
+### Failure behaviour
+
+If MateMail cannot be reached, or the shared secret is wrong, the bridge answers
+`DEFER_IF_PERMIT` — never `DUNNO`. Mail is retried rather than sent unchecked.
+
+`DEFER_IF_PERMIT` rather than a bare `DEFER` so a relay attempt that a later
+restriction would reject outright is still rejected, instead of being softened
+into a retryable 4xx during an outage.
+
+**This makes MateMail's availability part of the mail path.** Once installed,
+MateMail being down means mail stops flowing — temporarily and retryably —
+rather than flowing unmetered. That is the intended trade, and it is worth
+knowing before you install it rather than after.
+
+### The shared secret
+
+The bridge authenticates to MateMail with `INTERNAL_API_SECRET`. It must be set
+in the engine's `mailcow.conf` as:
+
+```
+MATEMAIL_INTERNAL_API_SECRET=<the same value as MateMail's INTERNAL_API_SECRET>
+```
+
+It is required, not defaulted: the Compose service uses `${VAR:?}` so the stack
+refuses to start rather than starting a bridge that defers every message.
+`mailcow.conf` is not versioned here — it carries the engine database password.
+
+### Installing it
+
+Use `scripts/install-policy-bridge.sh`, which backs up what it replaces,
+refuses to run without the secret, checks that the address Postfix dials is the
+address Compose binds, starts the bridge *before* reloading Postfix, and ends by
+printing the engine's effective configuration.
+
+```bash
+sudo ./scripts/install-policy-bridge.sh --check    # verify, change nothing
+sudo ./scripts/install-policy-bridge.sh            # install
+```
+
+### Verifying it afterwards
+
+```bash
+cd /opt/mailcow-dockerized
+docker compose exec -T postfix-mailcow postconf \
+    smtpd_recipient_restrictions smtpd_end_of_data_restrictions
+```
+
+`check_policy_service` must appear **before** `permit_sasl_authenticated`. If it
+does not, mail is not being checked.
+
+### ⚠ Re-validate after every mailcow upgrade
+
+`postfix-extra.cf` reproduces part of an upstream-generated restriction chain.
+An upgrade that changes that chain upstream leaves this override silently pinned
+to the old list — keeping our hook, and also keeping whatever upstream decided
+to change.
+
+`backend/tests/test_engine_policy_integration.py` holds the upstream chain this
+was derived from and fails if the two diverge, so the divergence surfaces in CI.
+After any upgrade:
+
+1. read the newly generated `data/conf/postfix/main.cf`;
+2. update `UPSTREAM_RECIPIENT_CHAIN` in that test;
+3. re-derive `postfix-extra.cf` from it;
+4. re-run `install-policy-bridge.sh` and check the `postconf` output again.
+
+The static address `10.244.0.246` needs the same check as the gateway's `.247` —
+see "The static `10.244.0.247` address" above.
 
 ---
 

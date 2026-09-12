@@ -16,7 +16,14 @@ from django.utils import timezone
 from apps.domains.models import Domain, DomainOwnership, DomainStatus
 from apps.domains.verification import generate_verification_token
 from apps.mailboxes.models import Mailbox
-from apps.tenants.models import MemberRole, MemberStatus, Tenant, TenantMembership
+from apps.tenants.models import (
+    MAIL_ENABLED_STATUSES,
+    MemberRole,
+    MemberStatus,
+    Tenant,
+    TenantMembership,
+    TenantStatus,
+)
 
 # Test-only: the production PBKDF2 hasher costs ~0.3s per call, which dominates
 # suite runtime when every test creates several users. This is applied via
@@ -35,12 +42,41 @@ def make_user(email, *, verified=True, active=True, password=TEST_PASSWORD, **ex
     return user
 
 
-def make_tenant(owner, name="Acme", slug="acme", status="active"):
-    tenant = Tenant.objects.create(name=name, slug=slug, owner=owner, status=status)
+def make_tenant(owner, name="Acme", slug="acme", status="active", *, approved=None):
+    """
+    A workspace in the state most tests need: approved for the Mail Engine.
+
+    Since P5, mail access requires a platform admin's approval as well as a
+    mail-enabled status, so `status="active"` alone no longer implies a
+    workspace can provision anything. `approved` defaults to True for a
+    mail-enabled status, because a test about forwarding or plan caps is not a
+    test about the approval gate and should not have to know the gate exists.
+
+    Tests that exercise the gate itself pass `approved=False`, or use
+    `make_unapproved_tenant()`. A non-mail-enabled status (suspended, pending)
+    is never silently approved.
+    """
+    if approved is None:
+        approved = status in MAIL_ENABLED_STATUSES
+
+    tenant = Tenant.objects.create(
+        name=name,
+        slug=slug,
+        owner=owner,
+        status=status,
+        approved_at=timezone.now() if approved else None,
+    )
     TenantMembership.objects.create(
         tenant=tenant, user=owner, role=MemberRole.OWNER, status=MemberStatus.ACTIVE
     )
     return tenant
+
+
+def make_unapproved_tenant(owner, name="Pending Co", slug="pending-co"):
+    """A workspace as signup leaves it: real, signed-into, and mail-less."""
+    return make_tenant(
+        owner, name=name, slug=slug, status=TenantStatus.PENDING_APPROVAL
+    )
 
 
 def add_member(tenant, user, role):

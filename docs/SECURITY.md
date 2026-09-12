@@ -36,6 +36,16 @@
 
 ---
 
+## Related documents
+
+| Document | Covers |
+|---|---|
+| `docs/MAIL_POLICY.md` | Sending policy, the approval gate, abuse response, deliverability, and the operator runbook (P5) |
+| `docs/MAIL_ENGINE.md` | The adapter boundary, DKIM lifecycle, engine runtime |
+| `docs/DECISIONS.md` | DEC-017 (policy framework), DEC-018 (free accounts, design) |
+
+---
+
 ## Principles
 
 1. **No open relay** — SMTP submission requires authentication, always.
@@ -49,29 +59,47 @@
 
 ## Anti-Relay Controls
 
-### SMTP Submission (Port 587 / 465)
+> **Corrected 2026-09-12.** This section previously described Stalwart, which
+> was option A in DEC-001 and was **not** chosen. The engine is
+> Postfix / Dovecot / Rspamd orchestrated by mailcow. The tables below describe
+> what is actually implemented.
 
-| Rule | Implementation |
-|------|---------------|
-| Authentication required | Stalwart: no anonymous SMTP submission |
-| Only hosted domains allowed as sender | Django pre-send validation + Stalwart FROM domain check |
-| Suspended tenant → reject | Django sends disable signal to Stalwart on suspension |
-| Disabled mailbox → reject | Stalwart blocks auth for disabled principals |
-| Per-mailbox hourly send limit | Stalwart rate limiter + Django enforcement |
-| Per-tenant daily send limit | Celery counter in Redis, checked pre-send |
+MateMail's decisions are made by the SMTP policy bridge
+(`apps/smtp_policy/views.py`), which the engine consults over an
+internal-secret-authenticated HTTP endpoint. It answers `OK`, `REJECT`
+(permanent, 5xx) or `DEFER` (temporary, 4xx). Full policy: `docs/MAIL_POLICY.md`.
+
+### SMTP Submission (Port 587)
+
+| Rule | Implementation | State |
+|------|---------------|-------|
+| Authentication required | Dovecot SASL; the engine accepts no anonymous submission | OK |
+| Sender must equal the authenticated account | first check in `OutboundPolicyView`, before anything else | OK (P5) |
+| Only hosted mailboxes may send | sender must resolve to a `Mailbox` MateMail holds | OK (P5) |
+| Unapproved workspace rejected | `assert_can_send_mail` — requires `approved_at` | OK (P5) |
+| Suspended workspace rejected | `assert_can_send_mail`, **plus** engine-side domain deactivation | OK (P5) |
+| Outbound disabled rejected | `Tenant.outbound_disabled`, the lighter abuse response | OK (P5) |
+| Suspended or disabled mailbox rejected | checked before workspace policy | OK |
+| Inactive sending domain rejected | `Domain.status` | OK |
+| Per-mailbox hourly send limit | plan-driven, atomic Redis script; **defers**, never rejects | OK (P5) |
+| Per-workspace daily send limit | same script, same call | OK (P5) |
+| Engine-side per-mailbox limit | `set_mailbox_rate_limit` — independent of the above | OK (P4C-A) |
+| Platform sender allowed, not exempted | own allowance, own finite ceiling, same identity rule | OK (P5) |
+| **Policy consulted at submission time** | `check_policy_service` before `permit_sasl_authenticated` (`deploy/engine/postfix-extra.cf`) | built, tested, **not yet deployed** |
 
 ### SMTP Inbound (Port 25)
 
-| Rule | Implementation |
-|------|---------------|
-| Only accept mail for hosted active domains | Stalwart domain whitelist populated by Django |
-| Reject unknown recipient | Stalwart 550 RCPT TO check against known mailboxes |
-| Reject unknown domain | Stalwart 550 MAIL FROM domain check |
-| SPF check on inbound | Stalwart built-in |
-| DKIM verify on inbound | Mail Engine (Rspamd) |
-| DMARC policy on inbound | Stalwart built-in |
-| Spam scanning | Stalwart anti-spam engine |
-| Rate limit per source IP | Stalwart connection rate limiter |
+| Rule | Implementation | State |
+|------|---------------|-------|
+| Only accept mail for hosted domains | `Domain` lookup in `InboundPolicyView` | OK |
+| Unknown domain permanently rejected | the answer will not change | OK |
+| Unknown recipient permanently rejected | deferring would make MateMail a backscatter source | OK |
+| Known alias accepted | alias-aware since P5; previously every alias bounced | OK (P5) |
+| Suspended workspace/mailbox **deferred** | reversible, so the mail must survive it | OK (P5) |
+| Outbound-disabled workspace still receives | cutting inbound punishes the sender, not the abuser | OK (P5) |
+| SPF / DKIM / DMARC verification | Rspamd | OK |
+| Spam scanning | Rspamd + ClamAV | OK |
+| Rate limit per source IP | Postfix + netfilter-mailcow | OK |
 
 ---
 
@@ -131,10 +159,12 @@ ORM calls.
 
 ### IMAP/SMTP Auth
 
-**Status: NOT IMPLEMENTED — the Mail Engine is not installed.** Nothing in this
-table is in force today; it is the target design for the engine. "Stalwart" in
-earlier drafts predates DEC-001, which selected mailcow (Postfix / Dovecot /
-Rspamd).
+**Status: the Mail Engine is installed and live as of P4B.** Dovecot performs
+SASL authentication for submission and IMAP, and the controls below are the
+engine's own — MateMail does not implement them and does not hold mailbox
+passwords. No public mail port is open, so none of this is currently reachable
+from the Internet. "Stalwart" in earlier drafts predates DEC-001, which selected
+mailcow (Postfix / Dovecot / Rspamd).
 
 | Control | Target implementation |
 |---------|----------------------|
@@ -171,7 +201,15 @@ Every API endpoint that touches tenant data:
 
 ### Mail Engine Layer
 
-Domains provisioned in Stalwart are scoped per-domain. Stalwart naturally prevents cross-domain access because each mailbox belongs to exactly one domain, and each domain is owned by exactly one tenant in Django.
+Domains in the Mail Engine are scoped per-domain: a mailbox belongs to exactly
+one domain, and a verified domain belongs to exactly one tenant — enforced by a
+partial unique index in MateMail's own database, not by the engine (P3a).
+
+**The engine itself has no tenant concept**, which is why that mapping is
+MateMail's responsibility and why engine-wide reads (`get_queue_status`,
+`get_quarantine_items`) are documented at the port as requiring tenant mapping
+before anything is stored or displayed. Treating an engine-wide list as
+tenant-scoped is the shape a cross-tenant leak would take here.
 
 There is no API path that allows Tenant A to read or affect Tenant B's mail.
 
@@ -883,8 +921,8 @@ Covered by `tests/test_domain_delete_durability.py`.
 | HTTPS (443) | TLS 1.2 | Let's Encrypt auto-renew |
 | IMAPS (993) | TLS 1.2 | Let's Encrypt auto-renew |
 | SMTP TLS (465/587) | TLS 1.2 | Let's Encrypt auto-renew |
-| JMAP internal | HTTP (internal Docker network only) | N/A |
-| Django ↔ Stalwart API | HTTP (internal Docker network only) | N/A |
+| Django to Mail Engine API | HTTPS via the HAProxy gateway on a dedicated private Docker network; certificate verified (DEC-014) | Let's Encrypt auto-renew |
+| Mail Engine to SMTP policy bridge | HTTP over the internal network, authenticated by `INTERNAL_API_SECRET` | N/A |
 | Django ↔ PostgreSQL | TLS or local socket | N/A |
 | Django ↔ Redis | Local socket or TLS | N/A |
 
@@ -976,8 +1014,12 @@ Both write audit events (`domain_ownership_verified`, `domain_ownership_failed`,
 | Threat | Control |
 |--------|---------|
 | Account takeover | 2FA with per-user throttling and TOTP replay prevention; password reset revokes every session (P3b) |
-| Open relay | SMTP auth required, FROM domain validation |
-| Spam sending | Per-mailbox and per-tenant send limits, reputation monitoring |
+| Open relay | SMTP auth required; sender must equal the authenticated account; sender must be a mailbox MateMail hosts (P5) |
+| Spam sending | Per-mailbox hourly and per-workspace daily limits, read from the plan and enforced atomically (P5). Reputation monitoring is **not** built — P7 |
+| Anonymous signup reaching the Mail Engine | Workspaces start `PENDING_APPROVAL`; mail capability requires an `approved_at` granted by a named platform admin (P5) |
+| A single compromised account | `set_mailbox_suspended` — a platform-only state a tenant admin cannot lift (P5) |
+| A workspace sending abusively | `outbound_disabled` stops sending while leaving inbound and administration intact (P5) |
+| Alias minting as cheap sending identities | `Plan.max_aliases`, enforced workspace-wide under a row lock (P5) |
 | Credential stuffing | Per-IP and per-account login lockout on failures (P3b) |
 | Tenant enumeration | Workspace slugs not enumerable via public API |
 | Trial abuse / mass signup | 3 signups per hour per IP; `MAX_WORKSPACES_PER_USER` caps owned workspaces (P3b) |
@@ -985,7 +1027,8 @@ Both write audit events (`domain_ownership_verified`, `domain_ownership_failed`,
 | Mass mailbox creation | 20/hour per tenant plus `Plan.max_mailboxes` (P3b) |
 | DNS abuse | DNS verification re-checks, domain pause on repeated failures |
 | Domain hijack / squatting | TXT ownership proof required before provisioning; verified ownership is exclusive, enforced by a partial unique index (P3a) |
-| Suspended tenant bypass | Celery task enforces suspension in Stalwart within 60 seconds of status change |
+| Suspended tenant bypass | Two independent mechanisms: the policy bridge refuses, **and** `apply_tenant_suspension_task` deactivates the workspace's domains in the engine. Whether the engine-side half was queued is reported to the operator rather than logged and forgotten (P5) |
+| Domain silently changing hands | Daily ownership re-verification; seven consecutive failures raise a flag for a human. Deliberately does not deprovision — see `docs/MAIL_POLICY.md` section 5 (P5) |
 
 ### Free `@matemail.online` accounts — a future threat surface, not a current one
 
@@ -1059,14 +1102,62 @@ Events logged:
 
 ## No-Open-Relay Checklist
 
-Before any mail engine phase is considered complete, the following must pass:
+Two different things are being claimed here, and they are tracked separately on
+purpose.
 
-- [ ] Unauthenticated SMTP submission rejected with `530 5.7.0`
-- [ ] Authenticated submission only accepted for domains owned by the authenticated user's tenant
-- [ ] Sending to external recipient without auth rejected
-- [ ] Sending from an address not belonging to the authenticated mailbox rejected
-- [ ] Suspended tenant: all outbound SMTP rejected
-- [ ] Disabled mailbox: SMTP auth rejected
-- [ ] Inbound SMTP: unknown domain rejected with `550 5.1.2`
-- [ ] Inbound SMTP: unknown recipient rejected with `550 5.1.1`
-- [ ] No port 25 unauthenticated forwarding (open relay via inbound → outbound rewrite)
+**A. MateMail decides correctly** — proved by `tests/test_smtp_policy_bridge.py`
+against the real endpoints, with the real policy module behind them.
+
+- [x] A sender MateMail does not host is refused
+- [x] A sender on a domain MateMail does not host is refused
+- [x] Sending as another tenant's mailbox is refused
+- [x] Sending as a colleague in the same workspace is refused
+- [x] Sending as the platform identity with a customer credential is refused
+- [x] Case and whitespace do not defeat the sender comparison
+- [x] Suspended workspace: outbound refused
+- [x] Outbound-disabled workspace: outbound refused
+- [x] Unapproved workspace: outbound refused
+- [x] Suspended or disabled mailbox: outbound refused
+- [x] Inactive sending domain: outbound refused
+- [x] Inbound unknown domain: permanently rejected
+- [x] Inbound unknown recipient: permanently rejected
+- [x] The bridge refuses a missing, empty or wrong internal secret
+
+**B. The engine is configured to ask** — proved by
+`tests/test_engine_policy_integration.py`, which parses the real override and
+evaluates it with a model of Postfix's own restriction semantics.
+
+- [x] The policy hook is present in `smtpd_recipient_restrictions`
+- [x] It precedes `permit_sasl_authenticated` — so authenticated submission
+      reaches it instead of short-circuiting (this was blocker 2)
+- [x] It follows `permit_mynetworks` — so the engine's own injections do not
+      enter customer policy
+- [x] It precedes `reject_unauth_destination`, and the bridge answers `DUNNO`
+      rather than `OK`, so the anti-relay check is still reached
+- [x] A second hook at `smtpd_end_of_data_restrictions` counts once per message
+- [x] Every upstream restriction is preserved; sender, relay, client and milter
+      settings are not redefined
+- [x] The address Postfix dials equals the address Compose binds
+- [x] The bridge publishes no host port and uses no host networking
+
+**C. The bridge answers correctly over the wire** — proved by
+`tests/test_policy_protocol_integration.py`, which runs the real daemon and
+speaks the real protocol against a live MateMail. Cases A–L of the relay matrix,
+including a MateMail outage (defers, never `OK`) and a wrong shared secret
+(defers).
+
+**D. Postfix actually invokes it in production** — **not yet.** This is the
+remaining gap, and it closes at deployment, not in CI: Postfix is not running
+here. `scripts/install-policy-bridge.sh` ends by printing the engine's own
+effective `postconf smtpd_recipient_restrictions smtpd_end_of_data_restrictions`
+and states what must appear in it.
+
+- [ ] `install-policy-bridge.sh` run on the engine host
+- [ ] effective `postconf` output shows the hook before `permit_sasl_authenticated`
+- [ ] unauthenticated submission refused — verified against the live engine
+- [ ] inbound unknown recipient refused — verified against the live engine
+
+Until D is done, A–C are correct decisions nobody asks for. No public mail port
+is open, so there is no live exposure, and the engine's own SASL requirement,
+sender-login check and relay restrictions are what is holding — but this
+checklist must not be read as finished.

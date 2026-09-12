@@ -7,6 +7,11 @@ class LogEventType(models.TextChoices):
     MAILBOX_CREATED = "mailbox_created", "Mailbox Created"
     MAILBOX_DELETED = "mailbox_deleted", "Mailbox Deleted"
     MAILBOX_DISABLED = "mailbox_disabled", "Mailbox Disabled"
+    # Platform-admin abuse actions, distinct from a tenant disabling its
+    # own mailbox: only MateMail can set or clear these.
+    DOMAIN_OWNERSHIP_STALE = "domain_ownership_stale", "Domain Ownership Record Missing"
+    MAILBOX_SUSPENDED = "mailbox_suspended", "Mailbox Suspended by Platform"
+    MAILBOX_UNSUSPENDED = "mailbox_unsuspended", "Mailbox Unsuspended by Platform"
     DOMAIN_ADDED = "domain_added", "Domain Added"
     DOMAIN_DELETED = "domain_deleted", "Domain Deleted"
     # Ownership verification (P3). Worth auditing in its own right: it is the
@@ -16,6 +21,13 @@ class LogEventType(models.TextChoices):
     DOMAIN_TOKEN_ROTATED = "domain_token_rotated", "Domain Verification Token Rotated"
     TENANT_SUSPENDED = "tenant_suspended", "Tenant Suspended"
     TENANT_REACTIVATED = "tenant_reactivated", "Tenant Reactivated"
+    # Approval lifecycle (P5). A workspace being allowed to send mail is a
+    # platform decision with consequences for everyone's sending reputation,
+    # so who made it and when is part of the permanent record.
+    TENANT_APPROVED = "tenant_approved", "Tenant Approved for Mail"
+    TENANT_REJECTED = "tenant_rejected", "Tenant Rejected"
+    TENANT_OUTBOUND_DISABLED = "tenant_outbound_disabled", "Tenant Outbound Mail Disabled"
+    TENANT_OUTBOUND_ENABLED = "tenant_outbound_enabled", "Tenant Outbound Mail Re-enabled"
     PLAN_CHANGED = "plan_changed", "Plan Changed"
     LOGIN = "login", "Login"
     LOGOUT = "logout", "Logout"

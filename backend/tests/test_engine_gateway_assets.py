@@ -20,8 +20,12 @@ ENGINE_DIR = REPO / "deploy" / "engine"
 OVERRIDE = ENGINE_DIR / "docker-compose.override.yml"
 HAPROXY = ENGINE_DIR / "haproxy.cfg"
 README = ENGINE_DIR / "README.md"
+EXTRA_CF = ENGINE_DIR / "postfix-extra.cf"
+BRIDGE_SCRIPT = REPO / "scripts" / "postfix_policy_bridge.py"
+INSTALLER = REPO / "scripts" / "install-policy-bridge.sh"
 
 SERVICE = "matemail-engine-gateway"
+BRIDGE_SERVICE = "matemail-policy-bridge"
 LINK = "matemail_engine_link"
 ENGINE_NET = "mailcow-network"
 ENGINE_HOST = "mx.matemail.online"
@@ -44,7 +48,7 @@ class GatewayAssetsExistTest(SimpleTestCase):
         failure, and .gitattributes pins these extensions to eol=lf so a
         Windows checkout cannot introduce them.
         """
-        for path in (OVERRIDE, HAPROXY):
+        for path in (OVERRIDE, HAPROXY, EXTRA_CF, BRIDGE_SCRIPT, INSTALLER):
             self.assertNotIn(b"\r\n", path.read_bytes(), f"{path.name} has CRLF")
 
 
@@ -168,11 +172,30 @@ class GatewayComposeContractTest(SimpleTestCase):
         """
         self.assertTrue(self.compose["networks"][LINK]["external"])
 
-    def test_the_override_declares_no_other_service(self):
+    def test_the_override_declares_only_the_two_matemail_services(self):
+        """
+        The override exists to add MateMail's own two sidecars — the gateway
+        (MateMail reaching the engine) and the policy bridge (the engine
+        reaching MateMail). Anything else here is either an unreviewed addition
+        or an accidental redefinition of an upstream mailcow service.
+        """
         self.assertEqual(
-            list(self.compose["services"]), [SERVICE],
-            "the override must add the gateway and nothing else",
+            sorted(self.compose["services"]), sorted([SERVICE, BRIDGE_SERVICE]),
+            "the override must add exactly the gateway and the policy bridge",
         )
+
+    def test_neither_service_shadows_an_upstream_mailcow_service(self):
+        """
+        Compose merges by service name. A collision would silently rewrite part
+        of the engine's own stack rather than adding to it.
+        """
+        for name in self.compose["services"]:
+            with self.subTest(service=name):
+                self.assertTrue(
+                    name.startswith("matemail-"),
+                    f"{name} lacks the matemail- prefix that keeps it clear of "
+                    "upstream service names",
+                )
 
     # ── operational ─────────────────────────────────────────────────────────
 

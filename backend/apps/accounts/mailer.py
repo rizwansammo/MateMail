@@ -46,6 +46,7 @@ logged with its cause, and the caller is told whether it worked so it can
 answer the customer honestly.
 """
 import logging
+import uuid
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, get_connection
@@ -106,12 +107,19 @@ def send_transactional(
         )
         return False
 
+    from_address = transactional_from_address()
     message = EmailMultiAlternatives(
         subject=subject,
         body=body,
-        from_email=transactional_from_address(),
+        from_email=from_address,
         to=recipients,
         connection=get_connection(fail_silently=False),
+        # Django generates a Message-ID from the LOCAL hostname when one is not
+        # supplied. In a container that is the container id, so real delivered
+        # mail carried `<...@00a3f41e29d7>` — a public header advertising an
+        # internal identifier, unstable across every deploy, and not a real
+        # domain. Set it from our own sending domain instead.
+        headers={"Message-ID": make_message_id(from_address)},
     )
     if html_body:
         message.attach_alternative(html_body, "text/html")
@@ -134,6 +142,39 @@ def send_transactional(
 
     logger.info("Transactional email (%s) sent to %d recipient(s).", purpose, len(recipients))
     return True
+
+
+def message_id_domain(from_address: str = "") -> str:
+    """
+    The right-hand side for a Message-ID: the domain we actually send from.
+
+    Taken from the From address, falling back to MAIL_HOSTNAME and then
+    MAIL_DOMAIN. Never the local hostname — in a container that is an ephemeral
+    id, which is both an information leak and not a real domain.
+    """
+    address = from_address or transactional_from_address()
+    if "@" in address:
+        # `MateMail <noreply@mail.matemail.online>` -> mail.matemail.online
+        domain = address.rsplit("@", 1)[1].strip().rstrip(">").strip()
+        if domain:
+            return domain
+    return (
+        getattr(settings, "MAIL_HOSTNAME", "")
+        or getattr(settings, "MAIL_DOMAIN", "")
+        or "localhost"
+    )
+
+
+def make_message_id(from_address: str = "") -> str:
+    """
+    A globally unique RFC 5322 Message-ID rooted at our own domain.
+
+    Uniqueness comes from `uuid4` — 122 random bits, so collisions are not a
+    practical concern even across every process and container that will ever
+    run. Deliberately not a timestamp plus a counter: those collide across
+    processes, which is precisely the situation here.
+    """
+    return f"<{uuid.uuid4()}@{message_id_domain(from_address)}>"
 
 
 def transactional_from_address() -> str:

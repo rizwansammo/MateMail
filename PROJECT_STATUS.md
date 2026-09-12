@@ -4,15 +4,22 @@
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
 **Last updated:** 2026-09-12  
-**Current phase:** **P4 COMPLETE** (2026-09-12) — Mail Engine live, activated, and delivering  
+**Current phase:** **P5 IMPLEMENTATION COMPLETE** (2026-09-12) — mail policy, approval, abuse  
+&nbsp;&nbsp;&nbsp;&nbsp;controls, and the engine-side SMTP policy integration.  
+&nbsp;&nbsp;&nbsp;&nbsp;Application policy **and** the Postfix integration are built and tested in  
+&nbsp;&nbsp;&nbsp;&nbsp;the repository; **not committed, not deployed**. Blocker 2 is closed in code:  
+&nbsp;&nbsp;&nbsp;&nbsp;the policy hook precedes `permit_sasl_authenticated`, with a second hook at  
+&nbsp;&nbsp;&nbsp;&nbsp;end-of-data so the rate limit counts once per message.  
+&nbsp;&nbsp;&nbsp;&nbsp;**What remains is deployment**, a separate authorized step.  
+**Previous phase:** **P4 COMPLETE** (2026-09-12) — Mail Engine live, activated, and delivering  
 &nbsp;&nbsp;&nbsp;&nbsp;P4A design + adapter · P4B private engine install · P4C-A/A2/A3 remediation  
 &nbsp;&nbsp;&nbsp;&nbsp;· P4C-B activation, released as `b8e0fe3b`.  
 &nbsp;&nbsp;&nbsp;&nbsp;Production runs `MAIL_ENGINE_ADAPTER=mailcow` against the private Mail Engine.  
 &nbsp;&nbsp;&nbsp;&nbsp;**Transactional delivery validation: PASSED** (2026-09-12) — one real message  
 &nbsp;&nbsp;&nbsp;&nbsp;delivered to Gmail Primary Inbox with SPF, DKIM and DMARC all passing.  
 &nbsp;&nbsp;&nbsp;&nbsp;No public mail port is open. No customer domain or mailbox exists.  
-&nbsp;&nbsp;&nbsp;&nbsp;**Not ready for customer mail:** P5, P6, P7 and P7.5 remain before Private Beta.  
-**Next phase:** P5 — mail policy enforcement (no open relay, rate limits, suspension)  
+&nbsp;&nbsp;&nbsp;&nbsp;**Not ready for customer mail:** P6, P7 and P7.5 remain before Private Beta.  
+**Next phase:** P6 — backups, restore, retention, safe deletion  
 **Launch gate:** private beta requires all of P0–P7; public launch requires P9
 
 ---
@@ -216,7 +223,7 @@ broken audit log. See the Phase 0 section below.
 | P4C-A3 | Versioned engine infrastructure + exact-revision Compose deployment | ✅ Implementation complete (2026-09-11) |
 | P4C-B | Activation: real adapter, delivery validation | ✅ Complete (2026-09-12) — real mail delivered, SPF/DKIM/DMARC pass |
 | **P4** | **Mail Engine: customer email + platform transactional mail** | **✅ COMPLETE (2026-09-12)** |
-| P5 | Mail policy enforcement (no open relay, rate limits, suspension) | Pending |
+| P5 | Mail policy, approval, abuse controls, product enforcement | ✅ Implementation complete (2026-09-12) — application policy **and** engine integration; awaiting deployment |
 | P6 | Backups, restore, safe deletion | Pending |
 | P7 | Operational surface (sync, reconciliation, monitoring, alerting) | Pending |
 | P7.5 | **MateMail Free** — `username@matemail.online` accounts (DEC-015) | Pending |
@@ -632,22 +639,68 @@ unreachable from the internet.
 
 ### P5 — Make mail policy actually enforce
 
-Closes blocker 2 — the phase that protects sending reputation.
+**Application side complete (2026-09-12).** See DEC-017, DEC-018 and
+`docs/MAIL_POLICY.md`. Blocker 2 is **partially** closed: MateMail now makes the
+right decisions, but the Mail Engine does not yet consult them at submission.
 
-- Fix the Postfix restriction order so the policy service runs *before*
-  `permit_sasl_authenticated`, or move it to `smtpd_end_of_data_restrictions`
-  where a message is counted once rather than once per recipient.
-- Make the policy bridge reachable: bind to the container-visible address,
-  correct `DJANGO_INTERNAL_URL` to the new port, source-restrict the internal
-  nginx location instead of denying it wholesale.
-- Write the missing `scripts/install-policy-bridge.sh` (`deploy.sh` already
-  instructs operators to run it).
-- Teach the inbound policy about aliases, forwarding rules and catch-alls, or
-  every alias address will bounce.
-- Make the rate limiter atomic; count per message; read limits from the plan.
-- Tenant suspension must call `suspend_domain` so it stops outbound too.
-- Require destination confirmation before a forwarding rule activates; notify
-  the mailbox owner and the workspace owner.
+Landed:
+
+- ✅ Approval gate — signup creates `PENDING_APPROVAL`; mail capability requires
+  a mail-enabled status **and** an `approved_at` granted by a named admin. One
+  authoritative check (`apps/tenants/policy.py`) that every provisioning path
+  calls, including the Celery task that previously checked nothing.
+- ✅ Rate limiter is genuinely atomic (one Redis script), counts per message,
+  and reads its limits from the plan. Fails closed on a Redis outage.
+- ✅ Tenant suspension deactivates the workspace's domains in the engine, so
+  suspension is two independent mechanisms rather than one database column.
+  Whether the engine-side half was queued is reported back to the operator.
+- ✅ Graded abuse responses: suspend one mailbox, disable one workspace's
+  outbound, or suspend the workspace. All reversible, all audited with an actor.
+- ✅ Inbound policy understands aliases — previously every alias address was
+  rejected as nonexistent, which would have permanently bounced all alias mail.
+- ✅ Refusals classified permanent vs temporary, so a reversible condition
+  defers instead of destroying the sender's message.
+- ✅ Platform sender recognised explicitly — it has no mailbox, domain or
+  tenant, and would otherwise have been rejected the moment the policy service
+  was enforced, taking account recovery down with it.
+- ✅ Periodic ownership re-verification, flag-only.
+- ✅ Message-ID rooted at the sending domain instead of the container id.
+- ✅ Free-account policy framework designed (DEC-018), nothing implemented.
+
+**Engine-side integration — built in the repository, not yet deployed:**
+
+- ✅ Postfix restriction ordering fixed. The policy hook sits *after*
+  `permit_mynetworks` and *before* `permit_sasl_authenticated`, so authenticated
+  submission reaches it instead of short-circuiting — the whole of blocker 2.
+  Both placements are wrong in different ways, and the file says which and why.
+- ✅ A second hook at `smtpd_end_of_data_restrictions`, which upstream leaves
+  empty, so a message is counted once rather than once per recipient. The stage
+  is passed to MateMail explicitly (`stage=rcpt` authorizes without counting).
+- ✅ Policy bridge reachable over the existing private link, as a sidecar in the
+  engine's own Compose project — no host port, no host networking, no other
+  Docker network with access. The earlier host-daemon design would have rebuilt
+  the published-socket topology DEC-014 measured and rejected; its systemd unit
+  has been removed rather than left beside the replacement.
+- ✅ `scripts/install-policy-bridge.sh` written, with a `--check` mode, a
+  preflight that refuses to install without the shared secret, and a
+  verification step that prints the engine's own effective `postconf` output.
+- ✅ Sender authorization extended to aliases, matching the engine's own sender
+  ACL, so the two agree instead of one refusing what the other permits.
+
+**Remaining: deployment.** Postfix is not running in CI, so what cannot be
+proved here is that the engine invokes the hook at the configured stages. The
+installer ends by printing the effective configuration for exactly that reason.
+See `docs/SECURITY.md` § No-Open-Relay Checklist, item D.
+
+**Deliberately deferred, with reason:**
+
+- ⬜ Destination confirmation before a forwarding rule activates, with notice to
+  the mailbox owner and workspace owner. This is a product feature — a
+  confirmation token, an email flow, and UI — rather than a policy fix, and
+  building it inside a policy phase would have meant shipping it without the
+  interface design it needs. It remains a **Private Beta blocker**: external
+  forwarding is the highest-abuse-risk capability MateMail offers, and it must
+  not reach real customers unconfirmed.
 
 Also in P5, **design only**: the policy framework free `@matemail.online`
 accounts will need at P7.5 (DEC-015). Free public email carries a categorically
@@ -956,7 +1009,11 @@ classification all run for real.
 - `get_queue_status` / `get_quarantine_items` remain engine-wide with no tenant
   dimension. The port documents that callers must map to a tenant before storing
   or displaying; the sync task that does so is P7.
-- The engine-side policy path is still not wired (blocker 2) — that is P5.
+- The engine-side policy path is built and tested in the repository (blocker 2
+  closed in code) but is **not yet deployed**, so the running engine does not
+  consult MateMail's decisions at submission time. No public mail port is open,
+  and the engine's own SASL, sender-login and relay restrictions are holding.
+  See "P5" above.
 
 ---
 

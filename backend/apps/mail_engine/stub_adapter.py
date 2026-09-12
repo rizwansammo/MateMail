@@ -17,6 +17,7 @@ from typing import Optional
 from .adapter import MailEngineAdapter
 from .dto import (
     AliasSpec,
+    RateLimit,
     DkimKeyInfo,
     DomainSpec,
     EngineDomain,
@@ -41,6 +42,7 @@ class StubAdapter(MailEngineAdapter):
         # They are never returned, logged or persisted.
         self._passwords: dict[str, bool] = {}
         self._dkim_rotations = 0
+        self._rate_limits: dict[str, RateLimit] = {}
 
     # ── Domains ─────────────────────────────────────────────────────────────
 
@@ -144,6 +146,22 @@ class StubAdapter(MailEngineAdapter):
         if address not in self._mailboxes:
             return None
         return datetime.now(timezone.utc).isoformat()
+
+    # ── Outbound rate limits ────────────────────────────────────────────────
+
+    def set_mailbox_rate_limit(self, address: str, limit: RateLimit) -> None:
+        if limit.is_unlimited:
+            # Mirrors the real engine: zero removes the limit rather than
+            # storing one of zero, so a later read reports "none set".
+            self._rate_limits.pop(address, None)
+            return
+        self._rate_limits[address] = limit
+
+    def get_mailbox_rate_limit(self, address: str) -> Optional[RateLimit]:
+        return self._rate_limits.get(address)
+
+    def clear_mailbox_rate_limit(self, address: str) -> None:
+        self._rate_limits.pop(address, None)
 
     # ── Aliases and forwarding ──────────────────────────────────────────────
 

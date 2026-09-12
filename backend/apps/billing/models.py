@@ -18,6 +18,12 @@ class Plan(models.Model):
     max_domains = models.PositiveIntegerField()
     max_mailboxes = models.PositiveIntegerField()
     max_members = models.PositiveIntegerField(default=5)
+    #: Aliases across the whole workspace. Previously uncapped: the engine was
+    #: told 400 per domain by a DomainSpec default nobody could configure, and
+    #: MateMail enforced nothing at all, so a workspace could create aliases
+    #: without limit. An alias is a free forwarding address, which makes it the
+    #: cheapest way to turn one approved workspace into many sending identities.
+    max_aliases = models.PositiveIntegerField(default=50)
 
     # ── Storage ──────────────────────────────────────────────────────────────
     #
@@ -50,6 +56,23 @@ class Plan(models.Model):
             "Total storage shared by every mailbox on a domain, in MB. Set "
             "deliberately — it is a commercial limit, not mailboxes x ceiling."
         ),
+    )
+
+    # ── Outbound sending limits (P5) ─────────────────────────────────────────
+    #
+    # Enforced by the SMTP policy bridge on every submission. Conservative by
+    # design: a new workspace on a shared sending reputation should have to ask
+    # for more rather than discover it can already send thousands.
+    #
+    # Previously these were three literals inside the rate limiter, identical
+    # for every plan and invisible to the product.
+    max_messages_per_hour_per_mailbox = models.PositiveIntegerField(
+        default=50,
+        help_text="Outbound messages one mailbox may send per hour.",
+    )
+    max_messages_per_day_per_tenant = models.PositiveIntegerField(
+        default=500,
+        help_text="Outbound messages the whole workspace may send per day.",
     )
     includes_spam_quarantine = models.BooleanField(default=False)
     includes_audit_logs = models.BooleanField(default=False)

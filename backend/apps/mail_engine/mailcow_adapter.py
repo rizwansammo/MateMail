@@ -22,6 +22,7 @@ from .adapter import MailEngineAdapter
 from .dto import (
     DEFAULT_DKIM_KEY_SIZE,
     AliasSpec,
+    RateLimit,
     DkimKeyInfo,
     DomainSpec,
     EngineDomain,
@@ -429,6 +430,71 @@ class MailcowAdapter(MailEngineAdapter):
             return None
         value = row.get("last_imap_login") or row.get("last_pop3_login") or ""
         return str(value) or None
+
+    # ── Outbound rate limits ────────────────────────────────────────────────
+
+    #: MateMail's window vocabulary mapped to the engine's single-letter frame.
+    #: Verified against functions.ratelimit.inc.php at 2026-07b, which accepts
+    #: exactly s, m, h and d and rejects anything else with `rl_timeframe`.
+    _RATE_FRAMES = {"second": "s", "minute": "m", "hour": "h", "day": "d"}
+    _FRAMES_TO_WINDOW = {v: k for k, v in _RATE_FRAMES.items()}
+
+    def set_mailbox_rate_limit(self, address: str, limit: RateLimit) -> None:
+        """
+        Apply the engine's own submission rate limit to one mailbox.
+
+        Contract verified in json_api.php at 2026-07b: `edit/rl-mbox` takes the
+        standard `{"items": [...], "attr": {...}}` shape and the router merges
+        items in as `object`. A value of 0 clears the limit — the engine deletes
+        its Redis key rather than storing a zero.
+        """
+        frame = self._RATE_FRAMES[limit.window]
+        self._write(
+            "/api/v1/edit/rl-mbox",
+            {"items": [address], "attr": {"rl_value": limit.messages, "rl_frame": frame}},
+            operation="set_mailbox_rate_limit",
+        )
+
+    def get_mailbox_rate_limit(self, address: str) -> Optional[RateLimit]:
+        try:
+            data = self._request(
+                "GET", f"/api/v1/get/rl-mbox/{address}",
+                operation="get_mailbox_rate_limit",
+            )
+        except NotFound:
+            return None
+
+        row = data[0] if isinstance(data, list) and data else data
+        if not isinstance(row, dict):
+            return None
+
+        raw_value = row.get("value")
+        raw_frame = row.get("frame")
+        if raw_value in (None, "", False):
+            # The engine answers with an empty shape when no limit is set,
+            # rather than 404. "No limit configured" is None, not zero — zero is
+            # a limit somebody deliberately cleared.
+            return None
+
+        try:
+            messages = int(raw_value)
+        except (TypeError, ValueError):
+            raise MailEngineError(
+                f"engine returned an unusable rate-limit value {raw_value!r}",
+                operation="get_mailbox_rate_limit",
+            )
+
+        window = self._FRAMES_TO_WINDOW.get(str(raw_frame))
+        if window is None:
+            raise MailEngineError(
+                f"engine returned an unknown rate-limit frame {raw_frame!r}",
+                operation="get_mailbox_rate_limit",
+            )
+        return RateLimit(messages=messages, window=window)
+
+    def clear_mailbox_rate_limit(self, address: str) -> None:
+        """Idempotent: the engine treats a zero value as "remove the limit"."""
+        self.set_mailbox_rate_limit(address, RateLimit(messages=0, window="hour"))
 
     # ── Aliases and forwarding ──────────────────────────────────────────────
 

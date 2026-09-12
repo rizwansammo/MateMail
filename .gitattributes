@@ -13,6 +13,9 @@
 *.yaml      text eol=lf
 *.conf      text eol=lf
 *.cfg       text eol=lf
+# Postfix fragments are read by a Linux daemon; a stray CR becomes part of a
+# parameter value and silently corrupts the directive it sits on.
+*.cf        text eol=lf
 *.php       text eol=lf
 *.ini       text eol=lf
 Dockerfile  text eol=lf

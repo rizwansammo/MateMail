@@ -4,10 +4,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.billing.utils import check_alias_limit, reserve_resource_slot
 from apps.domains.models import Domain
 from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
 from apps.tenants.permissions import IsTenantAdmin, TenantReadAdminWrite
+from apps.tenants.policy import MailNotPermitted, assert_can_use_mail
 from .models import Alias, AliasStatus
 from .serializers import AliasCreateSerializer, AliasSerializer
 
@@ -61,6 +63,17 @@ class AliasListCreateView(APIView):
         return Response(AliasSerializer(aliases, many=True).data)
 
     def post(self, request):
+        # GATE: an alias is a live receiving and sending address in the engine,
+        # so it is subject to the same policy as a mailbox or a domain.
+        try:
+            assert_can_use_mail(request.tenant)
+        except MailNotPermitted as exc:
+            logger.info(
+                "Alias creation refused for tenant %s: %s",
+                request.tenant.id, exc.reason_code,
+            )
+            return Response({"detail": exc.customer_message}, status=403)
+
         serializer = AliasCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -97,14 +110,20 @@ class AliasListCreateView(APIView):
         else:
             destination_address = data["destination_address"]
 
-        alias = Alias.objects.create(
-            tenant=request.tenant,
-            domain=domain,
-            source_address=source_address,
-            destination_mailbox=destination_mailbox,
-            destination_address=destination_address,
-            status=AliasStatus.ACTIVE,
-        )
+        # Aliases were previously uncapped entirely. Checked and created under
+        # the tenant lock, like every other plan-limited resource.
+        with reserve_resource_slot(request.tenant, check_alias_limit) as slot:
+            if not slot.allowed:
+                return Response({"detail": slot.message}, status=402)
+
+            alias = Alias.objects.create(
+                tenant=request.tenant,
+                domain=domain,
+                source_address=source_address,
+                destination_mailbox=destination_mailbox,
+                destination_address=destination_address,
+                status=AliasStatus.ACTIVE,
+            )
 
         try:
             _apply_alias(alias)

@@ -118,6 +118,14 @@ class DomainSpec:
         }
         if plan is not None:
             kwargs["max_mailboxes"] = plan.max_mailboxes
+            # The plan's alias cap is workspace-wide, while the engine's is
+            # per-domain, so a two-domain workspace could hold twice this many
+            # in the engine. That is deliberate: MateMail's own check
+            # (`check_alias_limit`) is the workspace-wide authority, and this is
+            # a backstop that is never TIGHTER than the product limit. A
+            # backstop tighter than the plan would reject aliases the customer
+            # has paid for.
+            kwargs["max_aliases"] = plan.max_aliases
             # All three come from the plan. Taking only the ceiling and leaving
             # the other two at dataclass defaults is what produced a plan with a
             # 512 MB ceiling and a 3072 MB default — an impossible domain the
@@ -208,6 +216,44 @@ class DkimKeyInfo:
     public_key: str
     dns_record_name: str = ""
     dns_record_value: str = ""
+
+
+@dataclass(frozen=True)
+class RateLimit:
+    """
+    An outbound sending limit the engine enforces on one mailbox.
+
+    Engine-neutral on purpose: `messages` per `window`, where the window is one
+    of a small fixed set every mail engine understands. The pinned engine
+    happens to express this as a value plus a single-letter frame, but that is
+    its vocabulary and it stops at the adapter — product code that had to know
+    `rl_frame="h"` would be product code coupled to mailcow.
+
+    `messages=0` means "no limit", matching how engines conventionally clear
+    one. It is not the same as having no RateLimit at all, which means "we did
+    not ask".
+    """
+
+    messages: int
+    window: str = "hour"
+
+    #: Windows the port accepts. Anything else is a caller error, not something
+    #: to translate hopefully into whatever the engine might take.
+    WINDOWS = ("second", "minute", "hour", "day")
+
+    def __post_init__(self):
+        if not isinstance(self.messages, int) or isinstance(self.messages, bool):
+            raise ValueError(f"messages must be a whole number, got {self.messages!r}")
+        if self.messages < 0:
+            raise ValueError("messages cannot be negative")
+        if self.window not in self.WINDOWS:
+            raise ValueError(
+                f"window must be one of {self.WINDOWS}, got {self.window!r}"
+            )
+
+    @property
+    def is_unlimited(self) -> bool:
+        return self.messages == 0
 
 
 @dataclass(frozen=True)

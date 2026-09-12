@@ -6,7 +6,8 @@ from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.billing.utils import check_domain_limit
+from apps.billing.utils import check_domain_limit, reserve_resource_slot
+from apps.tenants.policy import MailNotPermitted, assert_can_use_mail
 from apps.security import ratelimit
 from apps.security.limits import DOMAIN_CHECK_PER_DOMAIN
 from apps.logs.models import LogEventType
@@ -38,9 +39,17 @@ class DomainListCreateView(APIView):
         return Response(DomainSerializer(domains, many=True).data)
 
     def post(self, request):
-        allowed, msg = check_domain_limit(request.tenant)
-        if not allowed:
-            return Response({"detail": msg}, status=402)
+        # GATE: an unapproved, rejected, suspended or cancelled workspace may
+        # not touch the Mail Engine. One authoritative check (apps.tenants.
+        # policy) rather than a status comparison repeated per endpoint.
+        try:
+            assert_can_use_mail(request.tenant)
+        except MailNotPermitted as exc:
+            logger.info(
+                "Domain creation refused for tenant %s: %s",
+                request.tenant.id, exc.reason_code,
+            )
+            return Response({"detail": exc.customer_message}, status=403)
 
         serializer = DomainCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -59,14 +68,21 @@ class DomainListCreateView(APIView):
         # Both DKIM fields therefore start empty. Provisioning is gated on
         # ownership verification (P3a), so nothing is displayed as publishable
         # before the domain is proven anyway.
-        domain = Domain.objects.create(
-            tenant=request.tenant,
-            domain=serializer.validated_data["domain"],
-            dkim_selector=selector,
-            # Issued up front so the domain page can show the exact TXT record
-            # the moment the domain is added.
-            verification_token=generate_verification_token(),
-        )
+        # The cap is checked and the row created under the tenant lock. Checking
+        # first and creating after is a check-then-act race: two requests both
+        # read a count one below the cap and both succeed.
+        with reserve_resource_slot(request.tenant, check_domain_limit) as slot:
+            if not slot.allowed:
+                return Response({"detail": slot.message}, status=402)
+
+            domain = Domain.objects.create(
+                tenant=request.tenant,
+                domain=serializer.validated_data["domain"],
+                dkim_selector=selector,
+                # Issued up front so the domain page can show the exact TXT
+                # record the moment the domain is added.
+                verification_token=generate_verification_token(),
+            )
 
         # GATE: a newly added domain is unverified, so NO provisioning is
         # queued here. Provisioning happens only after ownership is proved.

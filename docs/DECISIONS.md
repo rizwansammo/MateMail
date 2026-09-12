@@ -694,6 +694,9 @@ of discovery.
 
 ### P5 — design, do not implement
 
+> **DISCHARGED by DEC-018 (2026-09-12)** — the P5 design deliverable this
+> section calls for, including the classified reserved-username policy.
+
 P5 designs the policy framework P7.5 needs. Topics to cover: free mailbox
 storage quota; daily and hourly sending limits; recipient limits per message and
 per period; anti-spam thresholds; signup abuse controls and bot protection;
@@ -832,7 +835,13 @@ Resulting values:
 Storage may be increased later. **None of this is final public pricing**, and
 prices and feature flags were not touched.
 
-### Admin approval — policy recorded, enforcement missing
+### Admin approval — recorded here, built in P5
+
+> **RESOLVED by DEC-017 (2026-09-12).** The paragraph below described the state
+> at the time of this decision and is kept for the record. Approval is now
+> enforced: signup creates a workspace in `PENDING_APPROVAL`, and mail access
+> requires both a mail-enabled status and an `approved_at` timestamp set by a
+> named platform admin.
 
 The beta requires admin approval before a workspace is provisioned. **No such
 mechanism exists in the codebase.** Signup at `apps/accounts/views.py`
@@ -862,3 +871,410 @@ remains the product architecture.
   which is exactly what let this ship.
 - A plan whose numbers contradict each other cannot provision a domain, and
   says so on the domain record instead of failing silently.
+
+---
+
+## DEC-017 — Mail capability is a granted state, not an inferred one
+
+**Date:** 2026-09-12
+**Status:** Accepted. Implemented in P5.
+
+### The problem
+
+Before P5, "may this workspace send mail?" was answered independently, and
+differently, by every piece of code that needed to know. Domain creation
+compared `tenant.status`. The SMTP bridge compared it again, with a different
+list of acceptable values. The Celery provisioning task did not compare it at
+all. Suspension set a database column that nothing outside the bridge consulted.
+
+Each of these was defensible on its own, and together they had a predictable
+property: the endpoint that forgot a check is the one an attacker finds. The
+specific holes measured during P5:
+
+| Path | Before |
+|---|---|
+| `provision_domain_task` | no capability check at all |
+| `AdminTenantSuspendView` | set a column; the engine kept the domains active |
+| `AdminTenantActivateView` | could move a never-approved workspace to ACTIVE, where mail then silently failed |
+| Outbound bridge | tenant status compared inline, with its own notion of "active" |
+| Rate limits | three literals, identical for every plan, invisible to the product |
+| Platform sender | would have been rejected as "Sender mailbox not found" |
+
+### Decision
+
+**One authoritative answer, in `apps/tenants/policy.py`, that every path asks.**
+
+```
+assert_can_use_mail(tenant)   # may it create or change engine resources?
+assert_can_send_mail(tenant)  # may it send, right now?
+```
+
+Capability is a **granted state with a recorded grantor**, not a property
+inferred from a status string. A workspace can use the Mail Engine only when
+both hold:
+
+1. its status is in `MAIL_ENABLED_STATUSES` (trial or active), and
+2. `approved_at` is set — a platform admin explicitly allowed it.
+
+The second is what makes this a gate rather than a convention. A status can be
+set by a fixture, a shell, a future admin action that forgets; the approval
+timestamp is a fact with a name and a time attached to it, and mail access
+requires that fact.
+
+Signup therefore creates a workspace in `PENDING_APPROVAL`. Anyone may sign up;
+signing up grants nothing.
+
+### Everything here fails closed
+
+An unknown status, a missing subscription, a tenant that cannot be loaded, a
+rate limiter that cannot be reached: all denied. `MAIL_ENABLED_STATUSES` is an
+allowlist, so a status added later is denied until someone decides otherwise,
+and the denial is logged loudly rather than passing quietly.
+
+### Suspension is two mechanisms, not one column
+
+A suspended workspace whose domains are still active in the Mail Engine is
+stopped only by the policy bridge — one service, one configuration line and one
+restart away from not running. An abuse suspension that quietly does nothing is
+worse than none, because an operator believes the problem is handled.
+
+Suspension now also deactivates the workspace's domains in the engine
+(`apply_tenant_suspension_task`). The customer stops sending if **either**
+mechanism works. Whether the engine-side half was queued is reported back to the
+operator rather than logged and forgotten.
+
+Deactivate, never delete: suspension is reversible by design, and deleting a
+domain to enforce a temporary state would destroy stored mail.
+
+### Three graded abuse responses
+
+Reach for the narrowest one that stops the damage.
+
+| Response | Scope | Reversible | Customer keeps |
+|---|---|---|---|
+| `set_mailbox_suspended` | one mailbox | yes | everything else in the workspace |
+| `set_outbound_enabled(False)` | one workspace's sending | yes | inbound mail, settings, administration |
+| `suspend_tenant` | one workspace entirely | yes | its data |
+
+Mailbox `SUSPENDED` is deliberately a state only MateMail can set or clear. A
+tenant admin's own control offers active and disabled only, and refuses to touch
+a suspended mailbox at all — otherwise a customer could re-enable the account
+MateMail just stopped. That asymmetry is the entire reason for having two states
+that both mean "not sending".
+
+Every transition requires an authenticated actor, takes a row lock, and writes
+an audit event. Letting a workspace send affects the reputation every other
+customer shares, so "who allowed this, and when" has to be answerable months
+later.
+
+### Sending limits come from the plan
+
+Volume is a commercial dimension, so it belongs on `Plan`, not in three literals
+inside the limiter:
+
+| Tier | Aliases | Messages/hour/mailbox | Messages/day/workspace |
+|---|---|---|---|
+| trial (Private Beta) | 50 | 50 | 500 |
+| starter | 100 | 100 | 1,000 |
+| business | 500 | 200 | 5,000 |
+| infrastructure | 2,000 | 300 | 20,000 |
+
+Conservative on purpose. A workspace that needs more can ask and be given more
+in seconds; a workspace that discovers it can already send thousands costs every
+other customer their deliverability. A workspace with **no** resolvable plan gets
+a tighter fallback still — absence of a plan is a configuration gap, and the safe
+reading of a gap is the tighter one.
+
+The check and the increment happen inside one Redis script. The previous
+implementation read every counter, decided, then incremented in a separate
+round-trip while its docstring claimed atomicity; under the concurrency that
+actually matters — a compromised account sending as fast as it can — the limit
+leaked reliably.
+
+Aliases are capped because an alias is a free forwarding address, which makes it
+the cheapest way to turn one approved workspace into many sending identities.
+
+### Refusals are classified: delayed, not destroyed
+
+A remote server told 5xx returns the message to its sender immediately; told 4xx
+it holds and retries for days. Every refusal in the bridge used to be a flat
+REJECT, so a workspace suspended over a billing question on a Friday permanently
+bounced every message sent to it until Monday — and those messages were gone,
+with the senders told the addresses did not work.
+
+The rule: **refuse permanently only when the answer will not change.**
+
+| Condition | Inbound | Why |
+|---|---|---|
+| domain not hosted here | REJECT | settled |
+| mailbox does not exist | REJECT | settled — and deferring would make MateMail a backscatter source |
+| workspace cancelled or rejected | REJECT | a decision already made |
+| workspace suspended / past due / pending | DEFER | expected to resolve |
+| mailbox suspended or disabled | DEFER | a pause, not a statement that the address never existed |
+| domain inactive | DEFER | nearly always temporary, and still a domain we host |
+| MateMail cannot tell | DEFER | "I do not know" must never be expressed as "this address does not exist" |
+
+**Outbound is deliberately asymmetric and rejects even reasons inbound defers.**
+Inbound mail belongs to a third party who should not lose it over our customer's
+billing problem. Outbound mail belongs to the customer, who is sitting in front
+of a mail client and is better served by an immediate, clear refusal. It also
+matters for abuse: deferring a suspended workspace's outbound would accumulate a
+spool of exactly the mail we suspended them for, and release it when the
+suspension lifted. The one outbound exception is a rate limit, which defers
+because the sender is within policy and merely early.
+
+### The platform sender is allowed, not exempted
+
+MateMail's own service identity (`noreply@mail.matemail.online`, DEC-013) sends
+verification emails, password resets and invitations through the same submission
+path as a customer. It has no mailbox, no domain and no tenant, so every check in
+the bridge would have rejected it — and account recovery for every customer would
+have stopped the moment the policy service was enforced in the engine's
+restrictions.
+
+It is now recognised explicitly (`PLATFORM_SENDER_ADDRESSES`), and that allowance
+is deliberately narrow:
+
+- it is checked **after** sender == authenticated username, so possession of the
+  platform credential lets you send as the platform and as nothing else;
+- it has its own finite hourly ceiling — trusted to send is not the same as
+  trusted to send without bound, and the realistic failures here are a leaked
+  credential and a retry loop, both of which a ceiling contains;
+- tenant policy is skipped because there is no tenant to have a policy, which
+  also means an abuse response against one customer cannot silence MateMail's
+  own password resets.
+
+### Ownership is re-checked, and only flagged
+
+Ownership was proved once at onboarding and never looked at again. When a domain
+changes hands — a lapsed registration, an acquisition, an ended contract — the
+former tenant keeps the VERIFIED row and keeps receiving the mail, while the new
+owner's claim can never succeed, because the partial unique index gives that row
+to exactly one tenant. The correct owner has no self-service path at all.
+
+A daily sweep re-checks every verified domain and counts consecutive failures.
+It deliberately **does not** deprovision anything: the signal is the absence of a
+DNS record, and DNS is absent for many reasons that are not a change of
+ownership. Cutting off a legitimate customer because of a bad week of lookups
+would do more damage, more often, than the case being defended against. Seven
+consecutive failures raise a flag once, and a human decides.
+
+### Message-ID
+
+Django generates a Message-ID from the local hostname when none is supplied. In
+a container that is the container id, so real delivered mail carried
+`<...@00a3f41e29d7>` — a public header advertising an internal identifier,
+different after every deploy, and not a resolvable domain. It is now a `uuid4`
+rooted at the sending domain.
+
+### Consequences
+
+- `Tenant` gains `status` choices `pending_approval` / `rejected`, plus
+  `approved_at`, `approved_by`, `review_reason`, `outbound_disabled`,
+  `outbound_disabled_at`. Migrations `tenants.0002` (schema) and `tenants.0003`
+  (backfill).
+- `Plan` gains `max_aliases`, `max_messages_per_hour_per_mailbox`,
+  `max_messages_per_day_per_tenant`. Migrations `billing.0006` / `billing.0007`.
+- `Domain` gains `ownership_recheck_failures`. Migration `domains.0006`.
+- Existing workspaces that were already trial or active are recorded as approved
+  by the backfill, with no approver and an explicit reason — the schema change
+  must not revoke access retroactively as a side effect.
+- The engine-side integration is versioned in `deploy/engine/postfix-extra.cf`
+  (the restriction override), `deploy/engine/docker-compose.override.yml` (the
+  bridge sidecar) and `scripts/postfix_policy_bridge.py`. Installed by
+  `scripts/install-policy-bridge.sh`. **Built and tested, not yet deployed.**
+
+### How Postfix is made to ask
+
+MateMail deciding correctly is worth nothing if the engine never asks, and the
+engine did not. Three things were wrong, and each would have been silent.
+
+**The hook was advised in the wrong place.** Appending `check_policy_service` to
+`smtpd_recipient_restrictions` puts it after `permit_sasl_authenticated`, where
+Postfix stops evaluating the moment a client authenticates — so every
+authenticated submission, exactly the traffic MateMail needs to rule on, would
+short-circuit before reaching it. The service would be installed, running, and
+never asked. It now sits *before* that permit, and *after* `permit_mynetworks`
+so the engine's own unauthenticated injections (watchdog probes, quarantine
+digests) are settled before customer policy is consulted.
+
+**Counting at the wrong stage.** A recipient-stage hook fires once per RCPT TO,
+so a message to five people would cost a sender five messages. A second hook at
+`smtpd_end_of_data_restrictions` — which upstream leaves empty — fires once per
+message, and that is where the counter moves. The stage is explicit in the
+request: `stage=rcpt` authorizes without counting, `stage=end_of_data`
+authorizes and records. A caller that omits it gets the full check, so a stage
+cannot be forgotten into a free send.
+
+**The wrong topology.** The earlier design ran the bridge on the host and opened
+a firewall hole for the Docker subnet — the same published-socket arrangement
+measured and rejected in DEC-014, on a socket that decides whether mail may be
+sent. It is now a sidecar in the engine's own Compose project, on the engine
+network and the existing private link, with no host port. Its systemd unit was
+deleted rather than left in the repository beside the replacement.
+
+### The bridge answers DUNNO, never OK
+
+In Postfix a policy service's `OK` means "permit and stop evaluating this list".
+The entry after ours is `reject_unauth_destination` — the anti-relay check — so
+`OK` would not merely permit a message, it would skip the check that stops
+MateMail relaying for domains it does not host. `DUNNO` leaves every later
+restriction in force. There is a test asserting no code path can emit `OK`.
+
+A MateMail outage answers `DEFER_IF_PERMIT`: mail is retried rather than passed
+unchecked or bounced permanently, and a relay attempt a later restriction would
+reject outright is still rejected.
+
+### Nothing upstream was replaced
+
+The engine's own defences all remain, and several overlap MateMail's
+deliberately: `reject_authenticated_sender_login_mismatch` rejects a spoofed
+MAIL FROM earlier than any policy service can be consulted, and
+`smtpd_relay_restrictions` makes unauthenticated relay impossible independently
+of what the policy service answers — including while it is down. The earlier
+advice to set `smtpd_sender_restrictions = check_policy_service …` would have
+discarded all of that for a narrower duplicate.
+
+### Aliases are authorized senders
+
+`sender == sasl_username` alone was too strict: it refused mail the engine had
+already accepted. The engine's sender ACL treats an alias whose `goto` is the
+logged-in mailbox as a permitted sender, so MateMail now does too — matched on
+the `destination_mailbox` foreign key, which cannot reach across tenants.
+
+Rate limits are charged to the authenticated mailbox rather than the envelope
+sender, so an account cannot spread its quota across the aliases it holds.
+
+---
+
+## DEC-018 — MateMail Free: the policy framework (design only)
+
+**Date:** 2026-09-12
+**Status:** Accepted as design. **Nothing is implemented. Implementation is P7.5.**
+
+DEC-015 placed free `@matemail.online` accounts at P7.5 and assigned the policy
+design to P5. This is that design. It fixes no numbers that require data
+MateMail does not yet have, and it builds nothing: there is no free signup, no
+username claiming, and no free mailbox provisioning in P5.
+
+### The one structural difference
+
+A business mailbox requires someone to prove control of a domain they paid for.
+An attacker who abuses it burns an asset with a cost and a paper trail. A free
+mailbox costs a signup form. Every policy below follows from that difference,
+and none of it is a tightening of the business policy — it is a different risk
+class.
+
+### What P5 already built that P7.5 inherits
+
+The framework is deliberately not free-specific, so P7.5 configures rather than
+builds:
+
+| Need | Mechanism | Status |
+|---|---|---|
+| no sending before a human allows it | `approved_at` + `assert_can_use_mail` | built |
+| per-plan sending volume | `Plan.max_messages_per_*` | built |
+| stop one account | `set_mailbox_suspended` | built |
+| stop one account's sending only | `outbound_disabled` | built |
+| atomic, fail-closed counting | Redis script in `rate_limits.py` | built |
+| audit with an actor | `LogEventType.*` | built |
+
+A free account is a tenant with one mailbox on a MateMail-owned domain and a
+`free` plan. The plan carries the limits. **No new enforcement path is
+anticipated** — which is the point of having designed the framework first.
+
+### Policy positions taken now
+
+**Approval.** Free accounts cannot use the beta's human-approval gate — it does
+not scale past the first few hundred signups. P7.5 must replace it for free
+accounts with verified email plus a signup abuse control, and an approved-state
+grant that is still explicit and still recorded. The gate stays; what satisfies
+it changes.
+
+**Sending.** A free account's limits must be strictly below the lowest paid
+tier's, and a new free account's lower still until it has any history. Numbers
+are P7.5's, to be set against observed beta behaviour rather than invented here.
+
+**Forwarding to external destinations is the highest-risk feature on a free
+account** and must not ship enabled. It converts a free mailbox into an
+untraceable relay with our reputation attached, and it is the one capability
+that makes automated free signups worth the attacker's trouble.
+
+**Inactivity.** A free mailbox that is never read still receives mail and still
+consumes storage, and a dormant account with a guessable password is an asset
+someone else will eventually use. P7.5 defines dormancy, notice, and what
+happens to the address afterwards — but a released username must never
+silently deliver its predecessor's mail to its successor.
+
+**Suspension.** Identical mechanisms, shorter fuse. The graded responses in
+DEC-017 apply unchanged.
+
+### Reserved usernames
+
+P7.5 must ship reservation **before** the first username is claimed; a list
+applied afterwards cannot take back an address already issued. Three classes,
+because they have different justifications and different rules for change:
+
+**1. Protocol-required.** RFC 2142 and RFC 2822 §4: other operators and
+automated systems expect these to reach a human at the domain owner.
+
+```
+postmaster  abuse
+```
+
+These must resolve to MateMail and are never claimable. `postmaster` and `abuse`
+in particular are where blocklist operators and other providers report problems
+— losing them means losing the ability to be told we have a problem.
+
+Also reserved on the same footing, from the wider RFC 2142 set, as MateMail owns
+the domain: `hostmaster`, `webmaster`, `security`, `noc`.
+
+**2. Operationally required.** Not mandated by any RFC, but addresses MateMail
+itself uses or will use for automated mail; letting them be claimed creates a
+collision with our own systems.
+
+```
+noreply  no-reply  donotreply  do-not-reply  bounce  bounces
+mailer-daemon  daemon  system  notifications  alerts  automated
+```
+
+**3. Brand-protected.** Addresses a recipient would reasonably read as speaking
+for MateMail or NetaMate. Letting a stranger claim any of them hands them the
+platform's voice — a phishing mail from `billing@matemail.online` needs no
+spoofing at all, because it would be genuinely sent from our infrastructure,
+with our DKIM signature.
+
+```
+admin  administrator  root  sysadmin  matemail  netamate
+support  help  helpdesk  contact  info  sales  billing
+accounts  account  payments  invoice  legal  privacy  careers
+team  staff  office  news  press  marketing  service  verify
+verification  password  reset  login  signin  auth  secure
+```
+
+**Normalisation must happen before the list is consulted**, or the list is
+decorative. `Adm1n`, `ad-min`, `аdmin` (Cyrillic а) and `admin.` are all attempts
+at the same address. P7.5 defines casefolding, separator handling, confusable
+scripts and dot-insensitivity, and applies them *before* matching. A reservation
+system that matches only the exact ASCII string is a reservation system that does
+not work.
+
+**Extending the list later** must not break accounts already issued. The rule:
+adding a name blocks new claims immediately and never revokes an existing
+account automatically — an existing holder of a newly-reserved name is a
+decision for a human, with notice and a migration path.
+
+### Not decided here
+
+Free storage quota; specific send caps; recipients per message; anti-spam
+thresholds; which bot protection; verification and recovery mechanics; whether
+free accounts are capped in number during the beta. All P7.5, all to be set
+against real data. Picking them now would be inventing numbers and then
+defending them.
+
+### Consequences
+
+- P5 ships **no** free-account code. The reserved list above is policy, not a
+  module, precisely so that P7.5 implements it once with normalisation attached
+  rather than inheriting a half-built constant.
+- DEC-015's P5 obligation is discharged by this entry.

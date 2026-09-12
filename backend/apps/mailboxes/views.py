@@ -8,7 +8,13 @@ from rest_framework.views import APIView
 from apps.domains.models import Domain
 from apps.domains.verification import DomainNotVerified, assert_provisionable
 from apps.mail_engine.errors import MailEngineError
-from apps.billing.utils import check_mailbox_limit
+from apps.billing.utils import (
+    check_mailbox_limit,
+    get_plan,
+    reserve_resource_slot,
+    resolve_mailbox_quota,
+)
+from apps.tenants.policy import MailNotPermitted, assert_can_use_mail
 from apps.security import ratelimit
 from apps.security.limits import MAILBOX_CREATE_PER_TENANT
 from apps.logs.models import LogEventType
@@ -75,9 +81,15 @@ class MailboxListCreateView(APIView):
                 ),
             )
 
-        allowed, msg = check_mailbox_limit(request.tenant)
-        if not allowed:
-            return Response({"detail": msg}, status=402)
+        # GATE: same authoritative policy as every other provisioning path.
+        try:
+            assert_can_use_mail(request.tenant)
+        except MailNotPermitted as exc:
+            logger.info(
+                "Mailbox creation refused for tenant %s: %s",
+                request.tenant.id, exc.reason_code,
+            )
+            return Response({"detail": exc.customer_message}, status=403)
 
         serializer = MailboxCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -103,13 +115,32 @@ class MailboxListCreateView(APIView):
                 status=400,
             )
 
-        mailbox = Mailbox.objects.create(
-            tenant=request.tenant,
-            domain=domain,
-            local_part=data["local_part"],
-            full_name=data["full_name"],
-            quota_mb=data["quota_mb"],
-        )
+        # ── Quota comes from the PLAN, never from the request ────────────────
+        #
+        # The serializer used to accept any `quota_mb` from the client with a
+        # 10 GB default and no ceiling, so a workspace on a 1 GB trial could
+        # ask for — and get — whatever it typed. Storage is a commercial limit;
+        # the customer may choose within it, not beyond it.
+        plan = get_plan(request.tenant)
+        requested = data.get("quota_mb")
+        quota_mb, quota_error = resolve_mailbox_quota(plan, requested)
+        if quota_error:
+            return Response({"quota_mb": quota_error}, status=400)
+
+        # Cap check and row creation under the tenant lock — see
+        # reserve_resource_slot. The engine call stays OUTSIDE the lock: it is a
+        # network round-trip and must not be held across a row lock.
+        with reserve_resource_slot(request.tenant, check_mailbox_limit) as slot:
+            if not slot.allowed:
+                return Response({"detail": slot.message}, status=402)
+
+            mailbox = Mailbox.objects.create(
+                tenant=request.tenant,
+                domain=domain,
+                local_part=data["local_part"],
+                full_name=data["full_name"],
+                quota_mb=quota_mb,
+            )
 
         # Synchronous provisioning — password only lives in this call stack.
         # A provisioning failure does not fail mailbox creation: the record

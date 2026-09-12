@@ -8,6 +8,15 @@ from rest_framework.views import APIView
 
 from apps.billing.models import Plan, PlanTier, Subscription, SubscriptionStatus
 from apps.billing.serializers import SubscriptionSerializer
+from .approval import (
+    ApprovalError,
+    approve_tenant,
+    reactivate_tenant,
+    reject_tenant,
+    set_mailbox_suspended,
+    set_outbound_enabled,
+    suspend_tenant,
+)
 from apps.logs.models import LogEventType, MailLog
 from apps.logs.utils import log_event
 from apps.tenants.models import Tenant, TenantStatus
@@ -184,38 +193,61 @@ class AdminTenantDetailView(APIView):
 
 
 class AdminTenantSuspendView(APIView):
+    """
+    POST /api/platform/tenants/{id}/suspend/
+
+    Stops a workspace completely: no sending, no receiving, no provisioning.
+    Optional body: {"reason": "..."}.
+
+    The response reports `engine_applied` — whether the engine-side half was
+    queued. Suspension is two mechanisms, and an operator handling an abuse
+    incident needs to know if only one of them took.
+    """
     permission_classes = [IsAuthenticated, IsPlatformAdmin]
 
     def post(self, request, pk):
-        try:
-            tenant = Tenant.objects.get(pk=pk)
-        except Tenant.DoesNotExist:
+        if not Tenant.objects.filter(pk=pk).exists():
             return Response({"detail": "Not found."}, status=404)
 
-        if tenant.status == TenantStatus.SUSPENDED:
-            return Response({"detail": "Already suspended."}, status=400)
+        try:
+            tenant, engine_queued = suspend_tenant(
+                pk, actor=request.user, reason=request.data.get("reason", "")
+            )
+        except ApprovalError as exc:
+            return Response({"detail": str(exc)}, status=400)
 
-        tenant.status = TenantStatus.SUSPENDED
-        tenant.save(update_fields=["status", "updated_at"])
-        logger.info("Platform admin %s suspended tenant %s", request.user.email, tenant.id)
-        log_event(tenant, LogEventType.TENANT_SUSPENDED, source=request.user.email)
-        return Response({"id": str(tenant.id), "status": tenant.status})
+        return Response({
+            "id": str(tenant.id),
+            "status": tenant.status,
+            "engine_applied": engine_queued,
+        })
 
 
 class AdminTenantActivateView(APIView):
+    """
+    POST /api/platform/tenants/{id}/activate/
+
+    Returns a suspended workspace to service. Refuses a workspace that has
+    never been approved — approval is a separate, explicit act.
+    """
     permission_classes = [IsAuthenticated, IsPlatformAdmin]
 
     def post(self, request, pk):
-        try:
-            tenant = Tenant.objects.get(pk=pk)
-        except Tenant.DoesNotExist:
+        if not Tenant.objects.filter(pk=pk).exists():
             return Response({"detail": "Not found."}, status=404)
 
-        tenant.status = TenantStatus.ACTIVE
-        tenant.save(update_fields=["status", "updated_at"])
-        logger.info("Platform admin %s activated tenant %s", request.user.email, tenant.id)
-        log_event(tenant, LogEventType.TENANT_REACTIVATED, source=request.user.email)
-        return Response({"id": str(tenant.id), "status": tenant.status})
+        try:
+            tenant, engine_queued = reactivate_tenant(
+                pk, actor=request.user, reason=request.data.get("reason", "")
+            )
+        except ApprovalError as exc:
+            return Response({"detail": str(exc)}, status=400)
+
+        return Response({
+            "id": str(tenant.id),
+            "status": tenant.status,
+            "engine_applied": engine_queued,
+        })
 
 
 class AdminTenantPlanView(APIView):
@@ -285,3 +317,164 @@ class AdminTenantPlanView(APIView):
             )
 
         return Response(SubscriptionSerializer(sub).data)
+
+
+# ── Approval and abuse controls (P5) ─────────────────────────────────────────
+#
+# Every endpoint below is IsPlatformAdmin, which refuses API-key credentials
+# outright — a key minted by a member of staff must never become a
+# platform-admin credential sitting in a customer's config file. A customer
+# cannot reach these at all: APIKeyScopeMiddleware denies /api/platform/, and
+# the permission denies non-staff sessions.
+
+class AdminTenantApproveView(APIView):
+    """
+    POST /api/platform/tenants/{id}/approve/   {"reason": "optional"}
+
+    Lets a workspace use the Mail Engine. Until this runs, the workspace can
+    sign in and configure itself but can provision nothing.
+    """
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def post(self, request, pk):
+        try:
+            tenant = approve_tenant(
+                pk, actor=request.user, reason=request.data.get("reason", "")
+            )
+        except Tenant.DoesNotExist:
+            return Response({"detail": "Not found."}, status=404)
+        except ApprovalError as exc:
+            return Response({"detail": str(exc)}, status=409)
+
+        return Response({
+            "id": str(tenant.id),
+            "status": tenant.status,
+            "approved_at": tenant.approved_at,
+            "approved_by": request.user.email,
+        })
+
+
+class AdminTenantRejectView(APIView):
+    """
+    POST /api/platform/tenants/{id}/reject/   {"reason": "optional"}
+
+    Refuses a workspace. Nothing is deleted, and the decision is reversible by
+    approving later — a rejection that destroyed data would make a mistake
+    unrecoverable and an appeal impossible.
+    """
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def post(self, request, pk):
+        try:
+            tenant = reject_tenant(
+                pk, actor=request.user, reason=request.data.get("reason", "")
+            )
+        except Tenant.DoesNotExist:
+            return Response({"detail": "Not found."}, status=404)
+        except ApprovalError as exc:
+            return Response({"detail": str(exc)}, status=409)
+
+        return Response({"id": str(tenant.id), "status": tenant.status})
+
+
+class AdminTenantOutboundView(APIView):
+    """
+    POST /api/platform/tenants/{id}/outbound/   {"enabled": false, "reason": "..."}
+
+    Switches a workspace's outbound sending off or on without suspending it.
+    The first abuse response to reach for: it stops sending immediately, leaves
+    everything else working, and reverses just as fast if the suspicion was
+    wrong.
+    """
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def post(self, request, pk):
+        enabled = request.data.get("enabled")
+        if not isinstance(enabled, bool):
+            return Response({"enabled": "Provide true or false."}, status=400)
+
+        try:
+            tenant = set_outbound_enabled(
+                pk, enabled=enabled, actor=request.user,
+                reason=request.data.get("reason", ""),
+            )
+        except Tenant.DoesNotExist:
+            return Response({"detail": "Not found."}, status=404)
+        except ApprovalError as exc:
+            return Response({"detail": str(exc)}, status=409)
+
+        return Response({
+            "id": str(tenant.id),
+            "outbound_disabled": tenant.outbound_disabled,
+        })
+
+
+class AdminPendingTenantsView(APIView):
+    """
+    GET /api/platform/tenants/pending/
+
+    The approval queue: workspaces waiting on a decision, oldest first, so the
+    person doing the reviewing has somewhere to look.
+    """
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def get(self, request):
+        pending = (
+            Tenant.objects
+            .filter(status=TenantStatus.PENDING_APPROVAL)
+            .select_related("owner")
+            .order_by("created_at")
+        )
+        return Response([
+            {
+                "id": str(t.id),
+                "name": t.name,
+                "slug": t.slug,
+                "owner_email": t.owner.email if t.owner else "",
+                "created_at": t.created_at,
+                "waiting_days": (timezone.now() - t.created_at).days,
+            }
+            for t in pending
+        ])
+
+
+
+class AdminMailboxSuspendView(APIView):
+    """
+    POST   /api/platform/mailboxes/{id}/suspend/   — suspend one mailbox
+    DELETE /api/platform/mailboxes/{id}/suspend/   — release it
+
+    MateMail's narrowest abuse response: stop one compromised account without
+    touching the rest of a workspace that has done nothing wrong.
+
+    Only a platform admin can set or clear this. A tenant admin's own control
+    offers active and disabled only, and cannot change a suspended mailbox at
+    all — otherwise a customer could simply re-enable the account MateMail
+    just stopped.
+
+    Optional body: {"reason": "..."}.
+    """
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def _act(self, request, pk, *, suspended: bool):
+        from apps.mailboxes.models import Mailbox
+
+        try:
+            mailbox = set_mailbox_suspended(
+                pk,
+                suspended=suspended,
+                actor=request.user,
+                reason=request.data.get("reason", "") if request.data else "",
+            )
+        except Mailbox.DoesNotExist:
+            return Response({"detail": "Not found."}, status=404)
+        except ApprovalError as exc:
+            return Response({"detail": str(exc)}, status=400)
+
+        return Response({"id": str(mailbox.id), "status": mailbox.status})
+
+    def post(self, request, pk):
+        return self._act(request, pk, suspended=True)
+
+    def delete(self, request, pk):
+        return self._act(request, pk, suspended=False)

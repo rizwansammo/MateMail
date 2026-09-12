@@ -30,6 +30,7 @@ converge rather than duplicate.
 | `ensure_alias` | Upsert. The spec's destination set replaces whatever the engine held. |
 | `ensure_forwarding` | Upsert. An empty destination set removes forwarding entirely, so "remove" and "set" are the same idempotent call. |
 | `set_domain_active` / `set_mailbox_active` | Assignment, not toggle. Setting the current value is a no-op success. |
+| `set_mailbox_rate_limit` / `clear_mailbox_rate_limit` | Assignment. Idempotent. |
 | `set_mailbox_password` / `set_mailbox_quota` | Assignment. Naturally idempotent. |
 | `delete_domain` / `delete_mailbox` / `delete_alias` | Idempotent. Deleting something already absent succeeds; it does **not** raise `NotFound`, because the caller's intent (it should not exist) is satisfied. |
 | `delete_dkim_key` | Idempotent. An already-absent key is the desired end state. |
@@ -59,6 +60,7 @@ from typing import Optional
 
 from .dto import (
     AliasSpec,
+    RateLimit,
     DkimKeyInfo,
     DomainSpec,
     EngineDomain,
@@ -136,6 +138,28 @@ class MailEngineAdapter(ABC):
     @abstractmethod
     def list_mailboxes(self, domain_name: str = "") -> list[EngineMailbox]:
         """Mailboxes the engine holds, optionally scoped to one domain."""
+
+    @abstractmethod
+    def set_mailbox_rate_limit(self, address: str, limit: "RateLimit") -> None:
+        """
+        Cap how much mail one mailbox may send. Idempotent assignment.
+
+        This is the engine's own enforcement, applied at submission time. It is
+        deliberately separate from MateMail's application-level limiter: the
+        application limiter is consulted by the policy bridge and can be
+        reasoned about in product terms, while this one holds even for a client
+        that reaches the engine without passing through MateMail.
+
+        Setting `messages=0` removes the limit.
+        """
+
+    @abstractmethod
+    def get_mailbox_rate_limit(self, address: str) -> Optional["RateLimit"]:
+        """The mailbox's current limit, or None if the engine has none set."""
+
+    @abstractmethod
+    def clear_mailbox_rate_limit(self, address: str) -> None:
+        """Remove any limit. Idempotent — clearing an absent limit succeeds."""
 
     @abstractmethod
     def get_mailbox_usage(self, address: str) -> Optional[MailboxUsage]:

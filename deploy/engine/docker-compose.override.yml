@@ -71,6 +71,77 @@ services:
       retries: 3
       start_period: 10s
 
+  matemail-policy-bridge:
+    # WHY THIS SERVICE EXISTS
+    #   Postfix cannot call an HTTP API. It speaks the `check_policy_service`
+    #   protocol over a socket, so something has to translate. This container is
+    #   that translation and nothing else: every decision it relays comes from
+    #   MateMail, and it holds no policy of its own.
+    #
+    #   Without it, MateMail's SMTP policy is a set of correct decisions that
+    #   the engine never asks for.
+    #
+    # WHY A SIDECAR RATHER THAN A HOST DAEMON
+    #   The obvious alternative - run the bridge on the host and let Postfix
+    #   reach it through the Docker gateway address - is the same topology that
+    #   was measured and rejected for the API path (see the gateway above, and
+    #   DEC-014). A host-published socket selects a destination address, never a
+    #   permitted source, so every other Docker network on this host could reach
+    #   it. Repeating that mistake to save one container would be a poor trade:
+    #   this socket decides whether mail may be sent.
+    #
+    # WHY NOT THE MATEMAIL BACKEND IMAGE
+    #   That image lives in a private registry, so using it here would make the
+    #   Mail Engine's stack depend on GHCR credentials to start. The bridge uses
+    #   only the Python standard library, so a stock interpreter is enough.
+    #
+    # Pinned by digest for the same reason as the gateway: this sits in the path
+    # of customer mail, and an unattended image change is an outage nobody chose
+    # the timing of. The digest is the authority; the tag is the human-readable
+    # hint beside it. Resolved from the registry at pin time: Python 3.13.15.
+    image: python:3.13-alpine@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a
+    restart: unless-stopped
+    command: ["python3", "-u", "/opt/matemail/postfix_policy_bridge.py"]
+    volumes:
+      # Read-only. The script is the only input and the container writes nothing.
+      - ./data/conf/matemail-gateway/postfix_policy_bridge.py:/opt/matemail/postfix_policy_bridge.py:ro,z
+    environment:
+      # The backend is addressed by Compose service name over the internal link.
+      # No host port, no published socket, no IP pinned in configuration.
+      DJANGO_INTERNAL_URL: "http://backend:8000"
+      # Supplied by the engine's own environment. Never written into this file:
+      # it is the credential that lets the bridge speak to MateMail at all.
+      INTERNAL_API_SECRET: "${MATEMAIL_INTERNAL_API_SECRET:?set MATEMAIL_INTERNAL_API_SECRET in mailcow.conf}"
+      LISTEN_PORT: "10031"
+      LOG_LEVEL: "INFO"
+    networks:
+      # Engine side: Postfix connects here. The address is pinned because it is
+      # named in the Postfix restriction chain (see postfix-extra.cf), and a
+      # DHCP address would move on recreation and silently defer all mail.
+      #
+      # .246 sits in the block mailcow reserves for static assignment, one below
+      # the gateway's .247 and clear of dynamic allocation, which runs upward
+      # from .2. Verified against the live network, not assumed.
+      mailcow-network:
+        ipv4_address: 10.244.0.246
+        aliases:
+          - matemail-policy-bridge
+      # MateMail side: the only route to the backend. `internal: true`, so this
+      # container has no path off the host through it.
+      matemail_engine_link:
+        aliases:
+          - matemail-policy-bridge
+    # No `ports:`. Deliberately - see above.
+    healthcheck:
+      # Accepting connections is the whole contract. `nc -z` opens and closes
+      # without speaking the policy protocol, so a health check can never be
+      # mistaken for a policy request and can never be counted as one.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10031 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 networks:
   # Created and owned OUTSIDE both Compose projects, so neither MateMail's nor
   # mailcow's lifecycle can remove it while the other still depends on it:

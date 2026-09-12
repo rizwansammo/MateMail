@@ -47,6 +47,26 @@ def provision_domain_task(self, domain_id: str):
     # calls .delay() directly, so the refusal lives here too — and this is the
     # last place before the adapter is reached.
     from apps.domains.verification import DomainNotVerified, assert_provisionable
+    from apps.tenants.policy import MailNotPermitted, assert_can_use_mail
+
+    # GATE 1 (task boundary): the workspace must be approved and in good
+    # standing. Checked here as well as in the view because .delay() can be
+    # called from anywhere — a management command, a future reconciliation job,
+    # a retry queued before a workspace was suspended. This is the last place
+    # before the adapter, so it is the one that must not be skippable.
+    try:
+        assert_can_use_mail(domain.tenant)
+    except MailNotPermitted as exc:
+        logger.error(
+            "REFUSED provisioning for tenant %s (%s) — domain %s",
+            domain.tenant_id, exc.reason_code, domain.domain,
+        )
+        domain.mail_engine_error = exc.customer_message
+        domain.save(update_fields=["mail_engine_error"])
+        # Not retried: approval will not appear by waiting, and a suspended
+        # workspace becoming eligible is an explicit admin action that
+        # re-queues provisioning itself.
+        return
 
     try:
         assert_provisionable(domain)
@@ -270,3 +290,91 @@ def deprovision_mailbox_task(self, address: str):
         logger.error("Mailbox removal failed for %s: %s", address, exc.log_message)
         return
     logger.info("Mailbox %s removed from the Mail Engine", address)
+
+
+@shared_task(
+    bind=True,
+    max_retries=5,
+    default_retry_delay=60,
+    name="mail_engine.apply_tenant_suspension",
+)
+def apply_tenant_suspension_task(self, tenant_id: str, active: bool):
+    """
+    Push a workspace's suspension state down to the Mail Engine.
+
+    ## Why this exists
+
+    Suspension used to be a single database field. Nothing in the engine
+    changed, so a suspended workspace's mailboxes could still authenticate and
+    still send — the only thing standing between a suspended customer and the
+    Internet was the outbound policy bridge, which is one service, one
+    configuration line, and one engine restart away from not running.
+
+    That is a single point of failure protecting the control MateMail most
+    needs to actually work. An abuse suspension that quietly does nothing is
+    worse than no suspension at all, because an operator believes the problem
+    is handled.
+
+    So suspension now reaches the engine too: the workspace's domains are
+    deactivated there, which stops submission at the engine itself regardless
+    of the policy bridge. Two independent mechanisms, and the customer stops
+    sending if either one works.
+
+    ## Deactivate, not delete
+
+    A suspension is reversible and frequently is reversed — a billing problem
+    resolves, an abuse report turns out to be wrong. Deleting the domain would
+    destroy stored mail to enforce a temporary state.
+
+    ## Best-effort per domain, all-or-nothing for the task
+
+    Every domain is attempted even if one fails, so one bad record cannot leave
+    the rest of a workspace sending. The task then raises if any failed, so
+    Celery retries and an operator sees it, rather than reporting success over
+    a workspace that is still half-live.
+    """
+    from apps.domains.models import Domain
+    from .factory import get_adapter
+
+    adapter = get_adapter()
+    domains = list(
+        Domain.objects.filter(
+            tenant_id=tenant_id, mail_engine_provisioned=True
+        ).values_list("domain", flat=True)
+    )
+    if not domains:
+        logger.info("No provisioned domains for tenant %s — nothing to apply", tenant_id)
+        return
+
+    failures = []
+    for name in domains:
+        try:
+            adapter.set_domain_active(name, active)
+        except EngineUnavailable as exc:
+            # Transport failure: retry the whole task. Setting an already-set
+            # value is a no-op success, so re-running over the domains that
+            # already succeeded costs nothing.
+            logger.warning(
+                "Engine unreachable while %s tenant %s — will retry",
+                "reactivating" if active else "suspending", tenant_id,
+            )
+            raise self.retry(exc=exc)
+        except MailEngineError as exc:
+            failures.append((name, exc.log_message))
+
+    if failures:
+        logger.error(
+            "SECURITY: could not apply suspension state active=%s to %s domain(s) "
+            "of tenant %s: %s. These domains may still be accepting submission.",
+            active, len(failures), tenant_id,
+            "; ".join(f"{n}: {m}" for n, m in failures),
+        )
+        raise MailEngineError(
+            f"{len(failures)} domain(s) could not be updated",
+            operation="apply_tenant_suspension",
+        )
+
+    logger.info(
+        "Applied active=%s to %s domain(s) of tenant %s in the Mail Engine",
+        active, len(domains), tenant_id,
+    )

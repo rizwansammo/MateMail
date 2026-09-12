@@ -71,6 +71,25 @@ class Domain(models.Model):
     #: resolver output — see apps.domains.verification.
     verification_last_error = models.TextField(blank=True)
 
+    #: Consecutive failures of the periodic re-verification (P5).
+    #:
+    #: Ownership was proved once and then never looked at again, so a domain
+    #: that changed hands stayed claimed by whoever verified it first — while
+    #: the new owner could never claim it, because the partial unique index
+    #: gives the verified row to exactly one tenant. The old tenant keeps
+    #: receiving mail for a domain that is no longer theirs.
+    #:
+    #: A counter rather than a flag because one failed lookup means nothing:
+    #: resolvers time out, registrars have bad afternoons. Sustained absence of
+    #: the record is the signal, and clearing the count on any success is what
+    #: makes it sustained.
+    #:
+    #: Deliberately does NOT deprovision anything by itself. Automatically
+    #: cutting off a paying customer because a DNS lookup failed all week would
+    #: cause far more damage than the case it defends against; this raises the
+    #: flag and a human decides.
+    ownership_recheck_failures = models.PositiveIntegerField(default=0)
+
     # DKIM
     dkim_selector = models.CharField(max_length=63, default="mm1")
     # Public key text, shown to the customer for the DNS TXT record.
