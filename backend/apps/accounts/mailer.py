@@ -3,10 +3,29 @@ Transactional application email.
 
 Four messages have to reach a customer before MateMail can host any mail at
 all: verify your address, reset your password, you have been invited, and
-security notices. None of them can depend on MateMail's own Mail Engine — that
-engine is not installed, and even once it is, a platform that cannot send a
-password reset while its own mail system is down is a platform nobody can
-recover an account on. These go out through an external provider over SMTP.
+security notices. They are sent through **MateMail's own Mail Engine** (DEC-013)
+using a dedicated service identity, `noreply@mail.matemail.online`, over
+authenticated SMTP submission on `mx.matemail.online:587` with STARTTLS.
+
+An earlier version of this module said the opposite — that these must never
+depend on MateMail's own engine and had to go through an external provider.
+That was the pre-DEC-013 position and is no longer the architecture.
+
+The concern behind it was real and is addressed rather than ignored: a platform
+that cannot send a password reset while its own mail system is down is a
+platform nobody can recover an account on. Two things separate the two failure
+domains:
+
+- the sending identity lives on `mail.matemail.online`, a subdomain distinct
+  from every customer domain, with its own SPF, DKIM and DMARC, so a customer
+  who damages their own domain's reputation cannot take account recovery with
+  them;
+- `transactional_email_configured()` below refuses to pretend, and every send
+  reports honestly whether it worked.
+
+What remains true is that this path shares infrastructure with customer mail.
+If the engine is down, account recovery is down. That is a monitoring and
+alerting requirement (P7), not something this module can solve.
 
 Two things were wrong before this module existed.
 
@@ -18,8 +37,9 @@ verification wall they cannot pass.
 
 **`EMAIL_HOST` defaulted to `localhost`.** Nothing listens on port 587 of the
 application container, so a deployment that forgot to set the variable would
-have silently discarded every message — and if something ever did listen, that
-would be the Mail Engine, which is exactly where transactional mail must not go.
+have silently discarded every message. The loopback check below is still the
+right guard: the engine is reached by its own hostname across a private network,
+never at localhost, so a loopback value can only ever mean "misconfigured".
 
 The policy here: never claim delivery that did not happen. A send that fails is
 logged with its cause, and the caller is told whether it worked so it can

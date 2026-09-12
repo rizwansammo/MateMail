@@ -1,14 +1,15 @@
 # MateMail deployment
 
-Everything needed to run MateMail on **MateServer**. Nothing here has been
-applied to any server: P2 prepared the configuration, it did not deploy it.
+Everything needed to run MateMail on **MateServer**. The control plane and the
+Mail Engine are both deployed; what follows is how they are configured.
 
-> **MateMail is not ready for MateServer.**
+> **MateMail is not ready for CUSTOMER mail.**
 > Per **DEC-012**, no real customer mail may reach the platform until P0–P7 are
-> all complete. Still outstanding: the Mail Engine does not exist (P4), mail
-> policy is not enforced (P5), backups are simulated (P6), and there is no
-> operational monitoring (P7). The deploy workflow is manual-only for exactly
-> this reason.
+> all complete. P4 is done — the Mail Engine is live, privately reachable, and
+> has delivered real authenticated mail — but mail policy is not enforced (P5),
+> backups are simulated (P6), and there is no operational monitoring (P7). No
+> public mail port is open. The deploy workflow is manual-only for exactly this
+> reason.
 
 ---
 

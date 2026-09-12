@@ -486,6 +486,37 @@ product does not use the thing it sells.
    `EMAIL_HOST` unconfigured. The application already refuses to send rather
    than reporting a false success, so this state is safe and visible.
 
+> ## ✅ CLOSED — delivered and verified 2026-09-12 (P4C-B)
+>
+> The deferred transactional delivery test has been **performed and passed**.
+> One message was sent from production through `send_transactional()` — the same
+> function every verification link and password reset uses — and arrived in the
+> recipient's **Gmail Primary Inbox**, not Spam.
+>
+> | | |
+> |---|---|
+> | SPF | **pass** — `smtp.mailfrom=noreply@mail.matemail.online`, `client-ip=169.58.114.252` |
+> | DKIM | **pass** — `header.i=@mail.matemail.online`, `header.s=mm1` |
+> | DMARC | **pass** — `header.from=mail.matemail.online` |
+> | PTR / HELO / A | aligned — all three are `mx.matemail.online` ↔ `169.58.114.252` |
+> | Transport | TLS 1.3 to `gmail-smtp-in.l.google.com`, certificate verified |
+> | Gmail response | `250 2.0.0 OK` |
+> | Placement | Primary Inbox |
+> | Queue after send | empty; no defer, no bounce |
+>
+> Point 4 of the decision is superseded: production now runs
+> `MAIL_ENGINE_ADAPTER=mailcow` with `EMAIL_HOST=mx.matemail.online`.
+>
+> **This proves the path works. It does not guarantee future deliverability or
+> inbox placement.** One message to one provider from a new sending IP is
+> evidence that authentication and routing are correct, not evidence of
+> reputation. Volume, warm-up, and behaviour at other providers are unproven —
+> and Microsoft's TCP/25 timeout remains unexplained.
+>
+> The recovery-path risk named below is still accepted and still unmitigated:
+> if the engine is down, account recovery is down. That remains P7's alerting
+> requirement.
+
 **Consequences:**
 
 - The application code needs **no change**. It is plain `django.core.mail` SMTP

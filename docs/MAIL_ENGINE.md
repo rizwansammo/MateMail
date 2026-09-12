@@ -148,6 +148,33 @@ Mailcow exposes a mature REST API at `/api/v1/` for managing all objects: domain
 
 ---
 
+## Domain storage — three numbers, two vocabularies
+
+The engine enforces `defquota <= maxquota <= quota` on every domain and refuses
+the whole domain when they contradict. **`quota: 0` is not "unlimited"** — it is
+a hard total of zero, so any positive per-mailbox ceiling exceeds it. That
+assumption shipped once and meant no domain could be created at all; see
+DEC-016.
+
+It also names them differently depending on direction, and changes units:
+
+| | write (`add`/`edit/domain`) | read (`get/domain/<name>`) |
+|---|---|---|
+| domain total | `quota` (MB) | `max_quota_for_domain` (**bytes**) |
+| per-mailbox ceiling | `maxquota` (MB) | `max_quota_for_mbox` (**bytes**) |
+| new-mailbox default | `defquota` (MB) | `def_quota_for_mbox` (**bytes**) |
+| mailbox count | `mailboxes` | `max_num_mboxes_for_domain` |
+
+Reading with the write-side names yields `None` for all three, which is
+indistinguishable from "the values were never applied". Verify a domain's
+storage with the read-side names, in bytes.
+
+MateMail carries all three on `DomainSpec`, sourced from the tenant's `Plan`.
+The adapter sends them verbatim and never derives the total — a shared pool
+smaller than `mailboxes x ceiling` is a legitimate plan shape.
+
+---
+
 ## Engine runtime as installed (P4B)
 
 The engine is installed and validated on MateServer. It is **not yet activated**

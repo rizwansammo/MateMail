@@ -348,7 +348,7 @@ Before sending production email:
 ## Mail Engine deployment facts (measured on MateServer, P4B / P4C-A)
 
 Everything in this section was measured on the production host, not planned.
-The engine is installed and validated; MateMail is **not yet pointed at it**.
+The engine is live and **production is pointed at it** (`MAIL_ENGINE_ADAPTER=mailcow`).
 
 ### The private engine link
 
@@ -462,3 +462,69 @@ applications already run on the host.
 Do **not** reclaim memory by disabling ClamAV or full-text search. Both are
 product requirements, and turning off malware scanning to save a gigabyte on a
 mail host is not a trade worth making.
+
+---
+
+## Platform transactional sender
+
+MateMail's own application mail — verification links, password resets,
+invitations — is sent through MateMail's own Mail Engine (DEC-013) using a
+dedicated service identity.
+
+| | |
+|---|---|
+| Sender | `MateMail <noreply@mail.matemail.online>` |
+| Platform domain | `mail.matemail.online` (5 mailboxes, 1024 MB default and max, 5120 MB total) |
+| DKIM selector | `mm1`, 2048-bit, generated and held by the engine |
+| Rate limit | **60 messages/hour**, enforced by the engine on the mailbox |
+| Submission | `mx.matemail.online:587`, STARTTLS, authenticated |
+| Credential | server-only, `/root/.matemail-platform-smtp`, mode 0600 root:root |
+
+**The credential value is never documented, committed, or printed.** It was
+generated on the server and exists in exactly two places: that file, and
+`/opt/MateMail/.env`.
+
+This identity is not a customer mailbox, not a tenant, and not an admin login.
+It is deliberately on a subdomain distinct from every customer domain so the two
+reputations, and the two failure modes, stay separate.
+
+### Required DNS for the platform sender
+
+Published on `matemail.online` at Namecheap; the PTR is at Contabo:
+
+| Type | Host | Value |
+|---|---|---|
+| TXT | `mail` | `v=spf1 ip4:169.58.114.252 -all` |
+| TXT | `mm1._domainkey.mail` | the engine's public DKIM key (420 chars) |
+| TXT | `_dmarc.mail` | `v=DMARC1; p=none; adkim=s; aspf=s` |
+| PTR | `169.58.114.252` | `mx.matemail.online` |
+
+`p=none` is monitoring only and stays that way until reporting and broader
+deliverability validation exist. Tightening to quarantine or reject without
+somewhere to receive failure reports would break mail with no way to see it.
+
+---
+
+## Mail Engine quota contract — write in MB, read in bytes
+
+A trap worth knowing before writing another probe or touching the adapter: the
+engine **writes and reads domain storage under different field names, in
+different units.**
+
+| Direction | Field | Unit |
+|---|---|---|
+| write (`add/domain`, `edit/domain`) | `quota` — domain total | MB |
+| write | `maxquota` — per-mailbox ceiling | MB |
+| write | `defquota` — new-mailbox default | MB |
+| read (`get/domain/<name>`) | `max_quota_for_domain` | **bytes** |
+| read | `max_quota_for_mbox` | **bytes** |
+| read | `def_quota_for_mbox` | **bytes** |
+
+Reading a domain with the write-side names returns `None` for all three and
+looks exactly like the values were never applied. That happened during P4C-B
+validation and cost a round of false failures; the values had been correct all
+along.
+
+The engine also enforces `defquota <= maxquota <= quota` and refuses the whole
+domain otherwise. `quota: 0` does **not** mean unlimited — it is a hard total of
+zero, so any positive ceiling above it is a contradiction. See DEC-016.

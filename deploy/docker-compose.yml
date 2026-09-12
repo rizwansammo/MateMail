@@ -40,9 +40,10 @@ x-backend-env: &backend_env
   DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:-matemail}
   REDIS_URL: redis://redis:6379/0
   INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?required}
-  # Mail Engine is not deployed until P4. The stub adapter keeps the control
-  # plane fully functional without one; do not switch this to the real engine
-  # before P4 has actually stood one up.
+  # The Mail Engine is live and this is pointed at it (P4C-B, DEC-013). `stub`
+  # remains the default so CI and local development need no engine; production
+  # sets `mailcow` in .env. `manage.py check --deploy` refuses the real adapter
+  # without a URL and key (mail_engine.E001/E002/E003).
   MAIL_ENGINE_ADAPTER: ${MAIL_ENGINE_ADAPTER:-stub}
   MAIL_ENGINE_API_URL: ${MAIL_ENGINE_API_URL:-}
   MAIL_ENGINE_API_KEY: ${MAIL_ENGINE_API_KEY:-}

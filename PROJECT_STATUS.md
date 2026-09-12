@@ -3,17 +3,16 @@
 **Product:** MateMail  
 **Owner:** NetaMate Solutions  
 **Domain:** matemail.online  
-**Last updated:** 2026-09-11  
-**Current phase:** P4C-A → A3 — **implementation complete; production activation pending**  
-&nbsp;&nbsp;&nbsp;&nbsp;P4A (design + adapter) committed as `9594376`, CI green.  
-&nbsp;&nbsp;&nbsp;&nbsp;P4B installed and validated the real Mail Engine privately on MateServer.  
-&nbsp;&nbsp;&nbsp;&nbsp;P4C-A fixed the four adapter defects P4B exposed.  
-&nbsp;&nbsp;&nbsp;&nbsp;P4C-A2 replaced the rejected host-socket topology with a dedicated private link,  
-&nbsp;&nbsp;&nbsp;&nbsp;and made domain deletion fail closed when engine cleanup cannot be queued.  
-&nbsp;&nbsp;&nbsp;&nbsp;Production MateMail is **unchanged**: still `MAIL_ENGINE_ADAPTER=stub`, still on its  
-&nbsp;&nbsp;&nbsp;&nbsp;previous image. No mail port is public. No DNS or PTR record has been changed.  
-&nbsp;&nbsp;&nbsp;&nbsp;**Transactional delivery validation: still DEFERRED.** Not performed, **not** passed.  
-**Next phase:** P4C-B — activation: point MateMail at the engine and prove delivery  
+**Last updated:** 2026-09-12  
+**Current phase:** **P4 COMPLETE** (2026-09-12) — Mail Engine live, activated, and delivering  
+&nbsp;&nbsp;&nbsp;&nbsp;P4A design + adapter · P4B private engine install · P4C-A/A2/A3 remediation  
+&nbsp;&nbsp;&nbsp;&nbsp;· P4C-B activation, released as `b8e0fe3b`.  
+&nbsp;&nbsp;&nbsp;&nbsp;Production runs `MAIL_ENGINE_ADAPTER=mailcow` against the private Mail Engine.  
+&nbsp;&nbsp;&nbsp;&nbsp;**Transactional delivery validation: PASSED** (2026-09-12) — one real message  
+&nbsp;&nbsp;&nbsp;&nbsp;delivered to Gmail Primary Inbox with SPF, DKIM and DMARC all passing.  
+&nbsp;&nbsp;&nbsp;&nbsp;No public mail port is open. No customer domain or mailbox exists.  
+&nbsp;&nbsp;&nbsp;&nbsp;**Not ready for customer mail:** P5, P6, P7 and P7.5 remain before Private Beta.  
+**Next phase:** P5 — mail policy enforcement (no open relay, rate limits, suspension)  
 **Launch gate:** private beta requires all of P0–P7; public launch requires P9
 
 ---
@@ -215,7 +214,8 @@ broken audit log. See the Phase 0 section below.
 | P4C-A | Engine contract remediation | ✅ Implementation complete (2026-09-11) |
 | P4C-A2 | Private engine boundary + durable deprovisioning | ✅ Implementation complete (2026-09-11) |
 | P4C-A3 | Versioned engine infrastructure + exact-revision Compose deployment | ✅ Implementation complete (2026-09-11) |
-| P4C-B | Activation: real adapter, delivery validation | Pending |
+| P4C-B | Activation: real adapter, delivery validation | ✅ Complete (2026-09-12) — real mail delivered, SPF/DKIM/DMARC pass |
+| **P4** | **Mail Engine: customer email + platform transactional mail** | **✅ COMPLETE (2026-09-12)** |
 | P5 | Mail policy enforcement (no open relay, rate limits, suspension) | Pending |
 | P6 | Backups, restore, safe deletion | Pending |
 | P7 | Operational surface (sync, reconciliation, monitoring, alerting) | Pending |
@@ -2098,4 +2098,89 @@ DNS/PTR external-action gate (**PTR is still `vmi3482362.contaboserver.net`**)
 
 No domain, mailbox, platform sender or DNS record has been created. No mail has
 been sent. No public mail port is open. UFW unchanged.
+
+---
+
+## P4 COMPLETE — first real delivery verified (2026-09-12)
+
+MateMail sent a real email, through its own infrastructure, and it arrived.
+
+### The delivery
+
+One message, sent from production via `apps.accounts.mailer.send_transactional()`
+— the same function behind every verification link, password reset and team
+invitation. Not `swaks`, not `sendmail`, not the engine's UI.
+
+```
+send_transactional()  →  django.core.mail  →  mx.matemail.online:587
+                      →  private gateway   →  postfix-mailcow
+                      →  rspamd DKIM sign  →  outbound TCP/25
+                      →  Gmail             →  Primary Inbox
+```
+
+| Evidence | Result |
+|---|---|
+| Application result | `send_transactional()` returned `True` |
+| Queue ID / Message-ID | `AD5EE13BE39` / `<178920022415.130...@00a3f41e29d7>` |
+| Submission | TLS 1.3, `AUTH PLAIN` as `noreply@mail.matemail.online` |
+| Outbound | **Verified** TLS 1.3 to `gmail-smtp-in.l.google.com` |
+| Gmail response | `250 2.0.0 OK` |
+| **SPF** | **pass** — `client-ip=169.58.114.252` |
+| **DKIM** | **pass** — `header.i=@mail.matemail.online`, `header.s=mm1` |
+| **DMARC** | **pass** — `header.from=mail.matemail.online` |
+| **PTR / HELO / A** | aligned, all `mx.matemail.online` ↔ `169.58.114.252` |
+| **Placement** | **Gmail Primary Inbox** — not Spam |
+| Queue after send | empty; no defer, no bounce, no retry |
+
+### What this does and does not prove
+
+**Proven:** the engine works, the adapter works, the private network path works,
+the platform sender works, and the infrastructure can deliver an authenticated
+email that a major provider accepts and files in the Inbox.
+
+**Not proven:** future deliverability or inbox placement. One message to one
+provider from a new sending IP says authentication and routing are correct. It
+says nothing about reputation under volume, behaviour at other providers, or
+what happens when real customer mail starts. Warm-up and monitoring remain
+ahead, and **Microsoft's TCP/25 timeout is still unexplained**.
+
+### Platform sender
+
+| | |
+|---|---|
+| Sender | `MateMail <noreply@mail.matemail.online>` |
+| Platform domain | `mail.matemail.online` |
+| DKIM selector | `mm1`, 2048-bit, engine-held |
+| Rate limit | 60 messages/hour |
+| SMTP | `mx.matemail.online:587`, STARTTLS, authenticated |
+| Credential | server-only, root-readable, never committed or printed |
+
+DMARC stays at `p=none`. Tightening belongs after reporting and broader
+validation exist — a stricter policy with nowhere to receive failure reports
+breaks mail invisibly.
+
+### Non-blocking cleanup: Message-ID right-hand side
+
+The delivered message carried `<...@00a3f41e29d7>` — the Docker container
+hostname — because Django generates the Message-ID before submission using the
+local hostname. It should be `<unique-id@mail.matemail.online>`.
+
+Not a blocker: Gmail accepted the message, all three authentication checks
+passed, and it reached the Inbox. rspamd noted it only as `MID_RHS_NOT_FQDN`
+(+0.50 against a 15.0 threshold, on a message scoring −19.50).
+
+It is still worth fixing — a container ID in a public header is a small
+infrastructure leak and a hygiene issue some filters weigh. The fix is a
+`Message-ID` header set from `DEFAULT_FROM_EMAIL`'s domain in
+`send_transactional()`. Deliberately **not** done in this closeout: it changes
+outbound mail behaviour and belongs with tests, not bundled into a
+documentation pass.
+
+### Still required before customer mail
+
+P4 completing does **not** make MateMail ready for customers. Remaining:
+**P5** mail policy enforcement · **P6** backup and restore · **P7** operations
+and monitoring · **P7.5** free accounts (DEC-015) · then Private Beta.
+
+No public mail port is open. No customer domain or mailbox exists.
 
