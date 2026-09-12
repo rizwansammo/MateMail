@@ -78,6 +78,41 @@ if [[ "$(docker network inspect matemail_engine_link --format '{{.Internal}}')" 
 fi
 note "preflight OK — secret present, engine link internal"
 
+# ── Can MateMail actually answer the bridge? ─────────────────────────────────
+#
+# The P5 activation failed here, twice over, and neither fault was visible in
+# any config file: Django answered `Host: backend:8000` with 400 DisallowedHost,
+# and once that was allowed it answered 301 to the public HTTPS URL. Both made
+# the bridge fail closed, which defers ALL mail.
+#
+# So this asks the real question over the real path instead of inferring it.
+# A wrong answer here means installing would stop mail, so it refuses.
+POLICY_PROBE=$(docker run --rm --network matemail_engine_link     --entrypoint python3 "$(docker inspect --format '{{.Config.Image}}' matemail-backend-1 2>/dev/null || echo python:3.13-alpine)"     -c "
+import json,urllib.request,urllib.error
+req=urllib.request.Request('http://backend:8000/api/internal/smtp/inbound/',
+    data=json.dumps({'recipient':'probe@not-hosted.invalid'}).encode(),
+    headers={'Content-Type':'application/json','X-Internal-Secret':'preflight-probe-wrong-on-purpose'},
+    method='POST')
+class NR(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,*a,**k): return None
+try:
+    urllib.request.build_opener(NR).open(req,timeout=8); print('200')
+except urllib.error.HTTPError as e: print(e.code)
+except Exception as e: print('ERR:'+type(e).__name__)
+" 2>/dev/null | tail -1)
+
+case "$POLICY_PROBE" in
+    403) note "MateMail internal API reachable and authenticating (403 to a deliberately wrong secret)" ;;
+    400) fail "MateMail answered 400 to Host 'backend'. Add 'backend' to DJANGO_ALLOWED_HOSTS
+  in /opt/MateMail/.env and restart the backend, or the bridge fails closed and
+  every message defers." ;;
+    30*) fail "MateMail redirected the internal call (HTTP $POLICY_PROBE) instead of answering.
+  '^api/internal/' must be in SECURE_REDIRECT_EXEMPT, or the bridge fails closed
+  and every message defers." ;;
+    *)   fail "MateMail internal API did not answer as expected (got: $POLICY_PROBE).
+  Refusing to install: the bridge would fail closed and defer all mail." ;;
+esac
+
 # ── The address in the Postfix config must match the address Compose assigns ──
 #
 # These are two files that have to agree about one number. If they drift,
@@ -144,6 +179,23 @@ done
 
 note "reloading Postfix so it picks up extra.cf"
 docker compose restart postfix-mailcow
+
+# `docker compose restart` returns when the container has STARTED, not when its
+# entrypoint has finished regenerating main.cf from extra.cf. Reading postconf
+# immediately showed the pre-restart chain and looked exactly like a failed
+# installation. Wait for the hook to actually appear before reporting anything.
+note "waiting for Postfix to regenerate its configuration"
+HOOK_SEEN=0
+for _ in $(seq 1 45); do
+    if docker compose exec -T postfix-mailcow postconf -h smtpd_recipient_restrictions 2>/dev/null          | grep -q "check_policy_service"; then
+        HOOK_SEEN=1
+        break
+    fi
+    sleep 2
+done
+[[ "$HOOK_SEEN" == "1" ]] || fail "the policy hook did not appear in the effective
+  configuration within 90s. Mail is NOT being checked. Restore
+  data/conf/postfix/extra.cf from the backup above and restart postfix-mailcow."
 
 echo
 echo "── Verify ──"

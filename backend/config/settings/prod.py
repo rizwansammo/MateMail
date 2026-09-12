@@ -18,7 +18,27 @@ REFRESH_COOKIE_SECURE = True
 # sets X-Forwarded-For with $proxy_add_x_forwarded_for. Anything further
 # left in that header was written by the caller.
 TRUSTED_PROXY_COUNT = env.int("TRUSTED_PROXY_COUNT", default=1)
-SECURE_REDIRECT_EXEMPT = [r"^api/health/"]
+# Paths that must NOT be redirected to HTTPS.
+#
+# `SECURE_SSL_REDIRECT` exists to push *browsers* onto TLS. Two paths are
+# reached machine-to-machine over a private Docker network instead, where the
+# redirect is not a hardening measure but a failure:
+#
+#   api/health/    the container healthcheck, over loopback.
+#
+#   api/internal/  the SMTP policy endpoints, called by the Mail Engine's policy
+#                  bridge across `matemail_engine_link`. Measured during the P5
+#                  activation, not assumed: without this, Postfix's every policy
+#                  question was answered 301 -> https://app.matemail.online/…,
+#                  the bridge could not follow it to a listener that does not
+#                  exist on that hop, and it failed closed — deferring ALL mail.
+#                  The bridge deliberately does not forge `X-Forwarded-Proto`,
+#                  because claiming a hop is TLS when it is not would be a lie
+#                  that other middleware also believes.
+#
+# Neither path is reachable from the Internet: nginx denies `/api/internal/`
+# at the edge, and the endpoints additionally require `INTERNAL_API_SECRET`.
+SECURE_REDIRECT_EXEMPT = [r"^api/health/", r"^api/internal/"]
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_BROWSER_XSS_FILTER = True
 X_FRAME_OPTIONS = "SAMEORIGIN"

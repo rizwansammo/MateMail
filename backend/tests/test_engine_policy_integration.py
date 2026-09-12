@@ -560,3 +560,114 @@ class InstallerTest(unittest.TestCase):
         The installer must end by showing it.
         """
         self.assertIn("postconf", self.text)
+
+
+class InternalApiReachabilityTest(unittest.TestCase):
+    """
+    The two settings the P5 production activation actually failed on.
+
+    Both were invisible in every config file and every test: the application was
+    healthy, the bridge was healthy, the Postfix hook was correctly ordered — and
+    Postfix's every policy question was still answered with an error, so the
+    bridge failed closed and ALL mail deferred.
+
+    They are asserted here because neither is exercised by a test client: Django's
+    test client bypasses `SECURE_SSL_REDIRECT` and supplies its own Host.
+    """
+
+    def setUp(self):
+        self.prod = (REPO / "backend" / "config" / "settings" / "prod.py").read_text(
+            encoding="utf-8"
+        )
+        self.env_example = (REPO / "deploy" / "env.production.example").read_text(
+            encoding="utf-8"
+        )
+
+    def test_internal_endpoints_are_exempt_from_the_https_redirect(self):
+        """
+        `SECURE_SSL_REDIRECT` pushes browsers onto TLS. The policy bridge is not a
+        browser — it calls across a private Docker network where there is no TLS
+        listener to be redirected to, so a 301 is not hardening, it is an outage.
+
+        Measured in production: every call became
+        `301 -> https://app.matemail.online/api/internal/...`, which the bridge
+        could not follow, so it deferred all mail.
+        """
+        directives = "\n".join(
+            line for line in self.prod.splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        match = re.search(r"SECURE_REDIRECT_EXEMPT\s*=\s*\[([^\]]*)\]", directives)
+        self.assertIsNotNone(match, "SECURE_REDIRECT_EXEMPT is not set in prod.py")
+        self.assertIn(
+            "api/internal/", match.group(1),
+            "the internal SMTP policy endpoints must be exempt from the HTTPS "
+            "redirect, or the policy bridge fails closed and all mail defers",
+        )
+
+    def test_the_health_exemption_was_not_lost(self):
+        directives = "\n".join(
+            line for line in self.prod.splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        match = re.search(r"SECURE_REDIRECT_EXEMPT\s*=\s*\[([^\]]*)\]", directives)
+        self.assertIn("api/health/", match.group(1))
+
+    def test_the_bridges_host_is_an_allowed_host(self):
+        """
+        The bridge addresses the app by Compose service name, so `Host: backend`
+        must be accepted. Production answered 400 DisallowedHost until it was.
+        """
+        import re as _re
+
+        url = _re.search(
+            r'DJANGO_INTERNAL_URL:\s*"http://([^:/"]+)',
+            (REPO / "deploy" / "engine" / "docker-compose.override.yml").read_text(
+                encoding="utf-8"
+            ),
+        )
+        self.assertIsNotNone(url, "the bridge has no DJANGO_INTERNAL_URL")
+        host = url.group(1)
+
+        allowed = _re.search(r"^DJANGO_ALLOWED_HOSTS=(.*)$", self.env_example, _re.M)
+        self.assertIsNotNone(allowed, "the env template sets no DJANGO_ALLOWED_HOSTS")
+        self.assertIn(
+            host, [h.strip() for h in allowed.group(1).split(",")],
+            f"the bridge dials Host '{host}', which the documented "
+            "DJANGO_ALLOWED_HOSTS does not permit — Django would answer 400 and "
+            "the bridge would defer all mail",
+        )
+
+
+class InstallerFailureModeTest(unittest.TestCase):
+    """
+    The installer must catch both activation failures before it changes anything,
+    and must not report success on a configuration Postfix has not loaded yet.
+    """
+
+    def setUp(self):
+        self.text = INSTALLER.read_text(encoding="utf-8")
+
+    def test_it_probes_the_internal_api_before_installing(self):
+        """
+        Config inspection was not enough: both faults only appeared when the real
+        request was made over the real path.
+        """
+        self.assertIn("api/internal/smtp/inbound/", self.text)
+
+    def test_it_refuses_on_a_disallowed_host(self):
+        self.assertIn("DJANGO_ALLOWED_HOSTS", self.text)
+
+    def test_it_refuses_on_a_redirect(self):
+        self.assertIn("SECURE_REDIRECT_EXEMPT", self.text)
+
+    def test_it_waits_for_the_hook_before_reporting(self):
+        """
+        `docker compose restart` returns when the container starts, not when its
+        entrypoint has regenerated main.cf. Reading postconf immediately printed
+        the PRE-restart chain and looked identical to a failed install.
+        """
+        wait = self.text.index("waiting for Postfix to regenerate")
+        verify = self.text.index("── Verify ──")
+        self.assertLess(wait, verify)
+        self.assertIn("HOOK_SEEN", self.text)
