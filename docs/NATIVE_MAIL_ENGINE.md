@@ -1542,7 +1542,7 @@ correctness problem.
 
 ---
 
-# NE1 — Foundation (in progress)
+# NE1 — Foundation (COMPLETE, 2026-09-13)
 
 Implementation lives in `deploy/native-engine/`; see its README for operation.
 
@@ -1591,11 +1591,49 @@ on the built image: `/run/dovecot/login` is group `dovenull`, the mail worker
 creates a maildir whose every file is 5000:5000, and nothing is left owned by
 uid or gid 1000.
 
-**Not yet complete.** Postfix, Unbound and Olefy have no acceptable upstream
-image, and Dovecot's cannot run the required identity model, so all four are
-built under repository control by
-`.github/workflows/native-engine-images.yml`. Until CI publishes them the full
-ten-service stack cannot start on MateServer. Resources are not the constraint —
+**Runtime deployed and validated on MateServer (2026-09-13).** The four
+repository-controlled images were published to GHCR from commit `a303b7b`
+(workflow run 34730345422) and are pinned in production by immutable digest:
+
+```
+matemail-native-postfix@sha256:d3aec130fcf42cf8926d278cdbb62944e1ecff8fb8948ae4864745d6e5dde363
+matemail-native-dovecot@sha256:5ebd68c8712b1baf0c6a527385b4a2cf2c2abfa5f2144d5a4da87e654e975c73
+matemail-native-unbound@sha256:3149f484719d88aca16d2cab6fa4fff084af47ede134258a1cfb7550d3004d8f
+matemail-native-olefy@sha256:9a077fe584e821cc8bae7b9607a301a3fbcb8f21260543c8dd589b3b54d69b18
+```
+
+All four packages remain private, and the `ne1` tag was checked against the
+commit-SHA tag so the digest is known to come from this build rather than
+assumed. Runtime lives at `/opt/MateMailNative/` with no git checkout on the
+VPS; the `.env` is `0600 root:root` with secrets generated on the server.
+
+**10 / 10 services healthy.** A full-stack restart returned all ten to healthy in
+about 30 seconds with PostgreSQL and Redis state intact and all nine volumes
+preserved. Isolation was measured, not assumed: every container sits only on
+`matemail_native_engine` (172.27.0.0/16, re-verified free immediately before
+creation), none joined `mailcow-network`, no mailcow or MateMail-app volume is
+mounted anywhere, and nothing is privileged or holds an added capability. No host
+port is published — the host `LISTEN` count was 40 before and 40 after, UFW is
+byte-identical, and DNS, PTR and MX are unchanged.
+
+Verified against the **deployed** images rather than the local builds: Dovecot
+carries vmail 5000:5000 with `dovenull` (998) owning `/run/dovecot/login` and
+`dovecot` (999) owning the internal sockets, its passwd-file holds no accounts
+and every credential is refused; Postfix runs `inet_protocols = ipv4` with 25 and
+587 reachable only inside the container and zero IPv6 sockets; Unbound returns
+NOERROR with the `ad` flag for a signed zone and SERVFAIL for a bogus one while
+still answering AAAA; ClamAV holds current signatures (1.4.6/28115, `daily.cld`
+fetched the same day) on its own volume; Rspamd resolves Redis, ClamAV, Olefy and
+Unbound to native 172.27.0.x addresses with no mailcow Redis or DKIM volume.
+
+Resource cost is 1081 MiB across the ten containers — 945 MiB of it ClamAV, which
+is memory-bounded — taking available RAM from 5.5 to 4.3 GiB with swap untouched
+at 740 KiB and disk down 1 GB. Load spiked while ClamAV loaded signatures and
+returned to baseline.
+
+mailcow and MateMail were neither modified nor restarted; the P5 policy hook is
+still on the live Postfix in its designed order, and both mail queues are empty.
+No mail was sent and no customer data exists in the native store. Resources are not the constraint —
 5.5 GiB RAM available, 4 GiB swap unused, 169 GB disk free, and ClamAV (the one
 heavy service, ~1 GB) is memory-bounded.
 

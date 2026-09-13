@@ -219,29 +219,64 @@ read that as evidence the defaults are satisfiable there.
 
 ## Status
 
+**NE1 COMPLETE** — deployed and validated on MateServer, 2026-09-13.
+
 ```
-NE1 configuration      complete, in this directory
-image builds           all four built locally and validated:
-                         postfix  `postfix check` clean, pgsql map driver
-                                  present, daemon starts via its entrypoint and
-                                  listens on 25/587 INSIDE the container with no
-                                  host port and no IPv6 socket
-                         dovecot  vmail 5000:5000, dovenull and dovecot present,
-                                  master drops privileges, mail worker reads AND
-                                  writes a 5000:5000 maildir, all credentials
-                                  denied, upstream binaries byte-identical
-                         unbound  DNSSEC validation proven (see above)
-                         olefy    starts as nobody, 10055 listening, healthcheck
-                                  passes, oletools 0.60.2 actually loaded
-local validation       db / redis / api / policy started, healthy, state
-                       survived a restart. Dovecot validates against its own
-                       image, starts, passes its healthcheck, survives a restart
-                       and DENIES every credential — proven by mutation, not by
-                       reading the file.
-MateServer runtime     BLOCKED — the four repository-controlled images are not
-                       yet published to GHCR. Dispatch the Native Engine images
-                       workflow, pin the digests, then deploy. A local build is
-                       not a published image.
-resources              safe: 5.5 GiB available, 4 GiB swap unused, 169 GB free.
-                       ClamAV is the heavy item (~1 GB) and is memory-bounded.
+runtime                /opt/MateMailNative/   (no git checkout on the VPS;
+                       .env is 0600 root:root, secrets generated server-side)
+release                commit a303b7b, CI green, images run 34730345422
+services               10 / 10 healthy
+restart recovery       full-stack restart -> 10 / 10 healthy in ~30s,
+                       PostgreSQL and Redis state both survived, 9 volumes intact
+isolation              own network only (matemail_native_engine, 172.27.0.0/16);
+                       0 containers on mailcow-network; no mailcow or MateMail-app
+                       volume mounted; no privileged, no cap_add, no host network;
+                       no published host ports (host LISTEN count 40 -> 40)
+resources              available 5.5 -> 4.3 GiB (native stack 1081 MiB, of which
+                       ClamAV 945 MiB, memory-bounded at 1.465 GiB);
+                       swap 740 KiB -> 740 KiB (untouched);
+                       disk 169 -> 168 GB free; load returned to baseline
+production             mailcow and MateMail untouched and healthy; the P5 policy
+                       hook is still on the live Postfix in the designed order;
+                       both queues empty; UFW byte-identical; DNS/PTR/MX unchanged
 ```
+
+### Immutable image digests in production
+
+```
+ghcr.io/rizwansammo/matemail-native-postfix@sha256:d3aec130fcf42cf8926d278cdbb62944e1ecff8fb8948ae4864745d6e5dde363
+ghcr.io/rizwansammo/matemail-native-dovecot@sha256:5ebd68c8712b1baf0c6a527385b4a2cf2c2abfa5f2144d5a4da87e654e975c73
+ghcr.io/rizwansammo/matemail-native-unbound@sha256:3149f484719d88aca16d2cab6fa4fff084af47ede134258a1cfb7550d3004d8f
+ghcr.io/rizwansammo/matemail-native-olefy@sha256:9a077fe584e821cc8bae7b9607a301a3fbcb8f21260543c8dd589b3b54d69b18
+```
+
+All four packages are **private**. The `ne1` tag and the commit-SHA tag resolve to
+the same digest, so the tag was verified to come from this build rather than
+trusted. A tag moves; the digest is what production runs.
+
+### What was proven on the deployed images, not the local ones
+
+```
+dovecot   vmail 5000:5000, dovecot 999, dovenull 998 all present;
+          /run/dovecot/login is group 998 — the pre-auth identity is NOT vmail;
+          socket owners span 0:0, 0:998, 0:999, 999:0, 999:999;
+          native_vmail and native_vmail_index volumes are 5000:5000;
+          passwd-file holds 0 accounts; every credential denied (exit 77)
+postfix   `postfix check` exit 0; inet_protocols = ipv4; 25 and 587 listening
+          only INSIDE the container; 0 IPv6 sockets; own queue volume; queue empty
+unbound   cloudflare.com NOERROR + ad; dnssec-failed.org SERVFAIL; AAAA NOERROR
+clamav    signatures present and current — main.cvd 89 MB, daily.cld 86 MB fetched
+          on the day, ClamAV 1.4.6/28115; native signature volume only
+olefy     healthy, runs as nobody (65534), 10055 internal, oletools imports
+rspamd    resolves redis / clamav / olefy / unbound to 172.27.0.x — all native;
+          no mailcow Redis, no mailcow DKIM volume, no DKIM keys present
+db/redis  marker written through schema_version and a synthetic Redis key both
+          survived a container restart; probes removed afterwards
+```
+
+A note on reading `docker ps`: its Ports column lists a container's **EXPOSE**
+declarations, which look alarming for postfix and dovecot. Published mappings are
+the ones with an `0.0.0.0:x->` arrow, and there are none — `docker port` returns
+empty for all ten, and the host LISTEN count did not change.
+
+NE2 has not started.

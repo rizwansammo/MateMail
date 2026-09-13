@@ -233,7 +233,7 @@ broken audit log. See the Phase 0 section below.
 
 Full detail, entry criteria and exit criteria: *Revised roadmap* below.
 
-### Native Engine Migration (NE0–NE8) — planned, NOT started
+### Native Engine Migration (NE0–NE8) — NE0 and NE1 complete
 
 A **separate** engineering track that replaces mailcow as the Mail Engine
 orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It does
@@ -241,8 +241,9 @@ orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It doe
 
 ```
 NE0 — architecture design:     COMPLETE (2026-09-13) — see DEC-019
-NE1 foundation:                built and locally validated; MateServer runtime
-                               pending CI-published images (see deploy/native-engine/)
+NE1 foundation:                COMPLETE (2026-09-13) — 10/10 services deployed and
+                               healthy on MateServer, isolated, restart-recovered,
+                               digest-pinned (see deploy/native-engine/)
 NE2–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
 ```
