@@ -1,0 +1,116 @@
+name: Native Engine images
+
+# Builds the four Native Engine components that need an image under repository
+# control — Postfix, Dovecot, Unbound and Olefy — and publishes them to GHCR.
+#
+# WHY THESE THREE AND NOT THE OTHERS
+#   PostgreSQL, Redis, ClamAV and Rspamd all ship official images from the
+#   projects that maintain the software, and the Compose file pins each by
+#   digest. Postfix and Unbound have no official image, and Olefy is our own
+#   service. NE0 Step 8 is explicit that the answer to "no official image" is a
+#   minimal image under repository control — not a community image of unknown
+#   provenance sitting in the mail path.
+#
+#   Dovecot is the fourth for a different reason. An official image exists and
+#   is used as the base, but it ships one account — vmail at 1000:1000 — and no
+#   `dovecot` or `dovenull`, so it cannot run the identity model the engine
+#   requires: uid 5000 is unreachable and the pre-auth login processes cannot be
+#   separated from the mail user. Ours is a thin DERIVATIVE of that pinned
+#   digest which corrects the identities and leaves the Dovecot binaries
+#   byte-for-byte identical.
+#
+# WHY IT IS MANUAL
+#   These images change rarely and sit in the path of customer mail. A push
+#   trigger would rebuild and republish them on every unrelated commit, which is
+#   how an unreviewed base-image change reaches production. Dispatch it
+#   deliberately, then pin the resulting digest in the Compose file.
+#
+# NEVER BUILT ON MATESERVER. The production host does not build source.
+
+on:
+  workflow_dispatch:
+    inputs:
+      components:
+        description: "Which images to build"
+        required: true
+        default: all
+        type: choice
+        options: [all, postfix, dovecot, unbound, olefy]
+
+concurrency:
+  group: native-engine-images
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: rizwansammo
+
+jobs:
+  build:
+    name: Build ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [postfix, dovecot, unbound, olefy]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip components not selected
+        id: gate
+        run: |
+          WANT='${{ inputs.components }}'
+          if [ "$WANT" = "all" ] || [ "$WANT" = "${{ matrix.component }}" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.component }} not selected — skipping"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.gate.outputs.build == 'true'
+
+      # GITHUB_TOKEN is scoped to this job and expires with it, so no long-lived
+      # registry secret is needed — the same model ci.yml already uses.
+      - name: Log in to GHCR
+        if: steps.gate.outputs.build == 'true'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push
+        if: steps.gate.outputs.build == 'true'
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/native-engine/images/${{ matrix.component }}
+          push: true
+          # Tagged by commit SHA so the Compose file can pin an exact build, and
+          # by `ne1` so the phase's images are findable. Never `latest`.
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/matemail-native-${{ matrix.component }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/matemail-native-${{ matrix.component }}:ne1
+          cache-from: type=gha,scope=native-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=native-${{ matrix.component }}
+
+      - name: Report the digest to pin
+        if: steps.gate.outputs.build == 'true'
+        run: |
+          {
+            echo "## matemail-native-${{ matrix.component }}"
+            echo ""
+            echo "Pin this digest in \`deploy/native-engine/.env\` on the server:"
+            echo ""
+            echo '```'
+            echo "${{ env.REGISTRY }}/${{ env.OWNER }}/matemail-native-${{ matrix.component }}@${{ steps.push.outputs.digest }}"
+            echo '```'
+            echo ""
+            echo "A tag is a moving target; the digest is what makes the"
+            echo "deployment reproducible."
+          } >> "$GITHUB_STEP_SUMMARY"

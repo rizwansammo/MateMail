@@ -241,7 +241,9 @@ orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It doe
 
 ```
 NE0 — architecture design:     COMPLETE (2026-09-13) — see DEC-019
-NE1–NE8 implementation:        NONE — not started
+NE1 foundation:                built and locally validated; MateServer runtime
+                               pending CI-published images (see deploy/native-engine/)
+NE2–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
 ```
 

@@ -1,0 +1,350 @@
+# MateMail Native Mail Engine — NE1 foundation.
+#
+# WHAT THIS CONFIGURES
+#   The ten-service Native Engine stack defined in docs/NATIVE_MAIL_ENGINE.md
+#   § NE0.19, deployed as its own Compose project entirely separate from
+#   mailcow and from the MateMail application.
+#
+# WHY IT IS SHAPED THIS WAY
+#   NE1 is a FOUNDATION, not a working mail server. Every service must start,
+#   stay healthy, persist its state and recover from a restart — and nothing
+#   more. Provisioning is NE2, mail flow is NE3, the adapter switch is NE5.
+#
+#   The single hardest requirement is isolation. mailcow is the LIVE production
+#   engine: it holds the only customer-facing mail path and the platform
+#   sender's identity. Nothing here may touch its networks, its volumes or its
+#   configuration. That is why every network and volume below is new, and why
+#   there is not one reference to a `mailcowdockerized_*` name anywhere in this
+#   file.
+#
+# WHICH PHASE OWNS IT
+#   NE1. Later phases extend it; they must not weaken the isolation properties
+#   that `backend/tests/test_native_engine_deployment.py` pins.
+#
+# NOT IN THIS FILE, DELIBERATELY
+#   No published ports. No `network_mode: host`. No `latest` tag. No bind mount
+#   of anything owned by another project. A future phase that needs a host port
+#   must justify it and verify the port is free with `ss -tulpn | grep LISTEN`.
+
+name: matemail-native
+
+# ── Shared anchors ───────────────────────────────────────────────────────────
+#
+# Every service restarts unless deliberately stopped, and every service is
+# logged with a bound so a chatty container cannot fill the disk that holds
+# customer mail.
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# Services that resolve DNS through the engine's own validating resolver.
+# Postfix runs DANE, which is only as trustworthy as the resolver behind it —
+# see § NE0.18. Pointing these at the host or a public resolver would silently
+# downgrade that guarantee while mail kept flowing.
+x-native-dns: &native-dns
+  dns:
+    - 172.27.0.53
+
+services:
+
+  # ── State ──────────────────────────────────────────────────────────────────
+
+  db:
+    <<: *common
+    container_name: matemail-native-db
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    environment:
+      POSTGRES_DB: ${NATIVE_DB_NAME:-matemail_engine}
+      POSTGRES_USER: ${NATIVE_DB_USER:-engine}
+      POSTGRES_PASSWORD: ${NATIVE_DB_PASSWORD:?required}
+      # Scram rather than md5: this database will hold mailbox password hashes
+      # and is read by Postfix and Dovecot with their own least-privilege roles.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - native_pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [engine]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NATIVE_DB_USER:-engine} -d ${NATIVE_DB_NAME:-matemail_engine}"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    <<: *common
+    container_name: matemail-native-redis
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    # Rspamd's bayes and fuzzy state is learned, not derived — losing it costs
+    # filtering quality that takes real traffic to rebuild. Persist it properly
+    # rather than treating this as a cache.
+    command: >
+      redis-server
+      --save 900 1
+      --save 300 10
+      --appendonly yes
+      --appendfsync everysec
+      --loglevel warning
+    volumes:
+      - native_redis:/data
+    networks: [engine]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Resolver ───────────────────────────────────────────────────────────────
+
+  unbound:
+    <<: *common
+    container_name: matemail-native-unbound
+    # No official image exists — NLnet Labs publishes none — and a validating
+    # resolver is too security-critical to take from an unvetted community
+    # image. Built from our own Dockerfile under repository control; see
+    # images/unbound/Dockerfile and README § Images.
+    image: ${NATIVE_UNBOUND_IMAGE:-ghcr.io/rizwansammo/matemail-native-unbound:ne1}
+    volumes:
+      - ./unbound/unbound.conf:/etc/unbound/unbound.conf:ro
+      - native_unbound:/var/lib/unbound
+    networks:
+      engine:
+        # Pinned because every other service names it in `dns:`. A DHCP address
+        # would move on recreation and take DNS — and therefore mail — with it.
+        ipv4_address: 172.27.0.53
+    healthcheck:
+      # Queries THIS resolver explicitly (@127.0.0.1) and requires the AD bit,
+      # so it proves both that Unbound answers and that it is validating.
+      #
+      # The obvious probe, `unbound-host -r`, is a trap: -r reads
+      # /etc/resolv.conf and asks Docker's resolver instead. It passes with
+      # Unbound completely dead — measured, not theorised.
+      test: ["CMD-SHELL", "drill -D @127.0.0.1 cloudflare.com A 2>/dev/null | grep -q 'flags:.* ad' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ── Content scanning ───────────────────────────────────────────────────────
+
+  clamav:
+    <<: [*common, *native-dns]
+    container_name: matemail-native-clamav
+    image: clamav/clamav:1.4@sha256:71fbb76b397cd84a90043caf1178a7f81bd0c131a031e7b0619afd721fbfad41
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+      FRESHCLAM_CHECKS: "2"
+    volumes:
+      # Its OWN signature database. Mounting mailcow's clamd-db-vol-1 would
+      # couple two engines through a volume one of them updates.
+      - native_clamav_db:/var/lib/clamav
+    networks: [engine]
+    # The heaviest service in the stack by a wide margin — mailcow's equivalent
+    # holds ~1 GB resident. Bounded so a signature reload spike cannot create
+    # memory pressure on the seven unrelated production applications sharing
+    # this host.
+    mem_limit: 1500m
+    healthcheck:
+      test: ["CMD-SHELL", "clamdcheck.sh || exit 1"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 300s
+
+  olefy:
+    <<: *common
+    container_name: matemail-native-olefy
+    # Small Python service; no upstream image exists. Ours, under repository
+    # control — see images/olefy/Dockerfile.
+    image: ${NATIVE_OLEFY_IMAGE:-ghcr.io/rizwansammo/matemail-native-olefy:ne1}
+    environment:
+      OLEFY_BINDADDRESS: "0.0.0.0"
+      OLEFY_BINDPORT: "10055"
+      OLEFY_LOGLVL: "20"
+    networks: [engine]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10055 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  rspamd:
+    <<: [*common, *native-dns]
+    container_name: matemail-native-rspamd
+    image: rspamd/rspamd:3.11@sha256:116c2e05bb03073f5ff3b41f407fb5f9ac13ae726e8f8d0cd56231e97d49d7b7
+    volumes:
+      - ./rspamd/local.d:/etc/rspamd/local.d:ro
+      # DKIM keys and learned bayes state live here. NE2 populates the keys;
+      # NE1 only guarantees the volume exists and survives a restart.
+      - native_rspamd:/var/lib/rspamd
+    networks: [engine]
+    mem_limit: 700m
+    depends_on:
+      redis: {condition: service_healthy}
+      unbound: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "rspamadm control stat >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ── Mail daemons ───────────────────────────────────────────────────────────
+
+  dovecot:
+    <<: [*common, *native-dns]
+    container_name: matemail-native-dovecot
+    # The upstream image has no `dovecot`/`dovenull` identities and puts vmail
+    # at 1000, which makes uid 5000 unreachable and privilege separation
+    # impossible. Ours is a derivative of the pinned upstream digest with the
+    # identities corrected — see images/dovecot/Dockerfile.
+    image: ${NATIVE_DOVECOT_IMAGE:-ghcr.io/rizwansammo/matemail-native-dovecot:ne1}
+    volumes:
+      - ./dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro
+      # Empty on purpose: no user matches, so NE1 authenticates nobody.
+      - ./dovecot/users:/etc/dovecot/users:ro
+      # Native mail store. mailcow's vmail-vol-1 is NEVER mounted here — that
+      # volume holds the live platform sender's mail.
+      - native_vmail:/var/vmail
+      - native_vmail_index:/var/vmail_index
+      - native_tls:/etc/ssl/mail:ro
+    networks: [engine]
+    healthcheck:
+      test: ["CMD-SHELL", "doveadm service status >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  postfix:
+    <<: [*common, *native-dns]
+    container_name: matemail-native-postfix
+    # No official Postfix image exists. Ours, under repository control — see
+    # images/postfix/Dockerfile.
+    image: ${NATIVE_POSTFIX_IMAGE:-ghcr.io/rizwansammo/matemail-native-postfix:ne1}
+    volumes:
+      - ./postfix/main.cf:/etc/postfix/main.cf:ro
+      - ./postfix/master.cf:/etc/postfix/master.cf:ro
+      # Its own queue. Sharing mailcow's would mean two Postfix instances
+      # competing over the same spool — corruption, not redundancy.
+      - native_postfix_queue:/var/spool/postfix
+      - native_tls:/etc/ssl/mail:ro
+    networks: [engine]
+    depends_on:
+      unbound: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "postfix status >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ── MateMail-owned services ────────────────────────────────────────────────
+
+  api:
+    <<: *common
+    container_name: matemail-native-api
+    # Standard-library Python only, so a stock interpreter suffices and the
+    # engine stack does not depend on a private registry to start. Same pattern
+    # as the P5 policy bridge.
+    image: python:3.13-alpine@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a
+    command: ["python3", "-u", "/opt/matemail/native_api/app.py"]
+    environment:
+      NATIVE_API_SECRET: ${NATIVE_API_SECRET:?required}
+      NATIVE_DB_HOST: db
+      NATIVE_DB_NAME: ${NATIVE_DB_NAME:-matemail_engine}
+      NATIVE_DB_USER: ${NATIVE_DB_USER:-engine}
+      NATIVE_DB_PASSWORD: ${NATIVE_DB_PASSWORD:?required}
+      NATIVE_API_PORT: "8451"
+    volumes:
+      - ../../engine/native_api:/opt/matemail/native_api:ro
+      # DKIM lifecycle (NE2) needs filesystem access to the key store, which is
+      # why provisioning is a service inside the engine rather than the adapter
+      # reaching in over SQL. DEC-007r: the private key never leaves here.
+      - native_rspamd:/var/lib/rspamd
+    networks: [engine]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8451/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  policy:
+    <<: *common
+    container_name: matemail-native-policy
+    image: python:3.13-alpine@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a
+    command: ["python3", "-u", "/opt/matemail/postfix_policy_bridge.py"]
+    environment:
+      # NE1 runs this isolated: it is NOT pointed at MateMail, and the live P5
+      # production bridge is untouched. NE5 supplies the real URL and secret.
+      DJANGO_INTERNAL_URL: ${NATIVE_POLICY_MATEMAIL_URL:-http://127.0.0.1:1}
+      INTERNAL_API_SECRET: ${NATIVE_POLICY_SECRET:-ne1-isolated-not-connected}
+      LISTEN_PORT: "10031"
+      LOG_LEVEL: "INFO"
+    volumes:
+      # The same proven P5 bridge, not a copy. It speaks Postfix's protocol and
+      # contains no engine-specific knowledge, so it transfers unchanged.
+      - ../../scripts/postfix_policy_bridge.py:/opt/matemail/postfix_policy_bridge.py:ro
+    networks: [engine]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10031 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# ── Networks ─────────────────────────────────────────────────────────────────
+#
+# One network, owned by this project, with an explicit subnet because the
+# resolver needs a pinned address.
+#
+# 172.27.0.0/16 was chosen by ENUMERATING the host, not by assumption. The
+# first guess, 172.26.0.0/16, turned out to belong to `myright_internal` — one
+# of the other NetaMate applications on this machine. Verified in use at the
+# time of writing: 172.17 (docker0), 172.18 netamate, 172.19 matedesk,
+# 172.20 mateassist, 172.21 mateconnect, 172.22 portfolio, 172.23–172.25
+# MateMail, 172.26 myright, 10.244.0.0/24 mailcow.
+#
+# Re-check before adding any further network: `docker network inspect` every
+# network and compare, the same way the port rule works.
+#
+# NOT internal: ClamAV needs outbound HTTPS for signatures, Unbound needs
+# outbound DNS, and Postfix will need outbound SMTP at NE3. Egress is therefore
+# a per-service property — see README § Egress — not something this network can
+# express on its own.
+#
+# `matemail_engine_link` is deliberately ABSENT. Per NE0, only `api` and
+# `policy` ever join it, and only from NE5 onward. During NE1 the stack is
+# completely isolated: nothing here can reach MateMail or mailcow, and nothing
+# there can reach this.
+networks:
+  engine:
+    name: matemail_native_engine
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.27.0.0/16
+
+# ── Volumes ──────────────────────────────────────────────────────────────────
+#
+# Every one is new and owned by this project. No mailcow volume is referenced
+# anywhere in this file; a test asserts that and fails the build if it changes.
+volumes:
+  native_pgdata:        {name: matemail_native_pgdata}
+  native_redis:         {name: matemail_native_redis}
+  native_vmail:         {name: matemail_native_vmail}
+  native_vmail_index:   {name: matemail_native_vmail_index}
+  native_postfix_queue: {name: matemail_native_postfix_queue}
+  native_rspamd:        {name: matemail_native_rspamd}
+  native_clamav_db:     {name: matemail_native_clamav_db}
+  native_unbound:       {name: matemail_native_unbound}
+  native_tls:           {name: matemail_native_tls}

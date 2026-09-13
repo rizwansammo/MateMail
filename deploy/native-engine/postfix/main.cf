@@ -1,0 +1,85 @@
+# MateMail Native Engine — Postfix main.cf (NE1 foundation).
+#
+# WHAT THIS CONFIGURES
+#   Enough Postfix to start, pass its own `postfix check`, and hold a queue.
+#
+# WHY IT IS SHAPED THIS WAY
+#   NE1 proves the service foundation, not mail flow. The virtual domain,
+#   mailbox, alias and sender-login maps that make this a working mail server
+#   are NE3's, and adding them now would mean shipping lookups against a schema
+#   NE2 has not designed yet.
+#
+#   What IS set here is everything that would be a security regression to add
+#   late: no open relay, TLS required for submission, and DNSSEC/DANE for
+#   outbound. Those defaults are easier to keep than to retrofit.
+#
+# WHICH PHASE OWNS IT
+#   NE1 (skeleton). NE3 adds maps, milters and the policy hook.
+
+compatibility_level = 3.6
+
+myhostname = mx.matemail.online
+mydomain = matemail.online
+myorigin = $myhostname
+mydestination = localhost.localdomain, localhost
+inet_interfaces = all
+# IPv4 ONLY, deliberately.
+#
+# The production mail engine does not use IPv6 today, and IPv6 sending is not a
+# transport detail — it needs its own AAAA/PTR records and builds a SEPARATE
+# sending reputation that receivers judge independently. Turning it on here
+# would introduce that silently, in a foundation phase, with no DNS or PTR
+# decision behind it.
+#
+# This constrains Postfix's transport and listening only. Unbound still resolves
+# AAAA records normally; NE3+ may revisit IPv6 as an explicit decision.
+inet_protocols = ipv4
+
+# ── Anti-relay ───────────────────────────────────────────────────────────────
+# mynetworks stays deliberately TIGHT. mailcow's includes its whole container
+# subnet, which is why loopback SMTP tests there short-circuit at
+# permit_mynetworks. Starting narrow means the policy hook NE3 installs is
+# actually reached.
+mynetworks_style = host
+mynetworks = 127.0.0.0/8 [::1]/128
+
+smtpd_relay_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    defer_unauth_destination
+
+# NE3 inserts the MateMail policy hook here, after permit_mynetworks and
+# BEFORE permit_sasl_authenticated — the ordering P5 proved in production.
+smtpd_recipient_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_unauth_destination
+
+# ── TLS ──────────────────────────────────────────────────────────────────────
+smtpd_tls_cert_file = /etc/ssl/mail/cert.pem
+smtpd_tls_key_file = /etc/ssl/mail/key.pem
+smtpd_tls_security_level = may
+smtpd_tls_mandatory_protocols = >=TLSv1.2
+smtpd_tls_protocols = >=TLSv1.2
+smtpd_tls_auth_only = yes
+tls_preempt_cipherlist = yes
+
+# Outbound DANE. This is the reason the engine runs its own validating
+# resolver (NE0.18) — without DNSSEC these two lines are decoration.
+smtp_dns_support_level = dnssec
+smtp_tls_security_level = dane
+smtp_tls_protocols = >=TLSv1.2
+
+# ── Limits and hygiene ───────────────────────────────────────────────────────
+message_size_limit = 104857600
+mailbox_size_limit = 0
+smtpd_helo_required = yes
+disable_vrfy_command = yes
+smtpd_delay_reject = yes
+biff = no
+append_dot_mydomain = no
+maximal_queue_lifetime = 5d
+bounce_queue_lifetime = 1d
+
+# Never advertise the software. Customers must not learn what runs underneath.
+smtpd_banner = $myhostname ESMTP

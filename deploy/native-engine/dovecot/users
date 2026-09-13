@@ -1,0 +1,9 @@
+# MateMail Native Engine — Dovecot passwd-file (NE1).
+#
+# DELIBERATELY EMPTY. No user matches, so every authentication attempt fails.
+# That is the NE1 contract: the foundation must not be able to authenticate
+# anyone, and must not leave a fake account behind for a later phase to trip on.
+#
+# NE3 replaces this passdb entirely with a READ-ONLY SQL lookup against the
+# engine database (BLF-CRYPT). Do not add a user here to "test something" —
+# provisioning is NE2, and a test account in a committed file outlives the test.

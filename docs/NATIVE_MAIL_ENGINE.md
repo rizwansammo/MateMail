@@ -1,7 +1,7 @@
 # NATIVE_MAIL_ENGINE.md — MateMail Native Engine Migration (NE0–NE8)
 
-**Status:** **NE0 COMPLETE** (2026-09-13) — architecture designed, nothing implemented.
-NE1–NE8 not started. mailcow remains the live production engine.
+**Status:** **NE0 COMPLETE** · **NE1 IN PROGRESS** (2026-09-13) — foundation built and
+locally validated; MateServer runtime pending CI-published images. NE2–NE8 not started. mailcow remains the live production engine.
 **Product decision: the Private Beta runs on the Native Engine, not on mailcow.**
 **Track:** separate from the P0–P9 product roadmap. The P phases are not renumbered.
 **Last updated:** 2026-09-13
@@ -691,6 +691,7 @@ is **running and untouched**.
 
 ```
 NE0  COMPLETE           NE5  not started
+NE1  foundation built, MateServer runtime pending images
 NE1  not started        NE6  not started
 NE2  not started        NE7  not started
 NE3  not started        NE8  not started
@@ -1538,4 +1539,63 @@ outage in exchange for a timestamp.
 Staleness is therefore possible and acceptable: a `last_login` that is a few
 minutes old, or missing after an api outage, is a monitoring signal (P7), not a
 correctness problem.
+
+---
+
+# NE1 — Foundation (in progress)
+
+Implementation lives in `deploy/native-engine/`; see its README for operation.
+
+**Built and locally validated.** All ten services defined; own network
+(`matemail_native_engine`, 172.27.0.0/16 — chosen by enumerating the host after
+172.26 turned out to belong to `myright_internal`); nine new volumes; no host
+ports; no mailcow network or volume referenced anywhere. `db`, `redis`, `api`
+and `policy` were started locally, reached healthy, and their state survived a
+full stack restart. The Unbound image was built and its DNSSEC validation
+proven: signed zones return the `ad` flag, `dnssec-failed.org` returns SERVFAIL.
+All four repository-controlled images have since been built and validated
+locally.
+
+**Three defects found and fixed during NE1, all of which would have been silent:**
+
+The resolver healthcheck originally used `unbound-host -r`, which reads
+`/etc/resolv.conf` and asks *Docker's* resolver — it passes with Unbound
+completely dead. Now `drill -D @127.0.0.1` requiring the `ad` flag, so a
+resolver that answers without validating also fails.
+
+The network subnet was first set to 172.26.0.0/16 by assumption. That range
+belongs to another NetaMate application on the same host. Ports and subnets get
+enumerated, never assumed.
+
+The Dovecot placeholder used a `static` passdb with `nopassword=y`, which
+accepts *any* credential for *any* user. A passwordless placeholder is not a
+placeholder. It is now an empty `passwd-file`, and the denial is proven by
+mutation rather than by reading the config: with one BLF-CRYPT account
+temporarily added the correct password authenticates and a wrong one does not,
+so the lookup is demonstrably live and the empty file is demonstrably what
+refuses everyone.
+
+**The vmail identity model is an NE1 foundation property.** NE0.4 fixes the mail
+store at vmail 5000:5000 for mailcow compatibility, the NE6 platform-sender
+migration and unambiguous ownership. The upstream `dovecot/dovecot:2.4.1` image
+ships vmail at 1000:1000, no `dovecot` and no `dovenull`, and runs unprivileged
+as vmail — so uid 5000 is unreachable (`setgid(5000) failed with euid=1000`) and
+the pre-auth login processes cannot be separated from the mail user
+(`fchown() failed for /run/dovecot/login`). Rather than downgrade the
+architecture to 1000, the engine builds a thin derivative of the pinned upstream
+digest that corrects the identities and leaves the Dovecot binaries
+byte-for-byte identical. Master starts as root and drops to `dovenull`
+(pre-auth), `dovecot` (internal) and `vmail` (mail) — Dovecot's own model, with
+no privileged container, no host networking and no added capabilities. Verified
+on the built image: `/run/dovecot/login` is group `dovenull`, the mail worker
+creates a maildir whose every file is 5000:5000, and nothing is left owned by
+uid or gid 1000.
+
+**Not yet complete.** Postfix, Unbound and Olefy have no acceptable upstream
+image, and Dovecot's cannot run the required identity model, so all four are
+built under repository control by
+`.github/workflows/native-engine-images.yml`. Until CI publishes them the full
+ten-service stack cannot start on MateServer. Resources are not the constraint —
+5.5 GiB RAM available, 4 GiB swap unused, 169 GB disk free, and ClamAV (the one
+heavy service, ~1 GB) is memory-bounded.
 
