@@ -25,3 +25,20 @@ PyYAML==6.0.2
 # on someone else's transitive dependency breaks silently the day that library
 # changes its JWT backend. Declare what you import.
 PyJWT==2.13.0
+
+# Test-only, and NOT in requirements.txt on purpose.
+#
+# The Native Engine API is a separate component with its own image and its own
+# pinned dependency set (deploy/native-engine/images/api/requirements.txt). Its
+# code must still be TESTED, and the repository has one test suite that CI runs,
+# so the two libraries its tests import are declared here.
+#
+# They are deliberately absent from requirements.txt: the Django application
+# does not import either, must never connect to the engine database, and must
+# never hash a mailbox password. A production dependency would blur exactly the
+# boundary NE0.2 exists to draw.
+#
+# Versions match the engine image exactly. Testing against a different bcrypt
+# than the one that runs in production would be testing something else.
+bcrypt==4.2.1
+psycopg[binary]==3.2.3

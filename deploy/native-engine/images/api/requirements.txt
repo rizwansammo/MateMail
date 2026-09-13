@@ -1,0 +1,24 @@
+# MateMail Native Engine API — pinned dependencies.
+#
+# Three, and only three. Each is here because the standard library genuinely
+# cannot do the job, not because it was convenient.
+#
+#   bcrypt        Python 3.13 REMOVED the `crypt` module (PEP 594), and hashlib
+#                 has never offered bcrypt. Measured on the pinned base image:
+#                 `import crypt` -> ModuleNotFoundError. Without this there is no
+#                 way to produce the BLF-CRYPT hash the pinned Dovecot expects,
+#                 and the alternatives — plaintext, a weaker scheme, or shelling
+#                 into the Dovecot container — are all worse than a dependency.
+#
+#   cryptography  RSA keypair generation for DKIM. The standard library has no
+#                 asymmetric key generation at all.
+#
+#   psycopg       The engine database is PostgreSQL. NE1 got away with a TCP
+#                 liveness check; NE2 runs real queries and needs a real driver.
+#
+# Versions are exact. A range here would mean the image CI publishes next month
+# is not the image validated this month, which is the whole reason the Compose
+# file pins digests.
+bcrypt==4.2.1
+cryptography==44.0.0
+psycopg[binary]==3.2.3

@@ -1,7 +1,8 @@
 name: Native Engine images
 
-# Builds the four Native Engine components that need an image under repository
-# control — Postfix, Dovecot, Unbound and Olefy — and publishes them to GHCR.
+# Builds the five Native Engine components that need an image under repository
+# control — Postfix, Dovecot, Unbound, Olefy and the Native API — and publishes
+# them to GHCR.
 #
 # WHY THESE THREE AND NOT THE OTHERS
 #   PostgreSQL, Redis, ClamAV and Rspamd all ship official images from the
@@ -19,6 +20,11 @@ name: Native Engine images
 #   digest which corrects the identities and leaves the Dovecot binaries
 #   byte-for-byte identical.
 #
+#   The Native API is the fifth, added in NE2. Python 3.13 removed the `crypt`
+#   module, so a stock interpreter cannot produce the BLF-CRYPT hash the pinned
+#   Dovecot expects, and it has no RSA key generation for DKIM. Three pinned
+#   dependencies, no compiler in the final image.
+#
 # WHY IT IS MANUAL
 #   These images change rarely and sit in the path of customer mail. A push
 #   trigger would rebuild and republish them on every unrelated commit, which is
@@ -35,7 +41,7 @@ on:
         required: true
         default: all
         type: choice
-        options: [all, postfix, dovecot, unbound, olefy]
+        options: [all, postfix, dovecot, unbound, olefy, api]
 
 concurrency:
   group: native-engine-images
@@ -57,7 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [postfix, dovecot, unbound, olefy]
+        component: [postfix, dovecot, unbound, olefy, api]
 
     steps:
       - uses: actions/checkout@v4

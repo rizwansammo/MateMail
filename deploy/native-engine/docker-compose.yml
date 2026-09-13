@@ -180,6 +180,10 @@ services:
     image: rspamd/rspamd:3.11@sha256:116c2e05bb03073f5ff3b41f407fb5f9ac13ae726e8f8d0cd56231e97d49d7b7
     volumes:
       - ./rspamd/local.d:/etc/rspamd/local.d:ro
+      # READ-ONLY on purpose. Rspamd verifies and signs with these keys; it has
+      # no reason to create, rotate or delete one. matemail-native-api owns the
+      # lifecycle, and this mount makes that structural rather than a convention.
+      - native_dkim:/var/lib/rspamd/dkim:ro
       # DKIM keys and learned bayes state live here. NE2 populates the keys;
       # NE1 only guarantees the volume exists and survives a restart.
       - native_rspamd:/var/lib/rspamd
@@ -250,11 +254,13 @@ services:
   api:
     <<: *common
     container_name: matemail-native-api
-    # Standard-library Python only, so a stock interpreter suffices and the
-    # engine stack does not depend on a private registry to start. Same pattern
-    # as the P5 policy bridge.
-    image: python:3.13-alpine@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a
-    command: ["python3", "-u", "/opt/matemail/native_api/app.py"]
+    # NE1 ran this on stock python:3.13-alpine. NE2 cannot: Python 3.13 removed
+    # the `crypt` module, so a stock interpreter cannot produce the BLF-CRYPT
+    # hash the pinned Dovecot expects, and it has no RSA generation for DKIM.
+    # Ours carries exactly three pinned dependencies — see images/api/.
+    # The ENTRYPOINT is in the image, so there is deliberately no `command`
+    # here: Compose would append it to the entrypoint rather than replace it.
+    image: ${NATIVE_API_IMAGE:-ghcr.io/rizwansammo/matemail-native-api:ne2}
     environment:
       NATIVE_API_SECRET: ${NATIVE_API_SECRET:?required}
       NATIVE_DB_HOST: db
@@ -262,12 +268,19 @@ services:
       NATIVE_DB_USER: ${NATIVE_DB_USER:-engine}
       NATIVE_DB_PASSWORD: ${NATIVE_DB_PASSWORD:?required}
       NATIVE_API_PORT: "8451"
+      NATIVE_DKIM_DIR: /var/lib/rspamd/dkim
     volumes:
       - ../../engine/native_api:/opt/matemail/native_api:ro
-      # DKIM lifecycle (NE2) needs filesystem access to the key store, which is
-      # why provisioning is a service inside the engine rather than the adapter
+      # DKIM lifecycle needs filesystem access to the key store, which is why
+      # provisioning is a service inside the engine rather than the adapter
       # reaching in over SQL. DEC-007r: the private key never leaves here.
-      - native_rspamd:/var/lib/rspamd
+      #
+      # NARROWED IN NE2. This used to mount the whole of `native_rspamd`, which
+      # gave the API write access to Rspamd's entire state directory — bayes
+      # database included — to do a job that only ever touches one subdirectory.
+      # It now mounts a dedicated DKIM volume at the same path Rspamd expects,
+      # and Rspamd mounts the same volume READ-ONLY.
+      - native_dkim:/var/lib/rspamd/dkim
     networks: [engine]
     depends_on:
       db: {condition: service_healthy}
@@ -345,6 +358,10 @@ volumes:
   native_vmail_index:   {name: matemail_native_vmail_index}
   native_postfix_queue: {name: matemail_native_postfix_queue}
   native_rspamd:        {name: matemail_native_rspamd}
+  # DKIM private keys. Separate from native_rspamd so the API can own the key
+  # store without owning Rspamd's state, and so a fresh volume inherits
+  # 11333:11333 mode 0700 from the API image rather than landing as root.
+  native_dkim:          {name: matemail_native_dkim}
   native_clamav_db:     {name: matemail_native_clamav_db}
   native_unbound:       {name: matemail_native_unbound}
   native_tls:           {name: matemail_native_tls}

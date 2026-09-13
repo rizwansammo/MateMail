@@ -1,0 +1,89 @@
+# MateMail Native Engine — Native API image.
+#
+# WHAT THIS CONFIGURES
+#   A Python runtime carrying the three dependencies the provisioning API needs:
+#   bcrypt for mailbox password hashing, cryptography for DKIM key generation,
+#   and psycopg for the engine database.
+#
+# WHY THIS IMAGE EXISTS AT ALL
+#   NE1 ran the API on stock `python:3.13-alpine` and said so proudly: standard
+#   library only, so the engine stack needs no private registry to start. NE2
+#   cannot keep that, and the reason was measured rather than assumed.
+#
+#   Python 3.13 REMOVED the `crypt` module (PEP 594). On the pinned base image
+#   `import crypt` raises ModuleNotFoundError, `hashlib` offers no bcrypt, and
+#   `bcrypt`, `passlib` and `cryptography` are all absent. So a stock
+#   interpreter cannot produce the BLF-CRYPT hash the pinned Dovecot expects.
+#
+#   The three ways to avoid this image were all rejected:
+#     - store plaintext                 -> never
+#     - pick a scheme Python can do     -> weakens the credential to dodge a
+#                                          dependency
+#     - shell into the Dovecot container to run `doveadm pw`
+#                                       -> couples provisioning to another
+#                                          container's lifetime, needs an exec
+#                                          path between them, and puts the
+#                                          plaintext in an argv any process
+#                                          listing can read
+#
+#   So: a minimal image under repository control, exactly as NE0 Step 8
+#   prescribes for this situation.
+#
+#   The compatibility itself is measured, not assumed. `doveadm pw -l` on the
+#   pinned Dovecot lists BLF-CRYPT, and `doveadm pw -t` accepts a hash produced
+#   by this image's bcrypt — succeeding for the right password and failing for a
+#   wrong one. That check matters because Dovecot emits `$2y$` while Python's
+#   bcrypt emits `$2b$`.
+#
+#   Built by GitHub Actions and published to GHCR — never built on MateServer.
+#
+# WHICH PHASE OWNS IT
+#   NE2.
+
+FROM python:3.13-alpine@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# musl wheels exist for all three, so there is no compiler in the final image
+# and nothing to strip afterwards.
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+ && rm -f /tmp/requirements.txt
+
+# ── The uid is load-bearing ─────────────────────────────────────────────────
+#
+# MEASURED: in rspamd/rspamd:3.11, /var/lib/rspamd is `drwxr-x--- 11333:11333`
+# and the container runs as 11333:11333. A DKIM private key must be mode 0600 —
+# owner only — and Rspamd must be able to READ it at NE3. Both are satisfiable
+# at once only if the writer and the reader are the same uid.
+#
+# An earlier draft of this image ran as `nobody` (65534). That user cannot write
+# the key directory, and cannot even list it: the mode is 0750 with no world
+# bits. DKIM generation would have failed the first time it was called, in
+# production, rather than here.
+#
+# So the API runs as 11333. The name is ours; the number is Rspamd's, and the
+# number is the part that matters.
+RUN addgroup -g 11333 -S nativeapi \
+ && adduser  -u 11333 -S -G nativeapi -H -s /sbin/nologin nativeapi \
+ && mkdir -p /var/lib/rspamd/dkim \
+ && chown -R 11333:11333 /var/lib/rspamd/dkim \
+ && chmod 0700 /var/lib/rspamd/dkim
+
+# Creating the directory here with the right ownership is what makes a FRESH
+# named volume land correctly: Docker seeds an empty volume from the image
+# directory it covers, ownership included. Proven in NE1 with the 5000:5000
+# vmail volumes.
+VOLUME ["/var/lib/rspamd/dkim"]
+
+# The application source is MOUNTED, not baked in, exactly as NE1 had it: the
+# Compose file bind-mounts ../../engine/native_api read-only. That keeps the
+# image about the dependency set and lets the code it runs be reviewed as source
+# in the repository rather than as a layer.
+WORKDIR /opt/matemail
+
+USER 11333:11333
+
+EXPOSE 8451
+ENTRYPOINT ["python3", "-u", "/opt/matemail/native_api/app.py"]

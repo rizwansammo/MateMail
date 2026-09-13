@@ -217,31 +217,146 @@ read that as evidence the defaults are satisfiable there.
 
 ---
 
+## NE2 — the provisioning layer
+
+The engine now holds authoritative state for domains, mailboxes, passwords,
+quotas, aliases, forwarding and DKIM. **Nothing consumes it yet** — no Postfix
+map, no Dovecot lookup, no Rspamd signing path is wired to any of it. That is
+NE3.
+
+`matemail-native-api` is the only thing that writes it, and the only place a
+DKIM private key exists.
+
+### Endpoints
+
+Authenticated with `NATIVE_API_SECRET` (constant-time compare), reachable only
+inside `matemail_native_engine`. RPC-shaped rather than REST because the thing
+on the other side is `MailEngineAdapter`, whose operations are verbs with
+idempotency guarantees — and "ensure" has no HTTP verb.
+
+```
+GET  /health                    unauthenticated, cheap, non-mutating
+GET  /ready                     schema version + DKIM storage writability
+GET  /status                    operator detail
+GET  /v1/domains                POST /v1/domains/{ensure,set-active,delete}
+GET  /v1/mailboxes              POST /v1/mailboxes/{ensure,set-active,delete}
+GET  /v1/mailboxes/send-as      POST /v1/mailboxes/{set-password,set-quota}
+GET  /v1/aliases                POST /v1/aliases/{ensure,delete}
+GET  /v1/forwarding             POST /v1/forwarding/ensure
+GET  /v1/dkim                   POST /v1/dkim/{rotate,delete}
+```
+
+### The API image changed, and the uid matters
+
+NE1 ran this on stock `python:3.13-alpine`. NE2 cannot: Python 3.13 removed the
+`crypt` module, so a stock interpreter cannot produce the BLF-CRYPT hash the
+pinned Dovecot expects, and it has no RSA generation for DKIM. `images/api/`
+carries three exactly-pinned dependencies and nothing else.
+
+It runs as **uid 11333**, which is Rspamd's. That is not cosmetic: a DKIM key
+must be mode 0600 *and* readable by Rspamd at NE3, which is only possible if the
+writer and the reader are the same uid. An earlier draft ran as `nobody` and
+could not even list `/var/lib/rspamd` — mode 0750, no world bits.
+
+The API's access was also **narrowed**. It used to mount all of `native_rspamd`,
+giving it write access to Rspamd's bayes database to do a job that touches one
+subdirectory. It now mounts a dedicated `native_dkim` volume at the same path
+Rspamd interpolates, and Rspamd mounts that volume **read-only**.
+
+### Schema migrations
+
+Applied by the API at startup, under a PostgreSQL advisory lock so two
+containers starting together cannot both run migration 002. Each migration and
+the row recording it commit together, so a failure leaves neither the change nor
+the claim that it happened.
+
+The deployed MateServer database is at version 1 from the NE1 init script. NE2
+takes it to version 2. That upgrade path is tested directly — a database
+recreated at exactly the version-1 state, migrated forward — as well as from
+empty.
+
+### Reading the DKIM guarantees
+
+```
+active key         /var/lib/rspamd/dkim/<domain>.<selector>.key   what Rspamd reads
+generations        /var/lib/rspamd/dkim/<domain>.<selector>.g<tok>.key
+                   immutable, written once, never modified
+mode               0600, uid 11333, on the dedicated native_dkim volume that
+                   Rspamd mounts READ-ONLY
+public material    selector, public_key, dns_record_name, dns_record_value —
+                   four fields, enforced by a response guard
+private key        never in the database, a response, a log line, or MateMail
+```
+
+**The active key file is the single source of truth.** Activation makes the
+active path a hard link to one generation — atomic — and
+`get_dkim_public_key` DERIVES the public key from whatever is actually there.
+The database row is metadata and a cache; when they disagree the file wins and
+the row is corrected. So a reader can never be handed a public key that Rspamd
+is not signing with.
+
+That is what makes the lifecycle crash-consistent. After process death at any
+step the domain has exactly one usable generation and the published key matches
+it — or the engine honestly reports no usable key, which reconciliation then
+repairs.
+
+```
+domain deletion    does NOT delete the key — pinned by the adapter contract,
+                   because MateMail's deprovisioning task deletes it explicitly
+                   first. Cascading would remove the step that stops the next
+                   owner of a domain inheriting the previous owner's key.
+```
+
+### The DKIM lifecycle is serialised
+
+Creation, rotation, deletion and reconciliation all run under one PostgreSQL
+advisory lock, so two mutations of the same domain can never interleave. Without
+it, two concurrent rotations can hand one caller a public key that is not the
+signing key — and a later repair cannot take back material that has already been
+published.
+
+It is a database lock, not a `threading.Lock`, because the engine is expected to
+run more than one API container; it is session-scoped so a killed container
+cannot wedge the next rotation; and acquisition has a `lock_timeout` so an
+impossible wait fails with a reason instead of hanging.
+
+### Recovering the key store
+
+Reconciliation runs at API startup before the first request is served, and is
+available as an authenticated `POST /v1/dkim/reconcile`. It is deliberately
+**not** part of `/health` or `/ready`, which must never change state.
+
+It activates a generation a row names but which is not live, corrects a row that
+disagrees with the live key, and removes key files no row refers to.
+
+**It never generates a key**, and it refuses to choose between several surviving
+generations when the row's pointer is also gone. Which public key was published
+is not knowable from inside the engine, and guessing signs mail that fails DKIM —
+worse than reporting the domain and letting an operator rotate deliberately.
+
+---
+
 ## Status
 
 **NE1 COMPLETE** — deployed and validated on MateServer, 2026-09-13.
+**NE2 local implementation complete** — runtime validation pending publication.
 
 ```
 runtime                /opt/MateMailNative/   (no git checkout on the VPS;
                        .env is 0600 root:root, secrets generated server-side)
-release                commit a303b7b, CI green, images run 34730345422
-services               10 / 10 healthy
-restart recovery       full-stack restart -> 10 / 10 healthy in ~30s,
-                       PostgreSQL and Redis state both survived, 9 volumes intact
-isolation              own network only (matemail_native_engine, 172.27.0.0/16);
-                       0 containers on mailcow-network; no mailcow or MateMail-app
-                       volume mounted; no privileged, no cap_add, no host network;
-                       no published host ports (host LISTEN count 40 -> 40)
-resources              available 5.5 -> 4.3 GiB (native stack 1081 MiB, of which
-                       ClamAV 945 MiB, memory-bounded at 1.465 GiB);
-                       swap 740 KiB -> 740 KiB (untouched);
-                       disk 169 -> 168 GB free; load returned to baseline
-production             mailcow and MateMail untouched and healthy; the P5 policy
-                       hook is still on the live Postfix in the designed order;
-                       both queues empty; UFW byte-identical; DNS/PTR/MX unchanged
+NE1 release            commit a303b7b, CI green, images run 34730345422
+NE1 services           10 / 10 healthy, restart-recovered, isolated,
+                       no published host ports, UFW and DNS untouched
+NE2 local              schema, Native API, crash-consistent DKIM lifecycle,
+                       NativeMailEngineAdapter (18 of 26 methods; 8 refuse,
+                       naming NE3/NE4) and tests complete. 1231 tests pass.
+NE2 runtime            PENDING — the Native API image is not published, so the
+                       server still runs the NE1 API. NE2B publishes it, pins the
+                       digest, redeploys and validates with synthetic .invalid data.
+production engine      mailcow, untouched. MAIL_ENGINE_ADAPTER is still "mailcow".
 ```
 
-### Immutable image digests in production
+### Immutable image digests in production (NE1)
 
 ```
 ghcr.io/rizwansammo/matemail-native-postfix@sha256:d3aec130fcf42cf8926d278cdbb62944e1ecff8fb8948ae4864745d6e5dde363
@@ -250,11 +365,11 @@ ghcr.io/rizwansammo/matemail-native-unbound@sha256:3149f484719d88aca16d2cab6fa4f
 ghcr.io/rizwansammo/matemail-native-olefy@sha256:9a077fe584e821cc8bae7b9607a301a3fbcb8f21260543c8dd589b3b54d69b18
 ```
 
-All four packages are **private**. The `ne1` tag and the commit-SHA tag resolve to
-the same digest, so the tag was verified to come from this build rather than
-trusted. A tag moves; the digest is what production runs.
+`matemail-native-api` joins them at NE2B. All packages are private, and each tag
+was checked against its commit-SHA tag so the digest is known to come from that
+build rather than trusted.
 
-### What was proven on the deployed images, not the local ones
+### What was proven on the deployed NE1 images, not the local ones
 
 ```
 dovecot   vmail 5000:5000, dovecot 999, dovenull 998 all present;
@@ -270,7 +385,7 @@ clamav    signatures present and current — main.cvd 89 MB, daily.cld 86 MB fet
 olefy     healthy, runs as nobody (65534), 10055 internal, oletools imports
 rspamd    resolves redis / clamav / olefy / unbound to 172.27.0.x — all native;
           no mailcow Redis, no mailcow DKIM volume, no DKIM keys present
-db/redis  marker written through schema_version and a synthetic Redis key both
+db/redis  a marker written through schema_version and a synthetic Redis key both
           survived a container restart; probes removed afterwards
 ```
 
@@ -279,4 +394,4 @@ declarations, which look alarming for postfix and dovecot. Published mappings ar
 the ones with an `0.0.0.0:x->` arrow, and there are none — `docker port` returns
 empty for all ten, and the host LISTEN count did not change.
 
-NE2 has not started.
+NE3 has not started.

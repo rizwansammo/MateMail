@@ -196,7 +196,7 @@ class ImagePolicyTest(unittest.TestCase):
         are built under repository control and supplied by variable rather than
         pulled from an unvetted community source.
         """
-        for name in ("postfix", "dovecot", "unbound", "olefy"):
+        for name in ("postfix", "dovecot", "unbound", "olefy", "api"):
             with self.subTest(service=name):
                 self.assertTrue(
                     self.compose["services"][name]["image"].startswith("${"),
@@ -204,7 +204,7 @@ class ImagePolicyTest(unittest.TestCase):
                 )
 
     def test_every_repo_built_image_has_a_dockerfile(self):
-        for name in ("postfix", "dovecot", "unbound", "olefy"):
+        for name in ("postfix", "dovecot", "unbound", "olefy", "api"):
             with self.subTest(service=name):
                 self.assertTrue(
                     (NE / "images" / name / "Dockerfile").is_file(),
@@ -288,14 +288,48 @@ class WriteModelTest(unittest.TestCase):
         self.assertNotIn("GRANT INSERT", sql)
         self.assertNotIn("GRANT UPDATE", sql)
 
-    def test_the_api_implements_no_provisioning_yet(self):
+    def test_engine_writes_live_where_they_are_reviewed(self):
         """
-        NE1 is a foundation. Stub provisioning endpoints would make the stack
-        look finished while doing nothing — the false-green this project has
-        already paid for once.
+        NE1 asserted the API implemented NO provisioning, which was right then
+        and is deliberately no longer true: NE2 IS the provisioning layer. The
+        invariant that survives the phase change is the one that matters — every
+        write to engine state goes through one reviewed module reached only via
+        the API.
+
+        `db.py` writes too, but only the migration ladder's own bookkeeping row,
+        so it is allowed exactly that and checked for it.
         """
-        self.assertIn("not implemented", self.api_source)
-        self.assertIn("NE2", self.api_source)
+        engine = REPO / "engine" / "native_api"
+        writers = {}
+        for module in engine.glob("*.py"):
+            body = module.read_text(encoding="utf-8")
+            upper = body.upper()
+            if any(verb in upper for verb in ("INSERT INTO", "UPDATE ", "DELETE FROM")):
+                writers[module.name] = body
+        self.assertTrue(writers, "no writer found at all — the search is wrong")
+        self.assertEqual(
+            set(writers), {"provisioning.py", "db.py"},
+            "engine writes must stay in provisioning.py (state) and db.py (migrations)",
+        )
+        # db.py may touch the version ledger and nothing else.
+        for table in ("domain", "mailbox", "alias", "forwarding", "dkim_key"):
+            with self.subTest(table=table):
+                self.assertNotIn(f"INTO {table}", writers["db.py"])
+                self.assertNotIn(f"FROM {table} ", writers["db.py"])
+        self.assertIn("INSERT INTO schema_version", writers["db.py"])
+
+    def test_no_django_code_connects_to_the_engine_database(self):
+        """
+        NE0.2, checked against the source rather than trusted. A Django-side
+        connection would create a second writer and end the invariant above.
+        """
+        apps_dir = REPO / "backend" / "apps"
+        offenders = []
+        for module in apps_dir.rglob("*.py"):
+            body = module.read_text(encoding="utf-8", errors="ignore")
+            if "NATIVE_DB_PASSWORD" in body or "matemail_engine" in body:
+                offenders.append(str(module.relative_to(REPO)))
+        self.assertEqual(offenders, [], f"Django reaches the engine database in: {offenders}")
 
     def test_the_api_fails_closed_without_its_secret(self):
         self.assertIn("if not API_SECRET:", self.api_source)
@@ -663,4 +697,152 @@ class DovecotImageContractTest(unittest.TestCase):
         for dangerous in ("privileged", "cap_add", "network_mode", "pid"):
             with self.subTest(key=dangerous):
                 self.assertNotIn(dangerous, svc)
+
+
+class NativeApiImageTest(unittest.TestCase):
+    """
+    NE2 gave the API its own image, and the reason is worth pinning.
+
+    Python 3.13 REMOVED the `crypt` module, `hashlib` has no bcrypt, and the
+    stock base image ships neither `bcrypt` nor `cryptography`. So a stock
+    interpreter cannot produce the BLF-CRYPT hash the pinned Dovecot expects,
+    and cannot generate an RSA key for DKIM. Measured, not assumed.
+    """
+
+    def setUp(self):
+        self.dockerfile = (NE / "images" / "api" / "Dockerfile").read_text(encoding="utf-8")
+        self.directives = directives_only(self.dockerfile)
+        self.requirements = (NE / "images" / "api" / "requirements.txt").read_text(encoding="utf-8")
+        self.compose = load_compose()
+
+    def test_the_api_uses_a_repository_controlled_image(self):
+        self.assertTrue(
+            self.compose["services"]["api"]["image"].startswith("${"),
+            "the API must not run on a stock image it cannot hash passwords with",
+        )
+
+    def test_dependencies_are_pinned_exactly(self):
+        """A range here means the image CI publishes is not the one validated."""
+        pinned = [line.strip() for line in directives_only(self.requirements).splitlines()
+                  if line.strip()]
+        self.assertTrue(pinned, "no dependencies declared")
+        for line in pinned:
+            with self.subTest(dependency=line):
+                self.assertIn("==", line, f"{line} is not pinned to an exact version")
+
+    def test_it_carries_the_three_dependencies_and_no_more(self):
+        names = sorted(line.split("==")[0].split("[")[0].strip()
+                       for line in directives_only(self.requirements).splitlines()
+                       if line.strip())
+        self.assertEqual(names, ["bcrypt", "cryptography", "psycopg"])
+
+    def test_the_uid_matches_rspamd(self):
+        """
+        MEASURED: /var/lib/rspamd is drwxr-x--- 11333:11333 in rspamd/rspamd:3.11.
+        A DKIM key must be mode 0600 AND readable by Rspamd at NE3, which is
+        only possible if the writer and the reader share a uid.
+
+        An earlier draft ran as `nobody` and could not even list the directory.
+        """
+        self.assertIn("USER 11333:11333", self.directives)
+        self.assertIn("11333", self.directives)
+
+    def test_the_compose_file_sets_no_command(self):
+        """
+        The image has an ENTRYPOINT. Compose `command` would be APPENDED to it,
+        not replace it, producing `python3 -u app.py python3 -u app.py`.
+        """
+        self.assertNotIn("command", self.compose["services"]["api"])
+
+    def test_the_api_no_longer_mounts_the_whole_rspamd_state(self):
+        """
+        NE2 narrowed this. The API needs one subdirectory to do DKIM; mounting
+        all of native_rspamd gave it write access to Rspamd's bayes database
+        too.
+        """
+        mounts = " ".join(self.compose["services"]["api"]["volumes"])
+        self.assertIn("native_dkim:/var/lib/rspamd/dkim", mounts)
+        self.assertNotIn("native_rspamd:/var/lib/rspamd", mounts)
+
+    def test_rspamd_gets_the_keys_read_only(self):
+        """
+        Rspamd signs and verifies; it never creates, rotates or deletes a key.
+        Read-only makes matemail-native-api's ownership structural.
+        """
+        mounts = " ".join(self.compose["services"]["rspamd"]["volumes"])
+        self.assertIn("native_dkim:/var/lib/rspamd/dkim:ro", mounts)
+
+    def test_the_dkim_path_still_matches_what_rspamd_interpolates(self):
+        signing = (NE / "rspamd" / "local.d" / "dkim_signing.conf").read_text(encoding="utf-8")
+        self.assertIn("/var/lib/rspamd/dkim/$domain.$selector.key", signing)
+
+    def test_the_workflow_builds_it(self):
+        workflow = (REPO / ".github" / "workflows" / "native-engine-images.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("api", workflow)
+        data = yaml.safe_load(workflow)
+        matrix = data["jobs"]["build"]["strategy"]["matrix"]["component"]
+        self.assertIn("api", matrix)
+        for expected in ("postfix", "dovecot", "unbound", "olefy"):
+            self.assertIn(expected, matrix)
+
+
+class EngineSchemaContractTest(unittest.TestCase):
+    """Properties of the NE2 schema that must not be edited away."""
+
+    def setUp(self):
+        self.sql = (REPO / "engine" / "native_api" / "migrations"
+                    / "002_provisioning.sql").read_text(encoding="utf-8")
+        self.directives = directives_only(self.sql)
+
+    def test_every_expected_table_is_created(self):
+        for table in ("domain", "mailbox", "alias", "alias_destination",
+                      "forwarding", "dkim_key"):
+            with self.subTest(table=table):
+                self.assertIn(f"CREATE TABLE IF NOT EXISTS {table} ", self.directives)
+
+    def test_forwarding_is_not_part_of_the_alias_tables(self):
+        """
+        The structural reason forwarding cannot become a sending right: it is a
+        different table, so the send-as query cannot reach it even by mistake.
+        """
+        start = self.directives.index("CREATE TABLE IF NOT EXISTS forwarding")
+        end = self.directives.index(");", start)
+        block = self.directives[start:end]
+        self.assertNotIn("alias", block)
+
+    def test_alias_destination_carries_the_send_as_marker(self):
+        start = self.directives.index("CREATE TABLE IF NOT EXISTS alias_destination")
+        end = self.directives.index(");", start)
+        block = self.directives[start:end]
+        self.assertIn("mailbox_id", block)
+        self.assertIn("REFERENCES mailbox(id)", block)
+
+    def test_dkim_key_does_not_reference_domain(self):
+        """
+        Deliberate. The adapter contract requires a key to OUTLIVE its domain,
+        and MateMail's deprovisioning task deletes the key explicitly first.
+        A cascade here would break both.
+        """
+        start = self.directives.index("CREATE TABLE IF NOT EXISTS dkim_key")
+        end = self.directives.index(");", start)
+        block = self.directives[start:end]
+        self.assertNotIn("REFERENCES domain", block)
+
+    def test_the_private_key_is_a_path_and_not_a_value(self):
+        self.assertIn("private_key_path", self.directives)
+        self.assertNotIn("private_key text", self.directives)
+        self.assertNotIn("private_key bytea", self.directives)
+
+    def test_read_only_roles_cannot_write(self):
+        self.assertIn("REVOKE INSERT, UPDATE, DELETE, TRUNCATE", self.directives)
+        for role in ("engine_ro_postfix", "engine_ro_dovecot"):
+            with self.subTest(role=role):
+                self.assertIn(role, self.directives)
+
+    def test_quota_columns_name_their_unit(self):
+        """MB, never bytes. A column called `quota` would be an invitation."""
+        for column in ("default_quota_mb", "max_quota_mb", "total_quota_mb", "quota_mb"):
+            with self.subTest(column=column):
+                self.assertIn(column, self.directives)
 

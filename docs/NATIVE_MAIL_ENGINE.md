@@ -1637,3 +1637,394 @@ No mail was sent and no customer data exists in the native store. Resources are 
 5.5 GiB RAM available, 4 GiB swap unused, 169 GB disk free, and ClamAV (the one
 heavy service, ~1 GB) is memory-bounded.
 
+---
+
+# NE2 — Provisioning layer (local implementation complete; runtime validation pending)
+
+The authoritative engine-side state behind the provisioning half of
+`MailEngineAdapter`. Nothing here makes Postfix, Dovecot or Rspamd **consume**
+that state — no lookup is wired and no mail is routed by any of it. That is NE3.
+
+## The adapter contract did not change
+
+All 26 abstract methods are unchanged. **NE2 implements 18 of them**:
+
+```
+domains          4    ensure_domain, set_domain_active, delete_domain, list_domains
+mailboxes        6    ensure_mailbox, set_mailbox_active, set_mailbox_password,
+                      set_mailbox_quota, delete_mailbox, list_mailboxes
+last login       1    get_last_login
+aliases          2    ensure_alias, delete_alias
+forwarding       1    ensure_forwarding
+DKIM             3    get_dkim_public_key, rotate_dkim_key, delete_dkim_key
+health           1    check_health
+                 --
+                 18
+```
+
+**8 remain for NE3/NE4** — three rate-limit methods and `get_mailbox_usage`
+(NE3), and four queue/quarantine methods (NE4). They raise
+`EngineCapabilityMissing` naming the phase that owns them.
+
+They are **not** stubbed to return empty results. An adapter that answered "the
+queue is empty" without looking would report a healthy queue during an incident,
+and one reporting 0 MB used would be wrong the moment NE3 delivers a message.
+Refusing is the honest answer.
+
+## Schema
+
+`engine/native_api/migrations/`, applied by the API itself at startup — it is the
+only component permitted to write this database, so it is the only one that can
+safely change its shape. Django never connects to it.
+
+```
+domain             name, active, dkim_selector, the three storage numbers
+mailbox            address, domain, password_hash, quota_mb, active, last_login_at
+alias              address, active
+alias_destination  destination + mailbox_id   <- the send-as marker
+forwarding         mailbox_id, destination    <- deliberately NOT an alias
+dkim_key           domain_name, selector, public_key, private_key_path
+```
+
+Quotas are **megabytes** throughout, named `_mb` so the unit cannot be misread.
+This matches `MailboxSpec.quota_mb` exactly; reinterpreting it would silently
+resize every customer mailbox.
+
+Two constraints encode rules rather than restate them: a mailbox
+`password_hash` must carry a scheme prefix, so an unhashed credential cannot be
+written even by a caller that bypassed the API; and `public_key` may not contain
+`PRIVATE KEY`.
+
+`dkim_key.domain_name` is deliberately **not** a foreign key. The adapter
+contract requires a signing key to outlive its domain, because
+`remove_domain_from_engine` deletes the key explicitly and unconditionally
+*before* the domain. A cascade would look tidier, break the contract test, and
+delete the step that stops the next owner of a domain inheriting the previous
+owner's key.
+
+## Receiving is not sending
+
+NE0 asked for the distinction; the schema makes it structural.
+
+```
+alias_destination.mailbox_id NOT NULL  ->  an internal mailbox
+                                           THAT mailbox may send as the alias
+alias_destination.mailbox_id NULL      ->  somewhere else entirely
+                                           nobody gains any sending right
+forwarding                             ->  a different table; the send-as query
+                                           cannot reach it at all
+```
+
+This mirrors MateMail's own product rule exactly — `Alias.destination_mailbox`
+(internal, confers send-as) versus `Alias.destination_address` (external, does
+not) — without needing a new DTO field, because the engine can already tell
+which destinations are mailboxes it hosts.
+
+Keeping forwarding in its own table is the point. If it lived in
+`alias_destination`, then a support address forwarding to an outside mailbox
+would put that outside address one join away from the send-as query, and the
+only thing preventing a spoofing right would be a `WHERE` clause someone has to
+remember. A separate table makes the wrong answer unreachable rather than merely
+unwritten.
+
+`mailbox_id` is re-resolved whenever a mailbox is created or deleted, so whether
+an alias confers send-as never depends on the order operations happened to
+arrive in.
+
+## Passwords
+
+BLF-CRYPT (bcrypt) at cost 10, stored with Dovecot's scheme prefix. The
+plaintext arrives in one request body, is hashed immediately, and is never
+written to the database, to Redis, to a log line or to a response. Errors
+describe the problem and never the value.
+
+**The scheme was verified against the pinned image, not assumed.** `doveadm pw -l`
+on dovecot/dovecot:2.4.1 lists BLF-CRYPT, and `doveadm pw -t` accepts a hash
+produced by Python's bcrypt — succeeding for the right password, failing for a
+wrong one. That check mattered: Dovecot emits one bcrypt variant prefix and
+Python emits another, and only a measurement settles whether both verify.
+
+Cost 10 rather than Dovecot's default of 5, which is low for a credential
+guarding a mailbox — roughly 100 ms, expensive to crack offline and cheap enough
+for IMAP clients that reauthenticate constantly.
+
+## Why the API needed its own image
+
+NE1 ran the API on stock `python:3.13-alpine` and said so proudly: standard
+library only, no private registry needed to start. NE2 cannot keep that, and the
+reason was measured.
+
+Python 3.13 **removed** the `crypt` module (PEP 594). On the pinned base image
+`import crypt` raises ModuleNotFoundError, `hashlib` offers no bcrypt, and
+`bcrypt`, `passlib` and `cryptography` are all absent. A stock interpreter cannot
+produce the hash the pinned Dovecot expects, and has no RSA generation for DKIM.
+
+The alternatives were storing plaintext, weakening the scheme to fit the runtime,
+or shelling into the Dovecot container to run `doveadm pw` — which would couple
+provisioning to another container's lifetime and put the plaintext in an argv any
+process listing can read. So: a minimal image under repository control with three
+exactly-pinned dependencies, which is what NE0 Step 8 prescribes for this
+situation.
+
+**The uid is load-bearing.** `/var/lib/rspamd` is `drwxr-x--- 11333:11333` in
+rspamd/rspamd:3.11. A DKIM key must be mode 0600 *and* readable by Rspamd at NE3,
+which is only possible if the writer and reader share a uid. An earlier draft ran
+as `nobody` and could not even list the directory — it would have failed the
+first time DKIM was called, in production.
+
+NE2 also **narrowed** the API's access: it used to mount all of `native_rspamd`,
+giving it write access to Rspamd's bayes database to do a job that touches one
+subdirectory. It now mounts a dedicated `native_dkim` volume at the same path
+Rspamd interpolates, and Rspamd mounts that volume **read-only**.
+
+## DKIM — crash-consistent by construction
+
+RSA 2048 minimum, generated with the OS CSPRNG through `cryptography`, stored at
+mode 0600 on the engine filesystem. The private key never enters the database, an
+API response, or MateMail — `DkimKeyInfo` has no field it could travel in, and a
+response guard refuses any payload carrying a forbidden key or PEM material.
+
+### The invariant
+
+```
+after process death at ANY step, the domain has exactly ONE usable generation,
+and the public key MateMail publishes is derived from the private key Rspamd
+signs with
+
+never: the database describing one generation while the live key is another
+```
+
+### How it is achieved: one source of truth
+
+An earlier NE2 draft committed the database row and then moved the key into
+place, and documented the resulting window instead of closing it. No ordering of
+two commits closes it — a crash can always land between them. What closes it is
+removing the second source of truth:
+
+```
+/var/lib/rspamd/dkim/<domain>.<selector>.key        the ACTIVE key (Rspamd reads this)
+/var/lib/rspamd/dkim/<domain>.<selector>.g<tok>.key immutable generations
+```
+
+A generation file is written once and never modified. **Activation** makes the
+active path a HARD LINK to one of them — a link into a temporary name followed by
+`os.replace`, which is atomic — so "which generation is live" is an inode
+identity rather than a claim someone recorded.
+
+`get_dkim_public_key` then **derives** the public key from whatever is actually at
+the active path. The row is metadata and a cache; when the two disagree the file
+wins and the row is corrected. A reader therefore cannot receive a public key that
+Rspamd is not signing with, because the answer is computed from the signing key
+itself.
+
+Hard links rather than a symlink: a symlink can dangle, and removing a generation
+name must never remove the live key while the active path still references its
+inode.
+
+### The lifecycle
+
+```
+first creation     generate -> claim the row -> activate
+rotation           generate -> ACTIVATE -> update the row
+```
+
+Different orders, and both are safe, because the row is never read directly:
+
+| crash point | result |
+|---|---|
+| after generation, before the row is claimed | no row; old generation still live; orphan reconciled |
+| after the row is claimed, before activation | row with no live key → reported as **no usable key**, never a stale one; reconciliation activates the generation the row names |
+| after activation, before the row update | new generation live; the derived public key matches it immediately; the row self-heals |
+| after the row update | steady state |
+
+A failed row update that is an *exception* rather than a crash rolls the
+activation back, so a failed call is a clean no-op. What "back" means depends on
+what activation disturbed, and getting that wrong is how a stale key survives:
+
+```
+same selector      activation overwrote the live path -> re-activate the
+                   previous generation under the same name
+selector change    activation created a NEW path and left the old one alone ->
+                   REMOVE the new path, or a live key survives under a selector
+                   the database does not name
+```
+
+The rollback originally handled only the first case. On `mm1 -> mm2` it removed
+the new generation file but left `<domain>.mm2.key` — a signing key that outlived
+the call that returned an error.
+
+**A row is not proof of a usable key.** First creation claims the row before it
+activates, so a failure between them leaves a row, a generation and nothing live.
+A retried `ensure_domain` therefore verifies the key is actually usable instead of
+returning success on the row's existence; if it is not, it activates the
+generation the row already names. It never mints a replacement and never chooses
+between ambiguous generations — it fails honestly instead, because a fresh key
+would publish material no DNS record matches.
+
+### The lifecycle is serialised
+
+Every DKIM mutation — creation, rotation, deletion and reconciliation — runs
+under one PostgreSQL advisory lock. Two rotations of the same domain could
+otherwise interleave:
+
+```
+A generates -> B generates -> A activates -> B activates
+-> B writes the row and returns B -> A writes the row and returns A
+```
+
+A later read repairs the row, but the damage is already done: caller A was handed
+public material that is not the signing key, and may already have published it in
+DNS. That is not something a subsequent repair can undo, which is why this is a
+lock rather than another reconciliation case.
+
+**A database lock, not a Python one.** A `threading.Lock` protects one process.
+The engine runs one API container today and is expected to run more; the moment
+it does, a process-local lock protects nothing while looking like it does.
+
+**Global rather than per domain.** Per-domain would be finer and would still be
+wrong: reconciliation sweeps key files belonging to every domain, so it would
+have to hold every domain's lock to be safe against an in-flight rotation
+elsewhere. These operations are rare — a domain is created once and rotated
+occasionally — so one lock is both simpler and sound. Mailbox, alias and
+forwarding provisioning is unaffected.
+
+**Session-scoped rather than transaction-scoped.** `pg_advisory_xact_lock` would
+be tidier to release, but it would force every write in the lifecycle into one
+transaction committing only at the end of the block — silently changing what a
+crash leaves behind, which is exactly what the crash-consistency tests are
+written against. Serialisation should not quietly rewrite the durability model it
+is protecting.
+
+The lock is released on every path:
+
+```
+success and handled exceptions   the `finally`
+BaseException (test crashes)     the `finally`
+process death / connection loss  PostgreSQL drops every session lock when the
+                                 backend exits, so a killed container cannot
+                                 wedge the next rotation
+```
+
+Acquisition uses a `lock_timeout` so an impossible wait **fails** instead of
+hanging. A leaked lock that blocks forever is harder to diagnose than one that
+says why it gave up, and a test that hangs is worse than one that fails.
+
+Proven by racing real operations on separate connections: concurrent
+same-selector rotations, concurrent different-selector rotations, rotation
+against reconciliation, and rotation against deletion. The decisive check runs
+*inside* each operation's own lock hold — every rotation confirms the public key
+it is about to return is the key that is live. Verifying after the call returns
+would prove nothing, because the next rotation may legitimately have replaced it
+by then.
+
+Three mutations confirm the tests depend on the lock: making it a no-op, swapping
+it for a `threading.Lock`, and removing the release.
+
+### Reconciliation
+
+Runs at API startup, before the first request is served, and is also available as
+an authenticated `POST /v1/dkim/reconcile`. It is deliberately **not** part of
+`/health` or `/ready`: it can change database state, and a healthcheck that
+mutates would make Docker's restart policy a provisioning trigger.
+
+```
+row with no live key        activate the generation the row names, if it exists
+row disagreeing with live   correct the row from the live key
+key files with no row       remove — nothing refers to them
+interrupted temp files      remove
+```
+
+**It never generates a key.** Minting one during recovery would publish material
+that no DNS record names, turning a recoverable inconsistency into mail that
+silently fails DKIM. For the same reason it refuses to choose when several
+generations survive with no live key and the row's pointer is also gone: which
+one was published is not knowable from inside the engine, so it reports the
+domain for an operator to rotate deliberately.
+
+### Verified by failure injection
+
+Crashes are simulated with a `BaseException`, so no `except Exception:` cleanup
+runs — modelling a killed container rather than a handled error.
+
+```
+crash after generation, before the row is claimed
+crash after the row is claimed, before activation
+crash during same-selector rotation, before activation
+crash during same-selector rotation, after activation
+crash after the row commits
+crash during a SELECTOR CHANGE, before the row update
+crash during a SELECTOR CHANGE, after the row update but before cleanup
+failed row update (exception) rolls the activation back — same selector
+failed row update (exception) rolls the activation back — selector change
+activation failure on first creation, then a retried ensure_domain recovers it
+concurrent ensure_domain: the losers cannot delete the winner's key
+concurrent RETRY after an activation failure converges on one identity
+concurrent same-selector rotations, each returning the key it committed
+concurrent different-selector rotations, leaving no stale active selector
+rotation raced against reconciliation, and rotation raced against deletion
+reconciliation against deliberately inconsistent synthetic state
+```
+
+After each, the tests assert the same property: the stored row, the derived
+public key and the live private key all agree — or the engine honestly reports no
+usable key. Twenty-one mutations of the design were each confirmed to make a test fail,
+including reverting to the old ordering, trusting the cached row instead of
+deriving, restoring the selector-blind rollback, treating the existence of a row
+as proof of a usable key, making the lifecycle lock a no-op, swapping it for a
+process-local `threading.Lock`, and removing its release.
+
+## Validation and idempotency
+
+Every endpoint validates before touching the database and **rejects unknown JSON
+fields** rather than ignoring them: a silently dropped field turns a caller's
+typo into a successful request that did not do what it said.
+
+Internationalised domain names are **refused**, deliberately. MateMail's own
+validator is ASCII-only so a U-label cannot arrive through the product path, and
+transcoding with the standard library would mean IDNA 2003 — which disagrees with
+IDNA 2008/UTS-46 on characters real registries use. The engine would store one
+label while MateMail published DNS for another. Supporting IDNA is a real
+decision requiring the `idna` package and a matching change in MateMail's
+validator, made together.
+
+Every create is an upsert, so two identical requests — a retry racing its
+original is the normal case — are resolved by the database rather than producing
+a unique violation for a caller that did nothing wrong.
+
+## What was verified
+
+```
+1231 tests pass (was 1050 before NE2). The same adapter contract that runs against StubAdapter and
+MailcowAdapter now runs against NativeMailEngineAdapter, over an in-process
+transport that dispatches into the REAL request handlers against a REAL
+PostgreSQL database running the REAL migrations.
+
+Upgrade path: a database recreated at exactly the deployed NE1 state (version 1)
+migrates forward to version 2 and gains the provisioning tables. Verified both in
+the test suite and against the real API image and a real postgres container.
+
+On the real image, on a real volume: key file mode 0600 owned by uid 11333,
+DKIM responses carrying only the four public fields, a password absent from every
+listing, auth refusing a wrong and a missing secret, unknown fields refused, and
+forwarding leaving send-as unchanged.
+
+DKIM crash consistency is proven by failure injection at every step of the
+lifecycle, with crashes simulated as BaseException so no cleanup handler runs.
+After each, the stored row, the derived public key and the live private key all
+agree — or the engine honestly reports no usable key and reconciliation repairs
+it.
+
+Thirteen mutations of the security and crash-safety properties were each
+confirmed to make a test fail: storing plaintext, unioning forwarding into
+send-as, treating every alias destination as internal, dropping a key from the
+response guard, cascading DKIM with the domain, letting the adapter send an empty
+password, trusting the cached row instead of deriving from the live key,
+reverting to the write-row-then-move ordering, disabling row-directed recovery,
+minting a key during reconciliation, guessing between surviving generations,
+making activation non-atomic, and pruning the generation the active key points at.
+```
+
+**Not yet complete.** The Native API image is not published, so the MateServer
+runtime still runs the NE1 API. NE2B publishes it, pins the digest, redeploys and
+validates on the server. mailcow remains the production engine and
+`MAIL_ENGINE_ADAPTER` remains "mailcow".
