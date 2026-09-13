@@ -260,7 +260,13 @@ services:
     # Ours carries exactly three pinned dependencies — see images/api/.
     # The ENTRYPOINT is in the image, so there is deliberately no `command`
     # here: Compose would append it to the entrypoint rather than replace it.
-    image: ${NATIVE_API_IMAGE:-ghcr.io/rizwansammo/matemail-native-api:ne2}
+    # REQUIRED, not defaulted. The default used to name `:ne2`, a tag the
+    # image workflow never publishes — it publishes the commit SHA and the
+    # moving `ne1`. A fallback pointing at a tag that does not exist fails
+    # obscurely for anyone running Compose without an .env; failing on the
+    # missing variable instead says exactly what is wrong. Production pins
+    # the digest either way.
+    image: ${NATIVE_API_IMAGE:?required}
     environment:
       NATIVE_API_SECRET: ${NATIVE_API_SECRET:?required}
       NATIVE_DB_HOST: db
@@ -270,7 +276,10 @@ services:
       NATIVE_API_PORT: "8451"
       NATIVE_DKIM_DIR: /var/lib/rspamd/dkim
     volumes:
-      - ../../engine/native_api:/opt/matemail/native_api:ro
+      # The application source is NOT mounted. It lives in the image, and a
+      # bind mount here would overlay the very code the pinned digest exists
+      # to guarantee — leaving the digest attesting to the dependency set and
+      # nothing about the provisioning logic actually running.
       # DKIM lifecycle needs filesystem access to the key store, which is why
       # provisioning is a service inside the engine rather than the adapter
       # reaching in over SQL. DEC-007r: the private key never leaves here.

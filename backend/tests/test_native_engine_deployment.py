@@ -764,6 +764,85 @@ class NativeApiImageTest(unittest.TestCase):
         self.assertIn("native_dkim:/var/lib/rspamd/dkim", mounts)
         self.assertNotIn("native_rspamd:/var/lib/rspamd", mounts)
 
+    def test_the_api_does_not_bind_mount_its_own_source(self):
+        """
+        The digest must cover the CODE, not just the dependencies.
+
+        NE1 and NE2A mounted `engine/native_api` over `/opt/matemail/native_api`.
+        Once the API became a digest-pinned image that bind mount overlaid the
+        very code the digest existed to guarantee: the pin then attested to
+        bcrypt, cryptography and psycopg, and to nothing about the provisioning
+        logic, the DKIM lifecycle or the migrations actually executing.
+
+        An image whose digest does not cover its own code is not a pinned
+        deployment.
+        """
+        mounts = self.compose["services"]["api"].get("volumes", [])
+        for mount in mounts:
+            spec = mount if isinstance(mount, str) else (
+                str(mount.get("source", "")) + ":" + str(mount.get("target", "")))
+            with self.subTest(mount=spec):
+                self.assertNotIn("native_api", spec,
+                                 "the API must not be handed its own source")
+                self.assertNotIn("/opt/matemail/native_api", spec)
+
+    def test_the_api_mounts_no_repository_source_at_all(self):
+        """
+        Not just native_api: any host path into the API is a way for code on the
+        VPS to differ from the code in the pinned image.
+        """
+        for mount in self.compose["services"]["api"].get("volumes", []):
+            spec = mount if isinstance(mount, str) else str(mount.get("source", ""))
+            with self.subTest(mount=spec):
+                self.assertFalse(
+                    spec.startswith("./") or spec.startswith("../") or spec.startswith("/"),
+                    f"the API must mount no host path, found {spec!r}",
+                )
+
+    def test_the_api_still_mounts_the_dkim_volume(self):
+        """Removing the source mount must not take the key store with it."""
+        mounts = " ".join(
+            m if isinstance(m, str) else f"{m.get('source','')}:{m.get('target','')}"
+            for m in self.compose["services"]["api"].get("volumes", [])
+        )
+        self.assertIn("native_dkim", mounts)
+        self.assertIn("/var/lib/rspamd/dkim", mounts)
+
+    def test_the_api_image_comes_from_the_variable(self):
+        self.assertIn("NATIVE_API_IMAGE", self.compose["services"]["api"]["image"])
+
+    def test_the_api_image_fallback_names_no_unpublished_tag(self):
+        """
+        The default used to be `:ne2`, which the workflow never publishes — it
+        publishes the commit SHA and the moving `ne1`. A fallback pointing at a
+        tag that does not exist fails obscurely; requiring the variable says
+        exactly what is missing.
+        """
+        image = self.compose["services"]["api"]["image"]
+        workflow = (REPO / ".github" / "workflows" / "native-engine-images.yml").read_text(
+            encoding="utf-8")
+        published = {line.strip().rsplit(":", 1)[-1]
+                     for line in workflow.splitlines()
+                     if "matemail-native-${{ matrix.component }}:" in line}
+        default = image.split(":-", 1)[1].rstrip("}") if ":-" in image else None
+        if default is not None:
+            tag = default.rsplit(":", 1)[-1]
+            self.assertIn(tag, published,
+                          f"the Compose default names tag {tag!r}, which the "
+                          f"workflow does not publish (it publishes {published})")
+
+    def test_the_image_bakes_in_the_source_and_migrations(self):
+        """The other half of the same guarantee: it must actually be in there."""
+        self.assertIn("COPY engine/native_api /opt/matemail/native_api", self.directives)
+        # Built from the repository root, or that COPY cannot resolve.
+        workflow = (REPO / ".github" / "workflows" / "native-engine-images.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("matrix.component == 'api'", workflow)
+        self.assertIn("file: deploy/native-engine/images/${{ matrix.component }}/Dockerfile",
+                      workflow)
+        self.assertIn("COPY deploy/native-engine/images/api/requirements.txt",
+                      self.directives)
+
     def test_rspamd_gets_the_keys_read_only(self):
         """
         Rspamd signs and verifies; it never creates, rotates or deletes a key.

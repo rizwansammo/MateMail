@@ -1639,7 +1639,7 @@ heavy service, ~1 GB) is memory-bounded.
 
 ---
 
-# NE2 — Provisioning layer (local implementation complete; runtime validation pending)
+# NE2 — Provisioning layer (COMPLETE, 2026-09-13)
 
 The authoritative engine-side state behind the provisioning half of
 `MailEngineAdapter`. Nothing here makes Postfix, Dovecot or Rspamd **consume**
@@ -2024,7 +2024,170 @@ minting a key during reconciliation, guessing between surviving generations,
 making activation non-atomic, and pruning the generation the active key points at.
 ```
 
-**Not yet complete.** The Native API image is not published, so the MateServer
-runtime still runs the NE1 API. NE2B publishes it, pins the digest, redeploys and
-validates on the server. mailcow remains the production engine and
-`MAIL_ENGINE_ADAPTER` remains "mailcow".
+## NE2B — runtime validation on MateServer (2026-09-13)
+
+```
+release          e14e6221e192825bd53175e2afc6ac390649a455, CI green
+api image        run 34765665185 (api only; the other four were unchanged since
+                 the NE1 release and were correctly skipped)
+api digest       ghcr.io/rizwansammo/matemail-native-api@sha256:
+                 198c238c4c3f080cb74f23b0ae65b2b7ce10b38d9fe6fa8d9543cf26588aced6
+schema           v1 -> v2, applied once, idempotent across an API restart
+services         10 / 10 healthy throughout
+```
+
+Only `api` and `rspamd` were recreated — precisely the two services the release
+changed. The other eight kept running, and no volume was removed at any point.
+
+### What the runtime proved that the tests could not
+
+The test suite runs against a scratch database and a temporary directory. These
+are the properties that only the real deployment can show:
+
+```
+migration         the DEPLOYED v1 database upgraded to v2 in place, once, with
+                  no duplicate version rows, and stayed v2 across a restart
+uid               the API runs as 11333 and the FRESH native_dkim volume
+                  inherited 0700 / 11333 from the image, as designed
+key permissions   the live private key is mode 0600 owned by 11333 on the real
+                  volume, and Rspamd can READ it while its mount refuses a write
+                  ("Read-only file system")
+hash              a password set through the API verified against the PINNED
+                  Dovecot via `doveadm pw -t` — correct password PASS, wrong
+                  password rejected
+derivation        the API's public key matched the key derived from the live
+                  private key, and the database row matched both
+concurrency       4 concurrent rotations through the real API: all succeeded,
+                  all distinct, exactly one live, no orphan generations, and
+                  zero advisory locks left held
+```
+
+### Synthetic lifecycle
+
+Everything ran under one timestamped `.invalid` namespace and was removed
+afterwards. No mail was transmitted and no customer state was created.
+
+```
+domain       ensure x3 -> one row; active false/true round-trip
+mailboxes    alice + bob; repeat ensure kept the credential; inactive mailbox
+             still represented; last_login null (nothing has authenticated)
+password     stored as {BLF-CRYPT}$2b$...; the plaintext appeared in NO text
+             column of ANY table and in no API log line
+quota        4096 MB round-tripped exactly; negative, zero and string rejected,
+             and the stored value was unchanged by the rejections
+alias        support -> alice: alias_destination.mailbox_id NOT NULL, so alice
+             is an authorised sender and bob is not
+external     press -> sink@example.invalid: mailbox_id IS NULL and the external
+             destination authorises nobody
+forwarding   alice -> external: stored in its own table, created no alias, and
+             left alice's send-as set unchanged
+dkim         first generation, then same-selector rotation, then mm1 -> ne2b2;
+             after each, exactly one generation and no files under the old
+             selector
+```
+
+### Cleanup
+
+Deprovisioned through the supported lifecycle in the contract's order — aliases,
+forwarding, mailboxes, deactivate, **DKIM explicitly**, then the domain, because
+the engine deliberately lets a key outlive its domain and MateMail's
+`remove_domain_from_engine` deletes it first for exactly that reason. Deletes
+were repeated to confirm idempotency.
+
+```
+every provisioning table   0 rows
+DKIM key store             empty (no keys, no generations, no staging files)
+advisory locks held        0
+reconciliation             reported nothing to repair
+```
+
+### Production
+
+```
+mailcow        20 containers, untouched and not restarted (StartedAt predates
+               this session); queue empty; P5 policy hook still on the live
+               Postfix; policy bridge healthy
+MateMail       8 containers, untouched and not restarted
+ports          mail ports 25/110/143/465/587/993/995 all bind 127.0.0.1 ONLY —
+               zero bound to a non-loopback address. Host LISTEN count 40 before
+               and 40 after. The only public listeners are 22, 80, 443 (and a
+               :4000 belonging to another NetaMate application, unchanged)
+UFW            rule checksum byte-identical
+DNS / PTR / MX unchanged
+native store   0 entries under native_vmail; 0 delivery log lines
+```
+
+### Resource impact
+
+```
+available RAM   4.5 GiB before -> 4.5 GiB after
+swap            306 MiB before -> 306 MiB after (unchanged; the 306 MiB predates
+                this work and is drift over 8 days of uptime)
+disk            168 GB free, unchanged
+native engine   851 MiB before -> 818 MiB after (ClamAV fluctuation dominates)
+Native API      10.1 MiB -> 25.9 MiB, about +16 MiB for bcrypt, cryptography and
+                psycopg. Acceptable and not worth optimising.
+load            3.27 before -> 1.59 after
+```
+
+### Deployment-integrity fix, after the runtime validation
+
+NE2B's functional validation was sound, but it exposed something the validation
+itself could not: the API image carried **no application code**. `/opt/matemail`
+was empty, and the container ran only because Compose bind-mounted
+`engine/native_api` from the VPS over the path the ENTRYPOINT executes.
+
+```
+image digest  =>  bcrypt, cryptography, psycopg
+image digest  =/=  the provisioning logic, the DKIM lifecycle, the migrations
+```
+
+A digest that does not cover a service's own code is not a pinned deployment; it
+is a pinned runtime wrapped around whatever happens to be on the disk beneath it.
+And the migrations were in the same position — the schema the API applies has to
+be the schema that build was tested against.
+
+The correction:
+
+```
+Dockerfile   COPY engine/native_api /opt/matemail/native_api   (source + migrations)
+workflow     the api build alone uses the repository root as context, with
+             `file:` naming the Dockerfile; the other four keep their own
+             directory, since handing them the whole repository buys nothing
+compose      no host path is mounted into the API at all; native_dkim stays,
+             and the DKIM ownership model is unchanged
+compose      NATIVE_API_IMAGE is `:?required` — the old `:ne2` default named a
+             tag the workflow never publishes
+```
+
+Proven with the image alone, no bind mount: it starts, `/health` and `/ready`
+answer, auth still refuses an unauthenticated `/ready`, the migration ladder is
+present inside the image and took a v1 database to v2, the provisioning modules
+import, bcrypt/cryptography/psycopg all work, and DKIM generation produced a
+0600 key owned by 11333 whose derived public key matched.
+
+Six mutations of the regression tests were each confirmed to fail: re-adding the
+source mount, mounting any other relative or absolute host path, removing the
+DKIM volume, restoring the unpublished `:ne2` fallback, and dropping the COPY.
+
+**The running MateServer API predates this fix.** It is still the NE2B image with
+the source overlay. NE2 is complete only once this is committed, the api image
+republished, the new digest pinned and the runtime redeployed.
+
+### One repository-side finding
+
+The Compose default for the API is `ghcr.io/rizwansammo/matemail-native-api:ne2`,
+but the image workflow still publishes the moving tag `ne1` (hardcoded from the
+NE1 phase). That tag therefore does not exist.
+
+It did not affect that deployment — production pins the digest, and the digest
+was verified against the commit-SHA tag. Corrected above by making
+`NATIVE_API_IMAGE` required rather than defaulted, which removes the reference
+instead of pointing it somewhere else. The workflow's moving tag stays `ne1`:
+renaming it would strand every already-published image under a tag nothing points
+at, and the moving tag is a convenience, not part of the deployment contract.
+
+**NE2 COMPLETE.** mailcow remains the production engine and
+`MAIL_ENGINE_ADAPTER` remains "mailcow" — NE2 gave the Native Engine
+authoritative provisioning state, not the mail path. Nothing in Postfix, Dovecot
+or Rspamd consumes that state yet; that is NE3.

@@ -45,9 +45,13 @@ FROM python:3.13-alpine@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# musl wheels exist for all three, so there is no compiler in the final image
-# and nothing to strip afterwards.
-COPY requirements.txt /tmp/requirements.txt
+# BUILD CONTEXT IS THE REPOSITORY ROOT, not this directory, because the
+# application source copied below lives outside it. The workflow passes
+# `file:` so this Dockerfile is still found here.
+#
+# musl wheels exist for all three dependencies, so there is no compiler in
+# the final image and nothing to strip afterwards.
+COPY deploy/native-engine/images/api/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
  && rm -f /tmp/requirements.txt
 
@@ -77,10 +81,25 @@ RUN addgroup -g 11333 -S nativeapi \
 # vmail volumes.
 VOLUME ["/var/lib/rspamd/dkim"]
 
-# The application source is MOUNTED, not baked in, exactly as NE1 had it: the
-# Compose file bind-mounts ../../engine/native_api read-only. That keeps the
-# image about the dependency set and lets the code it runs be reviewed as source
-# in the repository rather than as a layer.
+# ── The application source is BAKED IN ──────────────────────────────────────
+#
+# NE1 and NE2A mounted it from the host instead, and the comment here used to
+# defend that as keeping the image "about the dependency set". It was wrong,
+# and NE2B made the cost concrete: once the API became a digest-pinned image,
+# a host bind mount at the same path OVERLAID the very code the digest was
+# supposed to guarantee. The digest then attested to bcrypt, cryptography and
+# psycopg — and to nothing about the provisioning logic, the DKIM lifecycle or
+# the migrations actually executing.
+#
+# An image whose digest does not cover its own code is not a pinned
+# deployment; it is a pinned runtime wrapped around whatever happens to be on
+# the disk underneath.
+#
+# The migrations travel with it for the same reason: the schema the API
+# applies must be the schema that build was tested against, not whatever
+# version of 002_provisioning.sql the host filesystem happens to carry.
+COPY engine/native_api /opt/matemail/native_api
+
 WORKDIR /opt/matemail
 
 USER 11333:11333

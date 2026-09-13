@@ -339,7 +339,8 @@ worse than reporting the domain and letting an operator rotate deliberately.
 ## Status
 
 **NE1 COMPLETE** — deployed and validated on MateServer, 2026-09-13.
-**NE2 local implementation complete** — runtime validation pending publication.
+**NE2 functionally validated** on MateServer, 2026-09-13 — with a
+deployment-integrity fix staged and not yet deployed (see below).
 
 ```
 runtime                /opt/MateMailNative/   (no git checkout on the VPS;
@@ -350,13 +351,37 @@ NE1 services           10 / 10 healthy, restart-recovered, isolated,
 NE2 local              schema, Native API, crash-consistent DKIM lifecycle,
                        NativeMailEngineAdapter (18 of 26 methods; 8 refuse,
                        naming NE3/NE4) and tests complete. 1231 tests pass.
-NE2 runtime            PENDING — the Native API image is not published, so the
-                       server still runs the NE1 API. NE2B publishes it, pins the
-                       digest, redeploys and validates with synthetic .invalid data.
+NE2 runtime            VALIDATED (2026-09-13) — api image published and
+                       digest-pinned, engine DB upgraded v1 -> v2, full synthetic
+                       lifecycle validated and cleaned, 10/10 healthy
+NE2 integrity fix      STAGED, not deployed — the api image now bakes in its own
+                       source and the Compose file mounts no host path into it.
+                       Republish the api image, pin the new digest, redeploy.
 production engine      mailcow, untouched. MAIL_ENGINE_ADAPTER is still "mailcow".
 ```
 
-### Immutable image digests in production (NE1)
+### Immutable image digests in production
+
+```
+ghcr.io/rizwansammo/matemail-native-api@sha256:198c238c4c3f080cb74f23b0ae65b2b7ce10b38d9fe6fa8d9543cf26588aced6
+```
+
+Pinned at NE2B from release `e14e6221`.
+
+**Superseded by the deployment-integrity fix.** That build's image carried only
+the dependency set: the application source was bind-mounted from the VPS, so the
+digest guaranteed bcrypt, cryptography and psycopg and nothing about the
+provisioning logic actually running. The API image now bakes in
+`engine/native_api` — source and migrations — and the Compose file mounts no host
+path into it. A new digest must be published and pinned before the running API
+is covered by its own pin.
+
+`NATIVE_API_IMAGE` is also now **required** rather than defaulted: the old
+default named `:ne2`, a tag the workflow never publishes (it publishes the commit
+SHA and the moving `ne1`). Failing on the missing variable says what is wrong;
+pulling a non-existent tag does not.
+
+### Immutable image digests from NE1
 
 ```
 ghcr.io/rizwansammo/matemail-native-postfix@sha256:d3aec130fcf42cf8926d278cdbb62944e1ecff8fb8948ae4864745d6e5dde363

@@ -95,10 +95,21 @@ jobs:
         id: push
         uses: docker/build-push-action@v6
         with:
-          context: deploy/native-engine/images/${{ matrix.component }}
+          # The API image BAKES IN the application source, so its build needs the
+          # repository root as context. The other four need only their own
+          # directory, and handing them the whole repository would ship it to the
+          # daemon for no reason. `file` names the Dockerfile either way.
+          context: ${{ matrix.component == 'api' && '.' || format('deploy/native-engine/images/{0}', matrix.component) }}
+          file: deploy/native-engine/images/${{ matrix.component }}/Dockerfile
           push: true
           # Tagged by commit SHA so the Compose file can pin an exact build, and
-          # by `ne1` so the phase's images are findable. Never `latest`.
+          # by `ne1` so the images are findable as a set. Never `latest`.
+          #
+          # `ne1` is the tag this workflow has always published. The name is now
+          # phase-legacy rather than descriptive, and it is deliberately left
+          # alone: renaming it would strand every already-published image under a
+          # tag nothing points at. Production pins digests, so the moving tag is a
+          # convenience and not part of the deployment contract.
           tags: |
             ${{ env.REGISTRY }}/${{ env.OWNER }}/matemail-native-${{ matrix.component }}:${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.OWNER }}/matemail-native-${{ matrix.component }}:ne1
