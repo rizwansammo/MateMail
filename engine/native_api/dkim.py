@@ -56,12 +56,14 @@ WHY HARD LINKS RATHER THAN A SYMLINK
 from __future__ import annotations
 
 import base64
+import contextlib
 import logging
 import os
 import pathlib
 import re
 import secrets
 import tempfile
+import time
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -86,6 +88,10 @@ _PRIVATE_MODE = 0o600
 _DIR_MODE = 0o700
 
 #: `<domain>.<selector>.g<token>.key`
+#: Rspamd reads this for the per-domain selector. Not key material: it maps a
+#: domain to a selector, both of which are public in DNS.
+SELECTOR_MAP_NAME = "selectors.map"
+
 _GENERATION_RE = re.compile(r"^(?P<domain>.+)\.(?P<selector>[^.]+)\.g(?P<token>[0-9a-f]{16})\.key$")
 
 
@@ -109,6 +115,59 @@ def generation_path(domain: str, selector: str, token: str) -> pathlib.Path:
 def parse_generation(name: str) -> dict | None:
     match = _GENERATION_RE.match(name)
     return match.groupdict() if match else None
+
+
+# ── the selector map Rspamd reads ───────────────────────────────────────────
+
+
+def selector_map_path() -> pathlib.Path:
+    return KEY_DIR / SELECTOR_MAP_NAME
+
+
+def write_selector_map(pairs: list[tuple[str, str]]) -> str:
+    """
+    Publish `<domain> <selector>` for every domain that has a DKIM key.
+
+    WHY THIS FILE EXISTS
+        Rspamd has to know which selector signs which domain, and it cannot ask
+        PostgreSQL. The alternative shipped in NE1 was a single hardcoded
+        `selector = "mm1"` in dkim_signing.conf, which is wrong the moment one
+        domain rotates onto a different selector: every message for that domain
+        would be signed with a key whose name does not match the DNS record, and
+        the signature would fail at the receiver. A broken signature is worse
+        than none — it reads as a forgery rather than as unsigned mail.
+
+    WHY THE API WRITES IT
+        The engine API is the only component permitted to write the key store
+        (NE0.2, DEC-007r), and this file is part of that store: it is derived
+        from the same `dkim_key` rows, and it must change in step with them.
+        Rspamd mounts the directory read-only and only ever reads it.
+
+    ATOMIC, like the keys themselves. Rspamd re-reads this file on a timer, so a
+    partially-written map would be observable — it would mean signing some
+    domains with a truncated selector until the next write. The temp-and-rename
+    makes every read see either the old map or the new one.
+    """
+    _ensure_key_dir()
+    target = selector_map_path()
+    body = "".join(f"{domain} {selector}\n" for domain, selector in sorted(pairs))
+    handle, temp_name = tempfile.mkstemp(dir=str(KEY_DIR), prefix=".selectors.", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="ascii") as fh:
+            fh.write(body)
+            fh.flush()
+            os.fsync(fh.fileno())
+        # World-readable is deliberate and safe: this maps a domain to a
+        # selector, both of which are published in DNS. It is not key material.
+        os.chmod(temp_name, 0o644)
+        os.replace(temp_name, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name)
+        raise
+    _fsync_dir()
+    logger.info("published DKIM selector map with %d domain(s)", len(pairs))
+    return str(target)
 
 
 def _ensure_key_dir() -> None:
@@ -354,6 +413,178 @@ def prune_generations(domain: str, selector: str, keep_token: str | None) -> lis
                 removed.append(candidate.name)
         except DkimError as exc:
             logger.warning("could not prune %s: %s", candidate.name, exc)
+    return removed
+
+
+# ── retiring a selector's key instead of deleting it ────────────────────────
+#
+# THE PROBLEM THIS SOLVES
+#     Rspamd resolves a domain's selector from `selectors.map`, which it re-reads
+#     on its own watch cycle — `map_watch_interval` defaults to 300 seconds and
+#     is an upper bound, not a promise. A selector change that deleted the old
+#     key the instant the map was rewritten therefore opened a window: a worker
+#     still holding the previous map would look for a key that no longer exists
+#     and send the message UNSIGNED.
+#
+#     That was measured, not theorised — the rotation was observed propagating in
+#     about 13 seconds, which is a probability, not an invariant.
+#
+# THE MODEL
+#     A selector change RETIRES the old key rather than deleting it. The file
+#     keeps its exact name, because that is the name a stale Rspamd worker will
+#     open, and a sidecar marker records when retirement happened.
+#
+#         <domain>.<selector>.key           still signs, for stale workers
+#         <domain>.<selector>.key.retired   epoch seconds, written once
+#
+#     During the grace period both outcomes are correct signatures:
+#
+#         stale worker -> old selector + old key -> verifies against the old record
+#         fresh worker -> new selector + new key -> verifies against the new record
+#
+#     Neither is unsigned, and neither is signed with a key the published record
+#     does not name.
+#
+# WHY A SIDECAR FILE AND NOT A DATABASE COLUMN
+#     Crash consistency. The marker is written BEFORE the new key is activated,
+#     so any crash leaves the retirement recorded next to the key it describes,
+#     in the same directory, under the same ownership. A database row could be
+#     lost in a crash window and reconciliation would then treat a key that is
+#     still in use as an orphan and delete it early — precisely the failure this
+#     whole mechanism exists to prevent.
+#
+#     The marker is metadata about a private key, never key material, and it is
+#     never served through the API.
+
+#: Sidecar suffix. Deliberately does NOT end in `.key`, so `glob("*.key")` in the
+#: reconciliation sweep cannot mistake a marker for a key.
+RETIREMENT_SUFFIX = ".retired"
+
+#: How long a retired key keeps signing. Must comfortably exceed Rspamd's
+#: `map_watch_interval` (300s by default) plus process scheduling slack; 30
+#: minutes is six times that and still short enough that retired material does
+#: not accumulate. Overridable so tests can exercise expiry without waiting.
+RETIREMENT_GRACE_SECONDS = int(
+    os.environ.get("NATIVE_DKIM_RETIREMENT_GRACE", "1800")
+)
+
+
+def retirement_marker_path(domain: str, selector: str) -> pathlib.Path:
+    return KEY_DIR / f"{domain}.{selector}.key{RETIREMENT_SUFFIX}"
+
+
+def retire(domain: str, selector: str, when: float | None = None) -> str:
+    """
+    Mark a selector's active key as retired, keeping the key itself.
+
+    Written atomically and fsynced, because a half-written marker would make the
+    retirement timestamp unreadable and the key would look like an orphan.
+
+    Idempotent in the sense that re-retiring refreshes the timestamp; the caller
+    is the lifecycle, which holds the advisory lock, so there is no race here.
+    """
+    _ensure_key_dir()
+    target = retirement_marker_path(domain, selector)
+    stamp = str(int(when if when is not None else time.time()))
+    handle, temp_name = tempfile.mkstemp(dir=str(KEY_DIR), prefix=f".{domain}.", suffix=".rtmp")
+    try:
+        with os.fdopen(handle, "w", encoding="ascii") as fh:
+            fh.write(stamp)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name)
+        raise
+    _fsync_dir()
+    logger.info("retired DKIM selector %s for %s; key kept for the grace period",
+                selector, domain)
+    return str(target)
+
+
+def unretire(domain: str, selector: str) -> bool:
+    """
+    Drop a retirement marker. Returns whether one was there.
+
+    Used when a selector is (still) the authoritative one — either because a
+    rotation was rolled back, or because a crash left a marker on a selector the
+    database never stopped naming. A marker on the live selector would eventually
+    expire and delete the key the engine is actively signing with.
+    """
+    marker = retirement_marker_path(domain, selector)
+    try:
+        marker.unlink()
+        logger.info("cleared the retirement marker on %s for %s", selector, domain)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise DkimError(f"could not clear retirement marker for {domain}: {exc}") from exc
+
+
+def retired_at(domain: str, selector: str) -> int | None:
+    """Epoch seconds the selector was retired, or None if it is not retired."""
+    marker = retirement_marker_path(domain, selector)
+    try:
+        raw = marker.read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        # An unreadable timestamp must not mean "delete immediately". Fall back
+        # to the file's own mtime, which is at least as recent as the write.
+        try:
+            return int(marker.stat().st_mtime)
+        except OSError:
+            return None
+
+
+def retirement_expired(domain: str, selector: str, now: float | None = None) -> bool:
+    """
+    Has a retired key outlived its grace period?
+
+    A selector with no marker is NOT retired, and this returns False — an
+    unmarked stray is an orphan, which is a different judgement made elsewhere.
+    """
+    stamp = retired_at(domain, selector)
+    if stamp is None:
+        return False
+    current = now if now is not None else time.time()
+    return (current - stamp) >= RETIREMENT_GRACE_SECONDS
+
+
+def retired_selectors(domain: str | None = None) -> list[tuple[str, str]]:
+    """Every (domain, selector) currently carrying a retirement marker."""
+    found = []
+    for marker in sorted(KEY_DIR.glob(f"*.key{RETIREMENT_SUFFIX}")):
+        stem = marker.name[: -len(f".key{RETIREMENT_SUFFIX}")]
+        marker_domain, _, marker_selector = stem.rpartition(".")
+        if not marker_domain or not marker_selector:
+            continue
+        if domain is None or marker_domain == domain:
+            found.append((marker_domain, marker_selector))
+    return found
+
+
+def remove_retired(domain: str, selector: str) -> bool:
+    """
+    Delete a retired key and its marker, in that order.
+
+    Key first: if the marker went first and the process died, the key would be
+    left looking like an unmarked orphan — still removable, but by a rule that
+    was never meant to decide it.
+    """
+    removed = remove(key_path(domain, selector))
+    with contextlib.suppress(OSError):
+        retirement_marker_path(domain, selector).unlink()
+    if removed:
+        logger.info("removed retired DKIM key %s for %s after its grace period",
+                    selector, domain)
     return removed
 
 

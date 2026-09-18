@@ -111,6 +111,25 @@ def authorized(handler) -> bool:
     return hmac.compare_digest(provided.encode(), API_SECRET.encode())
 
 
+#: Dovecot's own credential, SEPARATE from API_SECRET on purpose.
+#:
+#: Dovecot needs to tell the engine "this mailbox just logged in", because it
+#: cannot write the database itself (migration 003) and the API is the only
+#: writer. Handing it API_SECRET to do that would give the most network-exposed
+#: component in the engine the ability to create domains, mint mailboxes and
+#: rotate DKIM keys. A dedicated secret that opens exactly one endpoint keeps a
+#: compromised Dovecot to the damage Dovecot can already do.
+POLICY_SECRET = os.environ.get("NATIVE_DOVECOT_POLICY_SECRET", "")
+
+
+def policy_authorized(handler) -> bool:
+    """Constant-time check of Dovecot's auth-policy credential."""
+    if not POLICY_SECRET:
+        return False
+    provided = handler.headers.get("X-Native-Policy-Secret", "")
+    return hmac.compare_digest(provided.encode(), POLICY_SECRET.encode())
+
+
 def _assert_response_is_safe(payload) -> None:
     """Walk a response and refuse to send anything carrying private material."""
     if isinstance(payload, dict):
@@ -281,11 +300,59 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as exc:                 # noqa: BLE001
             self._fail(exc)
 
+    def _handle_auth_policy_report(self):
+        """
+        Record a successful login. Dovecot's auth-policy "report" hook.
+
+        WHY THIS EXISTS AT ALL
+            `last_login_at` is a column MateMail shows customers and uses to
+            find dormant mailboxes. Dovecot knows when a login happened; it must
+            not write the database. Dovecot's own `last_login` plugin would need
+            write access, so it is not an option. This hook is the seam that
+            keeps "one writer" true.
+
+        FAIL-OPEN, DELIBERATELY
+            `auth_policy_reject_on_fail = no` on the Dovecot side means a login
+            still succeeds when this endpoint is down. Recording a timestamp is
+            bookkeeping; refusing a customer their mail because bookkeeping is
+            unavailable would turn a cosmetic outage into a real one.
+
+        Only a SUCCESSFUL login is recorded. Dovecot reports failures too, and
+        writing those here would let an unauthenticated attacker move a
+        timestamp by guessing passwords at the SMTP port.
+        """
+        body = self._body()
+        username = str(body.get("login") or body.get("username") or "").strip().lower()
+        # Dovecot sends `success` on the report hook. Anything that is not an
+        # explicit success is ignored rather than guessed at.
+        if not username or body.get("success") is not True:
+            self._send(200, {"recorded": False})
+            return
+        with db.connect() as conn:
+            recorded = provisioning.record_login(conn, username)
+        self._send(200, {"recorded": recorded})
+
     def do_POST(self):
+        route = self._route
+        # Checked BEFORE the provisioning secret: this route has its own
+        # credential and must not be reachable with it, nor reachable with the
+        # provisioning secret's authority.
+        # Dovecot POSTs to the configured URL verbatim — it does NOT append
+        # "allow"/"report" the way the documentation's examples suggest.
+        # Measured against 2.4.1: the request arrived at /v1/dovecot/policy.
+        # Both spellings are accepted so a URL with or without the suffix works.
+        if route in ("/v1/dovecot/policy", "/v1/dovecot/policy/report"):
+            if not policy_authorized(self):
+                self._send(403, {"error": "unauthorized"})
+                return
+            try:
+                self._handle_auth_policy_report()
+            except Exception as exc:             # noqa: BLE001
+                self._fail(exc)
+            return
         if not authorized(self):
             self._send(403, {"error": "unauthorized"})
             return
-        route = self._route
         handler = _WRITE_ROUTES.get(route)
         if handler is None:
             self._send(404, {"error": "not found"})
@@ -502,6 +569,11 @@ def main():
         with db.connect() as conn:
             version = db.apply_migrations(conn)
             logger.info("engine schema at version %d", version)
+            # Migration 003 gives the reader roles LOGIN; their passwords come
+            # from the environment, because a migration is in Git and a secret
+            # must not be. Runs every start so `.env` stays the single source of
+            # truth for a credential rotation.
+            db.sync_reader_credentials(conn)
             # Repair anything a crash left behind BEFORE serving a request.
             # Idempotent, and it never generates a key — minting one here would
             # publish material no DNS record names.

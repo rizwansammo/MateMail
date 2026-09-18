@@ -26,6 +26,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Postfix insists on a writable spool it owns; the runtime volume supplies it.
+# The shared SASL group — see images/dovecot/Dockerfile. Fixed gid on both
+# sides so Dovecot can create the auth socket group-readable by Postfix
+# without either image depending on the other's packaging numbers.
+RUN set -eux; \
+    groupadd --system --gid 2102 smtpauth; \
+    usermod -aG smtpauth postfix
+
 VOLUME ["/var/spool/postfix"]
 
 COPY entrypoint.sh /entrypoint.sh

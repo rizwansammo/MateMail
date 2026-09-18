@@ -74,7 +74,18 @@ RUN set -eux; \
              --home-dir /nonexistent --shell /usr/sbin/nologin dovecot; \
     groupadd --system dovenull; \
     useradd  --system --gid dovenull --no-create-home \
-             --home-dir /nonexistent --shell /usr/sbin/nologin dovenull
+             --home-dir /nonexistent --shell /usr/sbin/nologin dovenull; \
+    groupadd --system --gid 2102 smtpauth
+
+# `smtpauth` (gid 2102) is how Postfix reaches Dovecot's SASL socket. NE3 hands
+# SMTP authentication to Dovecot over a unix socket on a shared volume rather
+# than an inet listener, so a submission password never crosses the container
+# network even inside the isolated compose network.
+#
+# The gid is fixed and identical in the Postfix image. Debian's own `postfix`
+# group (102 there) is deliberately NOT reused: that number belongs to the
+# packaging, and a silent renumber would leave the socket unreadable and SMTP
+# authentication broken for every customer at once.
 
 # Mount points for the native mail store. A named volume inherits the ownership
 # of the image directory it covers, so creating these 5000:5000 here is what
@@ -110,5 +121,16 @@ RUN --mount=type=bind,from=layout,source=/,target=/mnt/layout     /mnt/layout/us
 # default container capability set that any root process already has.
 USER root
 
-# ENTRYPOINT and CMD are inherited from upstream unchanged:
-#   ["/usr/bin/tini", "--"]  +  ["/dovecot/sbin/dovecot", "-F"]
+# The engine database password cannot come from dovecot.conf — that file is in
+# Git — and Dovecot cannot expand an environment variable into a setting, which
+# was measured against this image rather than assumed: `%{env:...}` parses, and
+# libpq then reports "fe_sendauth: no password supplied". The entrypoint renders
+# the connection into a root-only include before starting Dovecot, and refuses
+# to start at all if the password is missing or unrepresentable.
+COPY --chown=0:0 --chmod=0755 entrypoint.sh /usr/local/bin/matemail-dovecot-entrypoint
+
+# Upstream's CMD is dropped deliberately: the entrypoint exec's
+# `tini -- dovecot -F` itself, so there is one place that decides how Dovecot
+# starts rather than two that have to agree.
+ENTRYPOINT ["/usr/local/bin/matemail-dovecot-entrypoint"]
+CMD []

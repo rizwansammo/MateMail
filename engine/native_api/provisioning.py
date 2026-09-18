@@ -215,6 +215,39 @@ def ensure_mailbox(conn, spec: dict, password: str = "") -> dict:
     return {"address": address}
 
 
+def record_login(conn, address: str) -> bool:
+    """
+    Stamp a mailbox's last successful login. Returns whether a row matched.
+
+    WHY IT IS HERE AND NOT IN THE HTTP LAYER
+        Every write to engine state lives in this module, so there is one file
+        to read when asking "what can change the database?". A write sitting in
+        `app.py` next to its request handler is invisible to that question, and
+        the deployment tests enforce the rule rather than trusting it.
+
+    The caller is Dovecot's auth-policy hook, which reports a login it has
+    ALREADY accepted. Dovecot cannot perform this update itself — it holds no
+    write access (migration 003) — and that is the point: the mail path stays
+    read-only and the API remains the single writer.
+
+    An address with no matching mailbox returns False rather than raising. The
+    hook is bookkeeping on a login that already succeeded; a mailbox deleted
+    between authentication and this report is a race, not an error worth
+    failing a customer's session over.
+    """
+    normalised = address.strip().lower()
+    if not normalised:
+        return False
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE mailbox SET last_login_at = now() WHERE address = %s",
+            (normalised,),
+        )
+        matched = cur.rowcount > 0
+    conn.commit()
+    return matched
+
+
 def set_mailbox_active(conn, address: str, active: bool) -> None:
     address = validation.email_address(address)
     active = validation.boolean(active, "active")
@@ -652,11 +685,32 @@ def _rotate_dkim_key_unlocked(conn, domain: str, selector: str = "") -> dict:
 
     material = dkim_lib.generate(name, chosen)
 
+    # A SELECTOR CHANGE RETIRES THE OUTGOING KEY, and the marker is written
+    # BEFORE the new key is activated.
+    #
+    # Rspamd re-reads `selectors.map` on its own watch cycle (up to
+    # `map_watch_interval`, 300s by default). Deleting the old key the moment the
+    # map changed left a window where a worker still holding the previous map
+    # looked for a key that no longer existed and sent the message UNSIGNED.
+    #
+    # Writing the marker first is what makes a crash safe in the only direction
+    # that matters: a crash after this point leaves the old key present AND
+    # recorded as retired, so reconciliation keeps it for the grace period rather
+    # than sweeping it as an orphan. The reverse order could lose the record of
+    # why a key is still there, and delete a key Rspamd is about to use.
+    retiring = bool(previous_selector and previous_selector != chosen)
+    if retiring:
+        dkim_lib.retire(name, previous_selector)
+
     # Nothing is live yet, so a failure here costs only the new generation file.
     try:
         dkim_lib.activate(material["generation_path"], material["active_path"])
     except Exception:
         dkim_lib.remove(material["generation_path"])
+        if retiring:
+            # The rotation never happened, so the old selector is authoritative
+            # again and must not carry a retirement it will later act on.
+            dkim_lib.unretire(name, previous_selector)
         raise
 
     try:
@@ -706,14 +760,23 @@ def _rotate_dkim_key_unlocked(conn, domain: str, selector: str = "") -> dict:
             # is how a stale key survives a failed call.
             dkim_lib.remove(material["active_path"])
         dkim_lib.remove(material["generation_path"])
+        if retiring:
+            # Same reasoning as above: a handled failure is a clean no-op, so the
+            # previous selector goes back to being simply the live one.
+            dkim_lib.unretire(name, previous_selector)
         raise
 
     # Only now is anything else unreferenced.
     dkim_lib.prune_generations(name, material["selector"], material["generation_token"])
-    if previous_selector and previous_selector != material["selector"]:
-        # A selector change moves the live key to a different filename; the old
-        # active path and its generations are no longer reachable by Rspamd.
-        dkim_lib.remove(dkim_lib.key_path(name, previous_selector))
+    if retiring:
+        # The old ACTIVE key deliberately stays: a stale Rspamd worker will open
+        # it by name and produce a signature that still verifies against the DNS
+        # record for the old selector. Reconciliation removes it once the grace
+        # period has passed.
+        #
+        # Its GENERATIONS go now. They were only ever the immutable source for
+        # the activation, nothing opens them by name, and keeping them would
+        # leave key material around with no rule deciding its lifetime.
         dkim_lib.prune_generations(name, previous_selector, None)
 
     return {
@@ -745,6 +808,14 @@ def _delete_dkim_key_unlocked(conn, domain: str) -> None:
     selector = row[0]
     dkim_lib.remove(dkim_lib.key_path(name, selector))
     dkim_lib.prune_generations(name, selector, None)
+
+    # Retired keys from earlier rotations go too. They exist to keep a stale
+    # Rspamd worker signing for a domain the engine still serves; once the domain
+    # has no DKIM at all there is nothing left for them to sign, and leaving
+    # private key material behind after an explicit delete is the wrong default.
+    for retired_domain, retired_selector in dkim_lib.retired_selectors(name):
+        dkim_lib.remove_retired(retired_domain, retired_selector)
+
     logger.info("deleted DKIM key for %s", name)
 
 
@@ -770,7 +841,8 @@ def _reconcile_dkim_unlocked(conn) -> dict:
     into mail that silently fails DKIM.
     """
     report = {"activated": [], "metadata_repaired": [], "orphans_removed": [],
-              "staging_removed": [], "unrecoverable": []}
+              "staging_removed": [], "unrecoverable": [],
+              "retired_retained": [], "retired_removed": []}
 
     with conn.cursor() as cur:
         cur.execute("SELECT domain_name, selector, public_key, private_key_path FROM dkim_key")
@@ -830,10 +902,28 @@ def _reconcile_dkim_unlocked(conn) -> dict:
             report["metadata_repaired"].append(domain)
             logger.warning("reconciled %s: row now describes the live key", domain)
 
+        # A crash between retiring the outgoing selector and committing the new
+        # row can leave the marker on the selector the database still names. It
+        # is authoritative, so the marker must go — left in place it would expire
+        # and delete the key the engine is actively signing with.
+        if dkim_lib.unretire(domain, selector):
+            logger.warning(
+                "reconciled %s: cleared a retirement marker from its live selector %s",
+                domain, selector,
+            )
+
         token = dkim_lib.active_generation_token(domain, selector)
         dkim_lib.prune_generations(domain, selector, token)
 
-    # Key files for domains the database no longer knows about.
+    # Key files the database does not name. Three different things live here and
+    # the difference matters:
+    #
+    #   retired, inside its grace   KEEP. A stale Rspamd worker may still open
+    #                               this by name, and deleting it is exactly the
+    #                               unsigned window the retirement model exists
+    #                               to close.
+    #   retired, grace expired      remove, with its marker
+    #   no marker at all            an orphan; nothing refers to it
     for path in sorted(dkim_lib.KEY_DIR.glob("*.key")):
         parsed = dkim_lib.parse_generation(path.name)
         if parsed:
@@ -842,15 +932,36 @@ def _reconcile_dkim_unlocked(conn) -> dict:
             stem = path.name[: -len(".key")]
             domain, _, selector = stem.rpartition(".")
             key = (domain, selector)
-        if key not in known and dkim_lib.remove(path):
+        if key in known:
+            continue
+
+        domain, selector = key
+        # Only a non-generation file can be retired: generations are never opened
+        # by Rspamd, so they are swept as before.
+        if not parsed and dkim_lib.retired_at(domain, selector) is not None:
+            if dkim_lib.retirement_expired(domain, selector):
+                if dkim_lib.remove_retired(domain, selector):
+                    report["retired_removed"].append(path.name)
+            else:
+                report["retired_retained"].append(path.name)
+            continue
+
+        if dkim_lib.remove(path):
             report["orphans_removed"].append(path.name)
+
+    # Markers with no key left beside them describe nothing.
+    for marker_domain, marker_selector in dkim_lib.retired_selectors():
+        if (marker_domain, marker_selector) in known:
+            continue
+        if not dkim_lib.key_path(marker_domain, marker_selector).is_file():
+            dkim_lib.unretire(marker_domain, marker_selector)
 
     for stale in dkim_lib.stale_staging_files():
         if dkim_lib.remove(stale):
             report["staging_removed"].append(stale.name)
 
     if any(report[k] for k in ("activated", "metadata_repaired", "orphans_removed",
-                               "staging_removed", "unrecoverable")):
+                               "staging_removed", "unrecoverable", "retired_removed")):
         logger.warning("DKIM reconciliation made changes: %s", report)
     return report
 
@@ -874,21 +985,55 @@ def _reconcile_dkim_unlocked(conn) -> dict:
 # and reconciliation can never sweep a rotation's files out from under it.
 
 
+def _publish_selector_map(conn) -> None:
+    """
+    Republish the domain-to-selector map Rspamd signs from.
+
+    WHY IT LIVES IN THE LOCK WRAPPERS
+        Every DKIM lifecycle change passes through one of the four functions
+        below, so this is the one place that sees all of them. Publishing here,
+        still holding the lifecycle lock, means the map is derived from rows
+        that are already committed and cannot interleave with a concurrent
+        rotation writing a different selector for the same domain.
+
+    WHY A FAILURE PROPAGATES
+        It would be easy to log and continue — the key is already written and
+        the row already committed, so the operation "worked". But a domain whose
+        selector never reached the map is a domain whose mail goes out UNSIGNED,
+        and reporting success for that is exactly the kind of quiet half-failure
+        the engine is supposed to make impossible. The caller retries; every one
+        of these operations is idempotent, and `reconcile_dkim` republishes the
+        map at startup regardless.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT domain_name, selector FROM dkim_key ORDER BY domain_name")
+        pairs = [(row[0], row[1]) for row in cur.fetchall()]
+    dkim_lib.write_selector_map(pairs)
+
+
 def _ensure_dkim_for(conn, domain: str, selector: str) -> None:
     with db.dkim_lifecycle_lock(conn):
-        return _ensure_dkim_for_unlocked(conn, domain, selector)
+        result = _ensure_dkim_for_unlocked(conn, domain, selector)
+        _publish_selector_map(conn)
+        return result
 
 
 def rotate_dkim_key(conn, domain: str, selector: str = "") -> dict:
     with db.dkim_lifecycle_lock(conn):
-        return _rotate_dkim_key_unlocked(conn, domain, selector)
+        result = _rotate_dkim_key_unlocked(conn, domain, selector)
+        _publish_selector_map(conn)
+        return result
 
 
 def delete_dkim_key(conn, domain: str) -> None:
     with db.dkim_lifecycle_lock(conn):
-        return _delete_dkim_key_unlocked(conn, domain)
+        result = _delete_dkim_key_unlocked(conn, domain)
+        _publish_selector_map(conn)
+        return result
 
 
 def reconcile_dkim(conn) -> dict:
     with db.dkim_lifecycle_lock(conn):
-        return _reconcile_dkim_unlocked(conn)
+        result = _reconcile_dkim_unlocked(conn)
+        _publish_selector_map(conn)
+        return result

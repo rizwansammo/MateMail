@@ -1161,3 +1161,170 @@ Until D is done, A–C are correct decisions nobody asks for. No public mail por
 is open, so there is no live exposure, and the engine's own SASL requirement,
 sender-login check and relay restrictions are what is holding — but this
 checklist must not be read as finished.
+
+---
+
+## Native Engine NE3 — mail flow
+
+NE3 is the phase where Postfix, Dovecot and Rspamd start reading NE2's
+provisioning state. Everything below was verified against a running stack on
+`.invalid` domains, not inferred from configuration.
+
+**Status: implemented and validated locally. Not deployed to MateServer.**
+mailcow remains the production engine and `MAIL_ENGINE_ADAPTER` is still
+`mailcow`.
+
+### Two defects found during NE3
+
+Both were inherited, both looked healthy, and neither was visible from the
+application side.
+
+**1. Postfix could read every password hash.**
+
+NE1's `postgres/init/001_bootstrap.sql` carried:
+
+```sql
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT ON TABLES TO engine_ro_postfix, engine_ro_dovecot;
+```
+
+It was written as a safety rail — new tables start read-only — but it does the
+opposite of least privilege. `ON TABLES` includes **views**, so every relation
+created afterwards was granted to *both* reader roles automatically, whatever
+the migration's own `GRANT` statements said. `engine_ro_postfix` could therefore
+`SELECT password_hash FROM dovecot_auth`.
+
+Demonstrated rather than argued: under the NE1 rule a freshly created view came
+out carrying `engine_ro_postfix=r , engine_ro_dovecot=r`. The rule had already
+fired once — migration 002 needed an explicit `REVOKE SELECT ON dkim_key` to
+claw back access it never granted — and any future table would have been exposed
+the same way.
+
+Migration 003 retires the rule (`ALTER DEFAULT PRIVILEGES ... REVOKE`) and
+revokes the grants the six new views had already inherited, then grants each
+role only what it needs. A new relation is now readable by nobody until a
+migration says otherwise.
+
+Regression: `ReaderPrivilegeTest` in
+`backend/tests/test_native_engine_mail_flow.py`, including a canary that creates
+a view and asserts it has no grantees.
+
+**2. Antivirus detected malware and delivered it anyway.**
+
+Rspamd ships `CLAM_VIRUS` with a score of `0.00`. An EICAR probe through the
+full NE3 path produced:
+
+```
+CLAM_VIRUS(0.00){Eicar-Test-Signature;} ... [11.40/15.00] add header
+```
+
+ClamAV identified it correctly, the message scored below the reject threshold,
+and it landed in the recipient's Maildir. An antivirus that scans, identifies
+malware and hands it to the customer is worse than none, because monitoring
+shows it working.
+
+`rspamd/local.d/groups.conf` now scores a confirmed virus far above any
+threshold. The same probe afterwards produced `[2011.40/15.00] reject` and
+`554 5.7.1` at SMTP time, with nothing delivered. A scanner *failure* is scored
+separately at zero — a broken scanner is not the same as dirty mail, and Postfix
+already defers when Rspamd itself is unreachable.
+
+### The read contract
+
+Postfix and Dovecot read six views (migration 003), never a base table:
+
+| View | Reader | Purpose |
+|------|--------|---------|
+| `postfix_virtual_domain` | postfix | is this domain ours |
+| `postfix_virtual_mailbox` | postfix | does this mailbox receive |
+| `postfix_virtual_alias` | postfix | where mail is delivered |
+| `postfix_sender_login` | postfix | **who may send as what** |
+| `dovecot_auth` | dovecot | password hash only |
+| `dovecot_userdb` | dovecot | mail location and quota |
+
+Neither role can read the other's views, neither can reach a base table, neither
+can write anything, and neither can create anything. Verified by connecting as
+each role: 19 of 19 checks behave as intended.
+
+`postfix_sender_login` is the anti-spoofing control. Ownership comes from
+exactly two places — a mailbox owns its own address, and an alias whose
+destination *is* a hosted mailbox is owned by that mailbox. It does not
+reference the `forwarding` table at all, so pointing forwarding at an address
+can never confer the right to send as it; an external alias destination has a
+NULL `mailbox_id` and is excluded by an INNER JOIN. Both exclusions are
+structural rather than filtered, so a later WHERE-clause edit cannot admit them.
+
+### Negative results, measured
+
+| Attempt | Result |
+|---|---|
+| authenticated user spoofs another mailbox | `553 5.7.1 not owned by user` |
+| authenticated user spoofs another tenant's domain | `553 5.7.1` |
+| authenticated user sends as their internal alias | accepted (correct) |
+| authenticated user sends as an alias pointing outside | `553 5.7.1` |
+| unauthenticated relay to the Internet | `554 5.7.1 Relay access denied` |
+| unauthenticated inbound to a real mailbox | accepted and delivered |
+| unauthenticated inbound to an unknown mailbox | `550 5.1.1 User unknown` |
+| authentication as an alias rather than a mailbox | `535 5.7.8` |
+| suspended mailbox or domain attempts to send | `535 5.7.8` at authentication |
+| EICAR probe | `554 5.7.1`, not delivered |
+| delivery exceeding a mailbox quota | LMTP `Quota exceeded`, not stored |
+
+No mail left the engine: the Postfix queue stayed empty and every `relay=` in
+the logs pointed at Dovecot.
+
+### Secrets
+
+Neither daemon can read a secret from its own configuration environment, so both
+images render credentials at container start and nothing is committed.
+
+Dovecot's `%{env:...}` is a particular trap: it parses, `doveconf -n` echoes it
+back unexpanded, and libpq then reports `fe_sendauth: no password supplied`. The
+result is a configuration that looks correct and authenticates nobody. Both
+entrypoints refuse to start without their credential rather than coming up
+healthy and failing every lookup, and both reject a password containing
+characters that cannot be represented in their config format — `#` opens a
+comment and a newline ends a setting in both.
+
+Dovecot holds a **separate** credential for reporting logins to the engine API
+(`X-Native-Policy-Secret`), scoped to that one endpoint. Handing it the
+provisioning secret would let the most network-exposed component in the engine
+create domains, mint mailboxes and rotate DKIM keys. Verified in both
+directions: the provisioning secret is refused at the policy endpoint, and the
+policy secret is refused at `/v1/domains/ensure`.
+
+### DKIM signing
+
+The selector is resolved per domain from a map the engine API publishes from the
+`dkim_key` rows. The previous `selector = "mm1"` was correct only for domains
+that had never rotated; for any other it would look for a key file that does not
+exist, and either send unsigned or sign with a key the published DNS record does
+not name. A signature that fails to verify is worse than no signature, because
+it reads as a forgery.
+
+There is deliberately no fallback selector. A domain missing from the map is a
+provisioning bug, and unsigned mail that shows up in monitoring is a better
+outcome than mail signed with a guess.
+
+Rspamd mounts the key store read-only and the API remains its only writer.
+Postfix cannot see the directory at all — `ls /var/lib/rspamd/dkim` inside the
+Postfix container returns "No such file or directory".
+
+The signing chain was verified cryptographically rather than by inspecting
+headers: a message from the real flow verified with `dkimpy` against the public
+material the API publishes, before and after a selector rotation, and failed
+against an unrelated key and against the previous selector's key. Details and
+the rotation propagation window are in `docs/NATIVE_MAIL_ENGINE.md`.
+
+A selector change does not delete the outgoing key; it retires it, keeping the
+file under its exact name for 1800 seconds so an Rspamd worker still holding the
+previous selector map signs correctly instead of sending unsigned. The retained
+key stays 0600, owned by the engine's DKIM uid, is never returned through the
+API, never becomes authoritative again, and is removed by reconciliation once the
+grace expires. Rationale and the measured propagation bound are in
+`docs/NATIVE_MAIL_ENGINE.md`.
+
+No API response carries private material. Probed across `/v1/dkim` (including
+`?include_private=1` and `?private=true`), `/v1/domains`, `/v1/mailboxes` and
+`/status`: zero hits for private-key material, and `FORBIDDEN_RESPONSE_KEYS`
+refuses to serialise such a field at all.

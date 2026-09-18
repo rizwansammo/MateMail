@@ -783,8 +783,23 @@ class DkimTest(EngineDatabaseTestCase):
         generations = [f for f in files if ".g" in f]
         self.assertEqual(len(generations), 1, f"orphaned generations: {files}")
         self.assertIn(f"{DOMAIN}.rot3.key", files)
-        self.assertEqual([f for f in files if f.startswith(f"{DOMAIN}.rot2")], [],
-                         f"the superseded selector was left behind: {files}")
+
+        # NE3: the superseded selector's ACTIVE key is deliberately retained, so
+        # an Rspamd worker still holding the previous selector map signs
+        # correctly instead of sending unsigned. What must NOT survive is the
+        # superseded selector's GENERATIONS — nothing opens those by name — and
+        # the retention must be bounded by a retirement marker rather than open
+        # ended.
+        self.assertIn(f"{DOMAIN}.rot2.key", files,
+                      "the outgoing key must be retained for stale workers")
+        self.assertTrue(engine_dkim.retirement_marker_path(DOMAIN, "rot2").is_file(),
+                        "a retained key without a marker has no lifetime rule")
+        self.assertEqual(engine_dkim.generations_for(DOMAIN, "rot2"), [],
+                         f"superseded generations were left behind: {files}")
+        self.assertEqual(
+            provisioning.get_dkim_public_key(self.conn, DOMAIN)["selector"], "rot3",
+            "the retained key must never be authoritative",
+        )
         # And the pair is one key, not two.
         active = self.key_dir / f"{DOMAIN}.rot3.key"
         import os as _os
@@ -1168,8 +1183,16 @@ class DkimCrashConsistencyTest(EngineDatabaseTestCase):
         self.assertEqual(
             provisioning.get_dkim_public_key(self.conn, DOMAIN)["selector"], "rot2"
         )
-        # The old selector's files are gone: Rspamd would never read them again.
-        self.assertEqual(self.live_files(DOMAIN, "mm1"), [])
+        # NE3: the old selector's ACTIVE key is retained so an Rspamd worker still
+        # holding the previous map signs correctly rather than sending unsigned.
+        # Its generations are gone, the retention is bounded by a marker, and it
+        # is not the selector anything publishes.
+        self.assertEqual(
+            sorted(self.live_files(DOMAIN, "mm1")),
+            [f"{DOMAIN}.mm1.key", f"{DOMAIN}.mm1.key.retired"],
+            "the outgoing key should be retained, with a marker and no generations",
+        )
+        self.assertEqual(engine_dkim.generations_for(DOMAIN, "mm1"), [])
         self.assertTrue(reported)
 
     def test_a_failed_row_update_rolls_the_activation_back(self):
@@ -1429,8 +1452,15 @@ class DkimCrashConsistencyTest(EngineDatabaseTestCase):
         # Everything agrees: row selector, live path, derived key, generations.
         self.assertEqual(self.stored_selector(DOMAIN), "mm2")
         self.assert_consistent(DOMAIN, expect_public=rotated)
-        self.assertFalse(engine_dkim.key_path(DOMAIN, "mm1").exists(),
-                         "the superseded selector was left signing")
+        # NE3 retires rather than deletes: mm1 keeps signing for workers that
+        # have not yet seen the new map, and reconciliation removes it once the
+        # grace expires. The invariant that matters here is unchanged — mm1 is
+        # not authoritative and cannot come back.
+        self.assertTrue(engine_dkim.key_path(DOMAIN, "mm1").exists(),
+                        "the superseded key must be retained, not deleted")
+        self.assertTrue(engine_dkim.retirement_marker_path(DOMAIN, "mm1").is_file(),
+                        "and its retention must be bounded by a marker")
+        self.assertEqual(self.stored_selector(DOMAIN), "mm2")
         self.assertEqual(engine_dkim.generations_for(DOMAIN, "mm1"), [])
         self.assertEqual(len(engine_dkim.generations_for(DOMAIN, "mm2")), 1)
 
@@ -1790,11 +1820,19 @@ class DkimLifecycleSerializationTest(EngineDatabaseTestCase):
         live, selector = self.assert_coherent(DOMAIN)
         self.assertIn(selector, selectors)
 
-        # No stale active selector survives — only the winner's files remain.
+        # Losing selectors leave no GENERATIONS and are never authoritative. Their
+        # active keys may survive as RETIRED material (NE3) — that is the point of
+        # retirement — but only ever with a marker bounding how long, and never as
+        # the selector the engine publishes.
         for other in [s for s in selectors if s != selector] + ["mm1"]:
             with self.subTest(stale=other):
-                self.assertFalse(engine_dkim.key_path(DOMAIN, other).exists(),
-                                 f"a live key survived under {other}")
+                self.assertNotEqual(other, selector)
+                if engine_dkim.key_path(DOMAIN, other).exists():
+                    self.assertTrue(
+                        engine_dkim.retirement_marker_path(DOMAIN, other).is_file(),
+                        f"{other} survived with no retirement marker, so nothing "
+                        f"will ever remove it",
+                    )
                 self.assertEqual(engine_dkim.generations_for(DOMAIN, other), [],
                                  f"generations survived under {other}")
         self.assertEqual(len(engine_dkim.generations_for(DOMAIN, selector)), 1)

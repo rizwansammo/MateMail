@@ -2267,3 +2267,188 @@ Native Engine's own footprint is unchanged at roughly 860 MiB, of which ClamAV i
 `MAIL_ENGINE_ADAPTER` is still "mailcow": NE2 gave the Native Engine
 authoritative provisioning state, not the mail path. Nothing in Postfix, Dovecot
 or Rspamd consumes that state — that is NE3.
+
+---
+
+## NE3 — Postfix + Dovecot + Rspamd mail flow
+
+**Status: implemented and validated locally (2026-09-18). NOT deployed to
+MateServer, and NE3 is not complete.** mailcow remains the production engine.
+
+NE3 is where the Native Engine stops being a provisioning database and becomes a
+mail server. Every claim below was measured against a running isolated stack on
+`.invalid` domains.
+
+### The path a message takes
+
+```
+authenticated client
+  -> Postfix submission (587, STARTTLS required)
+     SASL delegated to Dovecot over a unix socket on a shared volume
+  -> smtpd_sender_login_maps + reject_authenticated_sender_login_mismatch
+     (may this login use this envelope sender?)
+  -> Rspamd milter: ClamAV, oletools, spam scoring, DKIM signing
+  -> Postfix virtual transport
+  -> Dovecot LMTP (port 24)
+  -> Maildir at /var/vmail/<domain>/<local part>, owned 5000:5000
+```
+
+Proven end to end: a message from `alice@` to `bob@` arrived in the recipient's
+Maildir carrying `DKIM-Signature: ... d=<domain>; s=mm1`, delivered
+`with ESMTPSA` and then `with LMTP`.
+
+### What each component may read
+
+Migration 003 publishes six views and revokes NE2's table grants. Postfix and
+Dovecot hold separate PostgreSQL credentials, and neither can read the other's
+views, reach a base table, write anything, or create anything.
+
+The one view that matters most is `postfix_sender_login`. It answers "who may
+send as this address", and it is built so the wrong answers are unreachable
+rather than filtered: it never references the `forwarding` table, and an
+external alias destination is excluded by an INNER JOIN on a NULL `mailbox_id`.
+
+### Configuration findings worth keeping
+
+Several behaviours could only be established by running the software:
+
+* **Dovecot cannot expand `%{env:...}`.** It parses, `doveconf -n` echoes it
+  back, and libpq receives an empty string. Both images now render secrets
+  through entrypoints.
+* **Dovecot 2.4 renamed userdb fields to setting names.** `home`, `uid` and
+  `gid` no longer exist; the view returns `mail_home` and `quota_storage_size`.
+* **A quota default inside the `quota storage` block overrides the userdb.**
+  Written there, every mailbox silently receives the fallback. It belongs at the
+  top level, with the quota root left empty.
+* **Rspamd's `CLAM_VIRUS` scores 0.00 by default** — it detects and delivers.
+  See `docs/SECURITY.md` § Native Engine NE3.
+* **Dovecot POSTs auth-policy reports to the configured URL verbatim**, without
+  appending `allow`/`report`.
+* **The upstream Dovecot image has no coreutils** — no `cat`, `chown`, `chmod`
+  or `tr` — so its entrypoint uses shell builtins only.
+
+### Isolation held throughout
+
+No published host ports, `.invalid` domains only, the Postfix queue empty at the
+end, zero outbound SMTP delivery attempts, and every `relay=` in the logs
+pointing at Dovecot. No Internet mail was sent.
+
+### DKIM verified cryptographically, not by inspection
+
+A message produced by the real Postfix -> Rspamd -> LMTP flow was taken byte for
+byte out of the recipient's Maildir and verified with `dkimpy` against the public
+material `GET /v1/dkim` returns for that domain. The key reached the verifier
+through a DNS callback, because `.invalid` cannot publish records and public DNS
+was not touched.
+
+```
+original   s=mm1    body hash VERIFIES, header signature VERIFIES -> PASS
+rotated    s=alt7   body hash VERIFIES, header signature VERIFIES -> PASS
+rotated message against the OLD key                              -> FAIL
+original message against the OLD key                             -> PASS
+any message against an unrelated RSA key                         -> FAIL
+```
+
+The negative controls matter as much as the positives: with the wrong key the
+BODY HASH still verifies and only the HEADER SIGNATURE fails, which is exactly
+RFC 6376 behaviour and shows the verifier is discriminating on the key rather
+than returning a blanket success.
+
+### Selector rotation never creates an unsigned window
+
+A selector change RETIRES the outgoing key instead of deleting it.
+
+```
+rotate mm1 -> alt7
+    write <domain>.mm1.key.retired          (marker first, before anything else)
+    activate <domain>.alt7.key              (the commit point)
+    update the row, republish selectors.map
+    prune mm1's GENERATIONS
+    keep <domain>.mm1.key                   <- the part that matters
+```
+
+The old key keeps its exact filename, because that is the name a stale Rspamd
+worker opens. During the grace period both outcomes are correct signatures and
+neither is unsigned:
+
+```
+stale worker -> mm1 + retained mm1 key -> verifies against the old DNS record
+fresh worker -> alt7 + new key         -> verifies against the new DNS record
+```
+
+Proven cryptographically: a message signed with the RETAINED key verified
+against the public material the API published before the rotation.
+
+**Retirement grace: 1800 seconds**, overridable through
+`NATIVE_DKIM_RETIREMENT_GRACE` (tests use a short value rather than sleeping).
+
+**How long propagation actually takes.** `map_watch_interval` is 300s, but that
+is not the number that governs a file map — `map_file_watch_multiplier` is 0.1,
+so a local file map refreshes at **30s** at the shipped defaults. Measured with
+`rspamadm configdump`, after an earlier draft of this document quoted 300s and
+was wrong. The 1800s grace is 60x the real bound, which is the margin the
+invariant deserves.
+
+Rspamd needs **no restart, no `rspamadm reload` and no configuration edit**: its
+container `StartedAt` was unchanged across rotations, and its log shows
+`rereading map file .../selectors.map`. Even with `map_watch_interval` forced to
+3600s for a test, the rename was picked up promptly — the refresh is driven by
+the file's mtime, which the atomic replace changes.
+
+The retirement model does not depend on any of that timing. That is the point:
+the previous design was correct only because refresh happened to be fast.
+
+**Cleanup is reconciliation's.** No scheduler was added. Reconciliation runs at
+API startup and through `/v1/dkim/reconcile`, and it distinguishes three things
+that all look alike on disk:
+
+```
+retired, inside grace   KEEP           (reported as retired_retained)
+retired, grace expired  remove + marker (retired_removed)
+no marker at all        orphan, removed (orphans_removed)
+```
+
+A marker found on the selector the database still names is cleared — that is the
+crash window where the marker was written and the rotation then failed, and left
+alone it would eventually delete the live key. A marker with no key beside it is
+removed as litter. Deleting a domain's DKIM removes its retired material too.
+
+### Same-selector rotation is a different thing
+
+`mm1 -> mm1` with a new key retires nothing, and should not: the filename never
+changes, so no worker can be looking for a name that vanished, and `activate`
+uses an atomic rename so a reader gets either the old inode or the new one and
+never a torn file.
+
+**DNS is the real exposure here, and filesystem consistency cannot fix it.**
+Receivers that cached the old `p=` value will reject signatures from the new key
+until the record's TTL expires. A same-selector rotation is therefore NOT
+production-safe merely because the local key store is consistent — it needs a
+DNS-side plan (publish the new key, wait out the TTL, then rotate), and a
+selector CHANGE is the safer operation precisely because old and new records can
+coexist. This is a production rotation concern owned by NE7, not something NE3
+resolves.
+
+### What NE3 does not include, and why
+
+NE3 built the mail path. Four adapter methods remain unimplemented and they are
+**NE4's**, not unfinished NE3 work — nothing in the delivery path calls them:
+
+* `get_mailbox_usage` — quota ENFORCEMENT already works (Dovecot refuses an
+  over-quota delivery with `Quota exceeded`). Reading usage back needs an
+  administrative channel to Dovecot that NE4's quota validation needs anyway.
+* the three rate-limit methods — NE4 lists rate limiting among the behaviours it
+  validates in isolation; the mechanism belongs with Rspamd's ratelimit module
+  and the policy path.
+
+They refuse with `EngineCapabilityMissing`, which is the honest answer. A
+fabricated `used_mb=0` would be wrong the moment the first message is delivered,
+and wrong quietly.
+
+What NE3 still owes before it is complete: MateServer runtime validation,
+including publishing the rebuilt Dovecot and Postfix images (both gained
+entrypoints) to GHCR.
+
+Adapter methods remain **18 of 26 implemented, 8 capability-missing** — all
+eight now attributed to NE4. NE3 added no adapter methods, only the mail path
+underneath them.

@@ -42,3 +42,18 @@ PyJWT==2.13.0
 # than the one that runs in production would be testing something else.
 bcrypt==4.2.1
 psycopg[binary]==3.2.3
+
+# Test-only, NE3. tests/test_native_engine_mail_flow.py signs a message with the
+# private key the engine actually stored and verifies it against the public
+# material the Native API returns — the invariant that decides whether mail this
+# engine sends is accepted by the Internet.
+#
+# It is the counterpart to the manual acceptance gate: a message produced by the
+# real Postfix -> Rspamd -> LMTP flow was cryptographically verified with this
+# same library against the API's public key, before and after a selector
+# rotation. This test keeps that property from regressing without needing the
+# whole stack running.
+#
+# Absent from requirements.txt deliberately: nothing in the Django application
+# signs or verifies DKIM. Rspamd signs, and it has its own implementation.
+dkimpy==1.1.8

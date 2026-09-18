@@ -20,8 +20,8 @@ WHAT NE2 IMPLEMENTS
     Rate limits, storage usage, the queue and the quarantine raise
     `EngineCapabilityMissing`. They are not stubbed to return empty results: an
     adapter that answers "the queue is empty" without looking would report a
-    healthy queue during an incident. Refusing is the honest answer until NE3
-    and NE4 wire the measurements.
+    healthy queue during an incident. Refusing is the honest answer until NE4
+    wires the measurements.
 
 NOT IN PRODUCTION
     `MAIL_ENGINE_ADAPTER` stays "mailcow". This class exists, is tested, and is
@@ -64,11 +64,33 @@ _TIMEOUT = 15
 
 #: Operations the Native Engine will gain later. Named here so the refusal says
 #: which phase owns the work instead of "not implemented".
+#:
+#: ALL EIGHT BELONG TO NE4, and none of them block the NE3 mail path.
+#:
+#: They were previously split NE3/NE4, which read as though NE3 were unfinished
+#: without them. It is not: NE3 delivers authenticated submission, sender
+#: authorisation, filtering, DKIM signing, LMTP delivery and quota ENFORCEMENT,
+#: and none of that calls any of these.
+#:
+#:   rate limits    NE4 lists rate limiting as work it validates in isolation.
+#:                  The mechanism belongs with Rspamd's ratelimit module and the
+#:                  policy path, not with the delivery path NE3 built.
+#:   mailbox usage  Enforcement already works (Dovecot refuses an over-quota
+#:                  delivery). READING usage back needs an administrative channel
+#:                  to Dovecot that NE4's quota validation needs anyway, and it
+#:                  must exist before NE5 puts customers in front of it.
+#:   queue and quarantine
+#:                  NE4, unchanged — these are operational surfaces over a queue
+#:                  that only becomes interesting once traffic is real.
+#:
+#: Refusing with `EngineCapabilityMissing` is deliberate. A fabricated
+#: `used_mb=0` or an empty queue would be a measurement that is wrong the moment
+#: the first message is delivered, and wrong quietly.
 _LATER = {
-    "set_mailbox_rate_limit": "NE3",
-    "get_mailbox_rate_limit": "NE3",
-    "clear_mailbox_rate_limit": "NE3",
-    "get_mailbox_usage": "NE3",
+    "set_mailbox_rate_limit": "NE4",
+    "get_mailbox_rate_limit": "NE4",
+    "clear_mailbox_rate_limit": "NE4",
+    "get_mailbox_usage": "NE4",
     "get_queue_status": "NE4",
     "get_quarantine_items": "NE4",
     "cancel_queue_message": "NE4",
@@ -249,7 +271,7 @@ class NativeMailEngineAdapter(MailEngineAdapter):
 
     def get_last_login(self, address: str) -> Optional[str]:
         """
-        None until NE3, and that is an honest answer rather than a placeholder:
+        None until NE4, and that is an honest answer rather than a placeholder:
         the engine genuinely holds no login record yet, because nothing has
         authenticated against it. NE0.21's auth-event endpoint populates this.
         """
@@ -333,7 +355,7 @@ class NativeMailEngineAdapter(MailEngineAdapter):
 
     def get_mailbox_usage(self, address: str) -> Optional[MailboxUsage]:
         # Returning used_mb=0 would be a fabricated measurement that stays wrong
-        # the moment NE3 delivers the first message. Dovecot is the only thing
+        # the moment the engine delivers a message. Dovecot is the only thing
         # that knows, and it is not wired yet.
         raise self._unavailable("get_mailbox_usage")
 

@@ -27,6 +27,7 @@ import pathlib
 import re
 
 import psycopg
+import psycopg.sql
 
 logger = logging.getLogger("matemail.native.api.db")
 
@@ -144,7 +145,61 @@ def apply_migrations(conn) -> int:
 #: The schema version this build of the API requires. Readiness reports a
 #: mismatch rather than serving requests against a schema it was not written
 #: for — a newer API against an older database is how half-written rows happen.
-REQUIRED_VERSION = 2
+REQUIRED_VERSION = 3
+
+
+#: The reader roles NE3 gives a password to. Postfix and Dovecot authenticate
+#: as these; neither can write anything (migration 003).
+READER_ROLES = {
+    "engine_ro_postfix": "NATIVE_POSTFIX_DB_PASSWORD",
+    "engine_ro_dovecot": "NATIVE_DOVECOT_DB_PASSWORD",
+}
+
+
+def sync_reader_credentials(conn) -> list[str]:
+    """
+    Set the reader roles' passwords from the environment. Returns the roles set.
+
+    WHY THE API DOES THIS
+        The passwords cannot be in a migration — migrations are in Git. They
+        cannot be set by Postfix or Dovecot, which have no write access and are
+        the very roles being configured. The API is the only component that can
+        write this database at all (NE0.2), so it is the only candidate.
+
+    WHY IT RUNS EVERY START
+        It makes the credential in the root-only MateServer `.env` the single
+        source of truth. Rotating a reader password becomes: change `.env`,
+        restart. No manual `ALTER ROLE` on a production database, and no drift
+        between what Postfix is configured with and what PostgreSQL expects.
+
+    A role whose variable is unset is SKIPPED, not blanked. Clearing a password
+    because a variable was forgotten would break mail flow on the next restart
+    with no obvious cause.
+
+    The password is passed as a bound parameter and never logged. `ALTER ROLE`
+    does not accept a placeholder for the password literal, so the statement is
+    composed with psycopg's identifier/literal quoting rather than an f-string.
+    """
+    configured = []
+    for role, env_var in sorted(READER_ROLES.items()):
+        password = os.environ.get(env_var, "")
+        if not password:
+            logger.warning(
+                "%s is unset — leaving the %s password unchanged", env_var, role
+            )
+            continue
+        with conn.cursor() as cur:
+            cur.execute(
+                psycopg.sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD {}").format(
+                    psycopg.sql.Identifier(role),
+                    psycopg.sql.Literal(password),
+                )
+            )
+        configured.append(role)
+    conn.commit()
+    if configured:
+        logger.info("reader credentials synchronised for %s", ", ".join(configured))
+    return configured
 
 
 @contextlib.contextmanager

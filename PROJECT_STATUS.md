@@ -233,7 +233,7 @@ broken audit log. See the Phase 0 section below.
 
 Full detail, entry criteria and exit criteria: *Revised roadmap* below.
 
-### Native Engine Migration (NE0–NE8) — NE0, NE1 and NE2 complete
+### Native Engine Migration (NE0–NE8) — NE0–NE2 complete, NE3 implemented locally
 
 A **separate** engineering track that replaces mailcow as the Mail Engine
 orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It does
@@ -248,9 +248,37 @@ NE2 provisioning:              COMPLETE (2026-09-18) — schema, Native API, DKI
                                lifecycle, native adapter, tests, MateServer
                                runtime validation and the deployment-integrity
                                fix; the API runs entirely from its pinned image
-NE3–NE8 implementation:        NONE — not started
+NE3 mail flow:                 IMPLEMENTED AND VALIDATED LOCALLY (2026-09-18);
+                               NOT DEPLOYED TO MATESERVER. Postfix, Dovecot and
+                               Rspamd now consume NE2 state: authenticated
+                               submission -> sender authorisation -> Rspamd
+                               (ClamAV, oletools, DKIM signing) -> LMTP ->
+                               Maildir, proven end to end in an isolated local
+                               stack on .invalid domains
+NE4–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
 ```
+
+**NE3 is not complete.** It is implemented and verified locally; MateServer
+runtime validation has not been performed, and `MAIL_ENGINE_ADAPTER` is still
+`mailcow`. What NE3 established locally:
+
+* migration 003 publishes six read-only views as the contract Postfix and
+  Dovecot read, replacing NE2's table-level grants
+* two security defects inherited from earlier phases were found and fixed —
+  see `docs/SECURITY.md` § Native Engine NE3
+* the DKIM selector is now per-domain, resolved from a map the engine API
+  publishes; the hardcoded `mm1` is gone
+* 15 negative security tests pass, including sender spoofing, cross-tenant
+  spoofing, open relay, unknown recipients and suspension
+* a selector change RETIRES the outgoing DKIM key instead of deleting it, so
+  rotation can never produce unsigned mail while Rspamd still holds the previous
+  selector map; reconciliation removes retired keys after a 1800s grace
+* adapter methods are **18 of 26 implemented, 8 capability-missing**, and all
+  eight are attributed to NE4 — none of them is on the NE3 mail path
+
+Remaining for NE3 completion: MateServer runtime validation, including
+publishing the rebuilt Dovecot and Postfix images to GHCR.
 
 **Product decision (2026-09-13): the Private Beta runs on the Native Engine, not
 on mailcow.** Sequencing is therefore NE1–NE5 → P6 → P7 → NE6 → NE7 → P7.5 →

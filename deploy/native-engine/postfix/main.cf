@@ -21,7 +21,6 @@ compatibility_level = 3.6
 myhostname = mx.matemail.online
 mydomain = matemail.online
 myorigin = $myhostname
-mydestination = localhost.localdomain, localhost
 inet_interfaces = all
 # IPv4 ONLY, deliberately.
 #
@@ -43,17 +42,98 @@ inet_protocols = ipv4
 mynetworks_style = host
 mynetworks = 127.0.0.0/8 [::1]/128
 
+# NE3 inserts the MateMail policy hook here, after permit_mynetworks and
+# BEFORE permit_sasl_authenticated — the ordering P5 proved in production.
+# ── Virtual delivery: the engine database is the authority ───────────────────
+#
+# Every lookup goes through a VIEW owned by migration 003, never a base table.
+# `engine_ro_postfix` cannot read a base table, cannot read password hashes, and
+# cannot write anything — enforced by PostgreSQL grants, not by these queries
+# being careful. The view definitions also carry the "active domain AND active
+# mailbox" rule, so suspension has one meaning across submission, delivery and
+# IMAP instead of three copies that eventually disagree.
+#
+# The map files are rendered at container start by images/postfix/entrypoint.sh
+# because they carry the database password. The queries are in that script,
+# where a diff shows them.
+virtual_mailbox_domains = pgsql:/etc/postfix/sql/virtual_domain.cf
+virtual_mailbox_maps    = pgsql:/etc/postfix/sql/virtual_mailbox.cf
+virtual_alias_maps      = pgsql:/etc/postfix/sql/virtual_alias.cf
+
+# Delivery is Dovecot's, over LMTP on the internal compose network. Postfix
+# never writes to the mail store: one component owns Maildir, and it is the one
+# that also serves IMAP, so there is no second writer to keep consistent.
+virtual_transport = lmtp:inet:dovecot:24
+
+# Postfix must not also try to deliver these locally.
+local_recipient_maps =
+mydestination = localhost.localdomain, localhost
+
+# ── SMTP authentication ──────────────────────────────────────────────────────
+#
+# Delegated to Dovecot over a unix socket on a shared volume — not an inet
+# listener — so a submission password never crosses the container network.
+# Dovecot is already the authority on credentials; duplicating that into a
+# Postfix-side password store would create a second copy to keep in sync.
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = /run/dovecot-auth/auth-client
+smtpd_sasl_auth_enable = no
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_local_domain = $myhostname
+
+# ── Who may send as whom ─────────────────────────────────────────────────────
+#
+# THE anti-spoofing control. Without it any authenticated customer could put any
+# address in MAIL FROM — including another tenant's — and Postfix would sign it
+# with our DKIM key and send it over our IP reputation.
+#
+# The map returns every login allowed to use an envelope sender; the restriction
+# rejects the mail when the authenticated login is not among them.
+smtpd_sender_login_maps = pgsql:/etc/postfix/sql/sender_login.cf
+
+# ── Restrictions ─────────────────────────────────────────────────────────────
+#
+# ORDER IS THE SECURITY PROPERTY, so each stage says what it is for.
+#
+# `permit_mynetworks` is FIRST and is safe only because mynetworks is host-local
+# (127.0.0.0/8) — it is the container's own loopback, not the compose network.
+# If it ever grew to include the Docker subnet, every container on that network
+# would become an open relay.
+smtpd_sender_restrictions =
+    reject_non_fqdn_sender,
+    reject_unknown_sender_domain,
+    reject_authenticated_sender_login_mismatch,
+    reject_sender_login_mismatch
+
+# Relay control. `reject_unauth_destination` is what stops this being an open
+# relay: mail to a domain that is not ours is refused unless the client
+# authenticated. It stays LAST so nothing after it can permit past it.
 smtpd_relay_restrictions =
     permit_mynetworks,
     permit_sasl_authenticated,
-    defer_unauth_destination
+    reject_unauth_destination
 
-# NE3 inserts the MateMail policy hook here, after permit_mynetworks and
-# BEFORE permit_sasl_authenticated — the ordering P5 proved in production.
 smtpd_recipient_restrictions =
+    reject_non_fqdn_recipient,
+    reject_unknown_recipient_domain,
     permit_mynetworks,
     permit_sasl_authenticated,
     reject_unauth_destination
+
+# ── Content filtering ────────────────────────────────────────────────────────
+#
+# Rspamd as a milter: spam scoring, antivirus, and DKIM SIGNING all happen here.
+# Signing in the milter rather than in Postfix is what keeps the private key out
+# of Postfix entirely — Postfix cannot read the key store at all.
+#
+# `_action = tempfail` is deliberate. If Rspamd is unavailable the mail is
+# deferred, not delivered unsigned and unscanned: a message that skipped the
+# filter is worse than one that arrives a few minutes late.
+smtpd_milters = inet:rspamd:11332
+non_smtpd_milters = $smtpd_milters
+milter_protocol = 6
+milter_default_action = tempfail
+milter_mail_macros = i {mail_addr} {client_addr} {client_name} {auth_authen}
 
 # ── TLS ──────────────────────────────────────────────────────────────────────
 smtpd_tls_cert_file = /etc/ssl/mail/cert.pem

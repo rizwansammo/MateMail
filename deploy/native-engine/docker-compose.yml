@@ -209,16 +209,33 @@ services:
     # impossible. Ours is a derivative of the pinned upstream digest with the
     # identities corrected — see images/dovecot/Dockerfile.
     image: ${NATIVE_DOVECOT_IMAGE:-ghcr.io/rizwansammo/matemail-native-dovecot:ne1}
+    environment:
+      # Dovecot cannot read a secret from its own configuration -
+      # `%{env:...}` parses and then reaches libpq as an empty string - so
+      # the entrypoint renders these into a root-only include before the
+      # daemon starts, and refuses to start at all if one is missing.
+      NATIVE_DB_HOST: db
+      NATIVE_DB_NAME: matemail_engine
+      NATIVE_DOVECOT_DB_USER: engine_ro_dovecot
+      NATIVE_DOVECOT_DB_PASSWORD: ${NATIVE_DOVECOT_DB_PASSWORD:?required}
+      # Scoped to reporting a successful login and nothing else. NOT the
+      # provisioning secret: Dovecot is the most exposed component here,
+      # and that secret would let it mint mailboxes and rotate DKIM keys.
+      NATIVE_DOVECOT_POLICY_SECRET: ${NATIVE_DOVECOT_POLICY_SECRET:?required}
     volumes:
       - ./dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro
-      # Empty on purpose: no user matches, so NE1 authenticates nobody.
-      - ./dovecot/users:/etc/dovecot/users:ro
       # Native mail store. mailcow's vmail-vol-1 is NEVER mounted here — that
       # volume holds the live platform sender's mail.
       - native_vmail:/var/vmail
       - native_vmail_index:/var/vmail_index
       - native_tls:/etc/ssl/mail:ro
+      # The SASL socket Postfix authenticates submission through. A shared
+      # volume rather than an inet listener, so a customer's password is
+      # never on the container network.
+      - native_auth:/run/dovecot-auth
     networks: [engine]
+    depends_on:
+      db: {condition: service_healthy}
     healthcheck:
       test: ["CMD-SHELL", "doveadm service status >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -232,6 +249,13 @@ services:
     # No official Postfix image exists. Ours, under repository control — see
     # images/postfix/Dockerfile.
     image: ${NATIVE_POSTFIX_IMAGE:-ghcr.io/rizwansammo/matemail-native-postfix:ne1}
+    environment:
+      # The pgsql map files carry this password, so they are rendered at
+      # container start rather than committed. See images/postfix/entrypoint.sh.
+      NATIVE_DB_HOST: db
+      NATIVE_DB_NAME: matemail_engine
+      NATIVE_POSTFIX_DB_USER: engine_ro_postfix
+      NATIVE_POSTFIX_DB_PASSWORD: ${NATIVE_POSTFIX_DB_PASSWORD:?required}
     volumes:
       - ./postfix/main.cf:/etc/postfix/main.cf:ro
       - ./postfix/master.cf:/etc/postfix/master.cf:ro
@@ -239,9 +263,19 @@ services:
       # competing over the same spool — corruption, not redundancy.
       - native_postfix_queue:/var/spool/postfix
       - native_tls:/etc/ssl/mail:ro
+      # Read-only: Postfix consumes the socket Dovecot creates and has no
+      # business writing into that directory.
+      - native_auth:/run/dovecot-auth:ro
     networks: [engine]
     depends_on:
       unbound: {condition: service_healthy}
+      db: {condition: service_healthy}
+      # Postfix defers every message while Rspamd is unreachable
+      # (milter_default_action = tempfail) and cannot deliver without LMTP.
+      # Starting after both keeps a restart from queueing mail it could
+      # have waited a moment to handle.
+      dovecot: {condition: service_started}
+      rspamd: {condition: service_started}
     healthcheck:
       test: ["CMD-SHELL", "postfix status >/dev/null 2>&1 || exit 1"]
       interval: 30s
@@ -269,6 +303,13 @@ services:
     image: ${NATIVE_API_IMAGE:?required}
     environment:
       NATIVE_API_SECRET: ${NATIVE_API_SECRET:?required}
+      # The API sets these two roles' passwords at every start, so the
+      # root-only .env stays the single source of truth for a rotation.
+      # It is the only component that may write this database, so it is
+      # the only one that can configure the roles that may not.
+      NATIVE_POSTFIX_DB_PASSWORD: ${NATIVE_POSTFIX_DB_PASSWORD:?required}
+      NATIVE_DOVECOT_DB_PASSWORD: ${NATIVE_DOVECOT_DB_PASSWORD:?required}
+      NATIVE_DOVECOT_POLICY_SECRET: ${NATIVE_DOVECOT_POLICY_SECRET:?required}
       NATIVE_DB_HOST: db
       NATIVE_DB_NAME: ${NATIVE_DB_NAME:-matemail_engine}
       NATIVE_DB_USER: ${NATIVE_DB_USER:-engine}
@@ -365,6 +406,10 @@ volumes:
   native_redis:         {name: matemail_native_redis}
   native_vmail:         {name: matemail_native_vmail}
   native_vmail_index:   {name: matemail_native_vmail_index}
+  # Carries ONE unix socket: Dovecot's SASL listener, which Postfix uses to
+  # authenticate submission. Named rather than a bind mount so the socket
+  # never touches the host filesystem.
+  native_auth:          {name: matemail_native_auth}
   native_postfix_queue: {name: matemail_native_postfix_queue}
   native_rspamd:        {name: matemail_native_rspamd}
   # DKIM private keys. Separate from native_rspamd so the API can own the key

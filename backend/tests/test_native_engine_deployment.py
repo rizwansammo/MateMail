@@ -463,7 +463,27 @@ class MailStoreTest(unittest.TestCase):
         """
         directives = directives_only(self.dovecot)
         self.assertIn("quota = yes", directives)
-        self.assertRegex(directives, r"quota storage\s*\{[^}]*quota_storage_size")
+
+        # A quota root must exist...
+        self.assertRegex(directives, r"quota storage\s*\{")
+        # ...and a fallback limit must be set for a mailbox the userdb did not
+        # size, at the TOP LEVEL.
+        self.assertRegex(directives, r"(?m)^quota_storage_size\s*=\s*\S+")
+
+        # THE PLACEMENT IS THE POINT, and it is not cosmetic. A
+        # `quota_storage_size` written INSIDE the `quota storage` block wins
+        # over the per-mailbox value from the userdb, so every mailbox silently
+        # receives the fallback. Measured in NE3: a mailbox provisioned at 1 MB
+        # reported a 1048576 KB limit and accepted a 2 MB message. With the
+        # default at the top level the same mailbox reported 1024 KB and LMTP
+        # refused delivery with "Quota exceeded".
+        root = re.search(r"quota storage\s*\{(.*?)\}", directives, re.S)
+        self.assertIsNotNone(root, "the quota root should still be declared")
+        self.assertNotIn(
+            "quota_storage_size", root.group(1),
+            "a default inside the quota root overrides every per-mailbox quota",
+        )
+
         for backend in ("dict", "sql"):
             with self.subTest(backend=backend):
                 self.assertNotRegex(directives, rf"quota\s+{backend}\s*\{{")
@@ -480,9 +500,27 @@ class AntiRelayFromTheStartTest(unittest.TestCase):
     def setUp(self):
         self.main_cf = directives_only((NE / "postfix" / "main.cf").read_text(encoding="utf-8"))
 
-    def test_relay_restrictions_are_present_from_ne1(self):
-        self.assertIn("defer_unauth_destination", self.main_cf)
+    def test_relay_restrictions_refuse_unauthenticated_relay(self):
+        """
+        NE1 deferred unauthenticated relay; NE3 REJECTS it.
+
+        `defer_unauth_destination` answers 4xx, which tells a spammer to come
+        back later and keeps the attempt in their retry queue. Now that the
+        engine knows which domains are actually ours — `virtual_mailbox_domains`
+        is a live lookup rather than an empty list — a permanent 5xx is both
+        correct and cheaper. This asserts the stricter behaviour, and that the
+        weaker one has not come back.
+        """
         self.assertIn("reject_unauth_destination", self.main_cf)
+        self.assertNotIn("defer_unauth_destination", self.main_cf)
+
+        # It must be the LAST word in relay restrictions: a permit after it
+        # would let something through that this is there to stop.
+        relay = re.search(r"smtpd_relay_restrictions\s*=(.*?)(?=\n[a-z_]+\s*=)",
+                          self.main_cf, re.S)
+        self.assertIsNotNone(relay)
+        stages = [x.strip() for x in relay.group(1).replace("\n", " ").split(",") if x.strip()]
+        self.assertEqual(stages[-1], "reject_unauth_destination")
 
     def test_mynetworks_is_narrow(self):
         """
@@ -556,9 +594,31 @@ class DovecotDeniesAllAuthenticationTest(unittest.TestCase):
         self.assertNotRegex(self.directives, r"passdb\s+static\b")
         self.assertNotRegex(self.directives, r"driver\s*=\s*static")
 
-    def test_auth_is_backed_by_the_empty_passwd_file(self):
-        self.assertRegex(self.directives, r"passdb\s+passwd-file\s*\{")
-        self.assertIn("passwd_file_path = /etc/dovecot/users", self.directives)
+    def test_auth_is_backed_by_the_read_only_sql_view(self):
+        """
+        NE1 denied everyone through an empty passwd-file. NE3 replaces that with
+        a real lookup — against a VIEW, as a role that cannot write.
+
+        The NE1 property this supersedes was "nobody can authenticate". The NE3
+        property is narrower and more useful: authentication is possible, and
+        the only thing it can read is a hash.
+        """
+        self.assertRegex(self.directives, r"passdb\s+sql\s*\{")
+        self.assertRegex(self.directives, r"userdb\s+sql\s*\{")
+
+        # Views, never base tables: a base table here would hand Dovecot columns
+        # migration 003 deliberately does not publish to it.
+        self.assertIn("FROM dovecot_auth", self.directives)
+        self.assertIn("FROM dovecot_userdb", self.directives)
+        for table in ("FROM mailbox", "FROM domain", "FROM dkim_key"):
+            with self.subTest(table=table):
+                self.assertNotIn(table, self.directives)
+
+        # The credential is rendered at container start, never committed.
+        self.assertNotRegex(
+            self.directives, r"(?m)^\s*password\s*=\s*(?!%)\S",
+            "a database password must not appear in a committed config",
+        )
 
     def test_the_passwd_file_holds_no_accounts(self):
         """One test account here would outlive the phase that added it."""

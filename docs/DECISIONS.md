@@ -1416,3 +1416,126 @@ return on the P4A boundary work.
   exist.
 - mailcow removal (NE8) remains separately authorised and is never a side effect
   of another phase.
+
+---
+
+## DEC-020 — Postfix and Dovecot read the engine through views, not tables
+
+**Status:** accepted (NE3, 2026-09-18)
+
+NE2 granted the two reader roles `SELECT` on the base tables. NE3 replaces that
+with six purpose-built views (migration 003) and revokes the table grants.
+
+**Why.** Three things follow from it that table grants cannot give:
+
+* *A stable contract.* Postfix and Dovecot depend on six shapes, not on the
+  schema. A column rename would otherwise break a map file at delivery time
+  rather than at deploy time.
+* *Column-level least privilege.* `password_hash` is published to exactly one
+  view, granted to exactly one role. Postfix cannot read a hash at all, which is
+  not expressible with a table grant.
+* *One definition of "active".* "A mailbox is usable when the mailbox is active
+  **and** its domain is active" lives in the views. Copied into every map file
+  and every query instead, one copy eventually disagrees, and a suspended tenant
+  keeps sending.
+
+**Consequence.** NE1's `ALTER DEFAULT PRIVILEGES ... GRANT SELECT ON TABLES` is
+retired. It granted both readers access to every new relation automatically —
+including views — and had already required a compensating `REVOKE` in migration
+002. New relations are now readable by nobody until a migration grants them.
+
+---
+
+## DEC-021 — The DKIM selector is per domain, published by the engine API
+
+**Status:** accepted (NE3, 2026-09-18) — refines DEC-007r
+
+Rspamd resolves each domain's signing selector from
+`/var/lib/rspamd/dkim/selectors.map`, written by the engine API from the
+`dkim_key` rows. There is no global fallback selector.
+
+**Why.** A single hardcoded selector is correct only for domains that have never
+rotated. For any other, Rspamd looks for a key file that does not exist and
+either sends unsigned or signs with a key whose name the published DNS record
+does not match. A signature that fails to verify is worse than no signature: it
+reads as a forgery rather than as unsigned mail.
+
+**Why the API writes it.** The map is part of the key store, derived from the
+same rows as the keys and required to change in step with them. The API is
+already the only component permitted to write that store (DEC-007r), and Rspamd
+mounts it read-only. Publication happens inside the DKIM lifecycle lock, so the
+map can never reflect a half-completed rotation.
+
+**Why a failure propagates.** If the map cannot be published the operation
+fails, even though the key and row are already committed. A domain missing from
+the map sends unsigned mail; reporting success for that is the quiet
+half-failure the engine exists to prevent. Every operation is idempotent and
+startup reconciliation republishes the map.
+
+---
+
+## DEC-022 — Dovecot reports logins to the API instead of writing them
+
+**Status:** accepted (NE3, 2026-09-18)
+
+`last_login_at` is updated by the engine API, called from Dovecot's auth-policy
+hook, using a credential scoped to that single endpoint.
+
+**Why not Dovecot's own `last_login` plugin.** It writes to a dictionary, which
+would mean giving Dovecot write access to the engine database and ending the
+single-writer invariant (NE0.2) for a cosmetic timestamp.
+
+**Why a separate secret.** Dovecot is the most network-exposed component in the
+engine. Reusing the provisioning secret so it could record a login would let a
+compromised Dovecot create domains, mint mailboxes and rotate DKIM keys.
+
+**Why it fails open.** `auth_policy_reject_on_fail = no`, and the hook reports
+after authentication rather than gating it. Bookkeeping must not be able to lock
+customers out of their mail. Only successful logins are recorded, so an
+unauthenticated attacker cannot move a timestamp by guessing passwords.
+
+---
+
+## DEC-023 — A DKIM selector change retires the old key rather than deleting it
+
+**Status:** accepted (NE3, 2026-09-18) — refines DEC-021
+
+Rotating `mm1 -> alt7` keeps `<domain>.mm1.key` on disk, marked retired by a
+sidecar file, for a grace period of 1800 seconds. Reconciliation removes it
+afterwards.
+
+**Why.** Rspamd resolves the selector from a file map it re-reads on its own
+schedule. Deleting the old key the instant the map changed left a window where a
+worker still holding the previous map opened a key that no longer existed and
+sent the message UNSIGNED. The observed propagation was about 13 seconds, which
+is a probability rather than an invariant — and an invariant is what signing
+needs.
+
+Retaining the key makes both concurrent outcomes correct signatures: a stale
+worker verifies against the old DNS record, a fresh one against the new. Neither
+is unsigned, and neither is signed with a key the published record does not name.
+
+**Why not just shorten the refresh interval.** It reduces the probability and
+establishes nothing. The design has to tolerate the documented upper bound and
+process scheduling delays, not race them.
+
+**Why a sidecar file and not a database column.** Crash consistency. The marker
+is written BEFORE the new key is activated, so any crash leaves the retirement
+recorded beside the key it describes. A row lost in a crash window would let
+reconciliation classify a key that is still in use as an orphan and delete it
+early — exactly the failure the mechanism exists to prevent.
+
+**Why 1800 seconds.** A local file map refreshes at `map_watch_interval *
+map_file_watch_multiplier` — 300 * 0.1 = 30s at the shipped defaults, measured
+rather than assumed. 1800s is sixty times that, and short enough that retired
+private key material does not accumulate.
+
+**Why reconciliation owns cleanup.** It already runs at startup and through
+`/v1/dkim/reconcile`, already holds the DKIM lifecycle advisory lock, and already
+distinguishes live keys from orphans. Adding a scheduler for a deletion that is
+allowed to be late would be a moving part with no benefit.
+
+**Same-selector rotation is excluded deliberately.** The filename never changes,
+so no worker can be looking for a name that vanished, and activation is an atomic
+rename. Its real exposure is DNS caching of the old public key, which filesystem
+consistency cannot address; that is a production rollover concern owned by NE7.
