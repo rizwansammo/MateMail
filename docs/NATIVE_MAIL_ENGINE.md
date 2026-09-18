@@ -1639,7 +1639,7 @@ heavy service, ~1 GB) is memory-bounded.
 
 ---
 
-# NE2 — Provisioning layer (COMPLETE, 2026-09-13)
+# NE2 — Provisioning layer (COMPLETE, 2026-09-18)
 
 The authoritative engine-side state behind the provisioning half of
 `MailEngineAdapter`. Nothing here makes Postfix, Dovecot or Rspamd **consume**
@@ -2170,9 +2170,7 @@ Six mutations of the regression tests were each confirmed to fail: re-adding the
 source mount, mounting any other relative or absolute host path, removing the
 DKIM volume, restoring the unpublished `:ne2` fallback, and dropping the COPY.
 
-**The running MateServer API predates this fix.** It is still the NE2B image with
-the source overlay. NE2 is complete only once this is committed, the api image
-republished, the new digest pinned and the runtime redeployed.
+**Deployed 2026-09-18** — see the section below.
 
 ### One repository-side finding
 
@@ -2187,7 +2185,85 @@ instead of pointing it somewhere else. The workflow's moving tag stays `ne1`:
 renaming it would strand every already-published image under a tag nothing points
 at, and the moving tag is a convenience, not part of the deployment contract.
 
+## NE2 final deployment — integrity fix live (2026-09-18)
+
+```
+release       be5b7a38641c7592675e532ad3ec7bd01b68b23b, CI run 34769877707 green
+api image     Native Engine images run 35275580679 (api only; the other four
+              were unchanged and correctly skipped)
+api digest    ghcr.io/rizwansammo/matemail-native-api@sha256:
+              5cacaea0555cadd242eb82dc81cf8f2cfb6fac85cf0619a7af7c1d8fd8276e1d
+services      10 / 10 healthy; only `api` was recreated — the other nine kept
+              their 4–5 day uptime
+```
+
+The digest was verified against the commit-SHA tag rather than trusted, and
+confirmed to differ from the NE2B digest it replaces. All four other images stay
+on their NE1 digests.
+
+### The guarantee that was missing, and now holds
+
+NE2B's API image carried only the dependency set: `/opt/matemail` was empty and
+the container ran on a host bind mount of `engine/native_api`. The pin therefore
+attested to bcrypt, cryptography and psycopg, and to nothing about the
+provisioning logic, the DKIM lifecycle or the migrations actually executing.
+
+Measured on the running container after this deployment:
+
+```
+Config.Image        the new digest
+bind mounts         0   (the only mount is the native_dkim volume)
+source in image     app.py, db.py, dkim.py, passwords.py, provisioning.py,
+                    validation.py all present under /opt/matemail/native_api
+migrations in image 001_foundation.sql and 002_provisioning.sql present
+ENTRYPOINT          ["python3","-u","/opt/matemail/native_api/app.py"]
+content match       all eight files sha256-identical to the pushed commit
+host copy           still on disk at /opt/MateMailNative/engine/native_api and
+                    NOT mounted by the container — it is now documentation, not
+                    the code that runs
+```
+
+That last line is the point: the running code can be traced to a commit, not to
+whatever happens to be on the VPS filesystem.
+
+### Everything else unchanged
+
+```
+schema            v2, two schema_version rows, no migration re-applied on start
+                  or on a subsequent restart
+provisioning      all six tables exist and are empty (NE2B's synthetic data was
+                  cleaned and nothing was recreated)
+DKIM volume       native_dkim intact, dir 0700 owned by 11333, key store empty;
+                  API writable, Rspamd read-only ("Read-only file system")
+restart           API restarted alone: healthy, digest unchanged, still zero bind
+                  mounts, native_dkim still mounted, schema still v2
+isolation         no published host ports, all ten on matemail_native_engine
+                  only, 0 on mailcow-network, no foreign mounts, none privileged,
+                  no added capabilities
+mail ports        25/110/143/465/587/993/995 all bind 127.0.0.1 only; zero on a
+                  non-loopback address. Public listeners remain 22, 80, 443 plus
+                  a :4000 belonging to another NetaMate application
+production        mailcow 20 and MateMail 8 containers, untouched and not
+                  restarted (StartedAt predates this session); P5 policy hook
+                  intact; both queues empty; UFW byte-identical; DNS/PTR/MX
+                  unchanged; no mail sent; no customer data
+```
+
+### Two operational notes
+
+The MateServer GHCR credential had expired since NE2B, so `docker compose pull`
+returned `unauthorized`. It was refreshed from the authenticated `gh` CLI without
+the token passing through a terminal, an argument or a file. The old container
+kept running throughout — a failed pull recreates nothing.
+
+Host resources drifted over the five days between NE2B and this deployment
+(available RAM 4.5 → 3.2 GiB, swap 306 MiB → 1.4 GiB, disk 168 → 154 GB free),
+driven by other NetaMate applications on the box; the host LISTEN count rose from
+40 to 46 for the same reason, all docker-proxy entries and none mail-related. The
+Native Engine's own footprint is unchanged at roughly 860 MiB, of which ClamAV is
+645 MiB.
+
 **NE2 COMPLETE.** mailcow remains the production engine and
-`MAIL_ENGINE_ADAPTER` remains "mailcow" — NE2 gave the Native Engine
+`MAIL_ENGINE_ADAPTER` is still "mailcow": NE2 gave the Native Engine
 authoritative provisioning state, not the mail path. Nothing in Postfix, Dovecot
-or Rspamd consumes that state yet; that is NE3.
+or Rspamd consumes that state — that is NE3.

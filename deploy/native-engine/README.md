@@ -339,8 +339,7 @@ worse than reporting the domain and letting an operator rotate deliberately.
 ## Status
 
 **NE1 COMPLETE** — deployed and validated on MateServer, 2026-09-13.
-**NE2 functionally validated** on MateServer, 2026-09-13 — with a
-deployment-integrity fix staged and not yet deployed (see below).
+**NE2 COMPLETE** — deployed, digest-pinned and runtime-validated, 2026-09-18.
 
 ```
 runtime                /opt/MateMailNative/   (no git checkout on the VPS;
@@ -354,9 +353,10 @@ NE2 local              schema, Native API, crash-consistent DKIM lifecycle,
 NE2 runtime            VALIDATED (2026-09-13) — api image published and
                        digest-pinned, engine DB upgraded v1 -> v2, full synthetic
                        lifecycle validated and cleaned, 10/10 healthy
-NE2 integrity fix      STAGED, not deployed — the api image now bakes in its own
-                       source and the Compose file mounts no host path into it.
-                       Republish the api image, pin the new digest, redeploy.
+NE2 integrity fix      DEPLOYED (2026-09-18) — release be5b7a38, api image
+                       run 35275580679. The API now runs entirely from its
+                       image: 0 bind mounts, source and migrations baked in and
+                       sha256-identical to the commit, native_dkim preserved.
 production engine      mailcow, untouched. MAIL_ENGINE_ADAPTER is still "mailcow".
 ```
 
@@ -366,9 +366,13 @@ production engine      mailcow, untouched. MAIL_ENGINE_ADAPTER is still "mailcow
 ghcr.io/rizwansammo/matemail-native-api@sha256:198c238c4c3f080cb74f23b0ae65b2b7ce10b38d9fe6fa8d9543cf26588aced6
 ```
 
-Pinned at NE2B from release `e14e6221`.
+```
+ghcr.io/rizwansammo/matemail-native-api@sha256:5cacaea0555cadd242eb82dc81cf8f2cfb6fac85cf0619a7af7c1d8fd8276e1d
+```
 
-**Superseded by the deployment-integrity fix.** That build's image carried only
+Pinned 2026-09-18 from release `be5b7a38` — the digest currently running.
+
+The earlier NE2B digest (`sha256:198c238c…`) is **superseded**. That build's image carried only
 the dependency set: the application source was bind-mounted from the VPS, so the
 digest guaranteed bcrypt, cryptography and psycopg and nothing about the
 provisioning logic actually running. The API image now bakes in
