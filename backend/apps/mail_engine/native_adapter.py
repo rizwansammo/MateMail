@@ -86,16 +86,14 @@ _TIMEOUT = 15
 #: Refusing with `EngineCapabilityMissing` is deliberate. A fabricated
 #: `used_mb=0` or an empty queue would be a measurement that is wrong the moment
 #: the first message is delivered, and wrong quietly.
-_LATER = {
-    "set_mailbox_rate_limit": "NE4",
-    "get_mailbox_rate_limit": "NE4",
-    "clear_mailbox_rate_limit": "NE4",
-    "get_mailbox_usage": "NE4",
-    "get_queue_status": "NE4",
-    "get_quarantine_items": "NE4",
-    "cancel_queue_message": "NE4",
-    "release_quarantine_item": "NE4",
-}
+#: Operations the Native Engine does not implement.
+#:
+#: EMPTY AS OF NE4. Every method of the 26-method port is implemented against
+#: the real engine — rate limits enforced by the submission policy service,
+#: usage measured by Dovecot, queue and quarantine driven by Postfix's own
+#: queue. `_unavailable` is kept because a future contract addition should
+#: refuse honestly rather than return a plausible-looking zero.
+_LATER: dict[str, str] = {}
 
 
 class NativeMailEngineAdapter(MailEngineAdapter):
@@ -344,32 +342,94 @@ class NativeMailEngineAdapter(MailEngineAdapter):
 
     # ── Not yet implemented: refuse rather than fabricate ───────────────────
 
+    # ── NE4: operations ─────────────────────────────────────────────────────
+
+    #: The port's window vocabulary is already the engine's. There is no
+    #: translation table here on purpose — the Native Engine was built against
+    #: this contract, so a mapping layer would only be somewhere for the two to
+    #: drift apart.
+
     def set_mailbox_rate_limit(self, address: str, limit: RateLimit) -> None:
-        raise self._unavailable("set_mailbox_rate_limit")
+        self._request("POST", "/v1/mailboxes/rate-limit/set", json={"address": address, "messages": limit.messages, "window": limit.window},
+                          operation="set_mailbox_rate_limit")
 
     def get_mailbox_rate_limit(self, address: str) -> Optional[RateLimit]:
-        raise self._unavailable("get_mailbox_rate_limit")
+        """
+        The configured limit, or None when none was ever set.
+
+        None and `RateLimit(messages=0)` are different answers: the first means
+        nothing was configured, the second means someone deliberately lifted the
+        limit. Collapsing them would lose the distinction the DTO documents.
+        """
+        data = self._request(
+            "GET", "/v1/mailboxes/rate-limit", params={"address": address},
+            operation="get_mailbox_rate_limit", allow_404=True,
+        )
+        if not isinstance(data, dict) or data.get("messages") is None:
+            return None
+        return RateLimit(messages=int(data["messages"]),
+                         window=data.get("window", "hour"))
 
     def clear_mailbox_rate_limit(self, address: str) -> None:
-        raise self._unavailable("clear_mailbox_rate_limit")
+        self._request("POST", "/v1/mailboxes/rate-limit/clear", json={"address": address},
+                          operation="clear_mailbox_rate_limit")
 
     def get_mailbox_usage(self, address: str) -> Optional[MailboxUsage]:
-        # Returning used_mb=0 would be a fabricated measurement that stays wrong
-        # the moment the engine delivers a message. Dovecot is the only thing
-        # that knows, and it is not wired yet.
-        raise self._unavailable("get_mailbox_usage")
+        """
+        Real consumption, measured by Dovecot through the engine.
+
+        The engine converts doveadm's kilobytes to the megabytes this contract
+        uses, once, on its side. Doing it here as well is how a value gets
+        divided by 1024 twice.
+        """
+        data = self._request(
+            "GET", "/v1/mailboxes/usage", params={"address": address},
+            operation="get_mailbox_usage", allow_404=True,
+        )
+        if not isinstance(data, dict) or not data.get("address"):
+            return None
+        return MailboxUsage(
+            address=data["address"],
+            used_mb=int(data.get("used_mb", 0) or 0),
+            quota_mb=int(data.get("quota_mb", 0) or 0),
+            message_count=(int(data["message_count"])
+                           if data.get("message_count") is not None else None),
+        )
 
     def get_queue_status(self) -> list[dict]:
-        raise self._unavailable("get_queue_status")
+        """
+        The engine's real queue, excluding anything held.
 
-    def get_quarantine_items(self) -> list[dict]:
-        raise self._unavailable("get_quarantine_items")
+        Held mail is quarantine and is reported by `get_quarantine_items`. A
+        single list mixing the two would make "deferred" and "awaiting a human"
+        indistinguishable, which are opposite operational situations.
+        """
+        data = self._request("GET", "/v1/queue", operation="get_queue_status")
+        items = data.get("items") if isinstance(data, dict) else None
+        return items if isinstance(items, list) else []
 
     def cancel_queue_message(self, engine_message_id: str) -> None:
-        raise self._unavailable("cancel_queue_message")
+        """Drop one queued message. Idempotent — already gone is success."""
+        self._request("POST", "/v1/queue/cancel", json={"queue_id": engine_message_id},
+                          operation="cancel_queue_message")
+
+    def get_quarantine_items(self) -> list[dict]:
+        data = self._request("GET", "/v1/quarantine", operation="get_quarantine_items")
+        items = data.get("items") if isinstance(data, dict) else None
+        return items if isinstance(items, list) else []
 
     def release_quarantine_item(self, engine_message_id: str) -> None:
-        raise self._unavailable("release_quarantine_item")
+        """
+        Release one held message to its ORIGINAL recipients.
+
+        The engine releases by un-holding the queue file, so the sender and
+        recipients are whatever the message already carried. There is no
+        parameter here that could redirect it, and that is deliberate rather
+        than incidental.
+        """
+        self._request("POST", "/v1/quarantine/release", json={"queue_id": engine_message_id},
+                          operation="release_quarantine_item")
+
 
     # ── Health ──────────────────────────────────────────────────────────────
 

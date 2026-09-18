@@ -295,8 +295,35 @@ def set_mailbox_quota(conn, address: str, quota: int) -> None:
 
 
 def delete_mailbox(conn, address: str) -> None:
+    """
+    Remove a mailbox's provisioning state. Its MAIL IS KEPT.
+
+    NE4 decision. Deleting a mailbox removes authentication and routing — the
+    address stops working immediately — but the Maildir stays, recorded in
+    `retired_mailbox_storage` so it has an owner rather than being an orphan
+    directory nobody dares touch. Destroying customer mail must be a deliberate
+    operation, not a side effect of provisioning, and restore is P6's.
+
+    That retention is only safe because storage is addressed by an immutable
+    identity (migration 004). Recreating the same address mints a NEW identity
+    and therefore a NEW directory, so the next owner of the address cannot read
+    what this one left behind. Before 004 the recreated mailbox inherited the
+    old directory outright.
+    """
     address = validation.email_address(address)
     with conn.cursor() as cur:
+        # Recorded BEFORE the delete, while the row still exists to be read.
+        cur.execute(
+            """
+            INSERT INTO retired_mailbox_storage
+                   (address, domain_name, storage_id, quota_mb)
+            SELECT m.address, d.name, m.storage_id, m.quota_mb
+            FROM mailbox m JOIN domain d ON d.id = m.domain_id
+            WHERE m.address = %s
+            ON CONFLICT (storage_id) DO NOTHING
+            """,
+            (address,),
+        )
         cur.execute("DELETE FROM mailbox WHERE address = %s", (address,))
         # Any alias that pointed here is now external — it must stop conferring
         # send-as. The FK is ON DELETE CASCADE for the destination row itself,
@@ -304,6 +331,125 @@ def delete_mailbox(conn, address: str) -> None:
         # address; re-link resolves them to NULL.
         _relink_destinations(cur, address, None)
 
+
+def mailbox_storage_id(conn, address: str) -> str | None:
+    """
+    The immutable directory identity of one mailbox.
+
+    Exposed so callers can prove a recreated address landed somewhere new. It is
+    not a secret — it is a directory name — but it is also never needed by
+    MateMail, so it does not cross the adapter.
+    """
+    name = validation.email_address(address)
+    with conn.cursor() as cur:
+        cur.execute("SELECT storage_id FROM mailbox WHERE address = %s", (name,))
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+# ── Rate limits ─────────────────────────────────────────────────────────────
+#
+# Stored configuration, not an action, which is why these live here rather than
+# in operations.py. The engine is the authority; Postfix's policy service reads
+# `postfix_rate_limit` live, so a change takes effect on the next message with
+# nothing to publish and nothing to reload.
+
+_RATE_WINDOWS = ("second", "minute", "hour", "day")
+
+
+def set_mailbox_rate_limit(conn, address: str, messages: int, window: str) -> dict:
+    """
+    Cap one mailbox's submission volume. Idempotent.
+
+    `messages = 0` is an explicit "no limit", matching the RateLimit DTO, and is
+    stored rather than treated as a clear: "someone deliberately lifted this
+    mailbox's limit" and "nobody ever set one" are different facts, and only the
+    first should survive a later review of who changed what.
+    """
+    name = validation.email_address(address)
+    if not isinstance(messages, int) or isinstance(messages, bool) or messages < 0:
+        raise ValidationError("messages must be a whole number of zero or more",
+                              field="messages")
+    if window not in _RATE_WINDOWS:
+        raise ValidationError(
+            f"window must be one of {_RATE_WINDOWS}", field="window")
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM mailbox WHERE address = %s", (name,))
+        row = cur.fetchone()
+        if not row:
+            raise NotFound(f"no such mailbox: {name}")
+        cur.execute(
+            """
+            INSERT INTO mailbox_rate_limit (mailbox_id, messages, window_name, updated_at)
+            VALUES (%s, %s, %s, now())
+            ON CONFLICT (mailbox_id) DO UPDATE SET
+                messages    = EXCLUDED.messages,
+                window_name = EXCLUDED.window_name,
+                updated_at  = now()
+            """,
+            (row[0], messages, window),
+        )
+    conn.commit()
+    logger.info("rate limit for %s set to %d/%s", name, messages, window)
+    return {"address": name, "messages": messages, "window": window}
+
+
+def get_mailbox_rate_limit(conn, address: str) -> dict | None:
+    """The configured limit, or None when nothing was ever configured."""
+    name = validation.email_address(address)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT rl.messages, rl.window_name FROM mailbox_rate_limit rl "
+            "JOIN mailbox m ON m.id = rl.mailbox_id WHERE m.address = %s",
+            (name,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {"address": name, "messages": int(row[0]), "window": row[1]}
+
+
+def clear_mailbox_rate_limit(conn, address: str) -> None:
+    """
+    Remove the override entirely. Idempotent — clearing an absent limit is fine.
+
+    After this the mailbox has NO row, which the policy service reads as
+    unlimited. That is deliberately distinguishable from `messages = 0`.
+    """
+    name = validation.email_address(address)
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM mailbox_rate_limit WHERE mailbox_id IN "
+            "(SELECT id FROM mailbox WHERE address = %s)",
+            (name,),
+        )
+    conn.commit()
+    logger.info("rate limit cleared for %s", name)
+
+
+def list_retired_storage(conn, address: str = "") -> list[dict]:
+    """
+    Storage kept after a mailbox was deleted.
+
+    P6 owns retention and eventual removal. This exists so that work has a list
+    to act on instead of a directory tree to interpret.
+    """
+    query = ("SELECT address, domain_name, storage_id, quota_mb, retired_at "
+             "FROM retired_mailbox_storage")
+    params = ()
+    if address:
+        query += " WHERE address = %s"
+        params = (validation.email_address(address),)
+    query += " ORDER BY retired_at DESC"
+    with conn.cursor() as cur:
+        cur.execute(query, params or None)
+        rows = cur.fetchall()
+    return [
+        {"address": r[0], "domain": r[1], "storage_id": r[2],
+         "quota_mb": r[3], "retired_at": r[4].isoformat() if r[4] else None}
+        for r in rows
+    ]
 
 def list_mailboxes(conn, domain: str = "") -> list[dict]:
     with conn.cursor() as cur:

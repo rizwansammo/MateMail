@@ -1,4 +1,4 @@
-# MateMail Native Mail Engine — deployment (NE1)
+# MateMail Native Mail Engine — deployment (NE1–NE3)
 
 The Native Engine is a MateMail-owned mail stack built directly on Postfix,
 Dovecot and Rspamd. It exists to replace mailcow as the orchestration layer, and
@@ -340,6 +340,10 @@ worse than reporting the domain and letting an operator rotate deliberately.
 
 **NE1 COMPLETE** — deployed and validated on MateServer, 2026-09-13.
 **NE2 COMPLETE** — deployed, digest-pinned and runtime-validated, 2026-09-18.
+**NE3 COMPLETE** — mail flow deployed, digest-pinned and runtime-validated,
+2026-09-18.
+**NE4 implemented locally** — operations, queue, quarantine, rate limits and
+mailbox storage lifecycle. MateServer runtime validation pending.
 
 ```
 runtime                /opt/MateMailNative/   (no git checkout on the VPS;
@@ -357,7 +361,56 @@ NE2 integrity fix      DEPLOYED (2026-09-18) — release be5b7a38, api image
                        run 35275580679. The API now runs entirely from its
                        image: 0 bind mounts, source and migrations baked in and
                        sha256-identical to the commit, native_dkim preserved.
+NE3 release            commit 64b19471, CI run 35382656549, images runs
+                       35384065561 and 35384352926
+NE3 runtime            VALIDATED (2026-09-18) — schema v2 -> v3 with migration
+                       003 applied exactly once, 10/10 healthy, 18/18 reader
+                       isolation, end-to-end mail delivered to Maildir 5000:5000,
+                       DKIM cryptographically verified against the API's public
+                       material, selector rotation retaining the old key, EICAR
+                       rejected, quota enforced, last_login correct. All
+                       synthetic state cleaned; 0 outbound SMTP deliveries.
+adapter methods        18 of 26 implemented; the 8 that refuse all name NE4
 production engine      mailcow, untouched. MAIL_ENGINE_ADAPTER is still "mailcow".
+```
+
+### Deploying — always use `./deploy.sh`
+
+```bash
+cd /opt/MateMailNative/deploy/native-engine
+./deploy.sh          # bring the stack up with current configuration
+./deploy.sh pull     # pull pinned images first, then up
+```
+
+**Do not run bare `docker compose up -d`.** Compose compares images,
+environment, mounts and labels — never the CONTENT of a bind-mounted config
+file. NE3's new `groups.conf` sat on disk, visible inside the container, and had
+no effect for five days: the antivirus scores meant to reject malware were never
+loaded, and it was found by checking rather than by anything failing.
+
+`deploy.sh` hashes each service's configuration directory and exports the hash
+as an environment variable the Compose file consumes, so a configuration change
+becomes a change Compose can see and the container is recreated exactly when its
+configuration differs. Unchanged services are left running.
+
+### NE4 operational control
+
+Three private paths, none of them published:
+
+```
+queue / quarantine   Native API -> control daemon inside the Postfix container
+rate limiting        Postfix smtpd -> policy service on container loopback
+mailbox usage        Native API -> Dovecot doveadm HTTP API
+```
+
+The Native API never receives the Docker socket and never mounts the Postfix
+spool; Django never runs `docker exec`. The control daemon runs no shell.
+
+New secrets in `.env` (generate independently, never reuse `NATIVE_API_SECRET`):
+
+```
+NATIVE_CONTROL_SECRET     the queue/quarantine control API
+NATIVE_DOVEADM_API_KEY    Dovecot's administrative API
 ```
 
 ### Immutable image digests in production
@@ -370,7 +423,27 @@ ghcr.io/rizwansammo/matemail-native-api@sha256:198c238c4c3f080cb74f23b0ae65b2b7c
 ghcr.io/rizwansammo/matemail-native-api@sha256:5cacaea0555cadd242eb82dc81cf8f2cfb6fac85cf0619a7af7c1d8fd8276e1d
 ```
 
-Pinned 2026-09-18 from release `be5b7a38` — the digest currently running.
+Pinned 2026-09-18 from release `be5b7a38`. **Superseded by NE3** — see below.
+
+### NE3 digests (currently running)
+
+```
+ghcr.io/rizwansammo/matemail-native-api@sha256:abfa87acb7751ec6daf03842b1a9bedd120e8eb276673d725b5a8b195fb8be14
+ghcr.io/rizwansammo/matemail-native-dovecot@sha256:d90ce8e51e5c6c169736c0d95ecc25dcaccac7d20e0bb1d8bded9b3f903f94c5
+ghcr.io/rizwansammo/matemail-native-postfix@sha256:1f00551f026be80ce61d770f3c061db3a3a035901bc71259ac04fa649742e1eb
+```
+
+Pinned 2026-09-18 from release `64b19471`. Dovecot and Postfix were rebuilt
+because both images gained an entrypoint: neither daemon can read a secret from
+its own configuration, so each renders its database credentials at container
+start. `unbound` and `olefy` were unchanged by NE3 and remain on their NE1
+digests.
+
+The image workflow is `workflow_dispatch` with a single-component input and a
+concurrency group, so **each dispatch publishes only the component it names, and
+a queued dispatch can be cancelled by a newer one**. Dispatch them one at a time
+and confirm each tag exists before pinning — during NE3 the Dovecot build was
+silently cancelled this way and had to be re-dispatched.
 
 The earlier NE2B digest (`sha256:198c238c…`) is **superseded**. That build's image carried only
 the dependency set: the application source was bind-mounted from the VPS, so the

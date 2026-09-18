@@ -92,5 +92,23 @@ else
     echo "# No policy secret configured; last-login reporting is disabled."         > /etc/dovecot/engine-policy.conf
 fi
 
+# The doveadm HTTP API key (NE4). Same reasoning as the database password: it
+# cannot come from the environment through the configuration, and the
+# configuration is in Git.
+#
+# Optional, like the policy secret: without it the administrative API is simply
+# not usable, and Dovecot still serves mail. An engine that refused to start
+# because a reporting credential was missing would be trading a cosmetic outage
+# for a real one.
+if [ -n "${NATIVE_DOVEADM_API_KEY:-}" ]; then
+    {
+        echo "# Generated at container start - holds one secret."
+        echo "doveadm_api_key = ${NATIVE_DOVEADM_API_KEY}"
+    } > /etc/dovecot/engine-doveadm.conf
+else
+    echo "entrypoint: NATIVE_DOVEADM_API_KEY unset - the doveadm API is disabled" >&2
+    echo "# No API key configured; the administrative API is unusable."         > /etc/dovecot/engine-doveadm.conf
+fi
+
 # Upstream's entrypoint and command, unchanged.
 exec /usr/bin/tini -- /dovecot/sbin/dovecot -F

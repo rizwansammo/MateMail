@@ -1977,31 +1977,39 @@ class NativeAdapterContractTest(AdapterContractTests, EngineDatabaseTestCase):
 
 
 class NativeAdapterCapabilityTest(EngineDatabaseTestCase):
-    """The refusals are part of the contract, so they are asserted, not assumed."""
+    """
+    The capability surface is part of the contract, so it is asserted rather
+    than assumed. Through NE3 this class checked that eight operations REFUSED;
+    NE4 implements them, so it now checks that they reach the engine.
+    """
 
     def setUp(self):
         super().setUp()
         self.adapter, self.session = build_native_adapter(self.conn, ENGINE_DIR)
 
-    def test_unimplemented_operations_refuse_rather_than_fabricate(self):
-        from apps.mail_engine.errors import EngineCapabilityMissing
-        from apps.mail_engine.dto import RateLimit
+    def test_the_eight_operational_methods_reach_the_engine(self):
+        """
+        NE2 asserted these EIGHT REFUSED. NE4 implements them, so the property
+        worth protecting flipped: each must now actually call the engine rather
+        than return a plausible-looking empty result.
 
-        cases = [
-            ("get_mailbox_usage", lambda: self.adapter.get_mailbox_usage(ADDRESS)),
-            ("get_queue_status", self.adapter.get_queue_status),
-            ("get_quarantine_items", self.adapter.get_quarantine_items),
-            ("cancel_queue_message", lambda: self.adapter.cancel_queue_message("x")),
-            ("release_quarantine_item", lambda: self.adapter.release_quarantine_item("x")),
-            ("set_mailbox_rate_limit",
-             lambda: self.adapter.set_mailbox_rate_limit(ADDRESS, RateLimit(messages=10))),
-            ("get_mailbox_rate_limit", lambda: self.adapter.get_mailbox_rate_limit(ADDRESS)),
-            ("clear_mailbox_rate_limit", lambda: self.adapter.clear_mailbox_rate_limit(ADDRESS)),
-        ]
-        for name, call in cases:
+        A method that answered `[]` or `0` without asking would still count as
+        implemented and would still be a lie, which is exactly what the original
+        refusal existed to prevent.
+        """
+        import inspect
+
+        from apps.mail_engine.native_adapter import NativeMailEngineAdapter
+
+        for name in ("get_mailbox_usage", "get_queue_status", "get_quarantine_items",
+                     "cancel_queue_message", "release_quarantine_item",
+                     "set_mailbox_rate_limit", "get_mailbox_rate_limit",
+                     "clear_mailbox_rate_limit"):
             with self.subTest(operation=name):
-                with self.assertRaises(EngineCapabilityMissing):
-                    call()
+                source = inspect.getsource(getattr(NativeMailEngineAdapter, name))
+                self.assertIn("self._request(", source,
+                              f"{name} must query the engine, not fabricate a result")
+                self.assertNotIn("_unavailable(", source)
 
     def test_the_implemented_method_count_is_what_the_docs_claim(self):
         """
@@ -2034,9 +2042,13 @@ class NativeAdapterCapabilityTest(EngineDatabaseTestCase):
         implemented = abstract & defined - refusing
         remaining = abstract & refusing
 
+        # NE4 completed the port: 18 of 26 at NE3, 26 of 26 now, nothing
+        # deferred. The count is still read from the code rather than from
+        # prose — an earlier report claimed 16 of 26 because it had missed two
+        # methods and nothing checked the arithmetic.
         self.assertEqual(len(abstract), 26, "the port's method count changed")
-        self.assertEqual(len(implemented), 18, sorted(implemented))
-        self.assertEqual(len(remaining), 8, sorted(remaining))
+        self.assertEqual(len(implemented), 26, sorted(implemented))
+        self.assertEqual(len(remaining), 0, sorted(remaining))
         self.assertEqual(implemented | remaining, abstract,
                          "every abstract method must be implemented or explicitly refused")
 

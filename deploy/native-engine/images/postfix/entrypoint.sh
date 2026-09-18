@@ -95,6 +95,38 @@ write_map virtual_alias.cf \
 write_map sender_login.cf \
     "SELECT owner FROM postfix_sender_login WHERE address='%s'"
 
+# ── NE4 control plane ────────────────────────────────────────────────────────
+#
+# Started BEFORE Postfix and in the background, because Postfix runs in the
+# foreground as PID 1's child and never returns. It provides two things:
+#
+#   the queue/quarantine control API   consumed only by the Native API
+#   the submission rate-limit policy   consumed only by this container's smtpd
+#
+# If it cannot start, Postfix must not either. `smtpd_policy_service` failures
+# are configured to defer, so a silently-missing policy service would defer all
+# submission — which looks like a mail outage with no obvious cause. Failing
+# here instead makes the reason visible in the container's first ten lines.
+if [ -z "${NATIVE_CONTROL_SECRET:-}" ]; then
+    echo "entrypoint: NATIVE_CONTROL_SECRET is unset - refusing to start. The" >&2
+    echo "            queue control API and the rate-limit policy service both" >&2
+    echo "            depend on it, and Postfix defers submission without the" >&2
+    echo "            policy service." >&2
+    exit 78
+fi
+
+python3 /usr/local/lib/matemail/engine_control.py &
+CONTROL_PID=$!
+
+# Give it a moment to bind, then confirm it is actually alive rather than
+# assuming the fork succeeded.
+sleep 2
+if ! kill -0 "$CONTROL_PID" 2>/dev/null; then
+    echo "entrypoint: the engine control plane exited immediately" >&2
+    exit 70
+fi
+echo "entrypoint: engine control plane running as pid $CONTROL_PID" >&2
+
 postfix set-permissions 2>/dev/null || true
 postfix check
 exec postfix start-fg

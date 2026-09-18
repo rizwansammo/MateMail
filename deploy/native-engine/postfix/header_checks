@@ -1,0 +1,16 @@
+# MateMail Native Engine - NE4 quarantine trigger.
+#
+# ONE rule. Rspamd adds this header when its scoring reaches the quarantine
+# threshold, and Postfix then parks the message in the hold queue instead of
+# delivering it.
+#
+# POSIX EXTENDED REGEX, not PCRE. Postfix's regexp: tables do not understand
+# \s or \d, so character classes are spelled the POSIX way.
+#
+# WHY THIS IS NOT AN INTERNET-REACHABLE BACKDOOR
+#   Rspamd removes any inbound copy of this header before adding its own, so a
+#   remote sender cannot set it. Even if they could, the only thing it achieves
+#   is quarantining their OWN message - it cannot release one, cannot bypass
+#   scanning, and cannot redirect mail. The dangerous direction, escaping
+#   quarantine, is not expressible here at all.
+/^X-MateMail-Quarantine:[[:space:]]*yes[[:space:]]*$/   HOLD Quarantined by MateMail policy

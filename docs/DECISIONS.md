@@ -1539,3 +1539,127 @@ allowed to be late would be a moving part with no benefit.
 so no worker can be looking for a name that vanished, and activation is an atomic
 rename. Its real exposure is DNS caching of the old public key, which filesystem
 consistency cannot address; that is a production rollover concern owned by NE7.
+
+---
+
+## DEC-024 — Mailbox storage is addressed by an immutable identity
+
+**Status:** accepted (NE4, 2026-09-19)
+
+Maildir lives at `/var/vmail/<domain>/<storage_id>`, where `storage_id` is
+minted once per mailbox ROW and never reused. Deleting a mailbox removes its
+provisioning state and KEEPS its mail, recorded in `retired_mailbox_storage`.
+
+**Why.** NE3 runtime validation found that deleting a mailbox removed its rows
+and left the Maildir on disk at a path derived from the email address.
+Recreating that address pointed the new owner at the previous owner's mail. No
+attacker is required — only staff recreating a mailbox somebody asked to have
+deleted.
+
+Making the path depend on a per-row identity means a recreated address is
+*structurally* unable to reach the old directory. The alternative — deleting the
+mail on `delete_mailbox` — would make a provisioning call destroy customer data
+as a side effect, which is worse and is not what the contract asks for.
+
+**Why existing rows keep their current path.** Migration 004 backfills
+`storage_id` with the row's current `local_part`, so no live mailbox's storage
+moves and there is nothing to migrate on disk — SQL cannot move files, and a
+migration that renamed every path would orphan exactly the data it protects. The
+fix still holds for those rows: the vulnerability is delete-then-recreate, and a
+recreated mailbox is always a new row, which always gets a UUID.
+
+**Who owns the retained data.** P6. `retired_mailbox_storage` exists so that
+work has a list to act on rather than a directory tree to interpret.
+
+---
+
+## DEC-025 — Queue control runs inside the Postfix container
+
+**Status:** accepted (NE4, 2026-09-19)
+
+Queue and quarantine operations are served by a small control daemon that runs
+beside Postfix in its own container, reached only by the Native API over a
+shared-secret HTTP API on the engine network.
+
+**Why not the alternatives.** Giving the Native API the Docker socket hands it
+root on the host. Giving it a writable mount of the spool creates a second
+writer on a queue directory and turns any path-traversal bug into spool writes.
+Letting Django run `docker exec` couples MateMail to container names. The
+control daemon is the smallest privileged surface: it lives in the one place
+that already legitimately owns the spool, and it adds no service to the topology.
+
+**What keeps it safe.** It runs no shell. Every Postfix invocation is a fixed
+argv list whose only caller-supplied element is a queue id already matched
+against `^[A-Za-z0-9]{6,32}$`. Release is `postsuper -H`, which cannot alter a
+sender, a recipient or the content — so releasing is structurally incapable of
+redirecting someone's mail.
+
+---
+
+## DEC-026 — Quarantine is the Postfix hold queue
+
+**Status:** accepted (NE4, 2026-09-19)
+
+Rspamd marks a suspicious message with `X-MateMail-Quarantine`, and a Postfix
+`header_checks` rule moves it to the HOLD queue. `get_quarantine_items` reads
+that queue; `release_quarantine_item` un-holds one message.
+
+**Why.** The hold queue is the only Postfix state that already means "accepted,
+retained, and going nowhere until a human says so". It is distinct from
+`deferred` (will retry by itself) and `active` (being delivered now), so the
+three operational situations stay distinguishable — which a single "not
+delivered" list would destroy.
+
+**Why the marker is not an Internet-reachable backdoor.** Rspamd removes any
+inbound copy of the header before adding its own, so a remote sender cannot set
+it. Even if they could, the only thing it achieves is quarantining their own
+message: it cannot release one, cannot bypass scanning and cannot redirect mail.
+The dangerous direction — escaping quarantine — is not expressible through it.
+
+Confirmed malware is REJECTED outright rather than quarantined. Quarantine is
+for suspicion; parking malware in a queue for someone to release by accident is
+worse than refusing it.
+
+---
+
+## DEC-027 — A rate-limited submission is deferred, not bounced
+
+**Status:** accepted (NE4, 2026-09-19)
+
+Exceeding a per-mailbox submission limit returns `4.7.1` through
+`DEFER_IF_PERMIT`. The identity charged is the AUTHENTICATED login, never the
+envelope sender.
+
+**Why 4xx.** A rate limit is a statement about timing, not about the message. A
+permanent rejection would destroy mail that was never wrong and generate a
+bounce for what is a throttling decision. A well-behaved client retries.
+
+**Why the authenticated identity.** Charging the envelope sender would let a
+mailbox spread its traffic across every alias it is entitled to send as, which
+is precisely the budget the limit exists to cap.
+
+**Why the limiter fails open on its own outage.** If the limit lookup or the
+Redis counter is unavailable the message is allowed. This service caps volume;
+it does not authorise mail. Authentication, sender ownership and relay control
+have all already run and are unaffected. Refusing every submission because a
+counter was unreachable would turn a metering outage into a total outage. The
+Postfix side still DEFERS if the policy service itself cannot be reached at all.
+
+---
+
+## DEC-028 — Deployment hashes bind-mounted configuration
+
+**Status:** accepted (NE4, 2026-09-19)
+
+`deploy.sh` hashes each service's configuration directory and passes the result
+as an environment variable, so Compose recreates a container exactly when its
+configuration changed.
+
+**Why.** Compose compares images, environment, mounts and labels — never the
+CONTENT of a bind-mounted file. NE3 updated `rspamd/local.d`, `docker compose up
+-d` reported success, and Rspamd ran for five days with the previous rules: the
+antivirus scores meant to reject malware were never loaded. It was found by
+checking, not by anything failing.
+
+Documenting "remember to restart Rspamd" would not have prevented it. Hashing
+makes the change visible to the tool that decides what to recreate.

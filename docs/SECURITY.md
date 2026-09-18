@@ -1328,3 +1328,86 @@ No API response carries private material. Probed across `/v1/dkim` (including
 `?include_private=1` and `?private=true`), `/v1/domains`, `/v1/mailboxes` and
 `/status`: zero hits for private-key material, and `FORBIDDEN_RESPONSE_KEYS`
 refuses to serialise such a field at all.
+
+---
+
+## Native Engine NE4 — operations
+
+**Status: implemented and validated locally. MateServer runtime validation
+pending.**
+
+### The defect NE4 exists to fix
+
+NE3 runtime validation found that `delete_mailbox` removed a mailbox's rows and
+LEFT ITS MAIL on disk, at a path derived from the email address. Recreating that
+address pointed the new owner at the previous owner's mail. No attacker is
+required — only staff recreating a mailbox somebody asked to have deleted.
+
+Migration 004 addresses storage by an opaque identity minted once per mailbox
+row. A recreated address is a new row, so it gets a new identity and a different
+directory; the old one becomes unreachable by construction rather than by
+remembering to delete it. Proven end to end: after delete and recreate, the new
+mailbox reported 0 messages while the old directory was still on disk and
+recorded in `retired_mailbox_storage`.
+
+Deletion keeps the mail deliberately. A provisioning call must not destroy
+customer data as a side effect; P6 owns retention and removal, and the table
+gives that work a list to act on rather than a directory tree to interpret.
+
+### Operational control paths
+
+| Path | Who may call it | Credential |
+|---|---|---|
+| queue / quarantine | Native API only | `NATIVE_CONTROL_SECRET` |
+| rate-limit policy | this container's own smtpd | loopback only |
+| mailbox usage | Native API only | `NATIVE_DOVEADM_API_KEY` |
+
+The queue control plane runs INSIDE the Postfix container. The Native API never
+receives the Docker socket, never mounts the spool, and Django never runs
+`docker exec`. The daemon runs no shell: every Postfix invocation is a fixed
+argv list whose only caller-supplied element is a queue id already matched
+against `^[A-Za-z0-9]{6,32}$`. Traversal and injection attempts are refused with
+`400` before reaching the process that could act on them.
+
+Release is `postsuper -H`, which cannot alter a sender, a recipient or the
+content — so releasing quarantined mail is structurally incapable of
+redirecting it. Verified: a released message arrived exactly once with its
+`Delivered-To` unchanged.
+
+### Failure behaviour, measured
+
+| Component down | Behaviour |
+|---|---|
+| Rspamd | `454 4.3.0` — submission deferred, nothing accepted unscanned |
+| Dovecot | `454 4.7.0` — SASL unavailable, so nothing is accepted at all |
+| ClamAV | `soft reject` via `CLAM_VIRUS_FAIL` — deferred, never treated as clean |
+| Redis | submission ALLOWED — the limiter fails open (see below) |
+| Native API | mail path unaffected; Postfix and Dovecot read PostgreSQL directly |
+
+Two of these deserve the reasoning spelled out.
+
+**The rate limiter fails open, on purpose.** If the limit lookup or the Redis
+counter is unavailable the message is allowed. This service caps volume; it does
+not authorise mail. Authentication, sender ownership and relay control have all
+already run and are unaffected by a counter being unreachable. Refusing every
+submission because a metering component was down would turn a cosmetic outage
+into a total one. The Postfix side still DEFERS if the policy service itself
+cannot be reached at all, so a missing limiter is not the same as a broken one.
+
+**A scanner that could not answer is not a clean verdict.** Rspamd scores
+`CLAM_VIRUS_FAIL` at zero by default, so an unreachable ClamAV produced mail
+that flowed through unscanned and looked exactly like mail that had been checked.
+`force_actions.conf` now defers instead. Configuring `symbol_fail` on the
+antivirus rule was required for the symbol to exist at all — without it the
+module logs an error and emits nothing.
+
+Rate-limit rejection is `4.7.1` through `DEFER_IF_PERMIT`. A limit is a
+statement about timing, not about the message: a permanent rejection would
+destroy mail that was never wrong and bounce a throttling decision.
+
+### Deployment correctness
+
+Compose does not recreate a container when only a bind-mounted configuration
+file changed. NE3 lost five days of antivirus enforcement to this. `deploy.sh`
+hashes each service's configuration directory and passes the hash in the
+environment, so a configuration change becomes a change Compose can see.

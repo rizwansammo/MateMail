@@ -52,6 +52,7 @@ import urllib.parse
 
 import db
 import dkim as dkim_lib
+import operations
 import provisioning
 import validation
 from validation import ValidationError
@@ -293,6 +294,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(404, {"error": "not found"})
             else:
                 self._send(200, result)
+        except operations.InvalidIdentifier as exc:
+            self._send(400, {"error": str(exc)})
         except ValidationError as exc:
             self._send(400, {"error": exc.message, "field": exc.field})
         except provisioning.NotFound as exc:
@@ -362,6 +365,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with db.connect() as conn:
                 result = handler(conn, body)
             self._send(200, result if result is not None else {"ok": True})
+        except operations.InvalidIdentifier as exc:
+            self._send(400, {"error": str(exc)})
         except ValidationError as exc:
             self._send(400, {"error": exc.message, "field": exc.field})
         except provisioning.NotFound as exc:
@@ -531,6 +536,63 @@ def _read_dkim(conn, query):
     return provisioning.get_dkim_public_key(conn, query.get("domain", ""))
 
 
+# ── NE4: operations ─────────────────────────────────────────────────────────
+
+
+def _read_usage(conn, query):
+    """
+    Real consumption, measured by Dovecot.
+
+    An unreachable Dovecot is NOT reported as zero usage. A fabricated number
+    here would be believed by whatever renders it, and "your mailbox is empty"
+    is a worse answer than "we could not measure it".
+    """
+    address = validation.email_address(query.get("address", ""))
+    try:
+        return operations.mailbox_usage(address)
+    except operations.OperationUnavailable as exc:
+        raise RuntimeError(f"usage unavailable: {exc}") from exc
+
+
+def _read_rate_limit(conn, query):
+    return provisioning.get_mailbox_rate_limit(
+        conn, validation.email_address(query.get("address", "")))
+
+
+def _read_queue(conn, query):
+    return {"items": operations.queue_status()}
+
+
+def _read_quarantine(conn, query):
+    return {"items": operations.quarantine_items()}
+
+
+def _read_retired_storage(conn, query):
+    return {"items": provisioning.list_retired_storage(conn, query.get("address", ""))}
+
+
+def _rate_limit_set(conn, body):
+    return provisioning.set_mailbox_rate_limit(
+        conn,
+        body.get("address", ""),
+        body.get("messages"),
+        body.get("window", "hour"),
+    )
+
+
+def _rate_limit_clear(conn, body):
+    provisioning.clear_mailbox_rate_limit(conn, body.get("address", ""))
+    return {"cleared": True}
+
+
+def _queue_cancel(conn, body):
+    return operations.cancel_queue_message(body.get("queue_id", ""))
+
+
+def _quarantine_release(conn, body):
+    return operations.release_quarantine_item(body.get("queue_id", ""))
+
+
 _READ_ROUTES = {
     "/v1/domains":             _read_domains,
     "/v1/mailboxes":           _read_mailboxes,
@@ -538,6 +600,11 @@ _READ_ROUTES = {
     "/v1/mailboxes/send-as":   _read_send_as,
     "/v1/forwarding":          _read_forwarding,
     "/v1/dkim":                _read_dkim,
+    "/v1/mailboxes/usage":     _read_usage,
+    "/v1/mailboxes/rate-limit": _read_rate_limit,
+    "/v1/queue":               _read_queue,
+    "/v1/quarantine":          _read_quarantine,
+    "/v1/storage/retired":     _read_retired_storage,
 }
 
 
@@ -556,6 +623,10 @@ _WRITE_ROUTES = {
     "/v1/dkim/rotate":             _dkim_rotate,
     "/v1/dkim/delete":             _dkim_delete,
     "/v1/dkim/reconcile":          _dkim_reconcile,
+    "/v1/mailboxes/rate-limit/set":   _rate_limit_set,
+    "/v1/mailboxes/rate-limit/clear": _rate_limit_clear,
+    "/v1/queue/cancel":              _queue_cancel,
+    "/v1/quarantine/release":        _quarantine_release,
 }
 
 

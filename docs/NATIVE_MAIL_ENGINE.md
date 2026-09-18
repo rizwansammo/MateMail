@@ -352,6 +352,80 @@ revision.
 
 ---
 
+### NE4 — implemented locally (2026-09-19)
+
+**Status: implemented and validated locally. MateServer runtime validation
+pending.** `MAIL_ENGINE_ADAPTER` is still `mailcow`.
+
+NE4 turned the working NE3 mail path into something operable, and fixed the two
+issues NE3 runtime validation surfaced.
+
+#### Mailbox storage lifecycle
+
+Maildir now lives at `/var/vmail/<domain>/<storage_id>`, where `storage_id` is
+minted once per mailbox row and never reused (migration 004). Deleting a mailbox
+removes routing and authentication, KEEPS the mail, and records it in
+`retired_mailbox_storage`.
+
+Before this, deleting and recreating an address handed the new owner the
+previous owner's mail. Proven fixed: after delete and recreate the address
+reported 0 messages while the old directory remained on disk and recorded.
+
+Existing rows are backfilled with their current `local_part`, so no live
+mailbox's storage moves — SQL cannot move files, and a migration that renamed
+every path would orphan the data it exists to protect. The fix still holds for
+those rows, because a recreated mailbox is always a new row.
+
+**P6 owns retention and eventual removal of retained storage.**
+
+#### Usage
+
+`get_mailbox_usage` asks Dovecot through its administrative HTTP API, on the
+engine network, authenticated with its own key. Not derived from the quota
+column (which records what is allowed, not what is used) and not measured by
+walking the Maildir (which would make Django read customer mail). doveadm
+reports kilobytes; the engine converts to the contract's megabytes once, and
+rounds down so a mailbox is never reported fuller than it is.
+
+#### Rate limits
+
+Stored in the engine database, enforced by a Postfix policy service running
+inside the Postfix container on loopback. The identity charged is the
+AUTHENTICATED login, never the envelope sender — otherwise a mailbox could
+spread its traffic across every alias it may send as. Exceeding the limit
+returns `4.7.1` through `DEFER_IF_PERMIT`; see DEC-027 for why temporary.
+
+#### Queue and quarantine
+
+Both are the real Postfix queue, read with `postqueue -j` (structured, not
+scraped) and manipulated with `postsuper`. Quarantine is the HOLD queue, reached
+by an Rspamd marker and Postfix's `milter_header_checks`. The three states stay
+distinguishable: `active`/`deferred` are queue traffic, `hold` is quarantine.
+
+Two things were found by running it rather than reasoning about it:
+
+* **`soft reject` cannot be quarantine.** It tempfails the client, so the
+  message is never accepted and there is nothing to hold. Quarantine is the
+  `add header` band, which accepts.
+* **`header_checks` never sees milter-added headers.** The marker arrived in the
+  delivered message while the rule had already been evaluated against a message
+  without it. `milter_header_checks` exists for exactly this.
+
+#### Deployment
+
+`deploy.sh` hashes each service's configuration and passes the hash in the
+environment, so Compose recreates a container exactly when its configuration
+changed. This is the fix for NE3's finding that Rspamd ran five days with
+superseded rules.
+
+#### Adapter
+
+**26 of 26 implemented, nothing deferred.** All eight NE4 methods were exercised
+through `NativeMailEngineAdapter` itself against the running engine, returning
+real DTOs — not only through the internal HTTP API.
+
+---
+
 ### NE4 — Full isolated validation
 
 **Goal** — Prove the native engine before any real traffic.
@@ -2272,8 +2346,10 @@ or Rspamd consumes that state — that is NE3.
 
 ## NE3 — Postfix + Dovecot + Rspamd mail flow
 
-**Status: implemented and validated locally (2026-09-18). NOT deployed to
-MateServer, and NE3 is not complete.** mailcow remains the production engine.
+**Status: COMPLETE (2026-09-18).** Implemented, validated locally, and validated
+at runtime on MateServer. mailcow remains the production engine and
+`MAIL_ENGINE_ADAPTER` is still `mailcow` — NE3 gave the Native Engine a working
+mail path, not the production traffic. That switch is NE5's.
 
 NE3 is where the Native Engine stops being a provisioning database and becomes a
 mail server. Every claim below was measured against a running isolated stack on
@@ -2429,6 +2505,47 @@ selector CHANGE is the safer operation precisely because old and new records can
 coexist. This is a production rotation concern owned by NE7, not something NE3
 resolves.
 
+### MateServer runtime validation (2026-09-18)
+
+Deployed from `64b19471c39e51c0cfc8efe35a0b777ac3c2ba51`, digest-pinned, no Git
+checkout and no build on the VPS.
+
+```
+api      sha256:abfa87acb7751ec6daf03842b1a9bedd120e8eb276673d725b5a8b195fb8be14
+dovecot  sha256:d90ce8e51e5c6c169736c0d95ecc25dcaccac7d20e0bb1d8bded9b3f903f94c5
+postfix  sha256:1f00551f026be80ce61d770f3c061db3a3a035901bc71259ac04fa649742e1eb
+```
+
+unbound and olefy were unchanged by NE3 and stay on their NE1 digests.
+
+Results: 10/10 healthy, schema v3 with migration 003 applied exactly once,
+`/health` 200, `/ready` 200 authenticated and 403 unauthenticated, 18/18 reader
+isolation checks, end-to-end mail delivered to Maildir owned 5000:5000, DKIM
+verified cryptographically (body hash and header signature) against the API's
+published material with an unrelated key correctly failing, selector rotation
+retaining the old key `0600 11333:11333` beside its `.retired` marker, EICAR
+rejected `554` with `CLAM_VIRUS(2000.00)`, quota refused at LMTP with
+`Quota exceeded`, and `last_login` stamped only on successful authentication.
+
+Production was untouched throughout: mailcow's 20 containers and MateMail's 8
+were not restarted (their `StartedAt` predates the session), the P5 policy hook
+and bridge are intact, the UFW checksum is byte-identical to the pre-deployment
+baseline, DNS/PTR/MX are unchanged, and Postfix recorded **zero** outbound SMTP
+deliveries with no relay target other than Dovecot.
+
+Two operational notes worth carrying forward:
+
+* **Rspamd is not recreated by a config-only change.** Its `local.d` is a bind
+  mount, so Compose sees no change to its image or environment and leaves the
+  container running with the configuration it started with. NE3's new
+  `groups.conf` only took effect after an explicit `docker compose restart
+  rspamd`. Any future change to Rspamd's configuration needs that restart, and a
+  deployment that forgets it will look successful while the old rules are live.
+* **Deleting a mailbox does not delete its Maildir.** The provisioning rows go
+  and the mail stays. That is the safer default — destroying customer mail
+  should be an explicit operation — but the adapter contract does not yet say
+  who owns that deletion, and NE4 should decide rather than leave it implicit.
+
 ### What NE3 does not include, and why
 
 NE3 built the mail path. Four adapter methods remain unimplemented and they are
@@ -2445,9 +2562,8 @@ They refuse with `EngineCapabilityMissing`, which is the honest answer. A
 fabricated `used_mb=0` would be wrong the moment the first message is delivered,
 and wrong quietly.
 
-What NE3 still owes before it is complete: MateServer runtime validation,
-including publishing the rebuilt Dovecot and Postfix images (both gained
-entrypoints) to GHCR.
+NE3 owes nothing further. The rebuilt Dovecot, Postfix and API images are
+published and pinned, and MateServer runtime validation is complete.
 
 Adapter methods remain **18 of 26 implemented, 8 capability-missing** — all
 eight now attributed to NE4. NE3 added no adapter methods, only the mail path

@@ -109,6 +109,8 @@ services:
     # image. Built from our own Dockerfile under repository control; see
     # images/unbound/Dockerfile and README § Images.
     image: ${NATIVE_UNBOUND_IMAGE:-ghcr.io/rizwansammo/matemail-native-unbound:ne1}
+    environment:
+      NATIVE_UNBOUND_CONFIG_HASH: ${NATIVE_UNBOUND_CONFIG_HASH:-unset}
     volumes:
       - ./unbound/unbound.conf:/etc/unbound/unbound.conf:ro
       - native_unbound:/var/lib/unbound
@@ -178,6 +180,13 @@ services:
     <<: [*common, *native-dns]
     container_name: matemail-native-rspamd
     image: rspamd/rspamd:3.11@sha256:116c2e05bb03073f5ff3b41f407fb5f9ac13ae726e8f8d0cd56231e97d49d7b7
+    environment:
+      # NE4: Compose cannot see a change to a bind-mounted config FILE, so
+      # deploy.sh hashes rspamd/ and passes the result here. A configuration
+      # change therefore becomes a change Compose CAN see, and the container is
+      # recreated. Without this Rspamd keeps running with the rules it started
+      # with - which is exactly what happened during NE3, for five days.
+      NATIVE_RSPAMD_CONFIG_HASH: ${NATIVE_RSPAMD_CONFIG_HASH:-unset}
     volumes:
       - ./rspamd/local.d:/etc/rspamd/local.d:ro
       # READ-ONLY on purpose. Rspamd verifies and signs with these keys; it has
@@ -222,6 +231,9 @@ services:
       # provisioning secret: Dovecot is the most exposed component here,
       # and that secret would let it mint mailboxes and rotate DKIM keys.
       NATIVE_DOVECOT_POLICY_SECRET: ${NATIVE_DOVECOT_POLICY_SECRET:?required}
+      NATIVE_DOVECOT_CONFIG_HASH: ${NATIVE_DOVECOT_CONFIG_HASH:-unset}
+      # NE4: the administrative API mailbox usage is measured through.
+      NATIVE_DOVEADM_API_KEY: ${NATIVE_DOVEADM_API_KEY:?required}
     volumes:
       - ./dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro
       # Native mail store. mailcow's vmail-vol-1 is NEVER mounted here — that
@@ -256,9 +268,15 @@ services:
       NATIVE_DB_NAME: matemail_engine
       NATIVE_POSTFIX_DB_USER: engine_ro_postfix
       NATIVE_POSTFIX_DB_PASSWORD: ${NATIVE_POSTFIX_DB_PASSWORD:?required}
+      NATIVE_POSTFIX_CONFIG_HASH: ${NATIVE_POSTFIX_CONFIG_HASH:-unset}
+      # NE4 control plane: the queue/quarantine API and the submission
+      # rate-limit policy service, both served from inside this container.
+      NATIVE_CONTROL_SECRET: ${NATIVE_CONTROL_SECRET:?required}
+      NATIVE_REDIS_HOST: redis
     volumes:
       - ./postfix/main.cf:/etc/postfix/main.cf:ro
       - ./postfix/master.cf:/etc/postfix/master.cf:ro
+      - ./postfix/header_checks:/etc/postfix/header_checks:ro
       # Its own queue. Sharing mailcow's would mean two Postfix instances
       # competing over the same spool — corruption, not redundancy.
       - native_postfix_queue:/var/spool/postfix
@@ -309,6 +327,12 @@ services:
       # the only one that can configure the roles that may not.
       NATIVE_POSTFIX_DB_PASSWORD: ${NATIVE_POSTFIX_DB_PASSWORD:?required}
       NATIVE_DOVECOT_DB_PASSWORD: ${NATIVE_DOVECOT_DB_PASSWORD:?required}
+      # NE4: the operational control paths. The API owns them; nothing else
+      # calls the control plane or the doveadm API.
+      NATIVE_CONTROL_SECRET: ${NATIVE_CONTROL_SECRET:?required}
+      NATIVE_CONTROL_URL: http://postfix:8460
+      NATIVE_DOVEADM_API_KEY: ${NATIVE_DOVEADM_API_KEY:?required}
+      NATIVE_DOVEADM_URL: http://dovecot:8080
       NATIVE_DOVECOT_POLICY_SECRET: ${NATIVE_DOVECOT_POLICY_SECRET:?required}
       NATIVE_DB_HOST: db
       NATIVE_DB_NAME: ${NATIVE_DB_NAME:-matemail_engine}

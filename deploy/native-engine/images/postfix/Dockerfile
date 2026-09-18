@@ -23,6 +23,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
          postfix postfix-pgsql ca-certificates tini \
+         python3-minimal python3-psycopg2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Postfix insists on a writable spool it owns; the runtime volume supplies it.
@@ -32,6 +33,15 @@ RUN apt-get update \
 RUN set -eux; \
     groupadd --system --gid 2102 smtpauth; \
     usermod -aG smtpauth postfix
+
+# NE4's control plane. It runs inside this container because this is the only
+# place that already owns the Postfix spool - the alternatives were handing the
+# Native API a Docker socket, giving it a writable spool mount, or letting
+# Django shell out to `docker exec`, and all three are worse.
+#
+# python3 and psycopg2 come from Debian rather than pip: no compiler, no wheel
+# build, and they are patched by the same apt stream as Postfix itself.
+COPY engine_control.py /usr/local/lib/matemail/engine_control.py
 
 VOLUME ["/var/spool/postfix"]
 

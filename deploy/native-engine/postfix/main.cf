@@ -99,11 +99,56 @@ smtpd_sender_login_maps = pgsql:/etc/postfix/sql/sender_login.cf
 # (127.0.0.0/8) — it is the container's own loopback, not the compose network.
 # If it ever grew to include the Docker subnet, every container on that network
 # would become an open relay.
+# The last stage here is NE4's per-mailbox submission rate limit. It runs after
+# ownership has been established, so the identity it charges is one the client
+# has already proven it owns.
+#
+# NOTE: a comment may not sit inside this list. Postfix continues a logical line
+# through every whitespace-indented line that follows, so an indented '#' would
+# be parsed as a restriction name rather than a comment.
 smtpd_sender_restrictions =
     reject_non_fqdn_sender,
     reject_unknown_sender_domain,
     reject_authenticated_sender_login_mismatch,
-    reject_sender_login_mismatch
+    reject_sender_login_mismatch,
+    check_policy_service inet:127.0.0.1:10032
+
+# The rate-limit service lives inside this container on loopback, so it is not
+# on the engine network at all. A failure to reach it DEFERS rather than
+# permits: a limiter that fails open under load is not a limiter. (The service
+# itself still fails open on a database or Redis error — see engine_control.py
+# for why that specific case is different.)
+smtpd_policy_service_default_action = 451 4.3.5 Server configuration problem
+smtpd_policy_service_max_idle = 300s
+smtpd_policy_service_max_ttl = 1000s
+smtpd_policy_service_timeout = 10s
+
+# ── Quarantine ───────────────────────────────────────────────────────────────
+#
+# Rspamd marks a message for quarantine by adding a header; this rule moves it
+# to the HOLD queue, where it sits undelivered until something releases it.
+#
+# WHY THE HOLD QUEUE
+#   It is the only Postfix state that means "accepted, retained, and going
+#   nowhere until a human says so". Release is `postsuper -H`, which cannot
+#   alter the sender, the recipients or the content — so releasing is
+#   structurally incapable of redirecting someone's mail, which a re-injection
+#   design would have to prevent by being careful.
+#
+# The header an external client might try to set is stripped by Rspamd before
+# this rule sees it (milter_headers `remove`), so an Internet sender cannot
+# reach this rule with a header of their own making.
+# `milter_header_checks`, NOT `header_checks`.
+#
+# Ordinary header_checks inspect the message AS RECEIVED, before any milter has
+# run, so they never see a header Rspamd added — the marker arrived in the
+# delivered message and the rule had already been evaluated against a message
+# that did not contain it. Measured: the message was delivered carrying
+# `X-MateMail-Quarantine: yes`.
+#
+# `milter_header_checks` exists precisely for headers added by milters, and
+# supports the same actions including HOLD.
+milter_header_checks = regexp:/etc/postfix/header_checks
 
 # Relay control. `reject_unauth_destination` is what stops this being an open
 # relay: mail to a domain that is not ours is refused unless the client

@@ -145,7 +145,7 @@ def apply_migrations(conn) -> int:
 #: The schema version this build of the API requires. Readiness reports a
 #: mismatch rather than serving requests against a schema it was not written
 #: for — a newer API against an older database is how half-written rows happen.
-REQUIRED_VERSION = 3
+REQUIRED_VERSION = 4
 
 
 #: The reader roles NE3 gives a password to. Postfix and Dovecot authenticate
