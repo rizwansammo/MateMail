@@ -115,6 +115,50 @@ def directives_only(text: str) -> str:
     )
 
 
+def service_overrides(name: str) -> str:
+    """
+    Everything indented under a master.cf service entry — not only the lines
+    that begin with `-o`.
+
+    Postfix's braces form spreads a single setting over several lines, so a
+    parser looking for `-o` alone would miss exactly the restriction list that
+    matters most here. `inet` disambiguates `smtp inet`, the port 25 listener,
+    from `smtp unix`, the outbound client, which share a name.
+
+    An empty result is meaningful rather than an error: `smtp inet` carries no
+    overrides deliberately, and a test below asserts precisely that.
+    """
+    lines = (NE / "postfix" / "master.cf").read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines)
+                 if line.startswith(name) and "inet" in line)
+    out = []
+    for line in lines[start + 1:]:
+        if line[:1] not in (" ", "\t"):
+            break
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            out.append(stripped)
+    return "\n".join(out)
+
+
+def pinned_engine_address(service: str) -> str:
+    """
+    The fixed address the compose file gives a service on the engine network.
+
+    Parsed by hand because PyYAML is not a backend dependency. The point of the
+    test that uses this is to compare what two files say, so restating the
+    address in a third place would defeat it.
+    """
+    text = (NE / "docker-compose.yml").read_text(encoding="utf-8")
+    block = re.search(rf"(?ms)^  {re.escape(service)}:\n(.*?)(?=^  \S|\Z)", text)
+    if block is None:
+        raise AssertionError(f"docker-compose.yml declares no {service!r} service")
+    found = re.search(r"(?m)^\s*ipv4_address:\s*(\S+)", block.group(1))
+    if found is None:
+        raise AssertionError(f"{service} has no pinned ipv4_address")
+    return found.group(1)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Configuration: what the committed files actually say
 # ─────────────────────────────────────────────────────────────────────────────
@@ -233,13 +277,85 @@ class PostfixReadsTheEngineThroughViewsTest(SimpleTestCase):
         """
         Without this an authenticated customer could put any address in MAIL
         FROM — including another tenant's — and we would DKIM-sign it.
+
+        NE7 moved the two restrictions out of main.cf and onto the submission
+        service. That move is the fix, not a regression. Global in main.cf they
+        also applied to port 25, where no SASL layer exists, and Postfix
+        answered by logging
+
+            warning: restriction `reject_sender_login_mismatch' ignored:
+            no SASL support
+
+        and enforcing nothing. A silently discarded check reads exactly like a
+        check that passes, which is why this assertion now follows the
+        restrictions to the service that actually authenticates.
+
+        Who may use which address is `SenderAuthorisationViewTest` below; this
+        is whether Postfix consults it at all.
         """
-        self.assertIn("reject_sender_login_mismatch", self.main_cf)
-        self.assertIn("reject_authenticated_sender_login_mismatch", self.main_cf)
+        submission = service_overrides("submission")
+
+        self.assertIn("reject_sender_login_mismatch", submission)
+        self.assertIn("reject_authenticated_sender_login_mismatch", submission)
+
+        # Both are inert without this line — the omission that left them
+        # ignored on port 25 in the first place.
+        self.assertRegex(submission, r"smtpd_sasl_auth_enable\s*=\s*yes")
+
+        # The map they consult is data rather than policy, so it stays global.
+        self.assertRegex(self.main_cf, r"(?m)^smtpd_sender_login_maps\s*=\s*pgsql:")
+
+    def test_port_25_does_not_rest_on_a_check_it_cannot_run(self):
+        """
+        The companion to the test above, and the reason the restrictions moved.
+
+        Port 25 accepts mail from strangers and offers no SASL, so a
+        sender-login restriction there can never be enforced. Returning one to
+        main.cf would restore both the warning and the false impression of a
+        check. Inbound senders are constrained by the policy service and the
+        recipient maps instead.
+        """
+        self.assertNotIn("sender_login_mismatch", service_overrides("smtp"))
+        self.assertNotIn("sender_login_mismatch", self.main_cf)
 
     def test_delivery_goes_to_dovecot_over_lmtp(self):
-        """Postfix must not write the mail store; one component owns Maildir."""
-        self.assertRegex(self.main_cf, r"virtual_transport\s*=\s*lmtp:inet:dovecot:24")
+        """
+        Postfix must not write the mail store; one component owns Maildir.
+
+        The destination address is compared against the compose file rather
+        than written out here, so this cannot pass a pair of files that have
+        drifted apart — and the address itself stays defined in one place.
+        """
+        transport = re.search(r"(?m)^virtual_transport\s*=\s*(.+)$", self.main_cf)
+        self.assertIsNotNone(transport, "virtual_transport must be set")
+        destination = transport.group(1).strip()
+
+        self.assertTrue(
+            destination.startswith("lmtp:inet:"),
+            f"delivery must hand off over LMTP, not {destination!r}",
+        )
+
+        # Postfix writing the store itself would need this. Its absence is what
+        # keeps Maildir owned by exactly one process.
+        self.assertNotRegex(self.main_cf, r"(?m)^virtual_mailbox_base\s*=\s*\S")
+
+        pinned = re.fullmatch(r"lmtp:inet:(\d+\.\d+\.\d+\.\d+):(\d+)", destination)
+        self.assertIsNotNone(pinned, (
+            "NE7 regression: the destination must be a pinned ADDRESS, never a "
+            "name. Docker's embedded DNS answers NXDOMAIN for a stopped "
+            "container and Postfix treats a host that does not exist as a "
+            "PERMANENT failure (dsn=5.4.4), so a routine Dovecot restart "
+            "returned inbound customer mail to its senders as a hard bounce. "
+            "A refused connection to an address is temporary (dsn=4.4.1) and "
+            f"the message waits in the queue instead. Found: {destination!r}"
+        ))
+
+        self.assertEqual(
+            pinned_engine_address("dovecot"), pinned.group(1),
+            "Postfix delivers to an address the compose file does not give "
+            "Dovecot, so mail would go nowhere",
+        )
+        self.assertEqual("24", pinned.group(2), "Dovecot's LMTP listener is 24")
 
     def test_mynetworks_never_covers_the_container_subnet(self):
         """

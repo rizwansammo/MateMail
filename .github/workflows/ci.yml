@@ -107,6 +107,25 @@ jobs:
         working-directory: backend
         run: python manage.py test --settings=config.settings.dev --verbosity=2
 
+      # These four files hold the P6, P7, NE6 and NE7 regression suites and are
+      # written as plain pytest functions rather than TestCase classes, so
+      # unittest collection above cannot see a single one of them. They were
+      # therefore absent from every green run since P6 — 213 tests, including
+      # the ones guarding the LMTP delivery bounce and sender ownership.
+      #
+      # Named explicitly rather than run as `pytest tests/`, which would
+      # re-execute the whole Django suite a second time under a different
+      # runner. -rs prints the reason for any skip, because a silent skip is
+      # the exact failure being closed here.
+      - name: Regression suite (pytest-only files)
+        working-directory: backend
+        run: |
+          python -m pytest -rs \
+            tests/test_backup_restore.py \
+            tests/test_monitoring.py \
+            tests/test_ne6_submission.py \
+            tests/test_ne7_public_mail.py
+
   # ── Frontend gates ──────────────────────────────────────────────────────────
   frontend:
     name: Frontend lint and build

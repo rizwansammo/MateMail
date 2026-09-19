@@ -24,8 +24,14 @@ import sys
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
-yaml = pytest.importorskip("yaml")
+# PyYAML is a declared test dependency (requirements-dev.txt), so this is a
+# plain import. It was `pytest.importorskip("yaml")`, which silently turned
+# this entire file into zero tests on any environment without PyYAML —
+# exactly the failure mode that kept these regressions out of CI.
+import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 NATIVE = REPO / "deploy" / "native-engine"
@@ -311,9 +317,9 @@ def test_the_certificate_volume_is_read_only_to_postfix():
 
 # ─── the DKIM migration utility, driven for real ────────────────────────────
 
-crypto = pytest.importorskip("cryptography")
-from cryptography.hazmat.primitives import serialization           # noqa: E402
-from cryptography.hazmat.primitives.asymmetric import ec, rsa      # noqa: E402
+# `cryptography` is a production dependency (requirements.txt), not an
+# optional one; these imports moved to the top of the file when the
+# importorskip that guarded them was removed.
 
 
 def _pem(key) -> bytes:
@@ -564,8 +570,10 @@ def test_the_platform_identity_is_unchanged_by_ne6():
     world sees, and the domain it aligns under, are exactly what they were.
     """
     example = REPO / "deploy" / "env.production.example"
-    if not example.is_file():
-        pytest.skip("no production env example in the repository")
+    assert example.is_file(), (
+        "deploy/env.production.example is committed configuration; "
+        "skipping when it is absent would hide a changed platform sender."
+    )
     body = example.read_text(encoding="utf-8")
     assert PLATFORM_SENDER in body
     assert f"EMAIL_HOST={MAIL_HOST}" in body.replace(" ", "")
@@ -579,8 +587,10 @@ def test_no_container_ip_is_used_as_an_smtp_host():
     file. An IP would break on the next recreation, silently.
     """
     example = REPO / "deploy" / "env.production.example"
-    if not example.is_file():
-        pytest.skip("no production env example in the repository")
+    assert example.is_file(), (
+        "deploy/env.production.example is committed configuration; "
+        "skipping when it is absent would hide a changed platform sender."
+    )
     for line in example.read_text(encoding="utf-8").splitlines():
         if line.startswith("EMAIL_HOST="):
             assert not re.match(r"EMAIL_HOST=\d+\.\d+\.\d+\.\d+", line), line

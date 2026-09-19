@@ -16,6 +16,12 @@ djangorestframework-stubs==3.15.1
 # its 12 tests were silently never discovered and the suite reported 495
 # instead of 506. A local environment that happened to have PyYAML installed
 # directly hid this.
+#
+# The monitoring, NE6 and NE7 regression files parse the same way and import it
+# too. They reached for `pytest.importorskip("yaml")` instead, which degrades to
+# zero tests rather than an error — the softer form of the same bug, and the
+# reason those suites were quietly absent from CI. Declared here, so they now
+# import it plainly.
 PyYAML==6.0.2
 
 # Test-only, and declared for the same reason. tests/test_refresh_cookie.py

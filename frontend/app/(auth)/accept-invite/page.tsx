@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { BrandMark } from "@/components/brand-mark";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
 import { CheckCircle2, AlertTriangle, Loader2, Mail } from "lucide-react";
@@ -226,9 +227,7 @@ function InviteShell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="mb-6 flex items-center justify-center gap-2">
-          <div className="grid h-8 w-8 place-items-center bg-slate-950 text-white">
-            <span className="text-xs font-black">M</span>
-          </div>
+          <BrandMark size={32} />
           <span className="font-black text-slate-900">MateMail</span>
         </div>
         {children}

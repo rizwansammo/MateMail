@@ -18,7 +18,11 @@ from pathlib import Path
 
 import pytest
 
-yaml = pytest.importorskip("yaml")
+# PyYAML is a declared test dependency (requirements-dev.txt), so this is a
+# plain import. It was `pytest.importorskip("yaml")`, which silently turned
+# this entire file into zero tests on any environment without PyYAML —
+# exactly the failure mode that kept these regressions out of CI.
+import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 NATIVE = REPO / "deploy" / "native-engine"

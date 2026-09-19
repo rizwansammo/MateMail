@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -23,7 +24,11 @@ from pathlib import Path
 
 import pytest
 
-yaml = pytest.importorskip("yaml")
+# PyYAML is a declared test dependency (requirements-dev.txt), so this is a
+# plain import. It was `pytest.importorskip("yaml")`, which silently turned
+# this entire file into zero tests on any environment without PyYAML —
+# exactly the failure mode that kept these regressions out of CI.
+import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 MON = REPO / "deploy" / "monitoring"
@@ -134,8 +139,10 @@ def test_no_container_is_given_the_docker_socket():
 
 def test_no_public_nginx_route_is_added_for_monitoring():
     nginx = REPO / "deploy" / "nginx"
-    if not nginx.exists():
-        pytest.skip("no nginx configuration in the repository")
+    assert nginx.is_dir(), (
+        "deploy/nginx is committed configuration; skipping when it is "
+        "absent would hide whether monitoring had been published publicly."
+    )
     for path in nginx.rglob("*"):
         if path.is_file():
             body = path.read_text(encoding="utf-8", errors="ignore")
@@ -673,6 +680,16 @@ def _promtool(*args):
 
 needs_docker = pytest.mark.skipif(
     DOCKER is None, reason="docker is not available; promtool runs on the server")
+
+
+def test_this_environment_can_actually_validate_the_prometheus_config():
+    """
+    promtool is what proves the alert rules parse and fire. Without docker those
+    checks skip, which reads as a green run that validated nothing.
+    """
+    if os.environ.get("CI") != "true":
+        pytest.skip("local run; the guarantee is only meaningful on CI")
+    assert DOCKER, "CI must provide docker, or promtool validates nothing"
 
 
 @needs_docker

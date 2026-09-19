@@ -13,6 +13,7 @@ The guard is tested by running it, not by reading it.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -35,6 +36,18 @@ SCRIPTS = [BACKUP, RESTORE, RESTORE_MAILBOX, INSTALL, GUARD]
 
 BASH = shutil.which("bash")
 needs_bash = pytest.mark.skipif(BASH is None, reason="bash is not available")
+
+
+def test_this_environment_can_actually_run_the_script_tests():
+    """
+    Twelve tests here drive the real scripts through bash. Without bash they
+    skip, and a skip is how this whole file spent four phases reporting nothing
+    at all. Locally that is a fair trade; on CI it is the bug, so there the
+    absence fails instead.
+    """
+    if os.environ.get("CI") != "true":
+        pytest.skip("local run; the guarantee is only meaningful on CI")
+    assert BASH, "CI must provide bash, or twelve script tests silently vanish"
 
 
 def run_bash(script: str, *, env: dict | None = None, cwd: Path | None = None):

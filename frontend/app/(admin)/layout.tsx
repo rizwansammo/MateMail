@@ -7,8 +7,8 @@ import {
   Activity,
   Building2,
   LogOut,
-  ShieldCheck,
 } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import { useAuth } from "@/contexts/auth-context";
 
 const nav = [
@@ -51,9 +51,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 flex-col border-r border-slate-800 bg-slate-900 md:flex">
         {/* Logo */}
         <div className="flex h-14 items-center gap-3 border-b border-slate-800 px-5">
-          <div className="grid h-8 w-8 place-items-center bg-red-600 text-white">
-            <ShieldCheck className="h-4 w-4" />
-          </div>
+          {/* The red ring, not a red tile, is what marks this as the platform
+              admin surface — the logo itself stays the same everywhere. */}
+          <BrandMark size={32} preload className="ring-1 ring-red-500/60" />
           <div>
             <span className="font-black text-white">MateMail</span>
             <p className="text-[10px] font-semibold uppercase tracking-widest text-red-400">

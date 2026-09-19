@@ -77,12 +77,22 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * HTML documents only. Static chunks, images and the favicon are not
+     * HTML documents only. Static chunks, images and the app icons are not
      * script-executing documents, and giving each one a nonce would defeat
      * caching for no gain.
+     *
+     * The icons are `app/icon.png` and `app/apple-icon.png`. This list named
+     * `favicon.ico` until that file — the stock Next.js one — was replaced by
+     * the MateMail mark.
+     *
+     * The route names are taken from the build output (`○ /icon.png`,
+     * `○ /apple-icon.png`) rather than from the documentation, which shows an
+     * extensionless `/icon` and would have silently missed both. They are
+     * anchored with `$` so a future document route merely beginning with
+     * "icon" still receives its CSP.
      */
     {
-      source: "/((?!_next/static|_next/image|favicon.ico).*)",
+      source: "/((?!_next/static|_next/image|icon\\.png$|apple-icon\\.png$).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

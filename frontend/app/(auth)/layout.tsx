@@ -1,5 +1,5 @@
-import { ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { BrandMark } from "@/components/brand-mark";
 
 export default function AuthLayout({
   children,
@@ -13,9 +13,7 @@ export default function AuthLayout({
           href="/"
           className="inline-flex items-center gap-3 text-white hover:opacity-80 transition"
         >
-          <div className="grid h-9 w-9 place-items-center bg-cyan-400 text-slate-950">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
+          <BrandMark size={36} preload />
           <b className="text-lg">MateMail</b>
         </Link>
       </div>

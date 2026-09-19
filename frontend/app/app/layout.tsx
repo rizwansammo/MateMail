@@ -17,10 +17,10 @@ import {
   Send,
   Settings,
   Shield,
-  ShieldCheck,
   Users,
   UserPlus,
 } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import { useAuth } from "@/contexts/auth-context";
 
 const nav = [
@@ -73,9 +73,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
         {/* Logo */}
         <div className="flex h-14 items-center gap-3 border-b border-slate-200 px-5">
-          <div className="grid h-8 w-8 place-items-center bg-slate-950 text-white">
-            <ShieldCheck className="h-4 w-4" />
-          </div>
+          <BrandMark size={32} preload />
           <span className="font-black">MateMail</span>
         </div>
 
