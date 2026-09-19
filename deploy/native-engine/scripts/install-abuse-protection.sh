@@ -34,8 +34,27 @@ fail2ban-client --version 2>/dev/null | head -1 | sed 's/^/  /'
 log "installing the mail log shipper"
 mkdir -p /var/log/matemail
 chmod 750 /var/log/matemail
-install -m 0755 "$SRC/scripts/mail-log-shipper.sh" \
-    /opt/MateMailNative/deploy/native-engine/scripts/mail-log-shipper.sh 2>/dev/null || true
+SHIPPER=/opt/MateMailNative/deploy/native-engine/scripts/mail-log-shipper.sh
+# This installer normally runs FROM the deployed tree, which makes the source
+# and the destination the same path. `install` refuses that outright —
+# "are the same file", exit 1 — and the `2>/dev/null || true` that used to be
+# here turned the refusal into a success. The mode was therefore never set by
+# this line at all, and the unit only ever started because the tree had been
+# copied from a filesystem that marks everything executable. A deployment that
+# honoured the repository's own file modes would have handed systemd a
+# non-executable ExecStart and failed with 203/EXEC.
+mkdir -p "$(dirname "$SHIPPER")"
+if [ "$(readlink -f "$SRC/scripts/mail-log-shipper.sh")" = "$(readlink -f "$SHIPPER")" ]; then
+    chmod 0755 "$SHIPPER"
+else
+    install -m 0755 "$SRC/scripts/mail-log-shipper.sh" "$SHIPPER"
+fi
+# systemd would otherwise report this as 203/EXEC five seconds later, on a
+# restart loop, with nothing in this installer's output to explain it.
+[ -x "$SHIPPER" ] || {
+    echo "install: $SHIPPER is not executable" >&2
+    exit 1
+}
 install -m 0644 "$SRC/systemd/matemail-maillog.service" /etc/systemd/system/
 install -m 0644 "$SRC/fail2ban/logrotate-matemail-mail" \
     /etc/logrotate.d/matemail-mail

@@ -459,6 +459,41 @@ def test_the_log_shipper_never_replays_history():
     assert "sleep" in shipper, "it must reattach when a container is recreated"
 
 
+def test_the_shipper_install_cannot_silently_skip_its_own_chmod():
+    """
+    Regression, found while chasing the executable bit.
+
+    The installer runs FROM the deployed tree, which made this line's source
+    and destination the same path:
+
+        install -m 0755 "$SRC/scripts/mail-log-shipper.sh" \\
+            /opt/.../scripts/mail-log-shipper.sh 2>/dev/null || true
+
+    `install` refuses identical paths — "are the same file", exit 1 — and the
+    `|| true` turned that into a success. The mode was therefore never set by
+    the installer at all. The unit runs today only because the tree was copied
+    from Windows, where everything is executable; a deployment that honoured
+    the repository's own modes would hand systemd a non-executable ExecStart
+    and restart-loop on 203/EXEC, with nothing in the installer's output
+    explaining why.
+    """
+    installer = (NATIVE / "scripts" / "install-abuse-protection.sh").read_text(
+        encoding="utf-8")
+
+    handling = [line for line in installer.splitlines()
+                if "mail-log-shipper.sh" in line
+                and not line.lstrip().startswith("#")]
+    assert handling, "the installer no longer handles the shipper at all"
+    for line in handling:
+        assert "2>/dev/null" not in line and "|| true" not in line, (
+            f"a failure on this line would be invisible: {line.strip()}")
+
+    assert re.search(r'\[ -x "\$SHIPPER" \]', installer), (
+        "the installer must prove the shipper is executable before "
+        "`systemctl enable --now`, rather than leaving systemd to report "
+        "203/EXEC five seconds later")
+
+
 # ─── monitoring understands the new policy ──────────────────────────────────
 
 def test_the_collector_treats_the_three_ports_as_intended():

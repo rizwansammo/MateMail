@@ -283,6 +283,17 @@ def test_drill_accepts_a_real_drill_area(fake_env, tmp_path):
         f"{sh_path(RESTORE)} --workdir {sh_path(area)}"
     )
     out = result.stdout + result.stderr
+
+    # Evidence that the script RAN. This assertion is only about a string being
+    # absent, and a script that never started produces no strings at all: when
+    # the scripts were committed non-executable, every sibling test here went
+    # red and this one went green, reporting that the guard was well scoped
+    # while nothing had been executed. 126 is the shell's "found, but not
+    # executable".
+    assert result.returncode != 126, out
+    assert "restore drill" in out, (
+        f"the drill never started, so this proves nothing: {out!r}")
+
     assert "that is production, not a drill" not in out
 
 
@@ -545,3 +556,87 @@ def test_the_restic_cache_is_root_only():
     body = INSTALL.read_text()
     assert 'chmod 700 "${CACHE:-/var/cache/restic}"' in body
     assert 'chown root:root "${CACHE:-/var/cache/restic}"' in body
+
+
+# ─── the executable bit, as Git records it ──────────────────────────────────
+
+# Invoked by path: systemd's `ExecStart=/opt/MateMailBackup/matemail-backup.sh`,
+# every operator command in docs/BACKUP_RESTORE.md, and the drill tests above.
+EXECUTED_BY_PATH = [
+    "deploy/backup/install.sh",
+    "deploy/backup/matemail-backup.sh",
+    "deploy/backup/matemail-restore-mailbox.sh",
+    "deploy/backup/matemail-restore.sh",
+]
+
+# Sourced, never executed (`. "$HERE/lib/guard.sh"`), and install.sh places it
+# 0600 on the host deliberately. An exec bit here would be wrong, not harmless.
+SOURCED_ONLY = [
+    "deploy/backup/lib/guard.sh",
+]
+
+
+def git_modes(prefix: str) -> dict[str, str]:
+    """
+    The mode Git has RECORDED, which is the only one that decides anything.
+
+    Deliberately not the filesystem's. This repository is developed on Windows
+    with `core.fileMode=false`, where `os.access(path, os.X_OK)` answers True
+    for every file and Git Bash will run anything it is handed — so a local
+    check cannot see what a Linux runner will refuse.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-s", "--", prefix],
+            cwd=REPO, capture_output=True, text=True,
+        )
+    except FileNotFoundError:
+        raise AssertionError(
+            "git is not on PATH, so the committed file modes cannot be read. "
+            "This check exists because a mode that is wrong in Git is "
+            "invisible everywhere else, so it fails rather than skips."
+        ) from None
+    assert result.returncode == 0, f"git ls-files failed: {result.stderr}"
+    modes = {}
+    for line in result.stdout.splitlines():
+        meta, path = line.split(chr(9), 1)
+        modes[path] = meta.split()[0]
+    assert modes, f"no files recorded under {prefix}"
+    return modes
+
+
+def test_operator_scripts_are_committed_executable():
+    """
+    Regression, and it took a red CI run to find.
+
+    Committed 100644, these cannot be run by path: Linux answers 126,
+    "Permission denied". systemd would not start the nightly backup, and an
+    operator following the runbook during an actual incident would be told the
+    restore script does not permit execution.
+
+    It survived every local run because the workstation is Windows, where the
+    mode is invisible until a Linux checkout — so the assertion is on what Git
+    stores, not on what the filesystem reports.
+    """
+    modes = git_modes("deploy/backup")
+    wrong = {path: modes.get(path)
+             for path in EXECUTED_BY_PATH if modes.get(path) != "100755"}
+    assert not wrong, (
+        f"executed by path, so these must be committed 100755: {wrong}. "
+        f"Record it with `git update-index --chmod=+x <path>`, which works "
+        f"even where the filesystem has no executable bit."
+    )
+
+
+def test_the_sourced_library_stays_non_executable():
+    """
+    The other half of the rule, so the fix cannot be a blanket
+    `chmod +x deploy/backup/*.sh`: that would pass the test above while
+    contradicting install.sh, which places guard.sh 0600 because it is sourced.
+    """
+    modes = git_modes("deploy/backup")
+    for path in SOURCED_ONLY:
+        assert modes.get(path) == "100644", (
+            f"{path} is sourced, never executed, and must stay 100644 "
+            f"(found {modes.get(path)})"
+        )
