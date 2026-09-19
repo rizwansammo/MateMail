@@ -34,6 +34,33 @@ inet_interfaces = all
 # AAAA records normally; NE3+ may revisit IPv6 as an explicit decision.
 inet_protocols = ipv4
 
+# ── Logging ──────────────────────────────────────────────────────────────────
+#
+# Postfix logs to syslog by default, and this container has no syslog daemon.
+# The result was silent: Postfix ran, delivered mail, and wrote NOTHING about
+# it anywhere. `docker logs` showed only the control-plane wrapper's output.
+#
+# NE6 found this the hard way. The first message delivered through the Native
+# path left no Postfix record at all — no queue id, no relay, no `status=sent`
+# — so there was no way to prove where a message went, and P7's delivery,
+# deferral, bounce and rejection counters had been reading an empty log and
+# reporting a confident zero since the day they were written.
+#
+# `maillog_file` is Postfix 3.4+ native logging through the `postlogd` service
+# already present in master.cf. /dev/stdout puts it where every other service
+# in this stack puts it, under the same bounded json-file driver.
+maillog_file = /dev/stdout
+
+# One summary line per TLS session, inbound and outbound.
+#
+# At the default level 0 Postfix says nothing about TLS at all, so "was this
+# message delivered over TLS, and was the peer certificate trusted" has no
+# answer in the record — which is exactly the question asked after a delivery
+# and the one NE7 will ask of every provider. Level 1 is a summary per
+# connection, not a handshake trace: a few dozen bytes per message.
+smtp_tls_loglevel = 1
+smtpd_tls_loglevel = 1
+
 # ── Anti-relay ───────────────────────────────────────────────────────────────
 # mynetworks stays deliberately TIGHT. mailcow's includes its whole container
 # subnet, which is why loopback SMTP tests there short-circuit at

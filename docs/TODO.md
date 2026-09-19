@@ -359,3 +359,22 @@ transactional sender. Pre-beta requirement; does not block NE6.
 ⬜ **`OFFSITE_BACKUP_CONFIGURED = NO`** (carried from P6, now monitored).
 `BackupOffsiteNotConfigured` fires permanently and by design. Pre-beta
 requirement; does not block NE6.
+
+---
+
+## Found during NE6 (2026-09-19)
+
+⬜ **Rotate `MAIL_ENGINE_API_KEY`.** The legacy Mailcow API key in
+`/opt/MateMail/.env` was printed into an engineering session transcript during
+NE6 inspection. It is unused since `MAIL_ENGINE_ADAPTER=native` and is only
+reachable on the private network, so this is low urgency — but it should be
+rotated in Mailcow and the `.env` updated. The related
+`MAIL_ENGINE_API_URL=https://mx.matemail.online:8453` is also now dead
+configuration: that path pointed at the Mailcow gateway, which is no longer
+attached to the link network. Both can be removed outright once the Mailcow
+adapter is retired at NE8.
+
+⬜ **Stale comment in the Native compose networks block.** It describes the
+engine network as "internal (no egress)". It is not, and must not be — Postfix
+needs outbound SMTP, ClamAV needs signature updates, Unbound needs DNS. The
+live network is `internal=false`, which is correct; only the comment is wrong.

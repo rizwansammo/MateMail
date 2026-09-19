@@ -90,14 +90,26 @@ def test_the_gateway_forwards_one_port_to_one_upstream():
 
 def test_the_gateway_does_not_terminate_tls():
     """
-    `mode tcp` keeps the STARTTLS session and the SASL exchange end to end
-    between Django and Postfix. A terminating proxy would have to hold the
-    certificate AND would see the plaintext password.
+    The SUBMISSION path is byte forwarding, so the STARTTLS session and the
+    SASL exchange run end to end between Django and Postfix. A terminating
+    proxy would have to hold the certificate AND would see the plaintext
+    password.
+
+    Scoped to the submission path on purpose: the loopback health endpoint is
+    `mode http` by necessity, and that is not a TLS decision about mail.
     """
     cfg = GATEWAY_CFG.read_text(encoding="utf-8")
-    assert re.search(r"^\s*mode\s+tcp", cfg, re.M)
-    for forbidden in ("ssl crt", "mode http", "bind *:587 ssl"):
-        assert forbidden not in cfg
+    directives = "\n".join(l for l in cfg.splitlines()
+                           if not l.lstrip().startswith("#"))
+    assert re.search(r"^defaults\b[\s\S]*?^\s*mode\s+tcp", directives, re.M), (
+        "the default proxy mode must be tcp")
+
+    block = directives.split("frontend submission", 1)[1]
+    assert "ssl" not in block.split("backend", 1)[0], (
+        "the submission listener must not terminate TLS")
+    assert "mode http" not in block.split("backend", 1)[0]
+    # And nothing anywhere may hold a certificate: this container has no key.
+    assert "crt " not in directives and "crt-list" not in directives
 
 
 def test_the_gateway_holds_no_secret_and_cannot_write():
@@ -105,7 +117,31 @@ def test_the_gateway_holds_no_secret_and_cannot_write():
     assert svc.get("read_only") is True
     for mount in svc.get("volumes", []):
         assert mount.endswith(":ro"), f"writable mount on the gateway: {mount}"
-    assert not svc.get("environment"), "the gateway needs no environment at all"
+    # It carries exactly one environment entry, and that entry is a hash of its
+    # own configuration — present so Compose can SEE a config-only change, not
+    # because the container reads it. Anything resembling a credential here
+    # would be a credential in the one component that is reachable from the
+    # application.
+    env = svc.get("environment") or {}
+    assert set(env) == {"NATIVE_GATEWAY_CONFIG_HASH"}, env
+    for key in env:
+        assert not re.search(r"(?i)pass|secret|token|key(?!_)", key.replace(
+            "CONFIG_HASH", "")), key
+
+
+def test_a_gateway_config_change_is_visible_to_compose():
+    """
+    Compose compares images, environment, mounts and labels — never the
+    CONTENTS of a mounted file. Without a hash in the environment, editing the
+    gateway's routing would deploy "successfully" and leave the old routing
+    running. NE3 lost five days to exactly this with Rspamd.
+    """
+    svc = compose()["services"]["submission-gateway"]
+    assert "NATIVE_GATEWAY_CONFIG_HASH" in (svc.get("environment") or {})
+    deploy = (NATIVE / "deploy.sh").read_text(encoding="utf-8")
+    assert "NATIVE_GATEWAY_CONFIG_HASH=$(config_hash gateway)" in deploy
+    assert "NATIVE_GATEWAY_CONFIG_HASH" in deploy.split("export", 1)[1][:400], (
+        "the hash must be exported or Compose never sees it")
 
 
 def test_the_mail_path_is_still_unreachable_from_matemail():
@@ -510,3 +546,94 @@ def test_no_container_ip_is_used_as_an_smtp_host():
     for line in example.read_text(encoding="utf-8").splitlines():
         if line.startswith("EMAIL_HOST="):
             assert not re.match(r"EMAIL_HOST=\d+\.\d+\.\d+\.\d+", line), line
+
+
+def test_postfix_logs_where_something_can_read_it():
+    """
+    Regression, found during the NE6 migration. Postfix defaults to syslog and
+    this container has no syslog daemon, so it ran, delivered mail and wrote
+    nothing anywhere. The first Native delivery left no queue id, no relay and
+    no `status=sent` to point at — and P7's delivery, deferral, bounce and
+    rejection counters had been parsing an empty log and reporting a confident
+    zero since the day they were written.
+
+    A mail server whose delivery record does not exist cannot be operated.
+    """
+    main = MAIN_CF.read_text(encoding="utf-8")
+    assert re.search(r"^maillog_file\s*=\s*/dev/stdout", main, re.M), (
+        "Postfix must log somewhere `docker logs` can see")
+
+
+def test_the_monitoring_that_reads_those_logs_looks_at_the_right_container():
+    """
+    The counters are only as good as the container they read. This pins the
+    pairing so a rename cannot make them silently empty again.
+    """
+    collector = (REPO / "deploy" / "monitoring" / "collectors" /
+                 "matemail_collector.py").read_text(encoding="utf-8")
+    assert '"matemail-native-" + svc' in collector
+    assert '"postfix"' in collector and '"dovecot"' in collector
+
+
+def test_dkim_signs_the_exact_domain_not_its_registrable_parent():
+    """
+    Regression, found by the first real platform message in NE6.
+
+    Rspamd defaults `use_esld` to true, rewriting `mail.matemail.online` to
+    `matemail.online` before looking up the selector and the key. The lookup
+    missed, the default selector was used, the key path did not exist, and the
+    message was delivered UNSIGNED — with nothing reported to the application.
+
+    It stayed hidden because NE3's DKIM proof used a two-level test domain,
+    where the effective second-level domain and the real domain are identical.
+    Every MateMail sending domain is a subdomain, and DMARC is strict here, so
+    signing as the parent would fail alignment even if the key existed.
+    """
+    cfg = (NATIVE / "rspamd" / "local.d" / "dkim_signing.conf").read_text(
+        encoding="utf-8")
+    directives = "\n".join(l for l in cfg.splitlines()
+                           if not l.lstrip().startswith("#"))
+    assert re.search(r"^\s*use_esld\s*=\s*false\s*;", directives, re.M), (
+        "without use_esld=false, a subdomain sender signs as its parent or "
+        "not at all")
+    assert 'path = "/var/lib/rspamd/dkim/$domain.$selector.key"' in directives
+    assert 'selector_map = "/var/lib/rspamd/dkim/selectors.map"' in directives
+    assert re.search(r"^\s*sign_authenticated\s*=\s*true\s*;", directives, re.M)
+
+
+def test_the_gateway_health_check_does_not_touch_postfix():
+    """
+    Regression, found minutes after the gateway went live. In `mode tcp` any
+    connection to the submission frontend makes HAProxy open one to Postfix, so
+    a `nc -z 127.0.0.1 587` health check dropped a half-open session on the
+    mail server every thirty seconds. Postfix logged "lost connection after
+    CONNECT" each time, and P7 counted those into `connection_lost` — the
+    metric whose whole purpose is to reveal clients failing mid-session. A real
+    failure would have been indistinguishable from the health check.
+    """
+    svc = compose()["services"]["submission-gateway"]
+    probe = " ".join(svc["healthcheck"]["test"])
+    assert "587" not in probe, (
+        "the health check must not dial the submission frontend")
+    assert "8405/healthz" in probe
+    cfg = GATEWAY_CFG.read_text(encoding="utf-8")
+    assert "monitor-uri /healthz" in cfg
+
+
+def test_the_health_endpoint_is_not_reachable_from_matemail():
+    """Loopback only, so it cannot become an unauthenticated probe."""
+    cfg = GATEWAY_CFG.read_text(encoding="utf-8")
+    assert re.search(r"^\s*bind\s+127\.0\.0\.1:8405", cfg, re.M)
+
+
+def test_the_backend_health_check_completes_the_smtp_conversation():
+    """
+    A bare TCP `check` also left "lost connection" lines, every fifteen
+    seconds. Reading the banner and sending QUIT both proves more and leaves
+    the log clean.
+    """
+    cfg = GATEWAY_CFG.read_text(encoding="utf-8")
+    assert "option tcp-check" in cfg
+    assert "tcp-check send QUIT" in cfg
+    assert re.search(r"tcp-check expect rstring \^220", cfg)
+    assert re.search(r"tcp-check expect rstring \^221", cfg)

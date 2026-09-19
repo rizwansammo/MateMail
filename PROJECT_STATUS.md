@@ -271,7 +271,12 @@ P7 monitoring:                 COMPLETE (2026-09-19) — deployed on MateServer,
                                alerts validated against real induced failures.
                                Prometheus/Grafana/Alertmanager loopback-only.
                                NE6 technical readiness reports READY.
-NE6–NE8 implementation:        NONE — not started
+NE6 platform outbound:         COMPLETE (2026-09-19) - MateMail platform
+                               transactional mail now leaves through the
+                               Native Engine. SPF/DKIM/DMARC all pass,
+                               Gmail Primary Inbox. Mailcow retained as
+                               rollback only; no automatic fallback.
+NE7-NE8 implementation:        NONE - not started
 mailcow:                       live production dependency, unmodified
 ```
 
@@ -2719,3 +2724,114 @@ ALERT_RECEIVER_CONFIGURED = NO    alerts fire, group and are visible in
 
 Both are deliberately excluded from `matemail_ne6_ready`. NE6 technical
 readiness is not Private Beta readiness.
+
+---
+
+## NE6 COMPLETE — platform outbound now leaves through the Native Engine (2026-09-19)
+
+Release `46b67723ff985053568d907e8a104aebb15f48e2`, CI green. No application
+image was rebuilt: no application source changed.
+
+```
+Before NE6:   MateMail platform outbound  ->  Mailcow  ->  Internet
+After  NE6:   MateMail platform outbound  ->  Native Engine  ->  Internet
+```
+
+### The switch was one network alias
+
+`mx.matemail.online` is a Docker network alias on `matemail_engine_link`. NE6
+moved it from the Mailcow-owned gateway to a new Native-owned one. `EMAIL_HOST`,
+`EMAIL_PORT`, `EMAIL_HOST_USER`, `DEFAULT_FROM_EMAIL` and the SMTP credential
+are all **unchanged**, no container IP entered any settings file, and no DNS
+record was touched. Rollback is moving the alias back, which was rehearsed.
+
+### Real Internet delivery, through the real application
+
+Sent with `apps.accounts.mailer.send_transactional()` — the function behind
+every verification link and password reset — to an operator-controlled Gmail
+account, the same one used for the P4 delivery test.
+
+```
+SPF    pass    client-ip=169.58.114.252
+DKIM   pass    header.i=@mail.matemail.online  header.s=mm1
+DMARC  pass    header.from=mail.matemail.online   (adkim=s, aspf=s)
+TLS    1.3     TLS_AES_256_GCM_SHA384 to the recipient MX
+MX     250 2.0.0 OK        Placement: Primary Inbox
+Mailcow involvement: NONE  (zero lines in its log)
+```
+
+DKIM was also verified **cryptographically before sending**, with dkimpy
+against the public DNS key — signature and body hash valid — rather than
+trusting the presence of a header.
+
+### DKIM was adopted, so no DNS changed
+
+The existing `mm1` private key was migrated out of Mailcow by a one-time script
+that reads the key on stdin, refuses anything whose public half does not match
+DNS, and was deleted afterwards. Three independently derived public-key
+fingerprints — Mailcow's stored key, Native's key on disk, and the `p=` tag in
+public DNS — were required to be identical before the transport switch, and
+were:
+
+```
+12232cbc872dd3ef533293da2433bf2111eed96b05abd27c374cb34544d088b7
+```
+
+This mattered more than expected: creating the domain in Native
+**auto-generated a fresh mm1 key** that did not match DNS. The fingerprint gate
+caught it and the real key replaced it.
+
+### Four defects found and fixed in phase
+
+Each one produced a system that looked like it was working.
+
+**Native Postfix had no certificate at all** while its submission service
+required STARTTLS. It would have refused every message.
+
+**Native Postfix logged nothing.** Postfix defaults to syslog and the container
+has none, so it delivered mail and left no record — and P7's delivery,
+deferral, bounce and rejection counters had been parsing an empty log and
+reporting a confident zero since the day they were written.
+
+**DKIM signed nothing.** Rspamd's `use_esld` default rewrote
+`mail.matemail.online` to `matemail.online`, missed the selector map, and
+delivered mail UNSIGNED with no error. NE3's signing proof had used a
+two-level domain where that collapse is invisible. Every MateMail sending
+domain is a subdomain, so customers would have hit this too.
+
+**Health checks poisoned a monitoring signal.** HAProxy's TCP check and the
+container's own probe each dropped half-open sessions on Postfix ~4 times a
+minute, all counted as `connection_lost` — the metric meant to reveal clients
+failing mid-session. A real failure would have been invisible in the noise.
+
+All four have regression tests.
+
+### Failure behaviour, injected not assumed
+
+```
+submission gateway down   send_transactional() False; ZERO Mailcow lines
+rspamd down               451 4.7.1 at CONNECT, deferred
+clamav down               451 4.7.1 antivirus unavailable; never unscanned
+native redis down         450 4.7.1 rate limiting unavailable; fails CLOSED
+unbound down (external)   refused 4xx, nothing accepted, nothing queued
+```
+
+There is **no automatic fallback to Mailcow** and that was proven, not
+asserted (DEC-040).
+
+### Final state
+
+Native 11/11 healthy (the gateway is the eleventh service, monitored like the
+rest) · MateMail 6/6 · Mailcow 20 running with its platform domain, mailbox,
+DKIM key and credential intact · P5 bridge healthy · monitoring 4/4 · backups
+enabled · queues and quarantine empty · UFW checksum byte-identical to the
+pre-NE6 baseline · public listeners exactly 22, 80, 443, 4000 · zero public
+mail ports · zero published Native ports · MX, A, PTR, SPF, DKIM and DMARC
+unchanged · `matemail_ne6_ready` = 1 · only the known
+`BackupOffsiteNotConfigured` warning firing.
+
+### What NE6 did not do
+
+No public port opened. No Internet inbound. No customer submission or IMAP. No
+mailbox migration. Mailcow still carries customer/Internet mail and is removed
+at NE8. Broad deliverability testing across Gmail, Microsoft and Zoho is NE7's.

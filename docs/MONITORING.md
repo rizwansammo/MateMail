@@ -10,7 +10,7 @@ what am I looking at, and what do I do when it goes off.
 | Question | Where |
 |---|---|
 | Is MateMail healthy? | Overview → *MateMail services*, *App health endpoint* |
-| Is the Native Engine healthy? | Overview → *Native 10/10* |
+| Is the Native Engine healthy? | Overview → *Native all-healthy* (11 services since NE6) |
 | Is mail flowing / stuck? | Mail Operations → *Queue total*, *Oldest message* |
 | Deferred or rejected? | Mail Operations → *Postfix events per hour* |
 | Authentication failures abnormal? | Mail Operations → *Dovecot authentication* |
@@ -445,3 +445,36 @@ marking a series stale, which is what makes
 | `ALERT_RECEIVER_CONFIGURED = NO` | Pre-beta requirement. Alerts fire and are visible in Alertmanager over the tunnel, but nothing is delivered off the host. Set `ALERT_WEBHOOK_URL` in `/opt/MateMailMonitoring/.env` and re-run `install.sh`. The destination must not be served by Native Postfix, Mailcow or MateMail's transactional sender — those are the things being monitored. |
 
 Neither blocks NE6 technical readiness. Both block Private Beta.
+
+
+---
+
+## 18. What changed at NE6
+
+The engine gained an eleventh service, `submission-gateway`, and it is
+monitored like the other ten — `matemail_native_service_up{service=
+"submission-gateway"}`. An unmonitored component in the mail path would present
+as "the application cannot send" with nothing pointing at the cause.
+
+**The Native queue is no longer expected to be permanently zero.** Platform
+transactional mail now flows through it. It should still drain to empty in
+seconds; `NativeQueueNonEmpty` fires after 30 minutes, which remains the right
+signal, but a brief non-zero reading is now normal rather than suspicious.
+
+**Two Postfix counters were added**, `smtp_auth_ok` and `smtp_auth_failed`.
+SMTP authentication is logged by Postfix, not Dovecot, so platform submissions
+were not visible in the IMAP auth counter.
+
+**The Postfix counters now have data at all.** Before NE6, Postfix wrote no
+log — it defaults to syslog and the container has none — so
+`matemail_postfix_events_total` had been reporting a confident zero since it
+was written. `maillog_file = /dev/stdout` fixed the cause;
+`smtp_tls_loglevel = 1` additionally records whether each delivery negotiated
+TLS, which is the first question asked after a delivery and the one NE7 will
+ask of every provider.
+
+**`connection_lost` is trustworthy again.** The gateway's health checks used to
+drop half-open sessions on Postfix about four times a minute, all counted as
+`connection_lost`. The backend check now completes an SMTP conversation and
+liveness is answered by HAProxy's own loopback endpoint, so that metric once
+more means what it says.

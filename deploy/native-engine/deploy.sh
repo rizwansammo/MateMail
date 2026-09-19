@@ -52,8 +52,13 @@ NATIVE_RSPAMD_CONFIG_HASH=$(config_hash rspamd)
 NATIVE_POSTFIX_CONFIG_HASH=$(config_hash postfix)
 NATIVE_DOVECOT_CONFIG_HASH=$(config_hash dovecot)
 NATIVE_UNBOUND_CONFIG_HASH=$(config_hash unbound)
+# NE6. The submission gateway is bind-mounted configuration like the rest, and
+# needs a hash for the same reason: without one, a change to its routing would
+# deploy silently while the old routing kept running.
+NATIVE_GATEWAY_CONFIG_HASH=$(config_hash gateway)
 export NATIVE_RSPAMD_CONFIG_HASH NATIVE_POSTFIX_CONFIG_HASH \
-       NATIVE_DOVECOT_CONFIG_HASH NATIVE_UNBOUND_CONFIG_HASH
+       NATIVE_DOVECOT_CONFIG_HASH NATIVE_UNBOUND_CONFIG_HASH \
+       NATIVE_GATEWAY_CONFIG_HASH
 
 echo "deploy: configuration hashes"
 echo "  rspamd  $NATIVE_RSPAMD_CONFIG_HASH"

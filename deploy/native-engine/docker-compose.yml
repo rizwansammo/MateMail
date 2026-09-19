@@ -399,6 +399,13 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=1m,mode=1777
+    environment:
+      # Consumed by nothing inside the container. Its only job is to make a
+      # configuration-only change VISIBLE to Compose, which compares images,
+      # environment, mounts and labels but never the contents of a mounted
+      # file. Without it `up -d` reports success and leaves the old routing
+      # running - the trap that cost NE3 five days with Rspamd.
+      NATIVE_GATEWAY_CONFIG_HASH: ${NATIVE_GATEWAY_CONFIG_HASH:-unset}
     volumes:
       - ./gateway/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     networks:
@@ -412,9 +419,12 @@ services:
     # Deliberately no `ports:`. Publishing 587 would rebuild the exact hole
     # that NE7, not NE6, is allowed to open.
     healthcheck:
-      # Connect and close without speaking SMTP, so a health check can never be
-      # mistaken for a delivery attempt or trip a rate limiter.
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 587 || exit 1"]
+      # Asks HAProxy's own loopback monitor endpoint, NOT the submission
+      # frontend. In `mode tcp` any connection to 587 makes HAProxy open one to
+      # Postfix and drop it, so the old `nc -z 127.0.0.1 587` check logged a
+      # "lost connection after CONNECT" on the mail server twice a minute and
+      # polluted the metric meant to show clients failing mid-session.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8405/healthz || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

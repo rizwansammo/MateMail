@@ -1583,3 +1583,52 @@ no SMTP configuration in Alertmanager at all.
 therefore no log rotation whatsoever, with individual container logs already at
 45 MB. `/etc/logrotate.d/matemail-docker-containers` caps them without requiring
 a Docker daemon restart across 72 containers.
+
+---
+
+## Platform outbound mail (NE6)
+
+**MateMail reaches exactly two things in the engine.** The control-plane API
+and a TCP forwarder on port 587. Verified from the running backend: Native
+PostgreSQL, Dovecot, Redis, Rspamd and Postfix-direct do not even resolve.
+
+**The gateway holds nothing worth stealing.** `mode tcp`, read-only
+filesystem, no credential, no key, one listener, one upstream. The STARTTLS
+session and the SASL exchange run end to end between Django and Postfix, so a
+compromise of the gateway yields ciphertext.
+
+**It is not trusted by address.** `mynetworks` is host-local only, so the
+gateway must authenticate like any other client. Had it grown to include the
+container subnet, `permit_mynetworks` would have let anything reaching the
+gateway relay to the Internet unauthenticated — and the gateway is reachable by
+the whole application. A test pins this.
+
+**Verified refusals, from the real runtime:** wrong password → 535;
+unauthenticated relay → 554; authenticated but sender not owned by the login →
+`553 5.7.1 not owned by user`. Platform mail is not privileged: it passes the
+same STARTTLS, SASL, sender-ownership, rate-limit and scanner checks customer
+mail will.
+
+**TLS is verified, not assumed.** Django's SMTP backend uses
+`ssl.create_default_context()`, so the certificate and its hostname are both
+checked. Nothing was weakened for NE6 — instead the real Let's Encrypt
+certificate was installed into the engine, because the TLS volume was empty and
+submission required STARTTLS. One certificate is copied in; `/etc/letsencrypt`
+is not mounted, as it holds every other application's private keys.
+
+**The DKIM exception is bounded.** One private key was imported, once, by a
+script that reads it on stdin — never a command line, environment variable or
+shell history — refuses anything whose public half does not match DNS, and was
+deleted afterwards. No HTTP route accepts private keys, and a test asserts none
+exists (DEC-039). The key file is 0600 and no branch of the utility can print
+key material; a test drives every failure path and scans all output for it.
+
+**No automatic failover.** If Native submission is unavailable MateMail fails
+and retries; it does not route through Mailcow. Proven by injection: with the
+gateway stopped, the send failed and Mailcow's log gained zero lines. A silent
+failover would have changed the scanning and rate-limiting properties of
+outbound mail without anyone choosing that (DEC-040).
+
+**Unchanged by NE6:** UFW, DNS, PTR, public listeners, published ports. Zero
+mail ports are publicly reachable; that remains NE7's decision to make
+deliberately.

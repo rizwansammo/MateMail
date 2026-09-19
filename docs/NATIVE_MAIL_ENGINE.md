@@ -2752,3 +2752,79 @@ retries rather than silently sending through the component NE8 will remove.
 
 No public port was opened. No Internet inbound. No customer submission, no
 customer IMAP, no mailbox migration. Those are NE7's.
+
+### Proven in production, 2026-09-19
+
+```
+send_transactional()  ->  django.core.mail  ->  mx.matemail.online:587
+                      ->  submission-gateway (Native)
+                      ->  Native Postfix  ->  Rspamd DKIM sign
+                      ->  outbound TCP/25 ->  Gmail  ->  Primary Inbox
+```
+
+| Evidence | Result |
+|---|---|
+| Submission | TLS 1.3, `AUTH PLAIN` as the platform sender, certificate CN verified |
+| Queue id | accepted, `status=sent`, `removed` — queue drained |
+| Outbound TLS | TLS 1.3 `TLS_AES_256_GCM_SHA384` to the recipient MX |
+| Recipient MX | `250 2.0.0 OK` |
+| **SPF** | **pass** — `client-ip=169.58.114.252` |
+| **DKIM** | **pass** — `header.i=@mail.matemail.online`, `header.s=mm1` |
+| **DMARC** | **pass** — `header.from=mail.matemail.online`, strict alignment |
+| Placement | Primary Inbox, not Spam |
+| Mailcow involvement | **none** — zero lines in its log |
+
+The outbound leg is logged as "Untrusted TLS". That is correct rather than a
+problem: the recipient publishes no DANE TLSA record, so `dane` degrades to
+opportunistic TLS and the peer certificate is not validated. Encryption is
+negotiated either way.
+
+### Four defects NE6 surfaced, all fixed in phase
+
+**Native Postfix had no certificate.** The TLS volume was empty while
+submission required STARTTLS, so it would have refused every message.
+
+**Native Postfix logged nothing at all.** Postfix defaults to syslog; the
+container has no syslog daemon. It ran, delivered mail, and left no record —
+no queue id, no relay, no `status=sent`. P7's delivery, deferral, bounce and
+rejection counters had been reading an empty log and reporting a confident
+zero since they were written. Fixed with `maillog_file = /dev/stdout`, plus
+`smtp_tls_loglevel = 1` so "was this delivered over TLS" has an answer.
+
+**DKIM signed nothing.** Rspamd defaults `use_esld` to true, rewriting
+`mail.matemail.online` to `matemail.online` before the selector lookup. The
+lookup missed, the default selector was used, the key path did not exist, and
+the message was delivered UNSIGNED with nothing reported to the application.
+Invisible until now because NE3's signing proof used a two-level test domain,
+where the effective second-level domain and the real domain are the same
+string. Every MateMail sending domain is a subdomain, so this would have
+affected customers too.
+
+**The gateway's health checks poisoned a metric.** Both HAProxy's TCP backend
+check and the container's own `nc -z` probe dropped half-open sessions on
+Postfix, which logged "lost connection after CONNECT" roughly four times a
+minute. P7 counted those into `connection_lost`, the metric whose purpose is
+to reveal clients failing mid-session — a real failure would have been
+invisible in ~5,700 lines of daily noise. The backend check now completes an
+SMTP conversation, and liveness is answered by HAProxy's own loopback
+`monitor-uri` without touching Postfix.
+
+### Failure behaviour, verified by injection
+
+| Injected failure | Result |
+|---|---|
+| Submission gateway down | `send_transactional()` returned False; **zero** Mailcow log lines — no fallback |
+| Rspamd down | `451 4.7.1 Service unavailable` at CONNECT, deferred |
+| ClamAV down | `451 4.7.1 Antivirus temporarily unavailable` — never delivered unscanned |
+| Native Redis down | `450 4.7.1 rate limiting temporarily unavailable` — fails **closed** |
+| Unbound down, external recipient | refused 4xx, nothing accepted, nothing queued |
+
+Every service was restored immediately and the queue ended empty.
+
+### Rollback, rehearsed rather than asserted
+
+The procedure in the previous section was executed on 2026-09-19: the alias was
+moved to the Mailcow gateway, MateMail authenticated against Mailcow submission
+over TLS 1.3, and the alias was moved back to Native. A subsequent message was
+logged by Native and not by Mailcow. Mailcow retains its platform domain,
+mailbox, DKIM key, credential and gateway configuration.

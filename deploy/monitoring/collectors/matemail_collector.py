@@ -504,6 +504,11 @@ LOG_PATTERNS = {
         ("rejected", re.compile(r"\breject:")),
         ("tls_failure", re.compile(r"TLS (?:handshake|library) (?:problem|error)")),
         ("connection_lost", re.compile(r"lost connection after")),
+        # NE6: platform submissions are real traffic now. A successful
+        # SASL login is logged by Postfix, not Dovecot, so it needs its
+        # own signal here rather than being read off the IMAP counter.
+        ("smtp_auth_ok", re.compile(r"sasl_method=\S+, sasl_username=")),
+        ("smtp_auth_failed", re.compile(r"SASL \S+ authentication failed")),
         ("smtp_4xx", re.compile(r"said: 4\d\d")),
         ("smtp_5xx", re.compile(r"said: 5\d\d")),
     ],
