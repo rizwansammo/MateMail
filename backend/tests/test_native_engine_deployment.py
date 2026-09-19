@@ -26,11 +26,16 @@ COMPOSE = NE / "docker-compose.yml"
 ENV_EXAMPLE = NE / ".env.example"
 API = REPO / "engine" / "native_api" / "app.py"
 
-#: The ten services NE0.19 requires. Compose keys are short; container_name
-#: carries the full `matemail-native-*` identity.
+#: The services the engine runs. Compose keys are short; container_name carries
+#: the full `matemail-native-*` identity.
+#:
+#: NE0.19 defined ten. NE6 added the eleventh, `submission-gateway`: the TCP
+#: forwarder that lets MateMail reach Postfix on 587 without joining the engine
+#: network and without Postfix joining the link network.
 REQUIRED_SERVICES = {
     "postfix", "dovecot", "rspamd", "clamav", "olefy",
     "unbound", "db", "redis", "api", "policy",
+    "submission-gateway",
 }
 
 #: Anything named like this belongs to the live engine and must never appear.
@@ -57,12 +62,17 @@ class StructureTest(unittest.TestCase):
     def test_the_compose_file_parses(self):
         self.assertIsInstance(load_compose(), dict)
 
-    def test_all_ten_services_are_defined(self):
+    def test_the_service_list_is_exactly_the_declared_one(self):
+        """
+        The set is closed in both directions. A service quietly added to
+        the engine is a component nobody decided to run, and — because P7
+        iterates the same list — a component nobody is monitoring.
+        """
         services = set(load_compose()["services"])
         self.assertEqual(
             services, REQUIRED_SERVICES,
-            "NE0.19 defines exactly ten services; this file defines "
-            f"{sorted(services)}",
+            f"the engine defines {sorted(services)}, which is not the "
+            f"declared set {sorted(REQUIRED_SERVICES)}",
         )
 
     def test_every_service_carries_the_native_identity(self):
@@ -111,16 +121,24 @@ class IsolationFromMailcowTest(unittest.TestCase):
         self.assertEqual(nets["engine"]["name"], "matemail_native_engine")
         self.assertNotIn("external", nets["engine"])
 
-    def test_only_the_api_joins_the_engine_link(self):
+    def test_only_the_control_plane_and_submission_gateway_join_the_link(self):
         """
-        NE0 permits only `api` and `policy` on matemail_engine_link, and only
-        from NE5 — which has happened. The property worth protecting flipped
-        from "nobody is on it" to "ONLY the control plane is on it".
+        The link network carries exactly two services, and the list is closed.
 
-        That distinction is the security boundary: MateMail can ask the API to
-        provision, and cannot reach Postfix, Dovecot, Rspamd, the database or
-        the key store at all. A compromised application gets the component that
-        validates and authorises, not the mail path or the mail store.
+        NE5 put the control plane on it: MateMail asks the API to provision,
+        and the API validates and authorises. NE6 added the submission gateway,
+        because MateMail also has to SEND, and Django verifies the certificate
+        hostname — so something answering `mx.matemail.online` must hold the
+        real certificate for that name.
+
+        The boundary is not weaker for it. The gateway is not Postfix: it holds
+        no key and no credential, forwards one port to one upstream, and that
+        upstream authenticates every message it accepts. What MateMail still
+        cannot reach is the mail path and the mail store, which is what
+        `test_the_mail_path_stays_unreachable_from_matemail` pins down.
+
+        Anything else appearing here is a boundary change that must be argued
+        for, not discovered later.
         """
         import yaml
         services = yaml.safe_load(self.raw)["services"]
@@ -128,8 +146,9 @@ class IsolationFromMailcowTest(unittest.TestCase):
             name for name, spec in services.items()
             if "matemail_engine_link" in str(spec.get("networks"))
         )
-        self.assertEqual(["api"], on_link,
-                         "only the control plane may reach MateMail")
+        self.assertEqual(["api", "submission-gateway"], on_link,
+                         "only the control plane and the submission gateway "
+                         "may reach MateMail")
 
     def test_the_engine_link_is_externally_owned(self):
         """

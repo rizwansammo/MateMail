@@ -365,6 +365,64 @@ services:
       retries: 3
       start_period: 15s
 
+  # ── Private submission gateway (NE6) ───────────────────────────────────────
+  #
+  # The second, and last, service permitted on `matemail_engine_link`.
+  #
+  # MateMail must reach Postfix on 587 to send its transactional mail, and
+  # Django verifies the certificate AND its hostname (Django's SMTP backend
+  # uses ssl.create_default_context()). So whatever answers `mx.matemail.online`
+  # has to present the real certificate for that name. Three ways to do that,
+  # and only one is acceptable:
+  #
+  #   - Put MateMail on the engine network. That also puts it next to
+  #     PostgreSQL, Dovecot, Redis, Rspamd and the DKIM key store. No.
+  #   - Put Postfix on the link network. That widens the mail path's exposure
+  #     and breaks `test_the_mail_path_stays_unreachable_from_matemail`. No.
+  #   - A tiny TCP forwarder that carries the alias, exposes exactly one port,
+  #     and forwards to exactly one upstream. This.
+  #
+  # It terminates nothing: `mode tcp` means the STARTTLS session and the SASL
+  # exchange run end to end between Django and Postfix. This container never
+  # sees the password and holds no key, so there is nothing in it to steal.
+  #
+  # This REPLACES the Mailcow-owned gateway that carried the same traffic
+  # before NE6. Both cannot hold the `mx.matemail.online` alias at once —
+  # Docker would round-robin between them and mail would land in two different
+  # systems at random — so deployment detaches the Mailcow one. Reattaching it
+  # is the rollback, and it is a single `docker network connect`.
+  submission-gateway:
+    <<: *common
+    container_name: matemail-native-submission-gateway
+    image: haproxy:3.2.23-alpine@sha256:6343ce34a132a5dceaa24767d739df2bd519f8f7c1079ae39e4821334e8eb42e
+    # Nothing here should ever write to its own filesystem.
+    read_only: true
+    tmpfs:
+      - /tmp:size=1m,mode=1777
+    volumes:
+      - ./gateway/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      engine:
+      matemail_engine_link:
+        aliases:
+          # The certificate MateMail validates must match the name it dialled.
+          # This alias is the whole reason EMAIL_HOST stays `mx.matemail.online`
+          # and no container IP ever enters a settings file.
+          - mx.matemail.online
+    # Deliberately no `ports:`. Publishing 587 would rebuild the exact hole
+    # that NE7, not NE6, is allowed to open.
+    healthcheck:
+      # Connect and close without speaking SMTP, so a health check can never be
+      # mistaken for a delivery attempt or trip a rate limiter.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 587 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits: {memory: 64M}
+
   policy:
     <<: *common
     container_name: matemail-native-policy
@@ -409,14 +467,20 @@ services:
 # a per-service property — see README § Egress — not something this network can
 # express on its own.
 #
-# `matemail_engine_link` is JOINED BY `api` ONLY, and only from NE5 — which is
-# now. Per NE0 it is the single path between MateMail and this engine, and the
-# ONLY service that may sit on it is the API: the control plane.
+# `matemail_engine_link` is JOINED BY EXACTLY TWO SERVICES, and by nothing else:
 #
-# Nothing else joins it, deliberately. Postfix, Dovecot, Rspamd, the database
-# and the key store stay unreachable from MateMail, so a compromised
-# application cannot talk to the mail path or the mail store directly — it can
-# only ask the API, which is the component that validates and authorises.
+#   api                 the control plane, since NE5. MateMail asks it to
+#                       provision; it validates and authorises.
+#   submission-gateway  since NE6. A TCP forwarder with one listener, 587,
+#                       and one upstream, Postfix's submission service.
+#
+# The security property has not been relaxed, only stated more precisely.
+# Postfix, Dovecot, Rspamd, the database and the key store remain unreachable
+# from MateMail: the gateway is not Postfix, it holds no key and no credential,
+# and the single port it offers lands on the one service that authenticates
+# every message it accepts. A compromised application still gets the component
+# that validates and authorises, plus an SMTP port that will refuse it without
+# the platform credential — not the mail path and not the mail store.
 #
 # The network is `external: true` and internal (no egress). It is created and
 # owned outside this stack, so neither project's lifecycle can delete the other

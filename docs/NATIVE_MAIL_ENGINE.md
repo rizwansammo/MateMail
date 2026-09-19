@@ -2661,3 +2661,94 @@ label (DEC-036).
 mail. It covers the technical prerequisites only and deliberately excludes the
 two known external gaps — offsite backup and the external alert receiver —
 which are reported separately as pre-beta warnings.
+
+
+---
+
+## NE6 — the platform sender moves to the Native Engine
+
+```
+Before NE6:   MateMail  ->  Mailcow  ->  Internet
+After  NE6:   MateMail  ->  Native Engine  ->  Internet
+```
+
+Mailcow remains installed and healthy as the rollback path. It is no longer in
+the active platform outbound path.
+
+### The submission path
+
+```
+  Django / Celery                        (matemail_engine_link)
+        |  SMTP 587, STARTTLS, SASL
+        v
+  mx.matemail.online  ->  submission-gateway   haproxy, mode tcp
+        |                                       no key, no credential
+        v                                       (matemail_native_engine)
+  postfix:587                                   authenticates every message
+```
+
+`mx.matemail.online` is a Docker network ALIAS on the gateway, not a public
+name resolving to a container. That is why `EMAIL_HOST` never changed and why
+no container IP appears in any settings file. It is also why the certificate
+Django validates is the certificate Postfix holds: the gateway forwards bytes
+and terminates nothing (DEC-038).
+
+The gateway is the eleventh Native service. Postfix, Dovecot, Rspamd, the
+database and the key store remain unreachable from MateMail.
+
+### What the engine enforces on platform mail
+
+Platform mail is not privileged. It passes the same checks future customer mail
+will:
+
+| Control | Effect |
+|---|---|
+| `smtpd_tls_security_level=encrypt` on submission | STARTTLS is mandatory |
+| `smtpd_sasl_auth_enable=yes`, restrictions end in `reject` | no unauthenticated relay |
+| `mynetworks = 127.0.0.0/8` only | the gateway is NOT trusted by address |
+| `reject_sender_login_mismatch` | the login must own the envelope sender |
+| `check_policy_service` | the per-mailbox rate limit applies |
+| Rspamd + ClamAV milter | the same scanning path, no bypass |
+
+`mynetworks` staying host-local is what stops the gateway becoming an open
+relay: everything arriving through it must authenticate, exactly as a customer
+would.
+
+### The certificate
+
+Native Postfix mounts `matemail_native_tls` at `/etc/ssl/mail`. Before NE6 that
+volume was **empty** while submission required STARTTLS, so it would have
+refused every message. `scripts/install-mail-cert.sh` copies the host's Let's
+Encrypt certificate for `mx.matemail.online` into it and reloads Postfix; a
+certbot deploy hook repeats that on renewal.
+
+A copy, not a bind mount of `/etc/letsencrypt`, because that directory holds
+the private keys of every other application on the host.
+
+### DKIM
+
+`d=mail.matemail.online`, `s=mm1` — the same selector and the same key that
+were already published. The key was adopted rather than regenerated, so NE6
+needed no DNS change (DEC-039). Three independently derived public-key
+fingerprints — Mailcow's, Native's, and the one in public DNS — were compared
+and required to be identical before any transport switch.
+
+### Rollback
+
+Mailcow keeps its platform domain, mailbox, DKIM key, credential and gateway
+configuration. Returning to it is:
+
+```
+docker network disconnect matemail_engine_link matemail-native-submission-gateway
+docker network connect --alias mx.matemail.online     matemail_engine_link mailcowdockerized-matemail-engine-gateway-1
+cd /opt/MateMail && docker compose restart backend celery-worker celery-beat
+```
+
+No configuration file changes and no rebuild. There is deliberately no
+automatic failover (DEC-040): if Native submission is down, MateMail fails and
+retries rather than silently sending through the component NE8 will remove.
+
+### What NE6 did not do
+
+No public port was opened. No Internet inbound. No customer submission, no
+customer IMAP, no mailbox migration. Those are NE7's.

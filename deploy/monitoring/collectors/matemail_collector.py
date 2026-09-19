@@ -68,8 +68,13 @@ PUBLIC_IP = os.environ.get("PUBLIC_IP", "169.58.114.252")
 #: The ten Native services, named exactly once. Everything that iterates the
 #: engine iterates this, so a service added to the stack but not to this list
 #: shows up as a count mismatch instead of being silently unmonitored.
+#: NE6 added `submission-gateway`, the private path MateMail sends
+#: through. It is listed here because an unmonitored component in the
+#: mail path is worse than no component: its failure would present as
+#: "the application cannot send" with nothing pointing at the cause.
 NATIVE_SERVICES = ["api", "db", "redis", "dovecot", "postfix", "rspamd",
-                   "clamav", "olefy", "unbound", "policy"]
+                   "clamav", "olefy", "unbound", "policy",
+                   "submission-gateway"]
 MATEMAIL_SERVICES = ["backend", "frontend", "celery-worker", "celery-beat",
                      "postgres", "redis"]
 

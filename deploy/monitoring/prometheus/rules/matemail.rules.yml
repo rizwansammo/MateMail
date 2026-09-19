@@ -74,8 +74,8 @@ groups:
         for: 5m
         labels: {severity: critical}
         annotations:
-          summary: "Native Engine is not 10/10 healthy"
-          description: "{{ $value }} — only {{ with query \"matemail_native_services_healthy\" }}{{ . | first | value }}{{ end }} of 10 Native services are healthy."
+          summary: "Native Engine is not fully healthy"
+          description: "Some Native service is unhealthy. See matemail_native_service_healthy == 0 for which, and matemail_native_services_healthy vs matemail_native_services_expected for how many."
 
       - alert: NativeServiceRestartLoop
         expr: increase(matemail_native_service_restarts_total[30m]) > 3

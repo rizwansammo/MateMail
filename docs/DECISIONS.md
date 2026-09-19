@@ -1968,3 +1968,141 @@ choosing a third party on the user's behalf.
 are visible in the Alertmanager UI and API over the SSH tunnel; nothing is
 pushed off the host. This does not block NE6 technical readiness and does block
 Private Beta, and it is reported rather than hidden.
+
+---
+
+## DEC-038 — MateMail reaches Postfix through a Native-owned TCP gateway
+
+**Status:** Accepted · **Phase:** NE6 · **Date:** 2026-09-19
+
+### Decision
+
+MateMail sends its transactional mail to Native Postfix through
+`submission-gateway`: an HAProxy container in `mode tcp`, owned by the Native
+project, carrying the network alias `mx.matemail.online` on
+`matemail_engine_link`, listening on 587 and forwarding to `postfix:587`.
+
+It is the second and last service permitted on the link network. Postfix stays
+on the engine network alone.
+
+### Why
+
+Three constraints that fight each other. Django verifies the server
+certificate AND its hostname — its SMTP backend uses
+`ssl.create_default_context()` — so whatever answers `mx.matemail.online` must
+present the real certificate for that name. Postfix must not become reachable
+from the application, because the engine network also carries PostgreSQL,
+Dovecot, Redis, Rspamd and the DKIM key store. And no mail port may be
+published to the host before NE7.
+
+Putting MateMail on the engine network would have solved the first constraint
+by destroying the second. Putting Postfix on the link network would have
+widened the mail path's exposure for the sake of a DNS name. The gateway
+satisfies all three: one listener, one upstream, no key, no credential, no
+published port.
+
+`mode tcp` and not TLS termination, deliberately. The STARTTLS session and the
+SASL exchange run end to end between Django and Postfix, so the certificate
+Django validates is the one Postfix actually holds, and the plaintext password
+is never readable in the proxy. A terminating proxy would have to hold the
+certificate and would see the credential — a worse home for both.
+
+### Consequences
+
+`EMAIL_HOST` stays `mx.matemail.online`. No container IP enters a settings
+file, and the application configuration is unchanged by NE6.
+
+Switching transport is moving one network alias, which is also what makes
+rollback a single command rather than a rebuild. The two gateways cannot hold
+the alias simultaneously — Docker would round-robin and mail would land in two
+systems at random — so deployment detaches the Mailcow one.
+
+The engine now runs eleven services, not ten. P7's collector iterates the same
+list, so the gateway is monitored like everything else; an unmonitored
+component in the mail path would present as "the application cannot send" with
+nothing pointing at the cause.
+
+---
+
+## DEC-039 — The platform DKIM key is adopted, not regenerated
+
+**Status:** Accepted · **Phase:** NE6 · **Date:** 2026-09-19
+
+### Decision
+
+`mm1._domainkey.mail.matemail.online` — the key already published in DNS and
+already signing MateMail's mail through Mailcow — is migrated into the Native
+Engine unchanged. NE6 requires **no DNS change**.
+
+The migration is a one-time script, `deploy/native-engine/scripts/
+import_platform_dkim.py`, copied into the API container, run once with the key
+on **stdin**, and deleted. It is not an API route.
+
+### Why
+
+The engine's normal lifecycle is that it generates its own keys and is never
+handed private material (DEC-007r). This is a deliberate, documented exception
+with a narrow justification: generating a fresh key would mean a DNS change
+plus a window in which mail is signed with a key the world has not seen yet,
+and DMARC here is strict (`adkim=s`). Rotating a published key because
+generating one is easier would be an accidental DNS change dressed up as
+migration.
+
+It is a script rather than an endpoint because an HTTP route that accepts
+private keys is permanent: it exists on every future deployment, for every
+domain, forever, and is one authorisation bug away from being the worst
+endpoint in the system. A file that is copied in, used once and removed has no
+such afterlife.
+
+The key arrives on stdin so it never appears in a command line, a process
+listing, an environment variable or a shell history.
+
+### Consequences
+
+The utility refuses anything it is not for: non-RSA keys, keys below the
+engine's 2048-bit minimum, unreadable PEM, a domain the engine's own validator
+rejects, and — the important one — any key whose derived public half does not
+match the fingerprint taken from public DNS. That last check is what turns
+"the key we installed is the key the world validates against" from a hope into
+a fact, and it is proven by comparing three independently derived fingerprints
+before any transport switch.
+
+Installation reuses the engine's own atomic writer and its DKIM lifecycle lock,
+so a crash cannot leave a half-installed key and a concurrent rotation cannot
+interleave.
+
+---
+
+## DEC-040 — Mailcow is a rollback, never a fallback
+
+**Status:** Accepted · **Phase:** NE6 · **Date:** 2026-09-19
+
+### Decision
+
+After NE6, if Native submission is unavailable, MateMail fails and retries. It
+does **not** route through Mailcow. There is no secondary transport, no
+`EMAIL_BACKEND` fallback chain, and no second MX in the application's
+configuration.
+
+Returning to Mailcow is an operator action: reattach the Mailcow gateway's
+`mx.matemail.online` alias, detach the Native one, restart the SMTP-consuming
+services.
+
+### Why
+
+An automatic fallback would mean that a Native failure is invisible — mail
+keeps flowing, nobody investigates, and the system quietly runs on the
+component NE8 is supposed to delete. Worse, the two paths sign with the same
+DKIM key but differ in scanning and rate limiting, so a silent failover would
+change the security properties of outbound mail without anyone choosing that.
+
+Failing loudly is the behaviour that gets the problem fixed. P7 alerts on the
+queue growing and on the submission gateway being down, which is the intended
+signal.
+
+### Consequences
+
+A Native submission outage stops MateMail's transactional mail — password
+resets, verification, notifications — until it is restored or an operator rolls
+back. That is the accepted cost of not having a silent second path, and it is
+why Mailcow stays installed and why the rollback is one command.
