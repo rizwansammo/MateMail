@@ -350,7 +350,10 @@ NE4 release   commit 8f9fb952, CI run 35399071707, image runs 35399633726 /
               35399730060 / 35399812048
 NE4 digests   api     sha256:0a13dae9b251b08087f325d0ae41e1da0660b789e201f822ab8423da9b6c52d1
               dovecot sha256:e4f545002fa6889baa1530a655cb31c13eeec7f3dbc48f4a75e38c6b9f2efeae
-              postfix sha256:817dbb2252b148ceaad021ab54ed847da47223104f88a21022dc05980fd580c5
+              postfix sha256:7e20c9c53f070d4ddbd821cb6e5b47f3980acb62042249524864fc928bd240b0
+NE4 fix       release 7cb10d1d — the rate limiter now DEFERS rather than
+              allowing when Redis is unavailable and the mailbox has a limit;
+              mailboxes without one are unaffected. Validated on MateServer.
 NE4 runtime   schema v3 -> v4, 10/10 healthy, adapter 26/26 verified through
               NativeMailEngineAdapter, storage isolation proven, all synthetic
               state cleaned, 0 outbound SMTP deliveries

@@ -270,16 +270,22 @@ CI run         35399071707 (success)
 image runs     35399633726 (api), 35399730060 (dovecot), 35399812048 (postfix)
 api digest     sha256:0a13dae9b251b08087f325d0ae41e1da0660b789e201f822ab8423da9b6c52d1
 dovecot digest sha256:e4f545002fa6889baa1530a655cb31c13eeec7f3dbc48f4a75e38c6b9f2efeae
-postfix digest sha256:817dbb2252b148ceaad021ab54ed847da47223104f88a21022dc05980fd580c5
+postfix digest sha256:7e20c9c53f070d4ddbd821cb6e5b47f3980acb62042249524864fc928bd240b0
+               (superseding 817dbb22 — the rate-limiter fail-safe fix,
+                release 7cb10d1d, CI 35408935481, image run 35409244833)
 schema         v3 -> v4 (migration 004 applied exactly once)
 services       10/10 healthy, 0 published ports, 0 API bind mounts
 storage        delete + recreate yields a new opaque identity; the recreated
                mailbox reported 0 messages while the old Maildir remained
 usage          0 MB/0 msgs empty, 2 MB/1 msg after a 2.5 MB delivery
 rate limit     2/minute: 2 accepted, 3rd deferred 450 4.7.1; clear restores
+               counter outage: a mailbox WITH a limit defers 4.7.1, a mailbox
+               without one is unaffected, enforcement resumes on its own
 queue          exact-id cancel removed the message; never delivered; idempotent
 quarantine     held, listed, released -> delivered exactly once, recipient intact
-failure modes  ClamAV down 451, Rspamd down 454, Dovecot down 454; all recovered
+failure modes  ClamAV down 451, Rspamd down 454, Dovecot down 454,
+               PostgreSQL down 451 (no relay, no spoof bypass), Unbound down
+               451, Redis down 451 for limited mailboxes; all recovered
                EICAR rejected 554 with CLAM_VIRUS(2000.00)
 adapter        26/26 exercised through NativeMailEngineAdapter against the server
 rspamd deploy  deploy.sh config hash recreated Rspamd automatically (NE3 fix)
