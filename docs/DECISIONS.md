@@ -1678,7 +1678,7 @@ makes the change visible to the tool that decides what to recreate.
 
 ## DEC-029 — The MateMail control plane runs on the Native Engine
 
-**Status:** accepted (NE5, 2026-09-19)
+**Status:** accepted and IN PRODUCTION (NE5, 2026-09-19, release 37ebb217)
 
 `MAIL_ENGINE_ADAPTER=native`. MateMail provisions domains, mailboxes, aliases,
 forwarding, DKIM, quotas, rate limits, queue and quarantine through

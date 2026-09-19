@@ -342,9 +342,12 @@ worse than reporting the domain and letting an operator rotate deliberately.
 **NE2 COMPLETE** — deployed, digest-pinned and runtime-validated, 2026-09-18.
 **NE3 COMPLETE** — mail flow deployed, digest-pinned and runtime-validated,
 2026-09-18.
-**NE5 implemented locally** — MateMail's control plane switches to
-`MAIL_ENGINE_ADAPTER=native`. The Native `api` joins `matemail_engine_link`;
-nothing else on this stack does. MateServer switch pending.
+**NE5 COMPLETE** — MateMail's control plane runs on
+`MAIL_ENGINE_ADAPTER=native` in production (release `37ebb217`, CI 35437334621,
+deploy 35437913166). The Native `api` joins `matemail_engine_link`; nothing else
+on this stack does, so MateMail can reach the control API and cannot reach the
+mail path, the mail store or the engine database. mailcow remains installed as
+the rollback path and the live mail transport.
 
 **NE4 COMPLETE** — operations, queue, quarantine, rate limits and mailbox
 storage lifecycle, deployed and runtime-validated 2026-09-19.

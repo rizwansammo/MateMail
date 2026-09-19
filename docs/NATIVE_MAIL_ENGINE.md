@@ -453,9 +453,10 @@ not by inspecting configuration.
 
 ### NE5 — implemented locally (2026-09-19)
 
-**Status: implemented and validated locally. MateServer switch pending.**
+**Status: COMPLETE (2026-09-19).** Switched on MateServer from release
+`37ebb217`. Production runs `MAIL_ENGINE_ADAPTER=native`.
 
-The application control plane moves to `MAIL_ENGINE_ADAPTER=native`. Internet
+The application control plane runs on `MAIL_ENGINE_ADAPTER=native`. Internet
 mail, the platform sender and every public port are untouched.
 
 **What already worked.** Every engine call site in `apps/` already went through
@@ -487,7 +488,19 @@ Native, and mailcow received nothing. After restart the same call succeeded and
 created no duplicate.
 
 **Production state gate.** The MateMail production database held zero tenants,
-domains, mailboxes, aliases and forwarding rules, so no migration is required.
+domains, mailboxes, aliases and forwarding rules, so no migration was required —
+re-checked immediately before the switch.
+
+**Runtime result.** 24 application workflows through the adapter, a real Celery
+engine task executed against Native, and an API outage that raised
+`EngineUnavailable` without ever touching mailcow. Mailcow gained zero synthetic
+objects. Transactional SMTP, DNS, PTR, UFW and every public port are unchanged.
+
+**One defect, fixed in the same run.** The new settings were present in `.env`
+but not declared in the application's Compose file, so they arrived empty —
+Compose passes through only what it declares. The NE5 deploy checks caught it
+(`mail_engine.E011/E012`) before any customer action could hit an adapter with
+no URL.
 
 ---
 

@@ -47,6 +47,17 @@ x-backend-env: &backend_env
   MAIL_ENGINE_ADAPTER: ${MAIL_ENGINE_ADAPTER:-stub}
   MAIL_ENGINE_API_URL: ${MAIL_ENGINE_API_URL:-}
   MAIL_ENGINE_API_KEY: ${MAIL_ENGINE_API_KEY:-}
+  # NE5: where the Native Engine's control API lives, and the credential for it.
+  # Reached over `matemail_engine_link`, which only the engine's `api` service
+  # joins - the mail path and the engine database stay unreachable.
+  #
+  # Setting these in .env is NOT enough on its own: Compose passes through only
+  # what is declared here, so a variable present in .env and missing from this
+  # block arrives EMPTY. That is how this line came to be written - the switch
+  # was made, the adapter read an empty URL, and `check --deploy` caught it
+  # (mail_engine.E011/E012) before any customer action could.
+  NATIVE_ENGINE_API_URL: ${NATIVE_ENGINE_API_URL:-}
+  NATIVE_ENGINE_API_SECRET: ${NATIVE_ENGINE_API_SECRET:-}
   MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
   MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.online}
   DKIM_SELECTOR: ${DKIM_SELECTOR:-mm1}

@@ -233,7 +233,7 @@ broken audit log. See the Phase 0 section below.
 
 Full detail, entry criteria and exit criteria: *Revised roadmap* below.
 
-### Native Engine Migration (NE0–NE8) — NE0–NE4 complete, NE5 implemented locally
+### Native Engine Migration (NE0–NE8) — NE0–NE5 complete
 
 A **separate** engineering track that replaces mailcow as the Mail Engine
 orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It does
@@ -258,14 +258,38 @@ NE4 operations:                COMPLETE (2026-09-19) — validated on MateServer
                                Immutable mailbox storage, real usage from
                                Dovecot, enforced per-mailbox rate limits, queue
                                and quarantine control. Adapter 26 of 26.
-NE5 control-plane switch:      IMPLEMENTED AND VALIDATED LOCALLY (2026-09-19);
-                               MateServer switch pending. MateMail provisions
-                               through NativeMailEngineAdapter; mailcow remains
-                               installed as the rollback path and the live mail
-                               transport.
+NE5 control-plane switch:      COMPLETE (2026-09-19) — MAIL_ENGINE_ADAPTER=native
+                               in production. MateMail provisions through the
+                               Native Engine; mailcow stays installed as the
+                               rollback path and the live mail transport.
 NE6–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
 ```
+
+**NE5 control-plane switch on MateServer (2026-09-19)**
+
+```
+release        37ebb2176f74bb9a16a3cc56e678326da379cae3
+CI             run 35437334621 (success)
+deploy         run 35437913166 (success)
+images         no Native Engine image changed; MateMail backend rebuilt
+adapter        MAIL_ENGINE_ADAPTER=native on backend, worker and beat
+network        Native `api` joined matemail_engine_link; MateMail reaches the
+               API and CANNOT reach postfix, dovecot or the engine database
+workflows      24/24 through NativeMailEngineAdapter from the application
+celery         mail_engine.deprovision_mailbox executed against Native
+outage         API stopped -> EngineUnavailable, adapter stayed Native, no
+               mailcow mutation; recovered cleanly
+mailcow        0 synthetic objects created; 20 containers untouched
+transactional  EMAIL_* unchanged (mx.matemail.online:587, noreply@)
+isolation      UFW identical, DNS/PTR unchanged, 0 native public ports,
+               0 non-loopback mail ports, 0 outbound SMTP from Native
+```
+
+One defect was found and fixed during the switch: `NATIVE_ENGINE_API_URL` and
+`NATIVE_ENGINE_API_SECRET` were set in `.env` but not declared in
+`deploy/docker-compose.yml`, so Compose passed them through as empty. The NE5
+deployment checks caught it (`mail_engine.E011/E012`) before any customer action.
 
 **NE4 runtime validation on MateServer (2026-09-19)**
 

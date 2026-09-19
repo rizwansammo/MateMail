@@ -1443,7 +1443,7 @@ environment, so a configuration change becomes a change Compose can see.
 
 ## Native Engine NE5 — control-plane switch
 
-**Status: implemented and validated locally. MateServer switch pending.**
+**Status: COMPLETE — switched on MateServer 2026-09-19 (release 37ebb217).**
 
 MateMail's control plane moves to `MAIL_ENGINE_ADAPTER=native`. Internet mail,
 the platform sender and every public port are untouched — NE6 owns those.
