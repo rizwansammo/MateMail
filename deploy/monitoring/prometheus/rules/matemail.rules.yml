@@ -1,0 +1,566 @@
+# MateMail alert rules.
+#
+# WHY THE `for:` WINDOWS LOOK LIKE THIS
+#   A container that restarts in two seconds must not page anybody. Every
+#   availability rule therefore waits long enough to outlive a normal restart
+#   or a deploy, and no longer. The exceptions are the security rules: a mail
+#   port becoming publicly reachable is not something to sit on for five
+#   minutes, so those fire almost immediately.
+#
+#   Thresholds that an operator may reasonably want to change live in one place
+#   at the top of each group's comment rather than being scattered through
+#   expressions.
+#
+# WHY SEVERITIES ARE ONLY warning/critical
+#   Three levels invite a middle one that nobody routes anywhere. `critical`
+#   means mail is affected or about to be; `warning` means look today.
+
+groups:
+
+  # ── Monitoring itself ───────────────────────────────────────────────────
+  # If this group is quiet because the collector died, MonitoringCollectorStale
+  # is the thing that says so. Everything else here depends on it being true.
+  - name: monitoring
+    rules:
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Monitoring target {{ $labels.job }} is down"
+          description: "Prometheus cannot scrape {{ $labels.job }}. Metrics from it are stale, so every other alert that depends on it is now unreliable."
+
+      - alert: MonitoringCollectorStale
+        # The collector runs every 60s. Ten minutes without a completed run
+        # means the numbers on the dashboards are no longer current.
+        expr: time() - matemail_collector_last_run_timestamp_seconds > 600
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "MateMail collector has not completed for 10 minutes"
+          description: "Every matemail_* metric is frozen at its last value. Check: systemctl status matemail-collector.timer; journalctl -u matemail-collector.service"
+
+      - alert: MonitoringCollectorSectionFailing
+        expr: matemail_collector_section_ok == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Collector section {{ $labels.section }} is failing"
+          description: "That section publishes no metrics while it fails, so anything it covers is unmonitored rather than healthy."
+
+  # ── Native Engine ───────────────────────────────────────────────────────
+  - name: native_engine
+    rules:
+      - alert: NativeServiceDown
+        expr: matemail_native_service_up == 0
+        for: 3m
+        labels: {severity: critical}
+        annotations:
+          summary: "Native service {{ $labels.service }} is down"
+          description: "A Native Engine component is not running. Mail flow is degraded or stopped."
+
+      - alert: NativeServiceUnhealthy
+        expr: matemail_native_service_healthy == 0 and matemail_native_service_up == 1
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Native service {{ $labels.service }} is running but unhealthy"
+          description: "The container is up and failing its own healthcheck, which is the case container-status monitoring alone would miss."
+
+      - alert: NativeEngineNotFullyHealthy
+        # Deliberately separate from the per-service alerts: 9/10 is not
+        # healthy, and this is the signal an operator should read as such.
+        expr: matemail_native_all_healthy == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Native Engine is not 10/10 healthy"
+          description: "{{ $value }} — only {{ with query \"matemail_native_services_healthy\" }}{{ . | first | value }}{{ end }} of 10 Native services are healthy."
+
+      - alert: NativeServiceRestartLoop
+        expr: increase(matemail_native_service_restarts_total[30m]) > 3
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: "Native service {{ $labels.service }} is restarting repeatedly"
+          description: "More than three restarts in thirty minutes. A crash loop can look healthy between restarts."
+
+      - alert: NativeSchemaMismatch
+        expr: matemail_native_schema_version_matches == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Native Engine schema version does not match the code"
+          description: "The API requires a schema version the database does not have. Provisioning will fail."
+
+      - alert: NativeApiDown
+        expr: matemail_native_api_up == 0
+        for: 3m
+        labels: {severity: critical}
+        annotations:
+          summary: "Native API is unreachable"
+          description: "MateMail's control plane provisions through this API. Domain and mailbox operations will fail."
+
+  # ── MateMail application ────────────────────────────────────────────────
+  - name: matemail_app
+    rules:
+      - alert: MateMailServiceDown
+        expr: matemail_app_service_up == 0
+        for: 3m
+        labels: {severity: critical}
+        annotations:
+          summary: "MateMail service {{ $labels.service }} is down"
+
+      - alert: MateMailHealthEndpointFailing
+        expr: matemail_app_health_up == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "MateMail health endpoint is not answering"
+          description: "Checked through the application itself, not container status: a backend whose database has gone is 'running' to Docker and useless to a customer."
+
+      - alert: MateMailDependencyDown
+        expr: matemail_app_dependency_up == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "MateMail dependency {{ $labels.dependency }} is unavailable"
+
+      - alert: CeleryWorkerDown
+        expr: matemail_celery_workers_responding == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "No Celery worker is answering"
+          description: "Background work including provisioning and email verification has stopped."
+
+      - alert: CeleryBeatDown
+        expr: matemail_celery_beat_up == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Celery beat is down; scheduled tasks are not running"
+
+      - alert: CeleryBacklogGrowing
+        expr: matemail_celery_queue_depth > 500
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Celery backlog is {{ $value }} tasks"
+
+  # ── Mail flow: the group that matters most before NE6 ───────────────────
+  # Before NE6 the Native Internet queue is normally EMPTY. These thresholds
+  # are written for that expectation and should be revisited when real mail
+  # starts flowing.
+  - name: mail_flow
+    rules:
+      - alert: NativeQueueNonEmpty
+        expr: matemail_native_queue_total > 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Native mail queue has been non-empty for 30 minutes"
+          description: "{{ $value }} messages queued. Before NE6 this queue is normally empty, so anything persisting here wants explaining."
+
+      - alert: NativeQueueGrowing
+        expr: delta(matemail_native_queue_total[15m]) > 50
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Native mail queue is growing fast"
+          description: "Up {{ $value }} messages in fifteen minutes. Something downstream is refusing or failing."
+
+      - alert: NativeDeferredQueueGrowing
+        expr: matemail_native_queue_messages{queue="deferred"} > 25
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Deferred queue is {{ $value }} messages"
+          description: "Deferrals mean temporary failures that keep being retried: DNS, a scanner failing closed, or a remote refusing."
+
+      - alert: NativeQueuedMailTooOld
+        expr: matemail_native_queue_oldest_age_seconds > 14400
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "Oldest queued message is over four hours old"
+          description: "Mail this old is close to being returned to its sender."
+
+      - alert: NativeQuarantineAbnormal
+        expr: matemail_native_quarantine_held > 20
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} messages held in quarantine"
+          description: "Held mail waits for a human. A rising count usually means a scanner rule is catching more than intended."
+
+      - alert: MailDeliveryFailureSpike
+        expr: increase(matemail_postfix_events_total{event="bounced"}[1h]) > 25
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: "Bounces have risen sharply"
+          description: "{{ $value }} bounces in the last hour."
+
+      - alert: MailRejectionSpike
+        expr: increase(matemail_postfix_events_total{event="rejected"}[1h]) > 100
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: "Rejections have risen sharply"
+
+      - alert: AuthenticationFailureSpike
+        # Aggregate only. No username reaches this metric, by construction.
+        expr: increase(matemail_dovecot_events_total{event="auth_failed"}[15m]) > 50
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: "Unusual number of authentication failures"
+          description: "{{ $value }} failed logins in fifteen minutes. Could be a password-spraying attempt or a broken client in a loop."
+
+  # ── Scanners: these fail CLOSED, so their outage stops mail ─────────────
+  - name: scanners
+    rules:
+      - alert: RspamdDown
+        expr: matemail_rspamd_up == 0
+        for: 3m
+        labels: {severity: critical}
+        annotations:
+          summary: "Rspamd is not responding"
+          description: "NE3 makes scanner failure defer mail rather than deliver it unscanned. Mail will queue."
+
+      - alert: ClamAVDown
+        expr: matemail_clamav_up == 0
+        for: 3m
+        labels: {severity: critical}
+        annotations:
+          summary: "ClamAV is not responding"
+          description: "NE3 defers mail when the virus scanner is unavailable, so this stops delivery rather than letting malware through."
+
+      - alert: OlefyDown
+        expr: matemail_olefy_up == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Olefy document scanner is down"
+
+      - alert: ClamAVSignaturesStale
+        # freshclam updates several times a day; two days means it has stopped.
+        expr: matemail_clamav_signature_age_seconds > 172800
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "ClamAV signatures are {{ $value | humanizeDuration }} old"
+          description: "A running scanner with stale definitions looks healthy and catches nothing new."
+
+  # ── DNS ─────────────────────────────────────────────────────────────────
+  - name: dns
+    rules:
+      - alert: UnboundDown
+        expr: matemail_unbound_up == 0
+        for: 3m
+        labels: {severity: critical}
+        annotations:
+          summary: "Unbound is down; the mail engine cannot resolve anything"
+
+      - alert: DnsResolutionFailing
+        expr: matemail_dns_resolution_ok == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Unbound is not resolving known-good names"
+
+      - alert: DnssecValidationLost
+        # The NE1 property. A resolver that answers everything, including
+        # forgeries, is worse than one that is down.
+        expr: matemail_dnssec_validating == 0 or matemail_dnssec_rejects_invalid == 0
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "DNSSEC validation is no longer working correctly"
+          description: "Either signed answers are not being validated, or deliberately broken DNSSEC is being accepted. Both break the guarantee NE1 established."
+
+      - alert: MailDnsIdentityDrift
+        expr: matemail_dns_mx_correct == 0 or matemail_dns_a_correct == 0 or matemail_dns_ptr_correct == 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "MX, A or PTR for the mail identity has drifted"
+          description: "Reverse DNS and MX correctness decide whether mail is deliverable at all. Nothing in MateMail changes these, so drift means an external change."
+
+      - alert: SenderPolicyRecordMissing
+        expr: matemail_dns_spf_present == 0 or matemail_dns_dkim_present == 0 or matemail_dns_dmarc_present == 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "SPF, DKIM or DMARC is missing for the sender domain"
+
+  # ── Databases and Redis ─────────────────────────────────────────────────
+  - name: datastores
+    rules:
+      - alert: PostgresDown
+        expr: matemail_postgres_up == 0
+        for: 3m
+        labels: {severity: critical}
+        annotations:
+          summary: "PostgreSQL ({{ $labels.instance }}) is not answering"
+
+      - alert: RedisDown
+        expr: matemail_redis_up == 0
+        for: 3m
+        labels: {severity: critical}
+        annotations:
+          summary: "Redis ({{ $labels.instance }}) is not answering"
+
+      - alert: NativeRateLimitEnforcementUnavailable
+        # NE4 made the limiter fail CLOSED: without its counters, mailboxes
+        # with a configured limit defer instead of sending unmetered. That
+        # makes Native Redis a mail-flow dependency, not a cache.
+        expr: matemail_rate_limit_enforcement_available == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Per-mailbox rate limiting cannot be enforced"
+          description: "Native Redis or the policy service is unavailable. Mailboxes with a configured limit will have their mail deferred, by design."
+
+      - alert: PostgresLongRunningQueries
+        expr: matemail_postgres_long_running_queries > 5
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} queries running over a minute on {{ $labels.instance }}"
+
+      - alert: PostgresLocksWaiting
+        expr: matemail_postgres_locks_waiting > 5
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} ungranted lock requests on {{ $labels.instance }}"
+
+      - alert: RedisEvictingKeys
+        expr: increase(matemail_redis_evicted_keys_total[1h]) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Redis ({{ $labels.instance }}) is evicting keys"
+          description: "Evictions mean it is over its memory limit and silently dropping data."
+
+  # ── Host ────────────────────────────────────────────────────────────────
+  # Thresholds: disk 15%/8% free, inodes 15%/8% free, memory 8% available,
+  # swap 60% used, load 2x/4x cores.
+  - name: host
+    rules:
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Disk is {{ $value | printf \"%.1f\" }}% free"
+
+      - alert: DiskSpaceCritical
+        expr: (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 8
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Disk is {{ $value | printf \"%.1f\" }}% free"
+          description: "A full disk stops mail, stops the databases and stops backups, in that order."
+
+      - alert: InodesLow
+        expr: (node_filesystem_files_free{mountpoint="/"} / node_filesystem_files{mountpoint="/"}) * 100 < 15
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Only {{ $value | printf \"%.1f\" }}% of inodes remain"
+          description: "Maildir stores one file per message, so inodes can run out long before bytes do."
+
+      - alert: InodesCritical
+        expr: (node_filesystem_files_free{mountpoint="/"} / node_filesystem_files{mountpoint="/"}) * 100 < 8
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Only {{ $value | printf \"%.1f\" }}% of inodes remain"
+
+      - alert: MemoryPressure
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 8
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Only {{ $value | printf \"%.1f\" }}% of memory is available"
+
+      - alert: SwapPressure
+        expr: ((node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) / node_memory_SwapTotal_bytes) * 100 > 60
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Swap is {{ $value | printf \"%.1f\" }}% used"
+
+      - alert: LoadHigh
+        expr: node_load15 > 2 * count(count(node_cpu_seconds_total) by (cpu))
+        for: 20m
+        labels: {severity: warning}
+        annotations:
+          summary: "15-minute load average is {{ $value | printf \"%.1f\" }}"
+
+      - alert: LoadCritical
+        expr: node_load15 > 4 * count(count(node_cpu_seconds_total) by (cpu))
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "15-minute load average is {{ $value | printf \"%.1f\" }}"
+
+      - alert: MailStorageGrowingFast
+        # Aggregate free space on / hides this completely: a mailbox volume can
+        # double in a day and still be invisible inside 150 GB of headroom.
+        expr: delta(matemail_volume_bytes{volume="vmail"}[6h]) > 5e9
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: "Mail storage grew {{ $value | humanize1024 }}B in six hours"
+
+  # ── Backups ─────────────────────────────────────────────────────────────
+  - name: backups
+    rules:
+      - alert: BackupStale
+        # The timer is daily. 36 hours allows one missed run plus the
+        # randomised delay before anyone is told.
+        expr: time() - matemail_backup_latest_snapshot_timestamp_seconds > 129600
+        for: 30m
+        labels: {severity: critical}
+        annotations:
+          summary: "Newest backup snapshot is over 36 hours old"
+          description: "Check: systemctl status matemail-backup.service and journalctl -u matemail-backup.service"
+
+      - alert: BackupFailed
+        expr: matemail_backup_last_result_ok == 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "The last backup run failed"
+          description: "A failed run leaves no snapshot, so the repository is unchanged and the previous backup is now the newest."
+
+      - alert: BackupTimerDisabled
+        expr: matemail_backup_timer_enabled == 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "The backup timer is not enabled; no backups are being taken"
+
+      - alert: BackupOffsiteNotConfigured
+        # Deliberately permanent and deliberately only a warning. It is true
+        # right now, it is a pre-beta requirement, and it must not be silently
+        # forgotten by being left out of monitoring.
+        expr: matemail_backup_offsite_configured == 0
+        for: 1h
+        labels: {severity: warning, persistent: "true"}
+        annotations:
+          summary: "No offsite backup repository is configured"
+          description: "The only copy of the backups is on this host. That survives deletion, corruption and operator error, but not the loss of this machine. It is retention, not disaster recovery."
+
+  # ── TLS ─────────────────────────────────────────────────────────────────
+  - name: tls
+    rules:
+      - alert: CertificateExpiringSoon
+        expr: matemail_certificate_days_remaining < 21
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "Certificate for {{ $labels.host }} expires in {{ $value }} days"
+
+      - alert: CertificateExpiringCritical
+        # Let's Encrypt renews at 30 days. Reaching 7 means renewal is broken.
+        expr: matemail_certificate_days_remaining < 7
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "Certificate for {{ $labels.host }} expires in {{ $value }} days"
+          description: "Automatic renewal should have happened at 30 days. It has not."
+
+      - alert: CertbotTimerDisabled
+        expr: matemail_certbot_timer_enabled == 0
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "The certbot renewal timer is not enabled"
+
+  # ── Exposure. Security conditions fire fast. ────────────────────────────
+  - name: exposure
+    rules:
+      - alert: PublicMailPortDetected
+        # No `for:` window worth speaking of. Before NE7 no mail port should be
+        # publicly bound, and if one becomes so it should be said immediately.
+        expr: matemail_public_mail_ports > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "A mail port is publicly reachable"
+          description: "{{ $value }} mail port(s) are bound to a non-loopback address. Before NE7 this must be zero. Detection only: nothing here changes a firewall rule."
+
+      - alert: NativePortPublished
+        expr: matemail_native_published_ports > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "A Native Engine container port has been published to the host"
+
+      - alert: UnexpectedPublicPort
+        expr: matemail_unexpected_public_ports > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} unexpected publicly bound port(s)"
+          description: "Expected public ports are 22, 80, 443 and 4000 (TalkRoom legacy)."
+
+      - alert: FirewallInactive
+        expr: matemail_ufw_active == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "The host firewall is not active"
+
+  # ── Mailcow, transitional until NE8 ─────────────────────────────────────
+  - name: transitional
+    rules:
+      - alert: MailcowDown
+        expr: matemail_mailcow_up == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Mailcow is down"
+          description: "Mailcow still carries Internet and transactional mail until NE8. This alert is removed with it."
+
+      - alert: P5PolicyBridgeDown
+        expr: matemail_p5_bridge_up == 0 or matemail_p5_bridge_healthy == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "The P5 policy bridge is down"
+          description: "Mailcow asks this bridge whether a sender may send. Its loss affects submission policy enforcement."
+
+      - alert: MailcowQueueBacklog
+        expr: matemail_mailcow_queue_total > 100
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Mailcow queue holds {{ $value }} messages"
+
+      - alert: MailcowQueuedMailTooOld
+        expr: matemail_mailcow_queue_oldest_age_seconds > 14400
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Mailcow's oldest queued message is over four hours old"
+
+  # ── NE6 readiness ───────────────────────────────────────────────────────
+  - name: readiness
+    rules:
+      - alert: NE6ReadinessRegressed
+        # Informational rather than urgent: this is a gate, not an outage.
+        # It excludes offsite backup and the alert receiver on purpose; both
+        # are real pre-beta gaps and both are reported separately so that
+        # neither can be quietly marked green.
+        expr: matemail_ne6_ready == 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "NE6 technical readiness is not satisfied"
+          description: "{{ $value }} — see matemail_ne6_readiness_check for which prerequisite is failing."

@@ -1,0 +1,51 @@
+# Prometheus for MateMail.
+#
+# SHAPE AND WHY
+#   Two scrape targets only: node_exporter, which carries both the host metrics
+#   and everything the root collector writes into its textfile directory, and
+#   Prometheus itself. There is no service discovery and there are no exporter
+#   containers, because the collector already gathers what would otherwise need
+#   six of them, without handing any container the Docker socket.
+#
+#   `scrape_interval` is 30s rather than the usual 15s. Nothing measured here
+#   moves faster than that — a queue, a certificate, a PTR record — and halving
+#   the sample rate halves the series volume on a box that is already swapping.
+#
+#   The collector runs on its own timer every 60s. Scraping its output twice
+#   per collection is deliberate: a stale textfile keeps its last value, and
+#   `matemail_collector_last_run_timestamp_seconds` is what makes that
+#   staleness visible rather than the metrics quietly freezing.
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    host: mateserver
+    service: matemail
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # node_exporter carries host metrics AND the root collector's textfile
+  # output, so one target covers both.
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          instance: mateserver
+
+  # Prometheus watches itself so that "the monitoring is down" is itself an
+  # alertable condition rather than silence.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]

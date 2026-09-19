@@ -1,0 +1,4 @@
+# Runtime secrets and generated state never belong in the repository.
+.env
+__pycache__/
+*.pyc

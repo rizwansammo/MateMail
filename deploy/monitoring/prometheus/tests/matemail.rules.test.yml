@@ -1,0 +1,325 @@
+# promtool unit tests for the MateMail alert rules.
+#
+# WHY THESE AND NOT A GREP
+#   An alert rule is a program. "The file contains the word BackupStale" proves
+#   nothing about whether it fires at the right moment, and the interesting
+#   failures are all about the moment: a `for:` window that is zero pages on
+#   every container restart, and one that is too long stays silent through a
+#   real outage.
+#
+#   So each test below drives a series through a real failure and asserts BOTH
+#   halves: that the alert is still silent while the `for:` window is running,
+#   and that it is firing once it has elapsed. The first assertion is the one
+#   that catches a rule someone "fixed" by removing the window.
+#
+# RUN
+#   promtool test rules /etc/prometheus/tests/matemail.rules.test.yml
+
+rule_files:
+  - ../rules/matemail.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+
+  # ── Service down: must survive a short restart, must catch a real one ────
+  - interval: 1m
+    name: a Native service that stops is reported, but a brief restart is not
+    input_series:
+      - series: 'matemail_native_service_up{service="postfix"}'
+        #        0 1 2 3 4 5 6 7 8 9
+        values: '1 1 0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      # The rule waits 3m. At 2m of downtime it must still be silent, or every
+      # deploy and every container restart pages an operator at night.
+      - eval_time: 3m
+        alertname: NativeServiceDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: NativeServiceDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: postfix
+            exp_annotations:
+              summary: "Native service postfix is down"
+              description: "A Native Engine component is not running. Mail flow is degraded or stopped."
+
+  # ── Queue age ────────────────────────────────────────────────────────────
+  - interval: 1m
+    name: mail sitting in the queue too long is escalated
+    input_series:
+      - series: 'matemail_native_queue_oldest_age_seconds'
+        # Below the 4h threshold, then past it.
+        values: '3600+0x5 14500+0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: NativeQueuedMailTooOld
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: NativeQueuedMailTooOld
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Oldest queued message is over four hours old"
+              description: "Mail this old is close to being returned to its sender."
+
+  # ── Disk: warning and critical must be distinct, not the same rule twice ─
+  - interval: 1m
+    name: disk space crosses warning then critical
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/"}'
+        values: '12+0x20 5+0x20'
+      - series: 'node_filesystem_size_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/"}'
+        values: '100+0x40'
+    alert_rule_test:
+      # 12% free: warning territory, critical must stay quiet.
+      - eval_time: 18m
+        alertname: DiskSpaceCritical
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: DiskSpaceLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: /dev/sda1
+              fstype: ext4
+              mountpoint: /
+            exp_annotations:
+              summary: "Disk is 12.0% free"
+      # 5% free: critical.
+      - eval_time: 30m
+        alertname: DiskSpaceCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              device: /dev/sda1
+              fstype: ext4
+              mountpoint: /
+            exp_annotations:
+              summary: "Disk is 5.0% free"
+              description: "A full disk stops mail, stops the databases and stops backups, in that order."
+
+  # ── Inodes: the failure aggregate disk space cannot see ──────────────────
+  - interval: 1m
+    name: inode exhaustion is caught independently of bytes
+    input_series:
+      - series: 'node_filesystem_files_free{device="/dev/sda1",mountpoint="/"}'
+        values: '5+0x30'
+      - series: 'node_filesystem_files{device="/dev/sda1",mountpoint="/"}'
+        values: '100+0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: InodesCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              device: /dev/sda1
+              mountpoint: /
+            exp_annotations:
+              summary: "Only 5.0% of inodes remain"
+
+  # ── Backup staleness ─────────────────────────────────────────────────────
+  # The series is a fixed old timestamp; promtool's clock starts at epoch 0,
+  # so a NEGATIVE timestamp puts the snapshot far enough in the past that
+  # time() - snapshot exceeds the 36h threshold from the first evaluation.
+  - interval: 1m
+    name: a backup that stops being taken is reported stale
+    input_series:
+      - series: 'matemail_backup_latest_snapshot_timestamp_seconds'
+        values: '-200000+0x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BackupStale
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: BackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Newest backup snapshot is over 36 hours old"
+              description: "Check: systemctl status matemail-backup.service and journalctl -u matemail-backup.service"
+
+  - interval: 1m
+    name: a fresh backup does not alert
+    input_series:
+      # Taken "now": time() - 0 never exceeds 36h inside this test window.
+      - series: 'matemail_backup_latest_snapshot_timestamp_seconds'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: BackupStale
+        exp_alerts: []
+
+  # ── Offsite: a permanent, deliberate warning ─────────────────────────────
+  - interval: 1m
+    name: the missing offsite repository stays visible rather than being forgotten
+    input_series:
+      - series: 'matemail_backup_offsite_configured'
+        values: '0+0x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: BackupOffsiteNotConfigured
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              persistent: "true"
+            exp_annotations:
+              summary: "No offsite backup repository is configured"
+              description: "The only copy of the backups is on this host. That survives deletion, corruption and operator error, but not the loss of this machine. It is retention, not disaster recovery."
+
+  # ── Certificate expiry ───────────────────────────────────────────────────
+  - interval: 1m
+    name: certificate expiry escalates from warning to critical
+    input_series:
+      - series: 'matemail_certificate_days_remaining{host="mx.matemail.online"}'
+        values: '15+0x200'
+    alert_rule_test:
+      # 15 days: warning only. Critical is for renewal having actually failed.
+      - eval_time: 120m
+        alertname: CertificateExpiringCritical
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: CertificateExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              host: mx.matemail.online
+            exp_annotations:
+              summary: "Certificate for mx.matemail.online expires in 15 days"
+
+  - interval: 1m
+    name: a certificate about to expire is critical
+    input_series:
+      - series: 'matemail_certificate_days_remaining{host="mx.matemail.online"}'
+        values: '3+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: CertificateExpiringCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              host: mx.matemail.online
+            exp_annotations:
+              summary: "Certificate for mx.matemail.online expires in 3 days"
+              description: "Automatic renewal should have happened at 30 days. It has not."
+
+  # ── Exposure: the one that must not wait ─────────────────────────────────
+  - interval: 1m
+    name: a publicly exposed mail port is reported almost immediately
+    input_series:
+      - series: 'matemail_public_mail_ports'
+        values: '0 0 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: PublicMailPortDetected
+        exp_alerts: []
+      # Security conditions do not get a five minute grace period.
+      - eval_time: 4m
+        alertname: PublicMailPortDetected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "A mail port is publicly reachable"
+              description: "1 mail port(s) are bound to a non-loopback address. Before NE7 this must be zero. Detection only: nothing here changes a firewall rule."
+
+  - interval: 1m
+    name: the normal closed-port state never alerts
+    input_series:
+      - series: 'matemail_public_mail_ports'
+        values: '0+0x60'
+      - series: 'matemail_native_published_ports'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: PublicMailPortDetected
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: NativePortPublished
+        exp_alerts: []
+
+  # ── Rate limiting fails closed, so its outage stops mail ────────────────
+  - interval: 1m
+    name: losing rate-limit enforcement is critical, not cosmetic
+    input_series:
+      - series: 'matemail_rate_limit_enforcement_available'
+        values: '1 1 0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: NativeRateLimitEnforcementUnavailable
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: NativeRateLimitEnforcementUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Per-mailbox rate limiting cannot be enforced"
+              description: "Native Redis or the policy service is unavailable. Mailboxes with a configured limit will have their mail deferred, by design."
+
+  # ── The NE1 DNSSEC property ──────────────────────────────────────────────
+  - interval: 1m
+    name: losing DNSSEC validation is caught even while resolution still works
+    input_series:
+      - series: 'matemail_dnssec_validating'
+        values: '1+0x5 0+0x30'
+      - series: 'matemail_dnssec_rejects_invalid'
+        values: '1+0x40'
+      - series: 'matemail_dns_resolution_ok'
+        values: '1+0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DnssecValidationLost
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: DnssecValidationLost
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "DNSSEC validation is no longer working correctly"
+              description: "Either signed answers are not being validated, or deliberately broken DNSSEC is being accepted. Both break the guarantee NE1 established."
+
+  # ── The monitoring watching itself ───────────────────────────────────────
+  - interval: 1m
+    name: a collector that stops running makes its own silence visible
+    input_series:
+      # Frozen at epoch 0 while the clock advances: after 10m of wall time the
+      # staleness rule trips.
+      - series: 'matemail_collector_last_run_timestamp_seconds'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MonitoringCollectorStale
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MonitoringCollectorStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "MateMail collector has not completed for 10 minutes"
+              description: "Every matemail_* metric is frozen at its last value. Check: systemctl status matemail-collector.timer; journalctl -u matemail-collector.service"
+
+  # ── A failing collector section must not read as healthy ────────────────
+  - interval: 1m
+    name: a failing collector section is reported rather than passing silently
+    input_series:
+      - series: 'matemail_collector_section_ok{section="backups"}'
+        values: '1+0x3 0+0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MonitoringCollectorSectionFailing
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: MonitoringCollectorSectionFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              section: backups
+            exp_annotations:
+              summary: "Collector section backups is failing"
+              description: "That section publishes no metrics while it fails, so anything it covers is unmonitored rather than healthy."

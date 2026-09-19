@@ -1,0 +1,15 @@
+# Every minute. The scrape interval is 30s, so Prometheus samples each
+# collection about twice; a textfile keeps its last value between runs and
+# matemail_collector_last_run_timestamp_seconds is what makes a stalled
+# collector visible rather than letting the metrics quietly freeze.
+[Unit]
+Description=Collect MateMail metrics every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=matemail-collector.service
+
+[Install]
+WantedBy=timers.target

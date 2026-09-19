@@ -1,0 +1,26 @@
+# Bound Docker's container logs.
+#
+# WHY THIS FILE EXISTS
+#   P7 inspection found no /etc/docker/daemon.json on MateServer, so Docker is
+#   using its default json-file driver with NO rotation at all. Container logs
+#   had already reached 45 MB each and nothing was ever going to reclaim them.
+#
+#   The usual fix is to set log-opts in daemon.json, but that only applies to
+#   newly created containers and needs a Docker daemon restart, which on this
+#   host would disturb 72 containers including Mailcow and several unrelated
+#   production applications. logrotate achieves the same bound today and
+#   disturbs nothing.
+#
+#   copytruncate is required: Docker holds the log file open and would keep
+#   writing to a renamed inode.
+/var/lib/docker/containers/*/*-json.log {
+    daily
+    rotate 5
+    maxsize 50M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su root root
+}

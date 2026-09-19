@@ -1,0 +1,23 @@
+# Gather MateMail and Native Engine metrics for node_exporter's textfile
+# collector.
+#
+# Runs as root because it must read Docker, systemd, the Restic repository,
+# UFW and the certificate store. That is precisely the privilege this design
+# keeps OUT of the monitoring containers: nothing in the stack gets the Docker
+# socket, and node_exporter only ever reads the text this produces.
+[Unit]
+Description=MateMail metrics collector
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/MateMailMonitoring/collectors/matemail_collector.py
+EnvironmentFile=-/opt/MateMailMonitoring/collector.env
+# The collector reads a restic password FILE path from backup.env; the file
+# itself stays 0600 and is never read into a metric.
+UMask=0022
+# A hung docker exec must not wedge the timer forever.
+TimeoutStartSec=120
+Nice=15
+IOSchedulingClass=idle

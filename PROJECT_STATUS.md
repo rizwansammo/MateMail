@@ -267,6 +267,9 @@ P6 backup and restore:         COMPLETE (2026-09-19) — restic, encrypted,
                                single-mailbox restore both PROVEN on
                                MateServer. NO OFFSITE REPOSITORY yet, so
                                this is retention, not disaster recovery.
+P7 monitoring:                 LOCAL IMPLEMENTATION COMPLETE (2026-09-19)
+                               — awaiting commit, then deployment and
+                               runtime alert validation on MateServer.
 NE6–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
 ```
@@ -2482,3 +2485,117 @@ Until it is set, every run logs the gap and every manifest records
 nothing up — it counts rows, invents a size, and marks the job completed.
 Recorded in `docs/TODO.md`. It has no relationship to the platform backups
 above and must not ship to customers as a backup feature.
+
+---
+
+## P7 — monitoring and observability (local implementation, 2026-09-19)
+
+Implemented locally and validated; not yet deployed. The runtime half —
+deployment, failure injection, alert-state verification and resource
+measurement — follows the commit.
+
+### Measured baseline that decided the architecture
+
+```
+6 cores · 11 GiB RAM · 3.3 GiB available · 1.3 GiB swap ALREADY in use
+72 containers using ~6.6 GiB · 42 GB of 193 GB disk · 5% inodes
+```
+
+That is a host under memory pressure before anything is added. The
+conventional Prometheus stack — postgres_exporter twice, redis_exporter twice,
+blackbox_exporter, cAdvisor — would have meant six more containers, and
+cAdvisor would have wanted the Docker socket. So: four containers plus one
+root-owned host collector, capped at 792 MB in total and with no container
+holding any privilege (DEC-034).
+
+### What was built
+
+```
+deploy/monitoring/
+  docker-compose.yml          4 services, all 127.0.0.1, all memory-limited
+  collectors/                 the root host collector, 18 sections
+  prometheus/                 config, 60 alert rules, promtool unit tests
+  alertmanager/               grouping, inhibitions, no SMTP anywhere
+  grafana/                    provisioned datasource + 3 dashboards
+  systemd/                    collector service and 60s timer
+  logrotate/                  bounds Docker's previously unbounded logs
+  install.sh
+docs/MONITORING.md            operator runbook
+backend/tests/test_monitoring.py
+```
+
+Grafana is on **3040**, not 3000, because `127.0.0.1:3000` is already taken by
+another application on this shared host.
+
+### What it answers
+
+All ten Native services individually and as an all-or-nothing signal; MateMail
+through its own health endpoint rather than container status; Postfix queue by
+state with oldest-message age; quarantine; delivery, bounce, reject, 4xx, 5xx
+and TLS-failure counters; Dovecot authentication as aggregate counts; Rspamd,
+ClamAV with signature freshness, Olefy; Unbound including the NE1 DNSSEC
+property; both PostgreSQL instances; both Redis instances; per-volume storage
+growth; backup timer, last result and snapshot age; certificate expiry;
+MX/A/PTR/SPF/DKIM/DMARC; public port and firewall posture; Celery; Mailcow and
+the P5 bridge as transitional signals; and an NE6 readiness composite.
+
+### Three decisions worth stating
+
+**A failing collector section publishes nothing** (DEC-035). It never
+substitutes a default. A collector that cannot reach Postfix and therefore
+reports `queue_total 0` has not reported a healthy queue, it has reported a
+fiction that looks like the normal value. Metrics go stale instead, and
+staleness is alertable.
+
+**Metric labels come from a bounded allowlist** (DEC-036), enforced by a test
+that reads the collector's syntax tree. The collector reads Dovecot logs, which
+are full of mailbox addresses. A label built from one would publish customer
+data *and* create one series per address.
+
+**Alerts are never delivered through the mail system under test** (DEC-037).
+Alertmanager has no SMTP configuration at all.
+
+### Validation
+
+```
+promtool check config                    PASS
+promtool check rules                     PASS
+promtool test rules                      PASS — 15 rule unit tests
+backend/tests/test_monitoring.py         50 passed
+backend/tests/test_backup_restore.py     60 passed (unchanged)
+docker compose config                    PASS
+git diff --check                         clean
+secret scan                              no key material, no committed .env
+```
+
+Seven mutations were introduced to prove the tests catch real defects, and all
+seven were caught: Grafana bound to `0.0.0.0`; the Docker socket mounted into
+Prometheus; a memory limit removed; a mailbox address added as a metric label;
+a capture group added to a log pattern; the exposure alert given a 10-minute
+delay; and the backup-staleness threshold broken so that a *fresh* backup would
+alert — that last one failing the promtool unit tests, which proves they check
+real threshold semantics rather than merely parsing.
+
+### Defect found and fixed during P7
+
+**Docker had no log rotation whatsoever.** There is no `/etc/docker/daemon.json`
+on MateServer, so the default `json-file` driver had been running unbounded
+since the host was built; individual container logs had reached 45 MB. The
+usual fix is `log-opts` in `daemon.json`, but that applies only to newly created
+containers and needs a Docker daemon restart, which here would disturb 72
+containers including Mailcow and several unrelated production applications.
+`logrotate` with `copytruncate` bounds the same files today and disturbs
+nothing.
+
+### Known warnings, both pre-beta rather than NE6 blockers
+
+```
+OFFSITE_BACKUP_CONFIGURED = NO   BackupOffsiteNotConfigured fires permanently,
+                                 by design, and re-notifies weekly
+ALERT_RECEIVER_CONFIGURED = NO   alerts fire and are visible over the tunnel;
+                                 nothing is pushed off the host
+```
+
+Both are deliberately excluded from `matemail_ne6_ready`. Including them would
+either block NE6 on an unrelated purchasing decision or tempt someone to mark
+them green. NE6 technical readiness is not Private Beta readiness.

@@ -1,0 +1,17 @@
+# Dashboards are loaded from files, not created by hand.
+#
+# allowUiUpdates is false on purpose. A dashboard edited in the browser and
+# never written back is the usual way these drift from the repository; making
+# the files authoritative means what is reviewed is what is running.
+apiVersion: 1
+providers:
+  - name: matemail
+    orgId: 1
+    folder: MateMail
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

@@ -1,0 +1,182 @@
+# MateMail monitoring stack.
+#
+# BINDINGS
+#   Every port is bound to 127.0.0.1. Nothing here is reachable from the
+#   Internet and there is no nginx route for any of it: operator access is an
+#   SSH tunnel, documented in docs/MONITORING.md. Monitoring data is itself
+#   sensitive — it says which services are down and when backups last ran —
+#   so a public dashboard would be a gift to anyone looking for a way in.
+#
+#   Grafana is on 3040, not its default 3000, because 127.0.0.1:3000 is
+#   already taken by another application on this shared host.
+#
+# NO DOCKER SOCKET
+#   Nothing here mounts /var/run/docker.sock. Handing that to a container is
+#   handing it root on the host, and cAdvisor-style container monitoring is not
+#   worth that. Container state is gathered by a root-owned collector on the
+#   host, which writes text into node_exporter's textfile directory.
+#
+# RESOURCE LIMITS
+#   MateServer runs 72 containers and is already into its swap. Every service
+#   here has a hard memory limit, chosen so the whole stack cannot exceed
+#   roughly 600 MB even misbehaving. Prometheus gets the largest share because
+#   it is the only one that holds a dataset.
+
+name: matemail-monitoring
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: matemail-prometheus
+    restart: unless-stopped
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # Retention is capped by BOTH time and size. Time alone is a promise
+      # about disk that depends on how many series appear later; the size cap
+      # is the one that actually protects the filesystem.
+      - --storage.tsdb.retention.time=${PROM_RETENTION_TIME:-15d}
+      - --storage.tsdb.retention.size=${PROM_RETENTION_SIZE:-2GB}
+      - --web.listen-address=0.0.0.0:9090
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./prometheus/tests:/etc/prometheus/tests:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits: {memory: 400M}
+        reservations: {memory: 128M}
+    logging: &logging
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    container_name: matemail-alertmanager
+    restart: unless-stopped
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=0.0.0.0:9093
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    networks: [monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits: {memory: 96M}
+        reservations: {memory: 32M}
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: matemail-grafana
+    restart: unless-stopped
+    depends_on: [prometheus]
+    environment:
+      # The admin password comes from the root-only runtime .env. It is never
+      # committed and never printed.
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?grafana admin password is required}
+      # No sign-up, no anonymous access, no phoning home. This instance is
+      # reached only through an SSH tunnel by someone who already has root.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      # Served over a tunnel on plain HTTP; say so rather than emit links to a
+      # hostname that does not exist.
+      GF_SERVER_ROOT_URL: "http://127.0.0.1:3040/"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3040:3000"
+    networks: [monitoring]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health | grep -q ok"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    deploy:
+      resources:
+        limits: {memory: 200M}
+        reservations: {memory: 64M}
+    logging: *logging
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: matemail-node-exporter
+    restart: unless-stopped
+    # Host PID and network are needed to see the host's real processes and
+    # interfaces. This is far less privilege than the Docker socket would be:
+    # node-exporter reads /proc and /sys and cannot act on anything.
+    pid: host
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+      # The collector's output is published from here. This is the entire
+      # reason no exporter needs privileged access to Docker.
+      - --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/credentials/.+|var/lib/docker/.+)($$|/)
+      - --no-collector.hwmon
+      - --no-collector.thermal_zone
+      - --web.listen-address=0.0.0.0:9100
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+      - /var/lib/node_exporter/textfile_collector:/var/lib/node_exporter/textfile_collector:ro
+    ports:
+      - "127.0.0.1:9100:9100"
+    networks: [monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits: {memory: 96M}
+        reservations: {memory: 32M}
+    logging: *logging
+
+networks:
+  monitoring:
+    name: matemail_monitoring
+    driver: bridge
+
+volumes:
+  prometheus_data:
+    name: matemail_monitoring_prometheus
+  grafana_data:
+    name: matemail_monitoring_grafana
+  alertmanager_data:
+    name: matemail_monitoring_alertmanager

@@ -1533,3 +1533,53 @@ every time. The drill verifies every staged file against the SHA-256 recorded
 when it was written, checks restored row counts against the manifest, and
 requires each DKIM key to parse as a usable key. A snapshot whose manifest
 records no expectations fails the drill rather than passing it.
+
+---
+
+## Monitoring (P7)
+
+**Nothing is publicly reachable.** Prometheus, Alertmanager, Grafana and
+node-exporter are bound to `127.0.0.1` only. No nginx route is added for any of
+them and no monitoring domain exists. Operator access is an SSH tunnel by
+someone who already has root. Monitoring data is itself sensitive: it says
+which services are down, when backups last ran and what is exposed.
+
+**No container is given the Docker socket.** Mounting `/var/run/docker.sock`
+into a container is handing it root on the host, which is why there is no
+cAdvisor here. Container and host state is gathered by one root-owned collector
+running on the host from a systemd timer, which publishes plain text that
+node-exporter serves. The monitoring containers hold no privilege at all;
+node-exporter additionally reads `/proc` and `/sys` read-only and cannot act on
+anything.
+
+**No credentials in metrics, and none on a command line.** The collector queries
+each database inside its own container so `$POSTGRES_USER` and `$POSTGRES_DB`
+come from the container's environment and never appear in a host process
+listing. The Native API is probed from inside the API container using its own
+environment secret. restic is given a password *file path*, never a password.
+No password, API secret, DKIM private key, message body, mailbox name or
+recipient appears in any metric, label, dashboard or log line.
+
+**Metric labels are a bounded allowlist**, enforced by a test that reads the
+collector's syntax tree (DEC-036). This is both a privacy control and a
+cardinality control: a label built from a Dovecot log line would publish
+customer addresses into the metrics store *and* create one time series per
+address.
+
+**Grafana** has sign-up disabled, anonymous access disabled, and analytics and
+update checks off. Its admin password is generated at install, stored in a
+root-only `0600` runtime `.env`, never printed and never committed. Re-running
+the installer will not overwrite it.
+
+**Detection only.** Monitoring verifies the firewall, the published ports, the
+listeners, DNS, PTR and the certificate — and changes none of them. A
+monitoring system that rewrites firewall rules is one that can lock an operator
+out of the host at three in the morning.
+
+**Alerting does not depend on the mail system it watches** (DEC-037). There is
+no SMTP configuration in Alertmanager at all.
+
+**Log growth is bounded.** P7 found Docker running with no `daemon.json` and
+therefore no log rotation whatsoever, with individual container logs already at
+45 MB. `/etc/logrotate.d/matemail-docker-containers` caps them without requiring
+a Docker daemon restart across 72 containers.

@@ -1827,3 +1827,144 @@ legitimate restores into mailboxes that are in fact empty.
 The default leaves a `.restored-<timestamp>` directory inside the domain
 directory for the operator to compare against and remove. Dovecot ignores it,
 because storage is addressed by `storage_id` from userdb.
+
+---
+
+## DEC-034 — Monitoring is one root collector, not a shelf of exporters
+
+**Status:** Accepted · **Phase:** P7 · **Date:** 2026-09-19
+
+### Decision
+
+The monitoring stack is four containers — Prometheus, Alertmanager, Grafana and
+node-exporter — plus a single root-owned collector that runs on the host from a
+systemd timer and writes Prometheus text into node-exporter's textfile
+directory.
+
+There is no `postgres_exporter`, no `redis_exporter`, no `blackbox_exporter`
+and no cAdvisor.
+
+### Why
+
+Measured first. MateServer has 6 cores and 11 GB of RAM, of which 3.3 GB was
+available with 1.3 GB of swap already in use across 72 containers. The
+conventional stack would have added six or more containers to a host that is
+already swapping.
+
+The deciding argument was not memory, though. Everything P7 needs to see —
+Native's ten services, the Postfix queue, the Restic repository, the
+certificate, the PTR record, whether a mail port has become public — is
+knowable only from the host, as root. cAdvisor-style container monitoring wants
+`/var/run/docker.sock`, and handing the Docker socket to a container is handing
+it root on the host. One root-owned collector on the host obtains the same
+measurements and gives nothing away: the monitoring containers hold no
+privilege at all, and node-exporter only ever reads text.
+
+### Consequences
+
+Collection is once per minute rather than continuous, which is faster than
+anything measured here changes. Scrapes run every 30s, so each collection is
+sampled about twice; `matemail_collector_last_run_timestamp_seconds` is what
+makes a stalled collector visible rather than letting the metrics silently
+freeze at their last value.
+
+Adding a measurement means editing one Python file rather than adopting a
+container.
+
+---
+
+## DEC-035 — A failing collector section publishes nothing
+
+**Status:** Accepted · **Phase:** P7 · **Date:** 2026-09-19
+
+### Decision
+
+The collector runs eighteen independent sections. When one raises, that section
+emits **no samples at all** and `matemail_collector_section_ok{section="…"}`
+goes to 0. It never substitutes a default, and never emits a zero or a one to
+stand in for a measurement it could not take.
+
+### Why
+
+The failure mode this avoids is the expensive one. A collector that cannot
+reach Postfix and therefore reports `queue_total 0` has not reported a healthy
+queue; it has reported a fiction that happens to look like the normal value.
+Publishing nothing makes the metric go stale, and staleness is something
+Prometheus can see and alert on.
+
+`matemail_collector_last_run_timestamp_seconds` is written only at the end of a
+run. If the collector dies earlier, the previous file stays in place with its
+older timestamp, which is exactly how staleness becomes visible rather than
+being hidden by an absent file.
+
+### Consequences
+
+`MonitoringCollectorStale` and `MonitoringCollectorSectionFailing` are the two
+alerts that must never be silenced: they are what make every other alert
+trustworthy.
+
+Alertmanager inhibits the metric-derived alerts while the collector is stale,
+because alerts derived from frozen metrics are not evidence of anything.
+
+---
+
+## DEC-036 — Metric labels come from a bounded allowlist
+
+**Status:** Accepted · **Phase:** P7 · **Date:** 2026-09-19
+
+### Decision
+
+Metric labels may only use the keys `service`, `instance`, `dependency`,
+`queue`, `event`, `action`, `volume`, `section`, `check`, `host` and `port`.
+No mailbox, address, recipient, sender, message id, tenant, queue id or IP may
+ever appear in a label. This is enforced by a test that reads the collector's
+syntax tree, resolving labels through local variables rather than grepping.
+
+### Why
+
+Two failures share one cause. The collector reads Dovecot's logs, which are
+full of mailbox addresses; a label built from a log line would publish customer
+data into a metrics store and keep working perfectly while doing it. The same
+label would also give Prometheus one time series per address, which is the
+classic cardinality explosion — invisible for a month, then fatal.
+
+Every allowed key has a bounded domain: ten Native services, six MateMail
+services, two database instances, a handful of queue names and event kinds.
+
+The log pattern table is additionally checked for capture groups, because a
+capturing regex is the obvious next step for someone who wants to label by
+what it matched. The compiled objects are asked directly — `rx.groups == 0` —
+rather than the source re-parsed.
+
+### Consequences
+
+Log-derived signals are aggregate counts only. "Which mailbox is failing to
+authenticate" is a question for the logs, not for a dashboard, and that is the
+right place for it.
+
+---
+
+## DEC-037 — Alerts are never delivered through the mail system under test
+
+**Status:** Accepted · **Phase:** P7 · **Date:** 2026-09-19
+
+### Decision
+
+Alertmanager has no `email_configs` and no `smtp_smarthost`. Delivery is a
+configurable webhook, and no provider is chosen in the repository.
+
+### Why
+
+Native Postfix, Mailcow and MateMail's transactional sender are all things this
+stack watches. Any of them carrying the alert that says mail is broken is a
+system that goes quiet exactly when it matters.
+
+No provider is picked because picking one means inventing credentials and
+choosing a third party on the user's behalf.
+
+### Consequences
+
+`ALERT_RECEIVER_CONFIGURED = NO` today. Alerts still fire, group, inhibit and
+are visible in the Alertmanager UI and API over the SSH tunnel; nothing is
+pushed off the host. This does not block NE6 technical readiness and does block
+Private Beta, and it is reported rather than hidden.

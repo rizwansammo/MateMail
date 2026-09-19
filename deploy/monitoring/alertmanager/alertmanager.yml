@@ -1,0 +1,70 @@
+# Alertmanager for MateMail.
+#
+# THE POINT OF THIS FILE
+#   Monitoring that emails you to say the mail system is down is not
+#   monitoring. Native Postfix, Mailcow and MateMail's transactional sender are
+#   all things this stack is watching, so none of them can be the thing that
+#   carries the alert.
+#
+#   The default receiver is therefore a webhook, and it is deliberately NOT
+#   pointed at a provider here. Choosing one would mean inventing credentials
+#   and picking a third party on the user's behalf. Until a webhook URL is
+#   configured, alerts still fire, are still grouped, and are still visible in
+#   the Alertmanager UI and API over the SSH tunnel — they simply are not
+#   pushed off the box. That gap is reported as ALERT_RECEIVER_CONFIGURED=NO
+#   rather than papered over.
+#
+# GROUPING
+#   Grouped by alertname and severity, so ten Native services failing together
+#   arrive as one notification rather than ten. repeat_interval is long: a
+#   condition still true four hours later is not news.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ["alertname", "severity"]
+  # A short wait before the first notification lets a burst of related alerts
+  # from a single incident arrive together.
+  group_wait: 45s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: "default"
+
+  routes:
+    # Known, deliberate, permanent gaps. They must stay visible, but
+    # re-notifying daily about a decision nobody has made yet is exactly how
+    # people learn to ignore alerts.
+    - matchers: ['persistent="true"']
+      receiver: "default"
+      group_interval: 12h
+      repeat_interval: 168h
+
+    - matchers: ['severity="critical"']
+      receiver: "critical"
+      group_wait: 15s
+      repeat_interval: 2h
+
+inhibit_rules:
+  # A dead service explains its own unhealthiness; do not send both.
+  - source_matchers: ['alertname="NativeServiceDown"']
+    target_matchers: ['alertname="NativeServiceUnhealthy"']
+    equal: ["service"]
+
+  # A critical makes its warning twin redundant.
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity="warning"']
+    equal: ["alertname"]
+
+  # If the collector is not running then everything it publishes is stale, and
+  # alerts derived from it are not evidence of anything.
+  - source_matchers: ['alertname="MonitoringCollectorStale"']
+    target_matchers: ['alertname=~"Native.*|MateMail.*|Backup.*|Certificate.*|Mail.*"']
+
+receivers:
+  # Both receivers are intentionally destination-less. An Alertmanager receiver
+  # with no webhook_configs is valid: the alert is accepted, grouped and held
+  # for the UI and the API. install.sh rewrites these two entries when a
+  # webhook URL is present in the runtime environment.
+  - name: "default"
+  - name: "critical"

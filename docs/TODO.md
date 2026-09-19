@@ -338,3 +338,24 @@ deleted mailbox's Maildir and records it in `retired_mailbox_storage`. P6 backs
 that up and can restore from it, but nothing removes it: the rows and the
 directories accumulate for the lifetime of the deployment. A retention policy
 for retired storage belongs with P7 operations.
+
+---
+
+## Found during P7 (2026-09-19)
+
+✅ **Docker had no log rotation at all.** No `/etc/docker/daemon.json` existed,
+so the default `json-file` driver ran unbounded; container logs had reached
+45 MB each with nothing to reclaim them. Fixed with
+`/etc/logrotate.d/matemail-docker-containers`, which bounds them without the
+Docker daemon restart that a `daemon.json` change would have required across
+72 containers.
+
+⬜ **`ALERT_RECEIVER_CONFIGURED = NO`.** Alerts fire, group and are visible in
+Alertmanager over the SSH tunnel, but nothing is delivered off the host. Set
+`ALERT_WEBHOOK_URL` in `/opt/MateMailMonitoring/.env` and re-run `install.sh`.
+The destination must not be served by Native Postfix, Mailcow or MateMail's
+transactional sender. Pre-beta requirement; does not block NE6.
+
+⬜ **`OFFSITE_BACKUP_CONFIGURED = NO`** (carried from P6, now monitored).
+`BackupOffsiteNotConfigured` fires permanently and by design. Pre-beta
+requirement; does not block NE6.

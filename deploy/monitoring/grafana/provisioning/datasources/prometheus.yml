@@ -1,0 +1,17 @@
+# The single datasource. Provisioned from this file so that the repository is
+# the source of truth: a datasource clicked into the UI survives until someone
+# recreates the volume, and then nobody remembers how it was set up.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    # The uid is pinned because every provisioned dashboard refers to it by
+    # uid. Letting Grafana generate one means the dashboards come up with
+    # "datasource not found" on a fresh volume.
+    uid: matemail-prom
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 30s

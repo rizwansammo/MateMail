@@ -2625,3 +2625,39 @@ published and pinned, and MateServer runtime validation is complete.
 Adapter methods remain **18 of 26 implemented, 8 capability-missing** — all
 eight now attributed to NE4. NE3 added no adapter methods, only the mail path
 underneath them.
+
+
+---
+
+## Observability (P7)
+
+The engine is monitored by the stack in `deploy/monitoring/`. Operator runbook:
+`docs/MONITORING.md`.
+
+All ten services are measured individually and reported as an all-or-nothing
+signal, `matemail_native_all_healthy`. Nine of ten is not healthy, and an
+average would render it as 0.9 and look almost fine; one dead scanner is not
+90% of a working mail system.
+
+Engine-specific signals worth knowing about:
+
+| Metric | Why it matters here |
+|---|---|
+| `matemail_native_schema_version_matches` | The API refuses to run against a schema it does not require. Drift means provisioning fails. |
+| `matemail_rate_limit_enforcement_available` | NE4's limiter fails **closed**. Losing Native Redis or the policy service defers mail for rate-limited mailboxes rather than letting it out unmetered, so this is a mail-flow dependency, not a cache. |
+| `matemail_rspamd_up`, `matemail_clamav_up` | NE3 defers rather than delivering unscanned. A scanner outage stops delivery; the queue will grow, and that is the design working. |
+| `matemail_clamav_signature_age_seconds` | A running scanner with stale definitions looks healthy and catches nothing new. |
+| `matemail_dnssec_validating`, `matemail_dnssec_rejects_invalid` | The NE1 property: a signed domain validates and `dnssec-failed.org` returns SERVFAIL. A resolver that answers everything, including forgeries, is worse than one that is down. |
+| `matemail_native_quarantine_held` | Reported separately from the queue. Deferred and awaiting-a-human are opposite operational situations and are never summed. |
+| `matemail_native_published_ports` | Must be zero. The engine publishes no host ports before NE7. |
+
+Log-derived counters (`matemail_postfix_events_total`,
+`matemail_dovecot_events_total`) are accumulated by reading only lines newer
+than the previous collection, so `rate()` over them is meaningful. They carry
+aggregate counts only: no address, mailbox, message id or IP reaches a metric
+label (DEC-036).
+
+`matemail_ne6_ready` is the composite gate for starting real Native Internet
+mail. It covers the technical prerequisites only and deliberately excludes the
+two known external gaps — offsite backup and the external alert receiver —
+which are reported separately as pre-beta warnings.
