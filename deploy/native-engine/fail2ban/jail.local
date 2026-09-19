@@ -1,0 +1,43 @@
+# MateMail Native Engine jails.
+#
+# Two jails, both reading the shipped Native mail log. Nothing else is enabled
+# — in particular NOT sshd. An SSH jail is how an operator loses a server at
+# three in the morning, and hardening SSH is not what NE7 is for. If it is
+# wanted later it should be a deliberate change with a tested recovery path.
+#
+# ignoreip carries the operator's address. install.sh fills it in from the
+# current SSH connection, because these jails go live at the same moment the
+# submission port does, and the person testing wrong-password handling is
+# exactly the person who must not be locked out by it.
+
+[DEFAULT]
+backend  = auto
+bantime  = 1h
+findtime = 10m
+# Five, not one. A person mistyping a password twice is not an attacker, and a
+# jail that fires on a typo teaches operators to disable it.
+maxretry = 5
+# Bans go in DOCKER-USER. See the action file for why the default does nothing
+# on this host.
+banaction = matemail-docker-user
+banaction_allports = matemail-docker-user
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled = false
+
+[matemail-postfix]
+enabled  = true
+filter   = matemail-postfix
+logpath  = /var/log/matemail/mail.log
+port     = smtp,submission
+maxretry = 5
+
+[matemail-dovecot]
+enabled  = true
+filter   = matemail-dovecot
+logpath  = /var/log/matemail/mail.log
+port     = imaps
+# IMAP clients retry automatically with a stale saved password, so a slightly
+# higher threshold avoids banning a customer whose phone is simply wrong.
+maxretry = 8

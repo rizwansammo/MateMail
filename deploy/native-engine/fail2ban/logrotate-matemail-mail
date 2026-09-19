@@ -1,0 +1,14 @@
+# The shipped mail log is a duplicate of what Docker already holds, so it is
+# kept short. copytruncate because the shipper holds the file open and would
+# otherwise keep writing to a rotated inode.
+/var/log/matemail/mail.log {
+    daily
+    rotate 7
+    maxsize 100M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    create 0640 root adm
+}

@@ -485,22 +485,39 @@ groups:
   # ── Exposure. Security conditions fire fast. ────────────────────────────
   - name: exposure
     rules:
-      - alert: PublicMailPortDetected
-        # No `for:` window worth speaking of. Before NE7 no mail port should be
-        # publicly bound, and if one becomes so it should be said immediately.
-        expr: matemail_public_mail_ports > 0
+      - alert: ForbiddenMailPortPublic
+        # NE7 made 25, 587 and 993 public BY DESIGN, so the old
+        # "any public mail port" alert would now fire on the architecture. What
+        # is still an incident is a port nobody decided to open: POP3 and its
+        # TLS variant are not offered at all, plaintext IMAP would carry a
+        # password in clear, and 465 is a deliberate omission (DEC-042).
+        #
+        # Still no real `for:` window. A password-carrying port becoming public
+        # is not something to sit on.
+        expr: matemail_forbidden_mail_ports_public > 0
         for: 1m
         labels: {severity: critical}
         annotations:
-          summary: "A mail port is publicly reachable"
-          description: "{{ $value }} mail port(s) are bound to a non-loopback address. Before NE7 this must be zero. Detection only: nothing here changes a firewall rule."
+          summary: "A mail port that must never be public is publicly reachable"
+          description: "{{ $value }} of 110/143/465/995 are bound to a non-loopback address. See matemail_mail_port_public for which. Detection only: nothing here changes a firewall rule."
 
-      - alert: NativePortPublished
-        expr: matemail_native_published_ports > 0
+      - alert: PublicMailPortMissing
+        # The other half of the same policy, which could not exist before NE7.
+        # A submission or IMAPS port that has stopped listening is a customer
+        # outage, and previously nothing would have said so.
+        expr: matemail_intended_mail_ports_missing > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "A public mail port has stopped listening"
+          description: "{{ $value }} of 25/587/993 are not listening. Inbound mail, client submission or mailbox access is down."
+
+      - alert: NativeUnintendedPortPublished
+        expr: matemail_native_unintended_published_ports > 0
         for: 1m
         labels: {severity: critical}
         annotations:
-          summary: "A Native Engine container port has been published to the host"
+          summary: "A Native container port beyond 25/587/993 is published publicly"
 
       - alert: UnexpectedPublicPort
         expr: matemail_unexpected_public_ports > 0
@@ -516,6 +533,44 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: "The host firewall is not active"
+
+      - alert: AbuseProtectionDown
+        # Public submission and IMAPS attract credential stuffing continuously.
+        # A stopped jail looks exactly like a quiet week.
+        expr: matemail_fail2ban_up == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Abuse protection (fail2ban) is not running"
+          description: "Public submission and IMAPS are open with no brute-force protection."
+
+      - alert: AbuseProtectionBlind
+        # The subtler failure: fail2ban is running, healthy, and reading a file
+        # nobody is writing to. It bans nothing and reports nothing wrong.
+        expr: matemail_fail2ban_log_shipper_up == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Mail logs are not reaching fail2ban"
+          description: "fail2ban may be running against a stale file, in which case it will never ban anything while appearing healthy."
+
+      - alert: AbuseProtectionJailMissing
+        expr: matemail_fail2ban_jail_up == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Jail {{ $labels.jail }} is not loaded"
+
+      - alert: CredentialStuffingBurst
+        # Not a security incident on its own - this is the Internet. It is
+        # worth knowing about when it is unusual, and the bans are the signal
+        # that protection is working rather than that something is broken.
+        expr: increase(matemail_fail2ban_banned_total[1h]) > 20
+        for: 0m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value }} bans in the last hour on {{ $labels.jail }}"
+          description: "A sustained authentication attack. Protection is working; this is informational unless legitimate users are affected."
 
   # ── Mailcow, transitional until NE8 ─────────────────────────────────────
   - name: transitional

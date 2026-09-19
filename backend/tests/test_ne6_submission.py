@@ -74,10 +74,30 @@ def test_the_gateway_carries_the_certificate_hostname_as_an_alias():
     assert MAIL_HOST in nets["matemail_engine_link"]["aliases"]
 
 
-def test_no_native_service_publishes_a_host_port():
-    """NE6 opens nothing. Public ports are NE7's decision, not a side effect."""
-    for name, svc in compose()["services"].items():
-        assert not svc.get("ports"), f"{name} publishes {svc.get('ports')}"
+def test_the_submission_gateway_never_publishes_a_host_port():
+    """
+    NE6's own port property, which NE7 does not change.
+
+    The private gateway exists precisely so MateMail can reach Postfix without
+    a port being opened. NE7 later published 25, 587 and 993 on Postfix and
+    Dovecot — that policy is owned and tested by test_ne7_public_mail.py — but
+    the gateway is not a public service and publishing it would put an
+    unauthenticated hop to the mail path on the Internet.
+    """
+    svc = compose()["services"]["submission-gateway"]
+    assert not svc.get("ports"), svc.get("ports")
+
+
+def test_the_private_path_is_not_reachable_from_outside():
+    """
+    MateMail reaches the gateway by Docker network alias on an `internal`
+    network, never by a published port. If that ever changed, the NE6 design
+    would have quietly become a public submission service with different rules
+    from the one NE7 hardened.
+    """
+    nets = compose()["services"]["submission-gateway"]["networks"]
+    assert "matemail_engine_link" in nets
+    assert compose()["networks"]["matemail_engine_link"]["external"] is True
 
 
 def test_the_gateway_forwards_one_port_to_one_upstream():

@@ -246,6 +246,11 @@ services:
       # never on the container network.
       - native_auth:/run/dovecot-auth
     networks: [engine]
+    # IMAPS only. 143, 110 and 995 are not published AND do not listen inside
+    # the container (dovecot.conf sets the imap listener to port 0), so there
+    # is no plaintext path to a password even by accident.
+    ports:
+      - "${NATIVE_PUBLIC_IP:?NATIVE_PUBLIC_IP must be set; an empty value binds every interface}:993:993"
     depends_on:
       db: {condition: service_healthy}
     healthcheck:
@@ -285,6 +290,25 @@ services:
       # business writing into that directory.
       - native_auth:/run/dovecot-auth:ro
     networks: [engine]
+    # ── Public mail listeners (NE7) ───────────────────────────────────────
+    #
+    # Bound to the production address, NOT 0.0.0.0. Mailcow publishes the same
+    # port numbers on 127.0.0.1, so an all-interfaces bind would either collide
+    # with it or silently shadow it, and rollback depends on both being able to
+    # listen at once.
+    #
+    # NATIVE_PUBLIC_IP has no default on purpose. An unset variable would
+    # render as ":25:25", which Docker reads as every interface — the one
+    # mistake here that cannot be noticed by looking at the file. `:?` turns
+    # that into a refusal to start.
+    #
+    # 25 is the Internet MX: unauthenticated, STARTTLS offered but not
+    # required, relay refused to anything not hosted here.
+    # 587 is submission: STARTTLS and SASL both mandatory.
+    # 465 is deliberately absent - see DEC-042.
+    ports:
+      - "${NATIVE_PUBLIC_IP:?NATIVE_PUBLIC_IP must be set; an empty value binds every interface}:25:25"
+      - "${NATIVE_PUBLIC_IP:?NATIVE_PUBLIC_IP must be set; an empty value binds every interface}:587:587"
     depends_on:
       unbound: {condition: service_healthy}
       db: {condition: service_healthy}

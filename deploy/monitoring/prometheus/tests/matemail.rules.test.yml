@@ -208,38 +208,96 @@ tests:
 
   # ── Exposure: the one that must not wait ─────────────────────────────────
   - interval: 1m
-    name: a publicly exposed mail port is reported almost immediately
+    name: a mail port that must never be public is reported almost immediately
     input_series:
-      - series: 'matemail_public_mail_ports'
+      - series: 'matemail_forbidden_mail_ports_public'
         values: '0 0 1 1 1 1 1 1'
     alert_rule_test:
       - eval_time: 2m
-        alertname: PublicMailPortDetected
+        alertname: ForbiddenMailPortPublic
         exp_alerts: []
       # Security conditions do not get a five minute grace period.
       - eval_time: 4m
-        alertname: PublicMailPortDetected
+        alertname: ForbiddenMailPortPublic
         exp_alerts:
           - exp_labels:
               severity: critical
             exp_annotations:
-              summary: "A mail port is publicly reachable"
-              description: "1 mail port(s) are bound to a non-loopback address. Before NE7 this must be zero. Detection only: nothing here changes a firewall rule."
+              summary: "A mail port that must never be public is publicly reachable"
+              description: "1 of 110/143/465/995 are bound to a non-loopback address. See matemail_mail_port_public for which. Detection only: nothing here changes a firewall rule."
 
+  # The NE7 change itself. Before NE7 any public mail port alerted; 25, 587 and
+  # 993 are now the architecture, and a monitor that pages on the design is a
+  # monitor people switch off.
   - interval: 1m
-    name: the normal closed-port state never alerts
+    name: the three intended public mail ports never raise an exposure alert
     input_series:
-      - series: 'matemail_public_mail_ports'
+      - series: 'matemail_forbidden_mail_ports_public'
         values: '0+0x60'
-      - series: 'matemail_native_published_ports'
+      - series: 'matemail_intended_mail_ports_missing'
         values: '0+0x60'
+      - series: 'matemail_native_unintended_published_ports'
+        values: '0+0x60'
+      - series: 'matemail_mail_port_public{port="25"}'
+        values: '1+0x60'
+      - series: 'matemail_mail_port_public{port="587"}'
+        values: '1+0x60'
+      - series: 'matemail_mail_port_public{port="993"}'
+        values: '1+0x60'
     alert_rule_test:
       - eval_time: 45m
-        alertname: PublicMailPortDetected
+        alertname: ForbiddenMailPortPublic
         exp_alerts: []
       - eval_time: 45m
-        alertname: NativePortPublished
+        alertname: NativeUnintendedPortPublished
         exp_alerts: []
+      - eval_time: 45m
+        alertname: PublicMailPortMissing
+        exp_alerts: []
+
+  - interval: 1m
+    name: a public mail port that stops listening is a customer outage
+    input_series:
+      - series: 'matemail_intended_mail_ports_missing'
+        values: '0 0 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PublicMailPortMissing
+        exp_alerts: []
+      - eval_time: 9m
+        alertname: PublicMailPortMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "A public mail port has stopped listening"
+              description: "1 of 25/587/993 are not listening. Inbound mail, client submission or mailbox access is down."
+
+  # ── Abuse protection ────────────────────────────────────────────────────
+  - interval: 1m
+    name: fail2ban running against a stale log is reported, not treated as healthy
+    input_series:
+      - series: 'matemail_fail2ban_up'
+        values: '1+0x60'
+      - series: 'matemail_fail2ban_log_shipper_up'
+        values: '1 1 0+0x40'
+    alert_rule_test:
+      # fail2ban itself is up, so that alert must stay silent...
+      - eval_time: 30m
+        alertname: AbuseProtectionDown
+        exp_alerts: []
+      # ...while the blindness is still reported.
+      - eval_time: 5m
+        alertname: AbuseProtectionBlind
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: AbuseProtectionBlind
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Mail logs are not reaching fail2ban"
+              description: "fail2ban may be running against a stale file, in which case it will never ban anything while appearing healthy."
 
   # ── Rate limiting fails closed, so its outage stops mail ────────────────
   - interval: 1m

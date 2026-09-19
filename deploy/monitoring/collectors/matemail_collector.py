@@ -78,10 +78,24 @@ NATIVE_SERVICES = ["api", "db", "redis", "dovecot", "postfix", "rspamd",
 MATEMAIL_SERVICES = ["backend", "frontend", "celery-worker", "celery-beat",
                      "postgres", "redis"]
 
-#: Must never be publicly reachable before NE7.
+#: Every mail port, reported individually so an operator sees the whole
+#: picture rather than one number.
 MAIL_PORTS = [25, 110, 143, 465, 587, 993, 995]
+
+#: Public BY DESIGN since NE7: the Internet MX, authenticated submission
+#: and IMAPS. Before NE7 any public mail port was an incident; that is no
+#: longer true, and a monitor that keeps alerting on an intended state
+#: teaches people to ignore it.
+INTENDED_PUBLIC_MAIL_PORTS = {25, 587, 993}
+
+#: Must NEVER be public. POP3 and its TLS variant are not offered at all,
+#: plaintext IMAP would carry a password in clear, and implicit-TLS
+#: submission on 465 is a deliberate omission. If one of these appears,
+#: something published a port nobody decided to publish.
+FORBIDDEN_MAIL_PORTS = {110, 143, 465, 995}
+
 #: Expected to be public. 4000 is TalkRoom legacy and is known.
-EXPECTED_PUBLIC = {22, 80, 443, 4000}
+EXPECTED_PUBLIC = {22, 80, 443, 4000} | INTENDED_PUBLIC_MAIL_PORTS
 
 lines: list[str] = []
 sections: dict[str, int] = {}
@@ -896,26 +910,95 @@ def sec_exposure():
             continue
         public_ports.add(int(port))
 
-    exposed_mail = sorted(p for p in public_ports if p in MAIL_PORTS)
-    metric("matemail_public_mail_ports", len(exposed_mail), {},
-           "Mail ports reachable from a non-loopback address; must be 0 "
-           "before NE7")
     for port in MAIL_PORTS:
         metric("matemail_mail_port_public", 1 if port in public_ports else 0,
                {"port": str(port)}, "1 when this mail port is publicly bound")
+
+    # The signal that still means "something is wrong". NE7 made 25, 587
+    # and 993 intended, so counting every public mail port would now alert
+    # on the design itself.
+    forbidden = sorted(p for p in public_ports if p in FORBIDDEN_MAIL_PORTS)
+    metric("matemail_forbidden_mail_ports_public", len(forbidden), {},
+           "Mail ports that must never be public (110, 143, 465, 995) that "
+           "are; must be 0")
+
+    # The other half, which did not exist before NE7: an intended port that
+    # has STOPPED listening is an outage, and nothing could say so.
+    missing = sorted(INTENDED_PUBLIC_MAIL_PORTS - public_ports)
+    metric("matemail_intended_mail_ports_missing", len(missing), {},
+           "Public mail ports that should be listening and are not")
+
     metric("matemail_unexpected_public_ports",
            len(public_ports - EXPECTED_PUBLIC), {},
            "Publicly bound ports beyond the expected set")
 
+    # Native now publishes exactly three. Anything beyond that is a port
+    # somebody added without deciding to.
     published = try_run(["docker", "compose", "ps", "--format", "{{.Ports}}"],
                         timeout=30, cwd=NATIVE_DIR)
-    metric("matemail_native_published_ports",
-           sum(1 for l in published.splitlines() if "0.0.0.0" in l or ":::" in l),
-           {}, "Native Engine container ports published to the host; must be 0")
+    native_public = 0
+    for line in published.splitlines():
+        for mapping in line.split(","):
+            mapping = mapping.strip()
+            if "->" not in mapping:
+                continue
+            bind = mapping.split("->", 1)[0]
+            if bind.startswith("127.") or not bind:
+                continue
+            port = bind.rsplit(":", 1)[-1]
+            if port.isdigit() and int(port) not in INTENDED_PUBLIC_MAIL_PORTS:
+                native_public += 1
+    metric("matemail_native_unintended_published_ports", native_public, {},
+           "Native container ports published publicly that are not one of "
+           "the three NE7 intended; must be 0")
 
     ufw = try_run(["ufw", "status"], timeout=15)
     metric("matemail_ufw_active", 1 if "Status: active" in ufw else 0, {},
            "1 when the host firewall is active")
+
+
+def sec_abuse_protection():
+    """
+    NE7 opened public submission and IMAPS, so credential stuffing is now part
+    of normal traffic. What matters operationally is whether the protection is
+    RUNNING: a jail that silently stopped looks exactly like a quiet week.
+
+    Counts only, never the banned addresses. One time series per attacker is an
+    unbounded label and a list of IP addresses living in a metrics store.
+    """
+    active = try_run(["systemctl", "is-active", "fail2ban"], timeout=10).strip()
+    metric("matemail_fail2ban_up", 1 if active == "active" else 0, {},
+           "1 when the abuse-protection service is running")
+
+    # If the shipper dies, fail2ban keeps running against a file nobody writes
+    # to: it bans nothing while reporting itself perfectly healthy.
+    shipper = try_run(["systemctl", "is-active", "matemail-maillog"],
+                      timeout=10).strip()
+    metric("matemail_fail2ban_log_shipper_up", 1 if shipper == "active" else 0,
+           {}, "1 when Native mail logs are reaching the file fail2ban reads")
+
+    if active != "active":
+        return
+
+    for jail in ("matemail-postfix", "matemail-dovecot"):
+        out = try_run(["fail2ban-client", "status", jail], timeout=15)
+        metric("matemail_fail2ban_jail_up", 1 if out.strip() else 0,
+               {"jail": jail}, "1 when this jail is loaded")
+        if not out.strip():
+            continue
+        for line in out.splitlines():
+            value = line.rsplit(":", 1)[-1].strip()
+            if not value.isdigit():
+                continue
+            if "Currently banned:" in line:
+                metric("matemail_fail2ban_current_banned", int(value),
+                       {"jail": jail}, "Addresses currently banned")
+            elif "Currently failed:" in line:
+                metric("matemail_fail2ban_current_failed", int(value),
+                       {"jail": jail}, "Addresses with recent failures")
+            elif "Total banned:" in line:
+                metric("matemail_fail2ban_banned_total", int(value),
+                       {"jail": jail}, "Bans issued since start", "counter")
 
 
 def sec_celery():
@@ -984,15 +1067,27 @@ def sec_readiness():
         "backups_current": 1 if 0 <= emitted.get(
             "matemail_backup_latest_snapshot_age_seconds", 1e9) < 172800 else 0,
         "rate_limit": got("matemail_rate_limit_enforcement_available"),
-        "no_public_mail_ports": 1 if emitted.get(
-            "matemail_public_mail_ports", 1) == 0 else 0,
+        # NE7 inverted this. Before it, readiness meant NO mail port was
+        # public; after it, the three intended ports being public IS the
+        # working state, and what would be wrong is a forbidden port appearing
+        # or an intended one disappearing. Leaving the old check in place would
+        # have pinned readiness at 0 permanently the moment NE7 deployed.
+        "no_forbidden_mail_ports": 1 if emitted.get(
+            "matemail_forbidden_mail_ports_public", 1) == 0 else 0,
+        "public_mail_ports_listening": 1 if emitted.get(
+            "matemail_intended_mail_ports_missing", 1) == 0 else 0,
+        "abuse_protection": 1 if (got("matemail_fail2ban_up")
+                                  and got("matemail_fail2ban_log_shipper_up")) else 0,
         "monitoring_ok": 1 if all(sections.values()) else 0,
     }
     for name, ok in sorted(checks.items()):
         metric("matemail_ne6_readiness_check", ok, {"check": name},
                "1 when an NE6 technical prerequisite is satisfied")
     metric("matemail_ne6_ready", 1 if all(checks.values()) else 0, {},
-           "1 when every NE6 technical prerequisite is satisfied; excludes "
+           "1 when every technical prerequisite for operating the mail engine "
+           "is satisfied. Named for NE6, where it began as a go/no-go gate; "
+           "since NE7 it is the engine's continuous operating-readiness "
+           "signal, and its checks changed accordingly. Still excludes "
            "offsite backup and the external alert receiver, which are "
            "reported separately as pre-beta warnings")
     metric("matemail_ne6_readiness_checks_failed",
@@ -1016,6 +1111,7 @@ def main():
         ("log_counters", sec_log_counters), ("scanners", sec_scanners),
         ("dns", sec_dns), ("postgres", sec_postgres), ("redis", sec_redis),
         ("storage", sec_storage), ("backups", sec_backups), ("tls", sec_tls),
+        ("abuse_protection", sec_abuse_protection),
         ("dns_identity", sec_dns_identity), ("exposure", sec_exposure),
         ("celery", sec_celery),
     ]:

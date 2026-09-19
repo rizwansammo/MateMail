@@ -1,0 +1,19 @@
+# Re-emit Native mail logs into a file so fail2ban can watch them.
+# See scripts/mail-log-shipper.sh for why this indirection exists.
+[Unit]
+Description=MateMail Native mail log shipper (for fail2ban)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+ExecStart=/opt/MateMailNative/deploy/native-engine/scripts/mail-log-shipper.sh matemail-native-postfix matemail-native-dovecot
+Restart=always
+RestartSec=5
+# The file carries envelope addresses and client IPs, so it is not world
+# readable.
+UMask=0027
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

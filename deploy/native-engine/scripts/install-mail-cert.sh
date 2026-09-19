@@ -31,6 +31,7 @@ HOST="${MAIL_CERT_HOSTNAME:-mx.matemail.online}"
 VOLUME="${MAIL_TLS_VOLUME:-matemail_native_tls}"
 LIVE="/etc/letsencrypt/live/${HOST}"
 POSTFIX_CONTAINER="${POSTFIX_CONTAINER:-matemail-native-postfix}"
+DOVECOT_CONTAINER="${DOVECOT_CONTAINER:-matemail-native-dovecot}"
 
 # Postfix's smtpd runs as uid 100 / gid 102 in this image and reads the key
 # itself — the submission service is not chrooted. The key is therefore group
@@ -81,11 +82,21 @@ log "  fingerprint $(openssl x509 -in "$MOUNT/cert.pem" -noout -fingerprint -sha
 # Reload rather than restart: a reload re-reads the certificate without
 # dropping a connection or losing the queue. Absent container, no reload — the
 # next start reads the new files anyway.
-if docker inspect "$POSTFIX_CONTAINER" > /dev/null 2>&1; then
-    if docker exec "$POSTFIX_CONTAINER" postfix reload > /dev/null 2>&1; then
-        log "reloaded $POSTFIX_CONTAINER"
+#
+# BOTH services since NE7. Dovecot serves public IMAPS from the same files, and
+# reloading only Postfix would leave clients being handed an expired
+# certificate for up to ninety days without anything looking wrong on the
+# Postfix side.
+reload_service() {
+    local container="$1" command="$2"
+    docker inspect "$container" > /dev/null 2>&1 || return 0
+    if docker exec "$container" sh -c "$command" > /dev/null 2>&1; then
+        log "reloaded $container"
     else
-        log "WARNING: could not reload $POSTFIX_CONTAINER; it will pick the"
+        log "WARNING: could not reload $container; it will pick the"
         log "         certificate up on its next start"
     fi
-fi
+}
+
+reload_service "$POSTFIX_CONTAINER" "postfix reload"
+reload_service "$DOVECOT_CONTAINER" "doveadm reload"

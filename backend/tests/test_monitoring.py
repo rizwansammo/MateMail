@@ -262,6 +262,9 @@ def test_grafana_is_locked_down():
 ALLOWED_LABEL_KEYS = {
     "service", "instance", "dependency", "queue", "event", "action",
     "volume", "section", "check", "host", "port",
+    # NE7. Two jails, named in the configuration - a bounded set, unlike
+    # the addresses they ban, which must never become labels.
+    "jail",
 }
 
 #: Label keys that would be a privacy incident, an unbounded cardinality
@@ -508,7 +511,8 @@ def test_availability_alerts_wait_long_enough_to_survive_a_restart():
     security rules, which are supposed to be immediate.
     """
     immediate_by_design = {
-        "PublicMailPortDetected", "NativePortPublished",
+        "ForbiddenMailPortPublic", "NativeUnintendedPortPublished",
+        "CredentialStuffingBurst",
         "NativeServiceRestartLoop", "MailDeliveryFailureSpike",
         "MailRejectionSpike", "AuthenticationFailureSpike",
         "MailStorageGrowingFast",
@@ -524,7 +528,7 @@ def test_availability_alerts_wait_long_enough_to_survive_a_restart():
 
 def test_security_alerts_are_not_made_to_wait():
     rules = {r["alert"]: r for _, r in _all_rules()}
-    for name in ("PublicMailPortDetected", "NativePortPublished"):
+    for name in ("ForbiddenMailPortPublic", "NativeUnintendedPortPublished"):
         window = rules[name].get("for", "0m")
         minutes = int(re.sub(r"[^0-9]", "", window) or 0)
         assert minutes <= 2, (
@@ -542,7 +546,9 @@ def test_the_required_alerts_all_exist():
         "UnboundDown", "RspamdDown", "ClamAVDown", "OlefyDown",
         "BackupStale", "BackupFailed", "DiskSpaceLow", "InodesLow",
         "CertificateExpiringSoon", "MailDnsIdentityDrift",
-        "PublicMailPortDetected", "PrometheusTargetDown",
+        "ForbiddenMailPortPublic", "PublicMailPortMissing",
+        "AbuseProtectionDown", "AbuseProtectionBlind",
+        "PrometheusTargetDown",
         "MonitoringCollectorStale", "NativeRateLimitEnforcementUnavailable",
     }
     present = {rule["alert"] for _, rule in _all_rules()}

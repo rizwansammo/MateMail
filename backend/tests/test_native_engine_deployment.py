@@ -193,14 +193,40 @@ class NoExposureTest(unittest.TestCase):
         self.compose = load_compose()
         self.raw = directives_only(COMPOSE.read_text(encoding="utf-8"))
 
-    def test_no_service_publishes_a_host_port(self):
+    def test_only_the_three_intended_public_mail_ports_are_published(self):
+        """
+        NE1 through NE6 published NOTHING: a mail port reachable before the
+        policy existed would have been an open relay waiting to be found. NE7
+        is the phase that deliberately opens three, and only three.
+
+        The invariant did not go away, it became specific. Everything else in
+        the engine — the database, Dovecot's admin API, Rspamd's controller,
+        the Postfix control API — must still publish nothing at all, and the
+        three that do must bind the configured production address rather than
+        every interface, because Mailcow holds the same port numbers on
+        loopback and rollback depends on both being able to listen.
+        """
+        allowed = {"postfix": {25, 587}, "dovecot": {993}}
         for name, svc in self.compose["services"].items():
             with self.subTest(service=name):
-                self.assertNotIn(
-                    "ports", svc,
-                    f"{name} publishes a host port; NE1 opens none, and a mail "
-                    "port would be reachable before any policy exists",
-                )
+                mappings = svc.get("ports") or []
+                if name not in allowed:
+                    self.assertEqual(
+                        [], mappings,
+                        f"{name} publishes a host port; only postfix and "
+                        f"dovecot may, and only 25/587/993",
+                    )
+                    continue
+                ports, binds = set(), []
+                for mapping in mappings:
+                    parts = str(mapping).rsplit(":", 2)
+                    ports.add(int(parts[-1]))
+                    binds.append(parts[0] if len(parts) == 3 else "")
+                self.assertEqual(allowed[name], ports)
+                for bind in binds:
+                    self.assertIn("NATIVE_PUBLIC_IP", bind,
+                                  f"{name} does not bind the configured address")
+                    self.assertNotEqual("0.0.0.0", bind)
 
     def test_no_host_networking(self):
         for forbidden in ("network_mode: host", 'network_mode: "host"'):
