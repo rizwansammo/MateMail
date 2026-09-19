@@ -233,7 +233,7 @@ broken audit log. See the Phase 0 section below.
 
 Full detail, entry criteria and exit criteria: *Revised roadmap* below.
 
-### Native Engine Migration (NE0–NE8) — NE0–NE4 complete
+### Native Engine Migration (NE0–NE8) — NE0–NE4 complete, NE5 implemented locally
 
 A **separate** engineering track that replaces mailcow as the Mail Engine
 orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It does
@@ -258,7 +258,12 @@ NE4 operations:                COMPLETE (2026-09-19) — validated on MateServer
                                Immutable mailbox storage, real usage from
                                Dovecot, enforced per-mailbox rate limits, queue
                                and quarantine control. Adapter 26 of 26.
-NE5–NE8 implementation:        NONE — not started
+NE5 control-plane switch:      IMPLEMENTED AND VALIDATED LOCALLY (2026-09-19);
+                               MateServer switch pending. MateMail provisions
+                               through NativeMailEngineAdapter; mailcow remains
+                               installed as the rollback path and the live mail
+                               transport.
+NE6–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
 ```
 

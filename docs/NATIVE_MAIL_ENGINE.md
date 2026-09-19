@@ -451,6 +451,46 @@ not by inspecting configuration.
 
 ---
 
+### NE5 — implemented locally (2026-09-19)
+
+**Status: implemented and validated locally. MateServer switch pending.**
+
+The application control plane moves to `MAIL_ENGINE_ADAPTER=native`. Internet
+mail, the platform sender and every public port are untouched.
+
+**What already worked.** Every engine call site in `apps/` already went through
+`get_adapter()` — no module imported a mailcow client, constructed an adapter
+directly, or read mailcow settings. The port boundary drawn at P1 held, so NE5
+changed configuration and validation rather than business logic.
+
+**What NE5 added.**
+
+* `NATIVE_ENGINE_API_URL` / `NATIVE_ENGINE_API_SECRET` settings.
+* Deployment checks that refuse a `native` deployment with a missing URL or
+  secret, or a loopback URL. Previously only mailcow was validated, so a
+  half-configured Native switch would have constructed fine and failed on the
+  first customer action.
+* An unrecognised `MAIL_ENGINE_ADAPTER` now raises instead of silently becoming
+  the stub — see DEC-030.
+* The Native `api` service joins `matemail_engine_link`, the single path between
+  MateMail and the engine. Nothing else does (DEC-031).
+
+**Validated through the application layer**, not by calling the Native API
+directly: 38 operations covering the domain and mailbox lifecycles, aliases,
+forwarding, DKIM including rotation, usage, rate limits, queue, quarantine,
+health and listing — each repeated to prove idempotency — with mailcow
+deliberately unconfigured so any fallback would have failed loudly.
+
+**Outage behaviour** was exercised for real: with the Native API stopped, a
+provisioning call raised `EngineUnavailable` (retryable), the adapter remained
+Native, and mailcow received nothing. After restart the same call succeeded and
+created no duplicate.
+
+**Production state gate.** The MateMail production database held zero tenants,
+domains, mailboxes, aliases and forwarding rules, so no migration is required.
+
+---
+
 ### NE5 — Switch the MateMail adapter
 
 **Goal** — MateMail talks to the native engine, reversibly.

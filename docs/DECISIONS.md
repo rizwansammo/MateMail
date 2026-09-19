@@ -1673,3 +1673,76 @@ checking, not by anything failing.
 
 Documenting "remember to restart Rspamd" would not have prevented it. Hashing
 makes the change visible to the tool that decides what to recreate.
+
+---
+
+## DEC-029 — The MateMail control plane runs on the Native Engine
+
+**Status:** accepted (NE5, 2026-09-19)
+
+`MAIL_ENGINE_ADAPTER=native`. MateMail provisions domains, mailboxes, aliases,
+forwarding, DKIM, quotas, rate limits, queue and quarantine through
+`NativeMailEngineAdapter` against our own engine.
+
+**What this does not change.** Internet SMTP still arrives and leaves through
+mailcow, the platform sender is untouched, no public port moved, and no customer
+mail was migrated. NE5 moves the CONTROL PLANE — who creates a mailbox — not the
+mail path. Those are separate switches on purpose, because the control plane can
+be rolled back with an environment variable while moving mail cannot.
+
+**Why mailcow stays.** It is the rollback path and the live mail transport.
+`MailcowAdapter` remains in the codebase, its credentials remain in `.env`, and
+its services keep running. Rolling back is a configuration change, not a
+deployment: that property is worth more than the tidiness of deleting the code,
+and NE8 removes it under its own authorisation.
+
+**Why the switch was safe to make now.** The production MateMail database held
+zero tenants, domains, mailboxes, aliases and forwarding rules, so there was no
+customer state to migrate and no divergence to reconcile. Had there been any,
+NE5 would have stopped before switching.
+
+---
+
+## DEC-030 — An unrecognised adapter name refuses instead of falling back
+
+**Status:** accepted (NE5, 2026-09-19)
+
+`get_adapter()` raises `ImproperlyConfigured` for any value that is not `stub`,
+`mailcow` or `native`. It previously fell back to the stub.
+
+**Why.** The stub accepts every operation and reports success without an engine.
+Falling back to it on a typo — `natve`, a stale value, a trailing space — would
+produce a deployment that provisions nothing and tells the customer everything
+worked: mailboxes visible in the UI that do not exist anywhere. That failure is
+silent, durable and discovered by the customer.
+
+Refusing is loud and immediate, and `manage.py check --deploy` now catches the
+same mistake in the pipeline before it can ship.
+
+**Why `native` also gets deployment checks.** Only mailcow was validated before.
+An adapter with no URL constructs perfectly well and fails on the first customer
+action, by which point a domain is half-provisioned. HTTPS is deliberately NOT
+required for Native: it lives on an internal network with no published ports and
+no certificate until NE0.9, and demanding TLS would only encourage a self-signed
+certificate nobody verifies.
+
+---
+
+## DEC-031 — Only the Native API joins `matemail_engine_link`
+
+**Status:** accepted (NE5, 2026-09-19) — implements NE0's rule
+
+The Native `api` service is the single Native Engine component on the network
+MateMail can reach. Postfix, Dovecot, Rspamd, PostgreSQL, Redis, ClamAV, Olefy
+and Unbound stay off it.
+
+**Why.** The API is the component that validates input and authorises
+operations. A compromised MateMail application can therefore ask the engine to
+provision — subject to every check the API makes — and cannot reach the mail
+path, the mail store, the engine database or the DKIM key material at all.
+Putting the database on that network for convenience would have handed the
+application a second, unvalidated write path and ended the single-writer
+invariant NE0.2 exists to protect.
+
+The network is `external: true` so neither project's `compose down` can delete
+the other project's connectivity.

@@ -1438,3 +1438,54 @@ Compose does not recreate a container when only a bind-mounted configuration
 file changed. NE3 lost five days of antivirus enforcement to this. `deploy.sh`
 hashes each service's configuration directory and passes the hash in the
 environment, so a configuration change becomes a change Compose can see.
+
+---
+
+## Native Engine NE5 — control-plane switch
+
+**Status: implemented and validated locally. MateServer switch pending.**
+
+MateMail's control plane moves to `MAIL_ENGINE_ADAPTER=native`. Internet mail,
+the platform sender and every public port are untouched — NE6 owns those.
+
+### The boundary
+
+MateMail reaches exactly one Native Engine component, the API, over
+`matemail_engine_link` (internal, no egress, externally owned). Postfix,
+Dovecot, Rspamd, the engine database and the DKIM key store are unreachable from
+the application, so a compromised MateMail can ask the API to provision — under
+every check the API makes — and cannot touch the mail path or the mail store.
+
+### Failure behaviour
+
+An unreachable Native API raises `EngineUnavailable`, which is retryable, and
+**never** silently becomes a mailcow call. Verified by stopping the API and
+attempting a real provisioning call through the application: the operation
+failed retryably, the adapter was still Native afterwards, and mailcow received
+nothing. After restarting the API the same operation succeeded and produced no
+duplicate.
+
+That matters more than it looks. A fallback would provision a customer into
+mailcow while MateMail believed it was using Native, and the two would diverge
+silently — with no error anywhere to notice.
+
+### Configuration that cannot half-work
+
+`MAIL_ENGINE_ADAPTER` accepts only `stub`, `mailcow` or `native`; anything else
+raises rather than falling back to the stub, which accepts every operation and
+reports success without an engine. `manage.py check --deploy` additionally
+refuses a `native` deployment with a missing URL or secret, or a URL pointing at
+loopback — which is this container, never the engine.
+
+### Transactional mail is a separate switch
+
+`EMAIL_HOST`, `EMAIL_PORT` and the platform sender are independent of
+`MAIL_ENGINE_ADAPTER`; no setting derives one from the other, and the adapter
+contract has no method that sends a message. Password resets and verification
+mail continue to leave through the existing path until NE6 moves them
+deliberately.
+
+### Rollback
+
+`MailcowAdapter` remains present and configured, and mailcow keeps running.
+Reverting the control plane is an environment variable and a restart.

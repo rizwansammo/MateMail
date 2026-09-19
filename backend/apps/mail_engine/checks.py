@@ -24,8 +24,94 @@ from django.core.checks import Error, Tags, Warning, register
 _LOOPBACK = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 
 
+def _adapter_name() -> str:
+    return str(getattr(settings, "MAIL_ENGINE_ADAPTER", "stub")).lower().strip()
+
+
 def _using_real_engine() -> bool:
-    return str(getattr(settings, "MAIL_ENGINE_ADAPTER", "stub")).lower() == "mailcow"
+    """mailcow specifically — these checks assert mailcow's requirements."""
+    return _adapter_name() == "mailcow"
+
+
+@register(Tags.security, deploy=True)
+def mail_engine_adapter_is_known(app_configs, **kwargs):
+    """
+    An unrecognised adapter name must never reach a deploy.
+
+    The factory refuses it at runtime, but that refusal happens on the first
+    customer action. Catching it in `check --deploy` moves the failure to the
+    pipeline, where it costs nothing.
+    """
+    name = _adapter_name()
+    if name in ("stub", "mailcow", "native"):
+        return []
+    return [
+        Error(
+            f"MAIL_ENGINE_ADAPTER={name!r} is not a known adapter.",
+            hint="Valid values: 'stub', 'mailcow', 'native'.",
+            id="mail_engine.E010",
+        )
+    ]
+
+
+@register(Tags.security, deploy=True)
+def native_engine_configured(app_configs, **kwargs):
+    """
+    Refuse a Native deployment that cannot reach the Native API.
+
+    Same reasoning as the mailcow checks: an adapter with no URL constructs
+    perfectly well and fails on the first customer action, by which point a
+    domain is half-provisioned. The difference is the transport — the Native API
+    lives on an INTERNAL Docker network with no published ports and no
+    certificate until NE0.9, so HTTPS is not required here and demanding it
+    would only push someone toward a self-signed certificate nobody verifies.
+    """
+    if _adapter_name() != "native":
+        return []
+
+    errors = []
+    url = (getattr(settings, "NATIVE_ENGINE_API_URL", "") or "").strip()
+    secret = (getattr(settings, "NATIVE_ENGINE_API_SECRET", "") or "").strip()
+
+    if not url:
+        errors.append(Error(
+            "MAIL_ENGINE_ADAPTER is 'native' but NATIVE_ENGINE_API_URL is empty.",
+            hint=("Set it to the engine API on the private network, e.g. "
+                  "http://matemail-native-api:8451 — a service name, never an IP "
+                  "or a container id, both of which change."),
+            id="mail_engine.E011",
+        ))
+    if not secret:
+        errors.append(Error(
+            "MAIL_ENGINE_ADAPTER is 'native' but NATIVE_ENGINE_API_SECRET is empty.",
+            hint=("Set it from the engine's NATIVE_API_SECRET. It belongs in "
+                  "/opt/MateMail/.env and is never committed."),
+            id="mail_engine.E012",
+        ))
+
+    if url:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if host in _LOOPBACK:
+            errors.append(Error(
+                f"NATIVE_ENGINE_API_URL points at {host!r}, which is this "
+                f"container, not the engine.",
+                hint=("MateMail and the Native Engine run in separate containers "
+                      "and meet on the matemail_engine_link network. Use the "
+                      "engine's service name."),
+                id="mail_engine.E013",
+            ))
+        if parsed.scheme not in ("http", "https"):
+            errors.append(Error(
+                f"NATIVE_ENGINE_API_URL has scheme {parsed.scheme!r}.",
+                hint="Use http:// on the private engine network.",
+                id="mail_engine.E014",
+            ))
+
+    # A deployment that names the Native engine while still holding mailcow
+    # credentials is not an error — mailcow stays configured on purpose as the
+    # rollback path (NE5) — so nothing is asserted about MAIL_ENGINE_API_*.
+    return errors
 
 
 @register(Tags.security, deploy=True)

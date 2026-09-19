@@ -355,7 +355,7 @@ services:
       # It now mounts a dedicated DKIM volume at the same path Rspamd expects,
       # and Rspamd mounts the same volume READ-ONLY.
       - native_dkim:/var/lib/rspamd/dkim
-    networks: [engine]
+    networks: [engine, matemail_engine_link]
     depends_on:
       db: {condition: service_healthy}
     healthcheck:
@@ -409,10 +409,18 @@ services:
 # a per-service property — see README § Egress — not something this network can
 # express on its own.
 #
-# `matemail_engine_link` is deliberately ABSENT. Per NE0, only `api` and
-# `policy` ever join it, and only from NE5 onward. During NE1 the stack is
-# completely isolated: nothing here can reach MateMail or mailcow, and nothing
-# there can reach this.
+# `matemail_engine_link` is JOINED BY `api` ONLY, and only from NE5 — which is
+# now. Per NE0 it is the single path between MateMail and this engine, and the
+# ONLY service that may sit on it is the API: the control plane.
+#
+# Nothing else joins it, deliberately. Postfix, Dovecot, Rspamd, the database
+# and the key store stay unreachable from MateMail, so a compromised
+# application cannot talk to the mail path or the mail store directly — it can
+# only ask the API, which is the component that validates and authorises.
+#
+# The network is `external: true` and internal (no egress). It is created and
+# owned outside this stack, so neither project's lifecycle can delete the other
+# project's connectivity.
 networks:
   engine:
     name: matemail_native_engine
@@ -420,6 +428,9 @@ networks:
     ipam:
       config:
         - subnet: 172.27.0.0/16
+
+  matemail_engine_link:
+    external: true
 
 # ── Volumes ──────────────────────────────────────────────────────────────────
 #

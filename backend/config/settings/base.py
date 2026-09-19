@@ -267,6 +267,20 @@ MAIL_ENGINE_API_KEY = env("MAIL_ENGINE_API_KEY", default="")
 # "mailcow" = the real MateMail Mail Engine (Postfix/Dovecot/Rspamd via mailcow)
 MAIL_ENGINE_ADAPTER = env("MAIL_ENGINE_ADAPTER", default="stub")
 
+# ── Native Engine (NE5) ──────────────────────────────────────────────────────
+#
+# Where the Native Engine's private API lives, and the credential for it. Only
+# consulted when MAIL_ENGINE_ADAPTER is "native"; `manage.py check --deploy`
+# refuses that combination if either is missing, so a half-configured switch
+# cannot reach production.
+#
+# The URL is plain HTTP on purpose: this is an INTERNAL Docker network that
+# publishes no ports, and the engine has no certificate until NE0.9's
+# distribution model exists. It is not the public Internet and must not be
+# confused with MAIL_ENGINE_API_URL, which reaches mailcow over TLS.
+NATIVE_ENGINE_API_URL = env("NATIVE_ENGINE_API_URL", default="")
+NATIVE_ENGINE_API_SECRET = env("NATIVE_ENGINE_API_SECRET", default="")
+
 # MateMail platform settings
 MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.online")
 MAIL_HOSTNAME = env("MAIL_HOSTNAME", default="mx.matemail.online")

@@ -111,12 +111,42 @@ class IsolationFromMailcowTest(unittest.TestCase):
         self.assertEqual(nets["engine"]["name"], "matemail_native_engine")
         self.assertNotIn("external", nets["engine"])
 
-    def test_the_engine_link_is_not_joined_during_ne1(self):
+    def test_only_the_api_joins_the_engine_link(self):
         """
         NE0 permits only `api` and `policy` on matemail_engine_link, and only
-        from NE5. During NE1 the stack must reach neither MateMail nor mailcow.
+        from NE5 — which has happened. The property worth protecting flipped
+        from "nobody is on it" to "ONLY the control plane is on it".
+
+        That distinction is the security boundary: MateMail can ask the API to
+        provision, and cannot reach Postfix, Dovecot, Rspamd, the database or
+        the key store at all. A compromised application gets the component that
+        validates and authorises, not the mail path or the mail store.
         """
-        self.assertNotIn("matemail_engine_link", self.raw)
+        import yaml
+        services = yaml.safe_load(self.raw)["services"]
+        on_link = sorted(
+            name for name, spec in services.items()
+            if "matemail_engine_link" in str(spec.get("networks"))
+        )
+        self.assertEqual(["api"], on_link,
+                         "only the control plane may reach MateMail")
+
+    def test_the_engine_link_is_externally_owned(self):
+        """
+        Declared external so neither project's `compose down` can delete the
+        other project's connectivity.
+        """
+        import yaml
+        networks = yaml.safe_load(self.raw)["networks"]
+        self.assertTrue(networks["matemail_engine_link"]["external"])
+
+    def test_the_mail_path_stays_unreachable_from_matemail(self):
+        import yaml
+        services = yaml.safe_load(self.raw)["services"]
+        for name in ("postfix", "dovecot", "rspamd", "db", "redis", "clamav"):
+            with self.subTest(service=name):
+                self.assertNotIn("matemail_engine_link",
+                                 str(services[name].get("networks")))
 
     def test_no_bind_mount_escapes_the_project(self):
         """
@@ -327,6 +357,11 @@ class WriteModelTest(unittest.TestCase):
         offenders = []
         for module in apps_dir.rglob("*.py"):
             body = module.read_text(encoding="utf-8", errors="ignore")
+            # `matemail_engine_link` is the NETWORK MateMail reaches the engine
+            # API over (NE5) — naming it is not a database connection, and the
+            # deployment checks legitimately mention it in an operator hint.
+            # Strip it before looking for the database name.
+            body = body.replace("matemail_engine_link", "")
             if "NATIVE_DB_PASSWORD" in body or "matemail_engine" in body:
                 offenders.append(str(module.relative_to(REPO)))
         self.assertEqual(offenders, [], f"Django reaches the engine database in: {offenders}")
