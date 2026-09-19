@@ -27,8 +27,23 @@ for d in prometheus alertmanager grafana collectors systemd logrotate; do
 done
 cp "$SRC/docker-compose.yml" "$DEST/docker-compose.yml"
 cp "$SRC/.env.example" "$DEST/.env.example"
-chmod +x "$DEST/collectors/matemail_collector.py"
-chmod -R go-w "$DEST"
+
+# Permissions are normalised explicitly rather than inherited from this
+# script's umask.
+#
+# This script runs `umask 077` so that the runtime .env it creates is private.
+# That same umask makes every copied file root-only — and Prometheus,
+# Alertmanager and Grafana all run as UNPRIVILEGED users inside their
+# containers, by design. They then cannot read their own configuration, and
+# crash-loop with "permission denied" while the volumes and the compose file
+# both look perfectly correct.
+#
+# None of this configuration is secret: it is scrape targets, alert rules and
+# dashboards, all of it committed to the repository. The secrets are .env and
+# nothing else, and that is locked down separately below.
+find "$DEST" -type d -exec chmod 755 {} +
+find "$DEST" -type f -exec chmod 644 {} +
+chmod 755 "$DEST/collectors/matemail_collector.py"
 
 # ── Runtime configuration ───────────────────────────────────────────────────
 # The Grafana admin password is generated once and never printed. Regenerating
@@ -117,7 +132,23 @@ echo "  compose OK"
 
 echo "install: starting"
 cd "$DEST"
-docker compose --env-file "$DEST/.env" up -d
+# --force-recreate, for two independent reasons that both bite here.
+#
+# 1. This script replaces the configuration directories with `rm -rf` followed
+#    by a copy, which creates NEW inodes. A running container's bind mount was
+#    resolved at start and still points at the deleted directory, so it keeps
+#    reading configuration that no longer exists on disk. Grafana hit exactly
+#    this on first deployment: the files were correct, the permissions were
+#    correct, and inside the container the directory was unreadable.
+#
+# 2. Even without that, Compose compares images, environment, mounts and
+#    labels — never the CONTENTS of a mounted file. A configuration-only change
+#    is invisible to it, so `up -d` would report success and leave the old
+#    rules and dashboards running. The Native Engine deploy script solves the
+#    same problem by hashing its configuration; here the stack is small enough
+#    that recreating it outright is simpler and has no downside, because all
+#    state lives in named volumes.
+docker compose --env-file "$DEST/.env" up -d --force-recreate
 
 echo "install: done"
 docker compose ps --format '{{.Name}}\t{{.Status}}' | sed 's/^/  /'

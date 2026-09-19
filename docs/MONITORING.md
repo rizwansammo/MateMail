@@ -409,7 +409,35 @@ next install overwrites them.
 
 ---
 
-## 16. Known gaps
+## 16. Troubleshooting a deployment
+
+Three failures were hit deploying this the first time. All are fixed in
+`install.sh`; they are recorded because the symptoms are misleading.
+
+**"permission denied" reading a config file, while the file looks fine.**
+Prometheus and Alertmanager run as uid 65534 and Grafana as uid 472. They are
+unprivileged on purpose. `install.sh` runs `umask 077` so the runtime `.env` is
+private, which also made every copied config root-only. Configuration is now
+explicitly 755/644 — none of it is secret, it is all in the repository — and
+the `.env` is locked to 0600 separately.
+
+**A container reads configuration that is no longer on disk.** `install.sh`
+replaces config directories with `rm -rf` plus a copy, which makes new inodes.
+A running container's bind mount was resolved at start and still points at the
+deleted directory. The files are correct, the permissions are correct, and
+inside the container the directory is unreadable. `install.sh` therefore uses
+`--force-recreate`, which is safe because all state lives in named volumes.
+
+**A metric looks stale right after a change.** The collector takes ~18s and the
+scrape interval is 30s, so allow at least 60–75s after
+`systemctl start matemail-collector.service` before concluding a value is
+wrong. Prometheus also serves the previous sample for up to 5 minutes before
+marking a series stale, which is what makes
+`matemail_collector_last_run_timestamp_seconds` worth watching.
+
+---
+
+## 17. Known gaps
 
 | Gap | Status |
 |---|---|

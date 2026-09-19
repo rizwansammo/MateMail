@@ -193,10 +193,28 @@ def save_state():
 
 
 def section(name, fn):
+    """
+    Run one section, all-or-nothing.
+
+    On failure everything the section already emitted is ROLLED BACK. Catching
+    the exception is not enough on its own: a section that publishes four
+    metrics and then fails would otherwise leave those four behind, which is
+    precisely the half-truth this design exists to avoid. The backup section
+    found this for real — it emitted the systemd timer state, then failed
+    reading the repository configuration, and published a partial picture that
+    looked like a complete one.
+
+    `_declared` is rewound with the lines so that a metric whose HELP/TYPE was
+    rolled back is declared properly if some later section emits it.
+    """
+    mark, declared = len(lines), set(_declared)
     try:
         fn()
         sections[name] = 1
     except Exception as exc:                            # noqa: BLE001
+        del lines[mark:]
+        _declared.clear()
+        _declared.update(declared)
         sections[name] = 0
         print("section %s failed: %r" % (name, exc), file=sys.stderr)
 

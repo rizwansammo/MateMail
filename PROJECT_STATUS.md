@@ -267,9 +267,10 @@ P6 backup and restore:         COMPLETE (2026-09-19) — restic, encrypted,
                                single-mailbox restore both PROVEN on
                                MateServer. NO OFFSITE REPOSITORY yet, so
                                this is retention, not disaster recovery.
-P7 monitoring:                 LOCAL IMPLEMENTATION COMPLETE (2026-09-19)
-                               — awaiting commit, then deployment and
-                               runtime alert validation on MateServer.
+P7 monitoring:                 COMPLETE (2026-09-19) — deployed on MateServer,
+                               alerts validated against real induced failures.
+                               Prometheus/Grafana/Alertmanager loopback-only.
+                               NE6 technical readiness reports READY.
 NE6–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
 ```
@@ -2599,3 +2600,122 @@ ALERT_RECEIVER_CONFIGURED = NO   alerts fire and are visible over the tunnel;
 Both are deliberately excluded from `matemail_ne6_ready`. Including them would
 either block NE6 on an unrelated purchasing decision or tempt someone to mark
 them green. NE6 technical readiness is not Private Beta readiness.
+
+---
+
+## P7 COMPLETE — monitoring deployed and alerts proven (2026-09-19)
+
+Release `5a611fb3f6455d568faf08e57e016b5e429f38e2`, CI green. No application
+image was rebuilt: no application source changed, and monitoring configuration
+does not need one.
+
+### Deployed
+
+`/opt/MateMailMonitoring/` — Prometheus v3.1.0, Alertmanager v0.28.0,
+Grafana 11.5.1, node-exporter v1.8.2, all bound to `127.0.0.1`, plus the root
+collector on a 60-second systemd timer. 3 Prometheus targets up, 63 alert rules
+loaded and healthy, 18 of 18 collector sections reporting OK, 3 dashboards
+provisioned from repository files and querying live data.
+
+### Alerts validated against real induced failures
+
+Not inspected — induced, one at a time, each restored before the next.
+
+```
+Native Redis stopped   rate_limit_enforcement_available 1 -> 0
+                       native_services_healthy 10 -> 9, all_healthy 1 -> 0
+                       4 alerts PENDING, then after the 3m window
+                       NativeServiceDown and RedisDown FIRING and delivered
+                       to Alertmanager; the two 5m rules correctly still
+                       pending. On restore every metric returned and every
+                       alert RESOLVED.
+Native API stopped     native_api_up 1 -> 0; NativeApiDown + NativeServiceDown
+                       pending; recovered
+Unbound stopped        dns metrics -> 0; UnboundDown + DnsResolutionFailing
+                       pending; recovered
+Olefy stopped          olefy_up 1 -> 0; OlefyDown pending; recovered
+ClamAV stopped         clamav_up 1 -> 0; ClamAVDown + NativeServiceDown
+                       pending; recovered
+Backup timer disabled  backup_timer_enabled 1 -> 0; BackupTimerDisabled
+                       pending; re-enabled and recovered
+Collector section fail backups section_ok -> 0 and that section published
+                       NOTHING, while the other 17 sections were unaffected
+```
+
+The full metric → rule → pending → firing → Alertmanager → resolve path is
+therefore proven end to end, not assumed.
+
+Every observed value was checked against a baseline gathered independently
+before deployment: Native 10/10, schema v4, queues empty, certificate 81 days,
+snapshot age 3.8 h matching the recorded snapshot time, 2 snapshots,
+offsite_configured 0, MX/A/PTR/SPF/DKIM/DMARC all correct, zero public mail
+ports, UFW active, `matemail_ne6_ready` 1 with 0 checks failed.
+
+### Three defects found during deployment, all fixed in-phase
+
+**Configuration was unreadable by the containers that use it.** `install.sh`
+runs `umask 077` so the runtime `.env` is private; that same umask made every
+copied file root-only. Prometheus and Alertmanager run as uid 65534 *by
+design*, could not read their own configuration, and crash-looped with
+"permission denied" while the compose file and the volumes both looked
+perfectly correct. Permissions are now set explicitly — 755/644 for
+configuration, which is committed to the repository and not secret, with the
+`.env` locked to 0600 separately.
+
+**Bind mounts pointed at deleted directories.** `install.sh` replaces the
+config directories with `rm -rf` plus a copy, creating new inodes. A running
+container's bind mount was resolved at start and still referred to the removed
+directory, so Grafana read provisioning that no longer existed — files correct,
+permissions correct, directory unreadable inside the container. Fixed with
+`--force-recreate`, which also closes the better-known trap that Compose never
+compares the *contents* of a mounted file, the one that cost NE3 five days with
+Rspamd.
+
+**A partially-failing collector section published partial data.** The section
+wrapper caught the exception but did not roll back what had already been
+emitted, so the backup section published the systemd timer state, then failed
+reading the repository configuration, and left behind a half-picture that read
+as a complete one. That is precisely the failure DEC-035 exists to prevent, and
+the original test only read the source rather than exercising the behaviour.
+`section()` now snapshots and truncates on failure, and three behavioural tests
+drive a section through a failure and assert nothing survives. Reverting the
+fix fails those tests.
+
+### Resource usage, measured after settling
+
+```
+Prometheus     41 MiB / 400 MiB limit
+Grafana        72 MiB / 200 MiB limit
+Alertmanager   18 MiB /  96 MiB limit
+node-exporter   9 MiB /  96 MiB limit
+collector      55 MiB peak, transient, once per minute
+                            ~140 MiB resident in total
+disk           27 MB volumes + 348 KB config; images ~1.3 GB
+host           swap FELL from 1313 MB to 1054 MB; disk 42G -> 43G
+```
+
+Comfortably inside the budget. No correction was needed.
+
+### Final state
+
+Native 10/10 healthy · MateMail 6/6 healthy · Mailcow 20 running · P5 bridge
+healthy · monitoring 4/4 healthy · `MAIL_ENGINE_ADAPTER=native` · Native and
+Mailcow queues empty · quarantine empty · restic check clean, 2 snapshots ·
+UFW checksum byte-identical to the pre-P7 baseline · public listeners exactly
+22, 80, 443, 4000 · zero public mail ports · zero public monitoring ports ·
+zero published Native ports · DNS, PTR and certificate unchanged · no Internet
+mail sent by Native · no alerts firing.
+
+### Known warnings — pre-beta, not NE6 blockers
+
+```
+OFFSITE_BACKUP_CONFIGURED = NO    local repository is retention, not disaster
+                                  recovery; BackupOffsiteNotConfigured is
+                                  designed to fire permanently
+ALERT_RECEIVER_CONFIGURED = NO    alerts fire, group and are visible in
+                                  Alertmanager over the SSH tunnel; nothing is
+                                  pushed off the host
+```
+
+Both are deliberately excluded from `matemail_ne6_ready`. NE6 technical
+readiness is not Private Beta readiness.

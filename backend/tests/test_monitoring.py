@@ -384,13 +384,63 @@ def test_the_pattern_table_captures_nothing():
 # ─── the collector must not fake health ─────────────────────────────────────
 
 def test_a_failing_section_publishes_nothing_rather_than_a_default():
-    source = COLLECTOR.read_text(encoding="utf-8")
-    body = source.split("def section(", 1)[1].split("\ndef ", 1)[0]
-    assert "sections[name] = 0" in body
-    # The failure path must not emit anything; the metrics go stale instead.
-    assert "metric(" not in body, (
-        "a failing section must publish no samples at all, so its metrics go "
-        "stale rather than reporting a false healthy value")
+    """
+    Behavioural, not textual. Regression: the original merely caught the
+    exception, so a section that emitted four metrics and THEN failed left
+    those four behind — a partial picture that reads as a complete one. The
+    backup section did exactly that in production: it published the systemd
+    timer state, then failed reading the repository configuration, and the
+    result looked like a healthy backup report.
+
+    A section is all-or-nothing, so this drives one through a failure and
+    asserts that nothing survived.
+    """
+    mod = _collector_module()
+    mod.lines.clear()
+    mod.sections.clear()
+    mod._declared.clear()
+
+    def half_then_fail():
+        mod.metric("matemail_test_partial", 1, {}, "emitted before failing")
+        raise RuntimeError("the second half could not be measured")
+
+    mod.section("probe", half_then_fail)
+
+    assert mod.sections["probe"] == 0, "the failure was not recorded"
+    assert not any("matemail_test_partial" in line for line in mod.lines), (
+        "a metric emitted before the failure survived; the section published "
+        "a partial picture that looks like a complete one")
+    assert "matemail_test_partial" not in mod._declared, (
+        "the rolled-back metric is still declared, so a later section emitting "
+        "it would skip its HELP and TYPE")
+
+
+def test_a_succeeding_section_keeps_everything_it_emitted():
+    """The rollback must not be so eager that it discards good runs too."""
+    mod = _collector_module()
+    mod.lines.clear()
+    mod.sections.clear()
+    mod._declared.clear()
+    mod.section("probe", lambda: mod.metric("matemail_test_ok", 7, {}, "fine"))
+    assert mod.sections["probe"] == 1
+    assert any("matemail_test_ok 7" in line for line in mod.lines)
+
+
+def test_one_failing_section_does_not_discard_another_sections_metrics():
+    mod = _collector_module()
+    mod.lines.clear()
+    mod.sections.clear()
+    mod._declared.clear()
+    mod.section("good", lambda: mod.metric("matemail_test_keep", 1, {}, "keep"))
+
+    def boom():
+        mod.metric("matemail_test_drop", 1, {}, "drop")
+        raise RuntimeError("nope")
+
+    mod.section("bad", boom)
+    assert any("matemail_test_keep 1" in line for line in mod.lines)
+    assert not any("matemail_test_drop" in line for line in mod.lines)
+    assert mod.sections == {"good": 1, "bad": 0}
 
 
 def test_the_collector_publishes_its_own_liveness():
@@ -640,3 +690,66 @@ def test_alert_rule_unit_tests_pass():
     result = _promtool("test", "rules",
                        "prometheus/tests/matemail.rules.test.yml")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_install_makes_configuration_readable_by_unprivileged_containers():
+    """
+    Regression, found on first deployment. install.sh runs `umask 077` so that
+    the runtime .env is private; that same umask made every copied config file
+    root-only. Prometheus and Alertmanager run as uid 65534 by design, could
+    not read their own configuration, and crash-looped with "permission
+    denied" while the compose file and the volumes both looked correct.
+
+    None of the configuration is secret. The .env is, and is handled
+    separately.
+    """
+    body = INSTALL.read_text(encoding="utf-8")
+    assert 'find "$DEST" -type f -exec chmod 644 {} +' in body
+    assert 'find "$DEST" -type d -exec chmod 755 {} +' in body
+    # The permission normalisation must happen BEFORE the .env is created,
+    # or it would widen the one file that must stay private.
+    assert body.index("-type f -exec chmod 644") < body.index('chmod 600 "$DEST/.env"')
+
+
+def test_the_runtime_env_is_still_private_after_normalisation():
+    body = INSTALL.read_text(encoding="utf-8")
+    assert 'chmod 600 "$DEST/.env"' in body
+    assert 'chown root:root "$DEST/.env"' in body
+
+
+def test_containers_that_run_unprivileged_are_declared_as_such():
+    """The reason the permissions matter at all."""
+    compose = load(COMPOSE)
+    assert compose["services"]["prometheus"].get("user") == "65534:65534"
+    assert compose["services"]["alertmanager"].get("user") == "65534:65534"
+
+
+def test_install_recreates_containers_so_configuration_changes_take_effect():
+    """
+    Regression, found on first deployment. install.sh replaces the config
+    directories with `rm -rf` plus a copy, which makes new inodes; a running
+    container's bind mount still resolved to the DELETED directory, so Grafana
+    read provisioning that no longer existed while the files on disk were
+    perfectly correct.
+
+    The same flag covers the second, better-known trap: Compose compares
+    images, environment, mounts and labels, never the contents of a mounted
+    file, so a configuration-only change is otherwise invisible to it and
+    `up -d` reports success while the old rules keep running. NE3 lost five
+    days to that with Rspamd.
+    """
+    body = INSTALL.read_text(encoding="utf-8")
+    assert "--force-recreate" in body
+    up = next(l for l in body.splitlines() if "docker compose" in l and "up -d" in l)
+    assert "--force-recreate" in up, up
+
+
+def test_recreating_containers_cannot_lose_monitoring_history():
+    """--force-recreate is only safe because all state is in named volumes."""
+    compose = load(COMPOSE)
+    for name, mount in (("prometheus", "/prometheus"),
+                        ("grafana", "/var/lib/grafana"),
+                        ("alertmanager", "/alertmanager")):
+        vols = compose["services"][name]["volumes"]
+        assert any(v.endswith(":" + mount) and not v.startswith((".", "/"))
+                   for v in vols), f"{name} keeps {mount} outside a named volume"
