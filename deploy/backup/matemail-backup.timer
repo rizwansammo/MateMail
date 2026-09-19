@@ -1,0 +1,14 @@
+# One backup a day, and catch up after the host has been off. MateERP backs up
+# at 00:45 UTC; this is deliberately clear of it so two pg_dumps and two prunes
+# are not competing for the same disk.
+[Unit]
+Description=Schedule the MateMail backup
+
+[Timer]
+OnCalendar=*-*-* 01:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+Unit=matemail-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -262,6 +262,11 @@ NE5 control-plane switch:      COMPLETE (2026-09-19) — MAIL_ENGINE_ADAPTER=nat
                                in production. MateMail provisions through the
                                Native Engine; mailcow stays installed as the
                                rollback path and the live mail transport.
+P6 backup and restore:         COMPLETE (2026-09-19) — restic, encrypted,
+                               daily timer. Full restore drill and
+                               single-mailbox restore both PROVEN on
+                               MateServer. NO OFFSITE REPOSITORY yet, so
+                               this is retention, not disaster recovery.
 NE6–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
 ```
@@ -2368,8 +2373,112 @@ documentation pass.
 ### Still required before customer mail
 
 P4 completing does **not** make MateMail ready for customers. Remaining:
-**P5** mail policy enforcement · **P6** backup and restore · **P7** operations
-and monitoring · **P7.5** free accounts (DEC-015) · then Private Beta.
+**P5** mail policy enforcement · **P7** operations and monitoring ·
+**P7.5** free accounts (DEC-015) · then Private Beta. P6 backup and restore
+is complete, with an offsite repository still to be configured.
 
 No public mail port is open. No customer domain or mailbox exists.
 
+
+---
+
+## P6 COMPLETE — backups taken, and restored (2026-09-19)
+
+Backups exist, run on a timer, and have been restored. The restore is the part
+that counts: a backup nobody has restored is a guess about the worst day of the
+deployment's life.
+
+### What was built
+
+`deploy/backup/` in the repository, installed to `/opt/MateMailBackup/` by
+`install.sh`. Engine is restic 0.18.1 — encrypted, deduplicating, snapshot
+based. One snapshot per run, daily at 01:30 UTC with `Persistent=true`,
+retention 14 daily / 8 weekly / 6 monthly. Rationale and the full exclusion
+list are in DEC-032; the operator procedures are in `docs/BACKUP_RESTORE.md`.
+
+### What was proven on MateServer
+
+Proof used synthetic data, because production has no customer mailboxes and an
+empty system proves nothing about restoring mail. A `p6-drill.invalid` domain —
+`.invalid` is reserved and never resolves, so nothing could leave the host —
+carried three mailboxes and ten real messages delivered through Postfix,
+Rspamd and Dovecot. All of it was removed afterwards; production ended at zero
+domains, zero mailboxes, zero retired storage, zero DKIM keys.
+
+```
+full restore drill      PASS — 13 staged files verified against their manifest
+                        checksums; both databases loaded into a disposable
+                        PostgreSQL on --network none; restored row counts
+                        matched the manifest exactly (1 domain, 3 mailboxes,
+                        1 retired storage, schema v4); 2 DKIM keys parsed as
+                        usable keys; 40 mail files restored
+mailbox restore, live   PASS — default restored beside the mailbox, live
+                        mailbox untouched at 5 messages, copy owned 5000:5000
+mailbox restore, guard  PASS — --in-place against an active mailbox REFUSED
+mailbox restore, force  PASS — snapshot's 3 messages restored, all 5 live
+                        messages (including 2 that arrived after the snapshot)
+                        preserved in .replaced-<ts>, indexes rebuilt
+deleted mailbox         PASS — Maildir destroyed, then restored by address
+                        alone via retired_mailbox_storage; 2 messages back,
+                        content verified by marker, owner 5000:5000
+```
+
+### Failure tests
+
+```
+wrong repository password       refused (exit 12)
+database unreachable            backup failed, no snapshot written
+DKIM volume missing             backup failed, no volume created
+corrupted pack file             restic check --read-data detected it
+undecryptable repository        drill failed rather than reporting success
+concurrent run                  second run declined the lock and exited
+```
+
+### Four defects found by the drills, not by the code
+
+Each of these produced a backup or a drill that *looked* successful.
+
+**The manifest recorded nothing.** Row counts were built with
+`count(*)||":"||count(*)`. In PostgreSQL `":"` is a quoted identifier, not a
+string, so every query failed with `column ":" does not exist`, the error went
+to `/dev/null`, and the fallback wrote `?` for every count. The drill's
+strongest check — do the restored rows match what was captured — had nothing to
+compare against and said so, which is the only reason it was caught. Counting
+now uses psql's own field separator, and failing to count is fatal.
+
+**The drill passed without verifying.** It logged "manifest recorded no
+expectation" and continued to PASS. It now fails: a drill that passes without
+comparing anything is precisely the failure mode P6 exists to remove.
+
+**A missing DKIM volume produced a successful backup with no keys.**
+`docker run -v name:/path` *creates* a named volume that does not exist rather
+than failing. A renamed or lost DKIM volume would have been backed up as an
+empty directory, reported as success, every day, until someone needed it.
+Existence is now asserted before anything may mount it, and the key count is
+recorded in the manifest and checked by the drill.
+
+**The drill passed by winning a race.** The postgres image runs a temporary
+server during initdb; `pg_isready` on the unix socket answers during that phase
+and the server then restarts. The first drill passed; the next failed at
+`createdb` with "No such file or directory". Readiness is now probed over TCP,
+which the temporary server does not listen on, and requires two consecutive
+successes.
+
+All four have regression tests in `backend/tests/test_backup_restore.py`.
+
+### The honest limitation
+
+**There is no offsite repository.** `/opt/MateMailBackup/repo` is on the
+production host. It survives deletion, corruption and operator error. It does
+not survive losing the machine. That is retention, not disaster recovery, and
+calling it anything else would be the kind of claim this project does not make.
+`OFFSITE_REPOSITORY` is the one setting that closes it; no provider is assumed.
+Until it is set, every run logs the gap and every manifest records
+`"offsite": false`.
+
+### Also found
+
+`backend/apps/backups/` exposes `/api/backups/` to tenant admins and backs
+nothing up — it counts rows, invents a size, and marks the job completed.
+Recorded in `docs/TODO.md`. It has no relationship to the platform backups
+above and must not ship to customers as a backup feature.

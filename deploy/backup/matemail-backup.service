@@ -1,0 +1,15 @@
+# Take one MateMail backup. Failure is loud: the unit fails, the run leaves no
+# snapshot behind, and `systemctl status` shows why.
+[Unit]
+Description=MateMail backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/MateMailBackup/matemail-backup.sh
+# The script stages unencrypted dumps and secrets under /run; these keep that
+# staging root-only even if the umask in the script were ever lost.
+UMask=0077
+Nice=10
+IOSchedulingClass=idle

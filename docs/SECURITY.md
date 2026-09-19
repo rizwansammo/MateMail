@@ -1489,3 +1489,47 @@ deliberately.
 
 `MailcowAdapter` remains present and configured, and mailcow keeps running.
 Reverting the control plane is an environment variable and a restart.
+
+---
+
+## Backups (P6)
+
+**Encryption.** Snapshots are restic repositories: AES-256 with Poly1305-AES
+authentication. No custom cryptography exists anywhere in the backup system.
+
+**The repository password is the whole security boundary.** It lives at
+`/opt/MateMailBackup/restic-password`, root:root 0600, is generated once by
+`install.sh` and is never printed, logged or committed. `install.sh` refuses to
+overwrite an existing one, because doing so would make every existing snapshot
+permanently unreadable. A copy must be held off the host; without it the
+backups cannot be decrypted by anyone.
+
+**Unencrypted material never reaches a disk.** Database dumps, DKIM private
+keys and the copied `.env` files are staged under `/run` — tmpfs, root-only —
+and are wiped on exit whether the run succeeded or failed. They go from there
+into the encrypted repository and nowhere else.
+
+**Database credentials never cross onto the host.** `pg_dump` runs inside the
+database container and reads `$POSTGRES_USER` / `$POSTGRES_DB` from the
+container's own environment, so no credential appears in a host process
+listing. restic is given `--password-file`, a path, never `--password`.
+
+**What the snapshots contain.** Both `.env` files are in every snapshot,
+because a deployment cannot be rebuilt without them. This makes the repository
+as sensitive as production: it holds the Django secret key, the database
+passwords, the Native API secret and the DKIM private keys. Its directory is
+0700 and its contents are encrypted at rest.
+
+**Restore cannot destroy mail.** `matemail-restore-mailbox.sh` refuses to write
+into a mailbox that holds messages unless told twice, and even then moves the
+existing Maildir aside rather than deleting it (DEC-033). The restore drill
+refuses a `--workdir` naming any production path, and loads dumps into a
+throwaway PostgreSQL container on `--network none`, which is why trust
+authentication is acceptable there and nowhere else.
+
+**Verified, not assumed.** Each run lists the snapshot it just wrote and fails
+if the dumps, the manifest or the mail storage are absent; `restic check` runs
+every time. The drill verifies every staged file against the SHA-256 recorded
+when it was written, checks restored row counts against the manifest, and
+requires each DKIM key to parse as a usable key. A snapshot whose manifest
+records no expectations fails the drill rather than passing it.

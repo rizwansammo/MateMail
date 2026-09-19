@@ -4,6 +4,7 @@
 # Shell scripts MUST use LF — CRLF will break execution on Linux
 *.sh        text eol=lf
 *.service   text eol=lf
+*.timer     text eol=lf
 
 # Python files — LF
 *.py        text eol=lf

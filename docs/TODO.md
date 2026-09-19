@@ -1,7 +1,7 @@
 # TODO.md — MateMail Task Tracker
 
 **Product:** MateMail
-**Last updated:** 2026-09-10
+**Last updated:** 2026-09-19
 **Current phase:** Production Readiness P0 complete → next phase awaiting assignment
 
 Legend: ✅ Done | 🔄 In Progress | ⬜ Pending | ❌ Blocked
@@ -313,3 +313,28 @@ Legend: ✅ Done | 🔄 In Progress | ⬜ Pending | ❌ Blocked
 | `webmail-thread` | ThreadView | ⬜ To build |
 | `webmail-settings` | WebmailSettings | ⬜ To build |
 | (platform admin) | Internal staff portal | ⬜ Phase 13 |
+
+---
+
+## Found during P6 (2026-09-19)
+
+⬜ **`backend/apps/backups/` reports backups that never happen.**
+`/api/backups/` is live to tenant admins. `run_backup_task` counts domain and
+mailbox rows, computes `size_mb` from `domain_count * 2 + mailbox_count * 5`,
+records a `storage_location` that is never written to, and marks the job
+COMPLETED. Nothing is read, copied or stored. The frontend at
+`frontend/app/app/backups` presents this as a backup feature.
+
+This is unrelated to the platform backups delivered in P6
+(`docs/BACKUP_RESTORE.md`), which are real and have been restored.
+
+Before Private Beta this must either be implemented on top of the P6 engine —
+a per-tenant export is a plausible use of `restic dump` scoped to one domain's
+mailboxes — or removed from the API and the UI. Shipping it as-is tells
+customers their mail is backed up when it is not.
+
+⬜ **No operator-facing purge for retired mailbox storage.** NE4 retains a
+deleted mailbox's Maildir and records it in `retired_mailbox_storage`. P6 backs
+that up and can restore from it, but nothing removes it: the rows and the
+directories accumulate for the lifetime of the deployment. A retention policy
+for retired storage belongs with P7 operations.

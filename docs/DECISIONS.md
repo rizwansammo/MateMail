@@ -1746,3 +1746,84 @@ invariant NE0.2 exists to protect.
 
 The network is `external: true` so neither project's `compose down` can delete
 the other project's connectivity.
+
+---
+
+## DEC-032 — Backups are restic snapshots, and backed up state is chosen, not collected
+
+**Status:** Accepted · **Phase:** P6 · **Date:** 2026-09-19
+
+### Decision
+
+MateMail's backups are taken with **restic** into a dedicated repository, one
+snapshot per run, and the set of protected state is an explicit decision
+recorded in every snapshot's manifest.
+
+Protected: both PostgreSQL databases as version-matched `pg_dump -Fc` archives,
+the `matemail_native_vmail` volume (which also carries NE4's retired mailbox
+storage), the `matemail_native_dkim` volume, and the configuration and secrets
+needed to rebuild the deployment.
+
+Deliberately excluded: `matemail_native_clamav_db`, `matemail_native_rspamd`,
+`matemail_native_redis` and `matemail_redis_data`, which rebuild themselves;
+`matemail_native_postfix_queue` and `matemail_native_vmail_index`, which are
+actively harmful to restore; `matemail_native_tls` and `matemail_native_auth`,
+which are empty; and the two PostgreSQL data directories, captured as dumps.
+
+### Why
+
+Backing up everything is not caution. ClamAV signatures alone are 168 MB that
+change daily and re-download on demand; they would have dominated the
+repository while protecting nothing. Two of the volumes are worse than useless:
+restoring a stale Postfix queue re-delivers mail that was already delivered or
+resurrects mail that was deliberately cancelled, and Dovecot indexes older than
+the Maildir beneath them present to the user as missing and duplicated mail.
+Excluding the index volume is only coherent because restores rebuild it with
+`doveadm force-resync`, which they do.
+
+The exclusion list is written into every manifest so that a volume added to the
+stack later and never classified shows up as a difference rather than as
+silence.
+
+### Consequences
+
+Restoring a deleted mailbox needs the vmail volume **and** the native database
+from the same snapshot: the mail sits on disk under an opaque `storage_id`, and
+`retired_mailbox_storage` is the only record of whose it was.
+
+A repository on the production host is retention, not disaster recovery.
+`OFFSITE_REPOSITORY` is unset by default, no provider is assumed, and every run
+logs the distinction rather than letting an operator assume otherwise.
+
+---
+
+## DEC-033 — Restoring a mailbox never silently overwrites an active one
+
+**Status:** Accepted · **Phase:** P6 · **Date:** 2026-09-19
+
+### Decision
+
+`matemail-restore-mailbox.sh` restores **beside** the live mailbox by default.
+Writing into the mailbox itself requires `--in-place`; if the mailbox holds
+messages, it also requires `--force`; and `--force` moves the current Maildir to
+`.replaced-<timestamp>` rather than deleting it. No argument to the script
+deletes mail.
+
+### Why
+
+The common request is not "the server died", it is "I deleted a folder last
+Tuesday", and that mailbox is usually still in service. Restoring Tuesday's mail
+over it destroys everything that arrived since — and reports success while doing
+it. The guard that classifies the target (`absent` / `empty` / `active`) lives in
+`deploy/backup/lib/guard.sh` so it can be tested directly rather than only
+through a script that needs Docker, restic and a populated repository to run.
+
+`tmp/` is deliberately not counted as mail: Maildir uses it for deliveries that
+have not been committed by the rename into `new/`, so counting it would block
+legitimate restores into mailboxes that are in fact empty.
+
+### Consequences
+
+The default leaves a `.restored-<timestamp>` directory inside the domain
+directory for the operator to compare against and remove. Dovecot ignores it,
+because storage is addressed by `storage_id` from userdb.
