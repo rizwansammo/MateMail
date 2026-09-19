@@ -188,6 +188,91 @@ class QuarantineTriggerIsNotAnInternetBackdoorTest(SimpleTestCase):
         self.assertGreater(float(match.group(1)), reject)
 
 
+class RateLimitFailsClosedOnCounterOutageTest(SimpleTestCase):
+    """
+    REGRESSION: a Redis outage silently disabled every configured rate limit.
+
+    The first NE4 implementation returned DUNNO when the counter was
+    unreachable, so a mailbox somebody had deliberately capped was accepted with
+    no enforcement at all — indistinguishable from having no limit, for exactly
+    the mailboxes that needed one.
+
+    The fix defers instead. The distinction that keeps it safe is WHERE the
+    failure is handled: a mailbox with no configured limit returns before Redis
+    is ever contacted, so an outage cannot block traffic that was never metered.
+    """
+
+    def setUp(self):
+        self.control = (NE / "images" / "postfix" / "engine_control.py").read_text(encoding="utf-8")
+        self.verdict = self.control[self.control.index("def rate_verdict"):
+                                    self.control.index("class PolicyServer")]
+
+    def test_a_counter_outage_defers_rather_than_allowing(self):
+        # Everything from the INCR onward: the except block that handles an
+        # unreachable counter, and nothing before it.
+        after_incr = self.verdict[self.verdict.index("count = _redis_command"):]
+        # ONLY the except block. Slicing to the end of the function would also
+        # capture the legitimate final `DUNNO` returned when a message is under
+        # its limit, which has nothing to do with a counter outage.
+        handler = after_incr[after_incr.index("except Exception"):
+                             after_incr.index("if count >")]
+        self.assertIn("DEFER_IF_PERMIT", handler,
+                      "an unreachable counter must defer, not allow")
+        self.assertNotIn('return "action=DUNNO"', handler,
+                         "the counter-failure path must not fall through to DUNNO")
+
+    def test_the_deferral_is_temporary_not_permanent(self):
+        """
+        A counter outage is an engine problem, not a verdict about the message.
+        A 5xx would bounce mail that was never wrong.
+        """
+        self.assertIn("4.7.1", self.verdict)
+        self.assertNotIn("action=REJECT", self.verdict)
+        self.assertNotIn("5.7.1", self.verdict)
+
+    def test_an_unlimited_mailbox_returns_before_redis_is_touched(self):
+        """
+        THE PROPERTY THAT STOPS THIS BECOMING AN OUTAGE. Mailboxes with no
+        configured limit must not be blocked by a counter they never used.
+        """
+        before_redis = self.verdict[:self.verdict.index("count = _redis_command")]
+        self.assertIn('if not limit or limit["messages"] == 0:', before_redis)
+        self.assertIn('return "action=DUNNO"', before_redis)
+
+    def test_an_unauthenticated_request_returns_before_redis_is_touched(self):
+        before_redis = self.verdict[:self.verdict.index("count = _redis_command")]
+        self.assertIn("if not sasl_username:", before_redis)
+
+    def test_a_database_outage_is_handled_differently_and_says_why(self):
+        """
+        The LOOKUP failing is not the COUNTER failing. With no database, Postfix's
+        own map lookups are already failing and submission is already deferred by
+        the restrictions that run first; failing closed here would additionally
+        block every mailbox, including ones nobody ever metered.
+        """
+        lookup_handler = self.verdict[self.verdict.index("limit = lookup_limit"):
+                                      self.verdict.index("if not limit or")]
+        self.assertIn('return "action=DUNNO"', lookup_handler)
+        self.assertIn("virtual_mailbox_maps", lookup_handler,
+                      "the reasoning must be recorded where the decision is made")
+
+    def test_recovery_needs_no_intervention(self):
+        """
+        Nothing is cached and nothing is latched: the next message re-runs the
+        same lookup and the same INCR, so a returning Redis resumes enforcement
+        on its own.
+        """
+        self.assertNotIn("global ", self.verdict)
+        self.assertIn("_redis_command(\"INCR\"", self.verdict)
+
+    def test_postfix_defers_when_the_policy_service_itself_is_unreachable(self):
+        """
+        The service failing to answer at all must not be a free pass either.
+        """
+        main_cf = (NE / "postfix" / "main.cf").read_text(encoding="utf-8")
+        self.assertRegex(main_cf, r"smtpd_policy_service_default_action\s*=\s*4\d\d")
+
+
 class ControlPlaneIsLeastPrivilegeTest(SimpleTestCase):
     """
     The queue control path touches Postfix directly, so where it lives and what

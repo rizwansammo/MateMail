@@ -279,12 +279,20 @@ def rate_verdict(sasl_username):
     try:
         limit = lookup_limit(address)
     except Exception as exc:                     # noqa: BLE001
-        # FAIL OPEN, deliberately, and only here. This service exists to cap
-        # volume, not to authorise mail: authentication, sender ownership and
-        # relay control have all already run and are unaffected by this lookup.
-        # Refusing every submission because a rate-limit lookup failed would
-        # turn a counter outage into a total outage.
-        log(f"rate lookup failed ({type(exc).__name__}); allowing this message")
+        # The LOOKUP failing is different from the COUNTER failing, and is left
+        # permissive on purpose.
+        #
+        # This path means the engine database is unreachable — and in that state
+        # Postfix's own `virtual_mailbox_maps` and `smtpd_sender_login_maps`
+        # lookups are failing too, so submission is already being deferred by
+        # the restrictions that run BEFORE this service. Deferring again here
+        # would change nothing except which component gets blamed.
+        #
+        # It also cannot be made strict safely: with no database there is no way
+        # to know which mailboxes have a limit, so failing closed would block
+        # every mailbox, including the ones nobody ever metered.
+        log(f"rate lookup failed ({type(exc).__name__}); leaving the decision to "
+            f"the restrictions that already ran")
         return "action=DUNNO"
 
     if not limit or limit["messages"] == 0:
@@ -302,8 +310,21 @@ def rate_verdict(sasl_username):
             # extending the window and turn a fixed window into a sliding one.
             _redis_command("EXPIRE", key, window)
     except Exception as exc:                     # noqa: BLE001
-        log(f"redis unavailable ({type(exc).__name__}); allowing this message")
-        return "action=DUNNO"
+        # FAIL CLOSED. This mailbox HAS a limit, and without the counter there
+        # is no way to tell whether it has been reached. Allowing the message
+        # would accept it with no enforcement at all — which is indistinguishable
+        # from having no limit, for exactly the mailboxes somebody deliberately
+        # capped.
+        #
+        # Deferring is temporary and costs nothing permanent: the sender retries,
+        # nothing is lost, and an operator sees mail queuing rather than a limit
+        # quietly not applying. A mailbox with NO configured limit never reaches
+        # this line — it returned DUNNO above, before Redis was touched — so an
+        # outage does not block traffic that was never being metered.
+        log(f"redis unavailable ({type(exc).__name__}); deferring a submission "
+            f"from a rate-limited mailbox")
+        return ("action=DEFER_IF_PERMIT 4.7.1 Submission rate limiting is "
+                "temporarily unavailable; try again later")
 
     if count > limit["messages"]:
         # 4xx, NOT 5xx. A rate limit is a statement about timing, not about the

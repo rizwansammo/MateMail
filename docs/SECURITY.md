@@ -1380,19 +1380,46 @@ redirecting it. Verified: a released message arrived exactly once with its
 |---|---|
 | Rspamd | `454 4.3.0` — submission deferred, nothing accepted unscanned |
 | Dovecot | `454 4.7.0` — SASL unavailable, so nothing is accepted at all |
+| PostgreSQL | `451 4.3.0` — lookups defer; no open relay, no spoof bypass |
+| Unbound | `451 4.3.0` — DNS-dependent mail defers rather than being lost |
 | ClamAV | `soft reject` via `CLAM_VIRUS_FAIL` — deferred, never treated as clean |
-| Redis | submission ALLOWED — the limiter fails open (see below) |
+| Redis | `4.7.1` — submission DEFERRED for mailboxes that have a limit |
 | Native API | mail path unaffected; Postfix and Dovecot read PostgreSQL directly |
 
 Two of these deserve the reasoning spelled out.
 
-**The rate limiter fails open, on purpose.** If the limit lookup or the Redis
-counter is unavailable the message is allowed. This service caps volume; it does
-not authorise mail. Authentication, sender ownership and relay control have all
-already run and are unaffected by a counter being unreachable. Refusing every
-submission because a metering component was down would turn a cosmetic outage
-into a total one. The Postfix side still DEFERS if the policy service itself
-cannot be reached at all, so a missing limiter is not the same as a broken one.
+**The rate limiter fails CLOSED when the counter is unavailable.** An earlier
+NE4 build allowed the message, which meant a Redis outage silently disabled
+every configured limit: a mailbox somebody had deliberately capped was accepted
+with no enforcement at all, indistinguishable from having no limit. It now
+returns `4.7.1` and the sender retries.
+
+The distinction that keeps this from becoming a wider outage is WHERE the
+decision is made. A mailbox with no configured limit — or an explicit
+`messages = 0` — returns before Redis is contacted at all, so an outage cannot
+block traffic that was never being metered. Measured with a live engine:
+
+```
+Redis reachable     limited@ allowed        unlimited@ allowed
+Redis unreachable   limited@ DEFER 4.7.1    unlimited@ allowed
+Redis restored      limited@ allowed        unlimited@ allowed
+```
+
+Recovery needs no intervention: nothing is cached or latched, so the next
+message re-runs the same lookup and counter.
+
+The LOOKUP failing is deliberately treated differently from the COUNTER
+failing. That path means the engine database is unreachable, and in that state
+Postfix's own `virtual_mailbox_maps` and `smtpd_sender_login_maps` lookups are
+failing too — submission is already deferred by the restrictions that run first
+(measured: `451 4.3.0 Temporary lookup failure`, with no relay and no spoof
+bypass). It also cannot be made strict safely: with no database there is no way
+to know which mailboxes have a limit, so failing closed there would block every
+mailbox including the ones nobody ever metered.
+
+Postfix still defers if the policy service cannot be reached at all
+(`smtpd_policy_service_default_action`), so a missing limiter is not a free pass
+either.
 
 **A scanner that could not answer is not a clean verdict.** Rspamd scores
 `CLAM_VIRUS_FAIL` at zero by default, so an unreachable ClamAV produced mail

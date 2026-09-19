@@ -1638,12 +1638,22 @@ bounce for what is a throttling decision. A well-behaved client retries.
 mailbox spread its traffic across every alias it is entitled to send as, which
 is precisely the budget the limit exists to cap.
 
-**Why the limiter fails open on its own outage.** If the limit lookup or the
-Redis counter is unavailable the message is allowed. This service caps volume;
-it does not authorise mail. Authentication, sender ownership and relay control
-have all already run and are unaffected. Refusing every submission because a
-counter was unreachable would turn a metering outage into a total outage. The
-Postfix side still DEFERS if the policy service itself cannot be reached at all.
+**Why the counter failing FAILS CLOSED.** If Redis is unavailable and the
+mailbox has a configured limit, the submission is deferred `4.7.1`. Allowing it
+would accept the message with no enforcement at all — which is exactly the same
+outcome as having no limit, for precisely the mailboxes somebody chose to cap.
+A revision during NE4 changed this from the original fail-open behaviour after
+that was identified as a blocker.
+
+It does not become a wider outage because a mailbox with NO configured limit
+returns before Redis is contacted, so an outage cannot block traffic that was
+never metered. Recovery is automatic: nothing is cached or latched.
+
+**Why the LOOKUP failing does not.** That path means the engine database is
+unreachable, and Postfix's own map lookups are then failing too — submission is
+already deferred by restrictions that run before this service. Failing closed
+there would additionally block every mailbox, including ones with no limit,
+because with no database there is no way to tell which is which.
 
 ---
 

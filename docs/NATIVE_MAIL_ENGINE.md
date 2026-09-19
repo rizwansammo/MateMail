@@ -354,8 +354,10 @@ revision.
 
 ### NE4 — implemented locally (2026-09-19)
 
-**Status: implemented and validated locally. MateServer runtime validation
-pending.** `MAIL_ENGINE_ADAPTER` is still `mailcow`.
+**Status: COMPLETE (2026-09-19).** Implemented, validated locally, and validated
+at runtime on MateServer from release `8f9fb952`. `MAIL_ENGINE_ADAPTER` is still
+`mailcow` — NE4 gave the engine operational control, not production traffic.
+That switch is NE5's.
 
 NE4 turned the working NE3 mail path into something operable, and fixed the two
 issues NE3 runtime validation surfaced.
@@ -390,7 +392,9 @@ rounds down so a mailbox is never reported fuller than it is.
 #### Rate limits
 
 Stored in the engine database, enforced by a Postfix policy service running
-inside the Postfix container on loopback. The identity charged is the
+inside the Postfix container on loopback. If the Redis counter is unavailable a
+mailbox that HAS a limit is deferred rather than allowed — see DEC-027; a
+mailbox with no limit is unaffected because it returns before Redis is touched. The identity charged is the
 AUTHENTICATED login, never the envelope sender — otherwise a mailbox could
 spread its traffic across every alias it may send as. Exceeding the limit
 returns `4.7.1` through `DEFER_IF_PERMIT`; see DEC-027 for why temporary.

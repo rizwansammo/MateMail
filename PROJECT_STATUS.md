@@ -233,7 +233,7 @@ broken audit log. See the Phase 0 section below.
 
 Full detail, entry criteria and exit criteria: *Revised roadmap* below.
 
-### Native Engine Migration (NE0–NE8) — NE0–NE3 complete, NE4 implemented locally
+### Native Engine Migration (NE0–NE8) — NE0–NE4 complete
 
 A **separate** engineering track that replaces mailcow as the Mail Engine
 orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It does
@@ -254,13 +254,37 @@ NE3 mail flow:                 COMPLETE (2026-09-18) — validated on MateServer
                                -> Rspamd (ClamAV, oletools, DKIM signing) -> LMTP
                                -> Maildir. DKIM verified cryptographically, not
                                by header inspection.
-NE4 operations:                IMPLEMENTED AND VALIDATED LOCALLY (2026-09-19);
-                               MateServer runtime validation pending. Immutable
-                               mailbox storage, real usage from Dovecot,
-                               enforced per-mailbox rate limits, queue and
-                               quarantine control. Adapter now 26 of 26.
+NE4 operations:                COMPLETE (2026-09-19) — validated on MateServer.
+                               Immutable mailbox storage, real usage from
+                               Dovecot, enforced per-mailbox rate limits, queue
+                               and quarantine control. Adapter 26 of 26.
 NE5–NE8 implementation:        NONE — not started
 mailcow:                       live production dependency, unmodified
+```
+
+**NE4 runtime validation on MateServer (2026-09-19)**
+
+```
+release        8f9fb952250903fe5f46a4c2153ee2ef5e409a6e
+CI run         35399071707 (success)
+image runs     35399633726 (api), 35399730060 (dovecot), 35399812048 (postfix)
+api digest     sha256:0a13dae9b251b08087f325d0ae41e1da0660b789e201f822ab8423da9b6c52d1
+dovecot digest sha256:e4f545002fa6889baa1530a655cb31c13eeec7f3dbc48f4a75e38c6b9f2efeae
+postfix digest sha256:817dbb2252b148ceaad021ab54ed847da47223104f88a21022dc05980fd580c5
+schema         v3 -> v4 (migration 004 applied exactly once)
+services       10/10 healthy, 0 published ports, 0 API bind mounts
+storage        delete + recreate yields a new opaque identity; the recreated
+               mailbox reported 0 messages while the old Maildir remained
+usage          0 MB/0 msgs empty, 2 MB/1 msg after a 2.5 MB delivery
+rate limit     2/minute: 2 accepted, 3rd deferred 450 4.7.1; clear restores
+queue          exact-id cancel removed the message; never delivered; idempotent
+quarantine     held, listed, released -> delivered exactly once, recipient intact
+failure modes  ClamAV down 451, Rspamd down 454, Dovecot down 454; all recovered
+               EICAR rejected 554 with CLAM_VIRUS(2000.00)
+adapter        26/26 exercised through NativeMailEngineAdapter against the server
+rspamd deploy  deploy.sh config hash recreated Rspamd automatically (NE3 fix)
+production     mailcow 20 + MateMail 8 untouched, UFW identical, DNS/PTR
+               unchanged, 0 outbound SMTP, MAIL_ENGINE_ADAPTER still "mailcow"
 ```
 
 **NE3 runtime validation on MateServer (2026-09-18)**
