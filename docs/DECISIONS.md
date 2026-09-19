@@ -2106,3 +2106,166 @@ A Native submission outage stops MateMail's transactional mail — password
 resets, verification, notifications — until it is restored or an operator rolls
 back. That is the accepted cost of not having a silent second path, and it is
 why Mailcow stays installed and why the rollback is one command.
+
+---
+
+## DEC-041 — Public mail ports bind the production address, not every interface
+
+**Status:** Accepted · **Phase:** NE7 · **Date:** 2026-09-20
+
+### Decision
+
+Native publishes exactly three ports — 25, 587 and 993 — bound to
+`${NATIVE_PUBLIC_IP}`. Never `0.0.0.0`, and the variable has no default: an
+unset value refuses to start rather than falling back to every interface.
+
+### Why
+
+Mailcow publishes the same port NUMBERS on `127.0.0.1` and must keep doing so,
+because rollback is switching which engine is public. An all-interfaces bind
+would either collide with it or silently shadow it, and the failure would look
+like "mail stopped working" rather than "two mail servers are fighting over a
+port".
+
+The `:?` form matters more than it looks. `"${NATIVE_PUBLIC_IP}:25:25"` with
+the variable unset renders as `":25:25"`, which Docker reads as every
+interface. That is the one mistake in this file that cannot be seen by reading
+it, so it is made impossible instead.
+
+### The part that surprised us
+
+**UFW does not filter Docker-published ports on this host.** Proven by
+experiment during NE7: with the 993 rule removed, 993 stayed reachable from the
+Internet. Docker DNATs published ports in `nat/PREROUTING` and they are
+evaluated in `FORWARD` through `DOCKER-FORWARD`, which accepts them before the
+ufw chains are reached. `DOCKER-USER` is empty.
+
+So for these three ports **the bind address is the access control**, not the
+firewall. The UFW rules are still added — they are correct, they document
+intent, and they would matter for any non-Docker service — but nobody should
+believe they are what closes anything here.
+
+An earlier reading of this blamed port 4000 being reachable without a rule.
+That was wrong: TalkRoom uses `network_mode: host`, so UFW does filter it, and
+it is in fact NOT externally reachable. The conclusion survived; the evidence
+for it did not.
+
+### Consequences
+
+Monitoring inverted its port policy rather than switching it off: 25, 587 and
+993 no longer alert, 110/143/465/995 alert immediately, and an intended port
+that stops listening is now its own alert — a signal that could not exist
+before NE7.
+
+---
+
+## DEC-042 — 587 with STARTTLS, and no port 465
+
+**Status:** Accepted · **Phase:** NE7 · **Date:** 2026-09-20
+
+### Decision
+
+Submission is 587 with mandatory STARTTLS and mandatory SASL. Port 465
+(implicit TLS) is not offered. POP3 and POP3S are not offered. Plaintext IMAP
+on 143 does not listen at all.
+
+### Why
+
+465 and 587 do the same job. Offering both doubles the public attack surface,
+doubles what abuse protection has to watch, and doubles what a support answer
+has to explain, in exchange for compatibility with clients that every current
+mail application has outgrown. If real client data later shows a need, it is a
+small change to add; removing a port people have configured is not.
+
+143 is not merely unpublished — `dovecot.conf` sets its listener to `port = 0`.
+Leaving it bound inside the container would put one careless `ports:` entry
+between a customer's password and the Internet, and that entry is exactly the
+kind of thing added at speed during an incident.
+
+### Consequences
+
+A client that insists on 465 or POP3 cannot connect, and that is a
+configuration error rather than an outage. `docs/MAIL_CLIENT_SETUP.md` says so
+in the words a support reply needs.
+
+---
+
+## DEC-043 — Abuse protection bans in DOCKER-USER, not INPUT
+
+**Status:** Accepted · **Phase:** NE7 · **Date:** 2026-09-20
+
+### Decision
+
+fail2ban protects public submission and IMAPS with two jails. Its ban action
+writes into the `DOCKER-USER` chain. A small root service re-emits
+`docker logs` for Postfix and Dovecot into a file for fail2ban to read. No
+sshd jail is enabled.
+
+### Why
+
+A default fail2ban install on this host would have been worse than none. Its
+stock actions insert into `INPUT`, and traffic to a Docker-published port never
+reaches `INPUT` (see DEC-041). fail2ban would have run, matched attacks, logged
+bans, shown them in `fail2ban-client status` — and blocked nothing at all,
+while everybody assumed the mail server was protected. `DOCKER-USER` is the one
+chain Docker guarantees to traverse before its own accept rules.
+
+The log shipper exists because Native logs to `docker logs` under the json-file
+driver, which P7's collector depends on, while fail2ban watches files. Pointing
+fail2ban at `/var/lib/docker/containers/<id>/<id>-json.log` would break on
+every container recreation.
+
+No sshd jail: an SSH ban is how an operator loses a server at three in the
+morning, and SSH hardening is not what NE7 is for. The operator's own address
+is written into `ignoreip` from `SSH_CLIENT` at install time, because the jails
+go live at the same moment as the submission port and the person testing
+wrong-password handling is exactly the person who must not be locked out.
+
+### Consequences
+
+Both halves are monitored. `matemail_fail2ban_up` catches the service stopping;
+`matemail_fail2ban_log_shipper_up` catches the subtler failure where fail2ban
+is healthy but reading a file nobody writes to. Ban counts are exported per
+jail — never per address, which would be an unbounded label and a list of IP
+addresses living in a metrics store.
+
+---
+
+## DEC-044 — Internal delivery targets an address, not a name
+
+**Status:** Accepted · **Phase:** NE7 · **Date:** 2026-09-20
+
+### Decision
+
+`virtual_transport = lmtp:inet:172.27.0.24:24`, with Dovecot pinned to that
+address, replacing `lmtp:inet:dovecot:24`.
+
+### Why
+
+Found by stopping Dovecot during NE7 and watching inbound mail come back to
+the sender:
+
+```
+status=bounced (Host or domain name not found.
+                Name service error for name=dovecot type=A: Host not found)
+dsn=5.4.4
+```
+
+Docker's embedded DNS answers NXDOMAIN for a stopped container, and Postfix
+treats a host that does not exist as a **permanent** failure. So a routine
+Dovecot restart — a deploy, a config change, a container recreation — returned
+customer mail to its senders as a hard bounce instead of queueing it for the
+thirty seconds the restart took. Mail loss during ordinary maintenance,
+reported to the sender as undeliverable.
+
+An address cannot be NXDOMAIN. With the container down the connection is simply
+refused, which is temporary: the message waits in the queue. Verified after the
+change — `dsn=4.4.1, status=deferred`, then `status=sent` once Dovecot
+returned, with the queue draining to empty.
+
+### Consequences
+
+Dovecot's address is pinned in the compose file exactly as Unbound's already
+was, and for the same class of reason: something else depends on finding it at
+a fixed place. A test asserts the two stay in agreement, and that pinned
+addresses sit clear of the range Docker allocates dynamically.

@@ -276,7 +276,12 @@ NE6 platform outbound:         COMPLETE (2026-09-19) - MateMail platform
                                Native Engine. SPF/DKIM/DMARC all pass,
                                Gmail Primary Inbox. Mailcow retained as
                                rollback only; no automatic fallback.
-NE7-NE8 implementation:        NONE - not started
+NE7 public mail:               COMPLETE (2026-09-20) - 25/587/993 public.
+                               Real Gmail inbound delivered and read over
+                               public IMAPS; external client submission
+                               reached Gmail Inbox with SPF/DKIM/DMARC pass.
+                               110/143/465/995 closed. Mailcow untouched.
+NE8 implementation:            NONE - not started
 mailcow:                       live production dependency, unmodified
 ```
 
@@ -2835,3 +2840,103 @@ unchanged · `matemail_ne6_ready` = 1 · only the known
 No public port opened. No Internet inbound. No customer submission or IMAP. No
 mailbox migration. Mailcow still carries customer/Internet mail and is removed
 at NE8. Broad deliverability testing across Gmail, Microsoft and Zoho is NE7's.
+
+---
+
+## NE7 COMPLETE — the Native Engine is a public Internet mail server (2026-09-20)
+
+Release `f50c673690c0f23748cf89d593321d3775a986f1`, CI green. No application
+image rebuilt: no application source changed.
+
+```
+Internet  ->  :25   ->  Postfix -> scanners -> Dovecot LMTP -> Maildir
+client    ->  :587  ->  STARTTLS + AUTH -> Postfix -> Internet MX
+client    ->  :993  ->  Dovecot -> Maildir
+MateMail  ->  private gateway (NE6) -> Postfix -> Internet MX
+```
+
+Mailcow appears in none of them, and keeps its platform domain, mailbox, DKIM
+key, credential and gateway as the rollback.
+
+### Proven with real mail, both directions
+
+**Gmail → MateMail.** `mail-pz2-f12.google.com[74.125.228.12]` connected to the
+public MX and chose STARTTLS (TLS 1.3). Queue `372E5105F27`. Rspamd scored it
+−2.00/15.00 with `R_SPF_ALLOW`, `R_DKIM_ALLOW`, `DMARC_POLICY_ALLOW` and
+`ARC_ALLOW` — Native validated Gmail's own authentication. LMTP delivered it
+into the exact `storage_id` provisioned for the mailbox, and it was read back
+over public IMAPS from a Windows workstation with correct headers, body, stable
+UIDs and working `\Seen` semantics.
+
+**MateMail → Gmail, from an external client over public 587.** STARTTLS, AUTH
+PLAIN, and at Gmail: `spf=pass`, `dkim=pass (s=mm1)`, `dmarc=pass`, Primary
+Inbox. The `Received: ... with ESMTPSA` line from the workstation address is
+what distinguishes this from NE6, which used the private gateway.
+
+### Refused, verified from outside
+
+```
+open relay, plaintext and over TLS        554 5.7.1
+unknown recipient                          550 5.1.1
+inactive mailbox / inactive domain         550 5.1.1
+submission without STARTTLS                530 5.7.0
+wrong password, SMTP and IMAP              535 / AUTHENTICATIONFAILED
+sender not owned by the authenticated login 553 5.7.1
+EICAR attachment                           554, CLAM_VIRUS(2000.00)
+```
+
+Rspamd's RBL and SPF checks proved themselves incidentally: a forged
+`gmail.com` sender from a residential IP scored 16.40 and was rejected.
+
+### Four defects found, all silent, all fixed in phase
+
+**Inbound mail hard-bounced during a Dovecot restart.** With
+`lmtp:inet:dovecot:24`, a stopped container makes Docker's DNS answer NXDOMAIN,
+which Postfix treats as *permanent*: `dsn=5.4.4, status=bounced`. A routine
+restart returned customer mail to its senders. Now delivers to a pinned
+address, which defers and recovers — verified by repeating the outage
+(DEC-044).
+
+**fail2ban would never have banned an IMAP brute-force.** The filter carried
+Dovecot 2.3's wording and was validated against a hand-written sample of the
+same wording, so it agreed with itself and matched zero real lines. Dovecot 2.4
+says `Login aborted:`. It would have run, reported healthy and shown no bans.
+
+**IMAP authentication was invisible to monitoring, for two independent
+reasons** — the collector captured only stdout while Dovecot logs to stderr,
+and the patterns used the same stale 2.3 wording. Either alone was enough.
+
+**Sender-login restrictions were declared where Postfix ignores them.** Port 25
+has SASL disabled by design, so both restrictions were silently skipped and
+warned about on every inbound connection. Moved to submission, where they now
+demonstrably fire.
+
+All four have regression tests, and the fail2ban and collector tests now use
+log lines captured from the running server rather than written from memory.
+
+### Security posture
+
+Public: 22, 25, 80, 443, 587, 993. Closed: 110, 143, 465, 995 — and 143 does
+not listen at all. Every internal service verified unreachable from the
+Internet.
+
+UFW changed (three rules added), but **UFW is not what enforces this**: Docker
+published ports bypass it, proven by removing the 993 rule and finding 993 still
+reachable. The bind address is the control (DEC-041). That is also why
+fail2ban bans into `DOCKER-USER`, verified by banning a TEST-NET address and
+reading the resulting rule (DEC-043).
+
+### Final state
+
+Native 11/11 healthy · MateMail 6/6 · Mailcow 20 running · P5 healthy · P6
+timer active · P7 4/4 with `matemail_ne6_ready = 1`, 0 checks failed, 0
+collector sections failed · fail2ban and its log shipper active · queues and
+quarantine empty · DNS, PTR, SPF, DKIM and DMARC unchanged · certificate valid
+to 2026-12-10 · only `BackupOffsiteNotConfigured` firing.
+
+### Not done, deliberately
+
+No POP3, no port 465, no plaintext IMAP, no public signup, no free mailboxes,
+no autoconfig, no Mailcow removal. Microsoft and Zoho protocol interop is
+verified; real inbox delivery to them is not, because no operator-controlled
+mailbox exists on either and NE7 did not invent one.

@@ -1632,3 +1632,65 @@ outbound mail without anyone choosing that (DEC-040).
 **Unchanged by NE6:** UFW, DNS, PTR, public listeners, published ports. Zero
 mail ports are publicly reachable; that remains NE7's decision to make
 deliberately.
+
+---
+
+## Public mail exposure (NE7)
+
+**Three ports are public, bound to the production address only:** 25, 587 and
+993. `110`, `143`, `465` and `995` are closed, and 143 does not listen even
+inside the container. Verified externally from a workstation, not from the
+server: every internal service — PostgreSQL, Redis, the Native API, the Postfix
+control API, Dovecot's admin listener, LMTP, Rspamd's controller, Prometheus,
+Grafana, Alertmanager, node-exporter — refuses connections from the Internet.
+
+**UFW does not enforce this.** Docker-published ports bypass it: the traffic is
+DNATed in `nat/PREROUTING` and evaluated in `FORWARD` through `DOCKER-FORWARD`,
+which accepts before the ufw chains run. Proven by removing the 993 rule and
+finding 993 still reachable. **The bind address is the access control.** The
+UFW rules are still correct and still added; nobody should believe they are
+what closes anything here. An earlier version of this reasoning cited port 4000
+as evidence and was wrong — TalkRoom uses host networking, so UFW does filter
+it.
+
+**Port 25 accepts unauthenticated mail, and must.** It is an MX. Protection is
+the relay policy, verified denied in plaintext and over TLS, plus recipient
+validation that rejects unknown, inactive and non-hosted addresses inside the
+SMTP transaction rather than accepting and bouncing later.
+
+**Port 587 refuses everything until it is encrypted and authenticated.** AUTH
+is not advertised before STARTTLS (`smtpd_tls_auth_only`), a client that skips
+STARTTLS gets `530`, a wrong password gets `535`, and an unauthenticated relay
+attempt gets `554`. An authenticated client may use its own address and the
+identities it owns — anything else is `553 ... not owned by user`.
+
+Those sender-ownership restrictions moved to the submission service in NE7.
+Postfix ignores them in any smtpd without SASL and says so in a warning on
+every connection, so on port 25 they had been declared but never applied.
+
+**Mail store access is TLS-only.** `ssl = required`, TLS 1.2 floor, the real
+Let's Encrypt certificate for `mx.matemail.online`, and renewal installs into
+both Postfix and Dovecot — reloading only one would serve an expired
+certificate for up to ninety days with nothing looking wrong on the other side.
+
+**Abuse protection bans where it actually takes effect.** fail2ban's stock
+actions write to `INPUT`, which Docker-published traffic never reaches, so a
+default install would log bans it was not applying. Bans go into `DOCKER-USER`,
+verified by banning a TEST-NET address and reading the resulting rule. Two
+jails, no sshd jail, five failures before a one-hour ban, and the operator's
+own address in `ignoreip`.
+
+Ban counts are exported per jail, never per address: one series per attacker
+would be an unbounded label and a list of IP addresses living in a metrics
+store.
+
+**Releasing a blocked address:**
+
+```bash
+fail2ban-client status matemail-postfix
+fail2ban-client set matemail-postfix unbanip <address>
+```
+
+**What NE7 did not open:** no POP3, no implicit-TLS submission, no plaintext
+IMAP, no public signup, no free mailboxes. Mailcow keeps its platform domain,
+mailbox, DKIM key and credential, and remains the rollback.

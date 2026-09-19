@@ -21,6 +21,24 @@ submission  inet  n       -       n       -       -       smtpd
   -o smtpd_tls_security_level=encrypt
   -o smtpd_sasl_auth_enable=yes
   -o smtpd_client_restrictions=permit_mynetworks,permit_sasl_authenticated,reject
+  # Sender ownership belongs HERE, not in main.cf.
+  #
+  # These two restrictions require SASL to be enabled in the smtpd that runs
+  # them. Port 25 has it disabled — an MX that demands a password receives no
+  # mail — so Postfix silently ignored them there and warned about it on every
+  # inbound connection. This is the only service where they can take effect,
+  # and it is the only one where they mean anything: a client that has
+  # authenticated may use its own address and the identities it owns, and
+  # nothing else.
+  #
+  # The braces form is needed because the policy service argument contains a
+  # space; without them master.cf would take only the first word.
+  -o { smtpd_sender_restrictions =
+         reject_non_fqdn_sender,
+         reject_unknown_sender_domain,
+         reject_authenticated_sender_login_mismatch,
+         reject_sender_login_mismatch,
+         check_policy_service inet:127.0.0.1:10032 }
 
 pickup      unix  n       -       n       60      1       pickup
 cleanup     unix  n       -       n       -       0       cleanup

@@ -90,7 +90,25 @@ virtual_alias_maps      = pgsql:/etc/postfix/sql/virtual_alias.cf
 # Delivery is Dovecot's, over LMTP on the internal compose network. Postfix
 # never writes to the mail store: one component owns Maildir, and it is the one
 # that also serves IMAP, so there is no second writer to keep consistent.
-virtual_transport = lmtp:inet:dovecot:24
+# Delivered to a PINNED ADDRESS, not a name, and NE7 found out why the
+# hard way.
+#
+# With `lmtp:inet:dovecot:24`, stopping the Dovecot container makes
+# Docker's embedded DNS answer NXDOMAIN for `dovecot`. Postfix treats a
+# host that does not exist as a PERMANENT failure and BOUNCES the mail:
+#
+#   status=bounced (Host or domain name not found. Name service error
+#   for name=dovecot type=A: Host not found)  dsn=5.4.4
+#
+# So a routine Dovecot restart returned inbound customer mail to its
+# senders instead of queueing it for the thirty seconds the restart took.
+# Mail loss during a deploy, reported to the sender as a hard failure.
+#
+# An address cannot be NXDOMAIN. With the container down the connection is
+# simply refused, which Postfix treats as temporary: the message waits in
+# the queue and is delivered when Dovecot returns. The address is pinned in
+# the compose file the same way Unbound's is, and for the same reason.
+virtual_transport = lmtp:inet:172.27.0.24:24
 
 # Postfix must not also try to deliver these locally.
 local_recipient_maps =
@@ -133,11 +151,27 @@ smtpd_sender_login_maps = pgsql:/etc/postfix/sql/sender_login.cf
 # NOTE: a comment may not sit inside this list. Postfix continues a logical line
 # through every whitespace-indented line that follows, so an indented '#' would
 # be parsed as a restriction name rather than a comment.
+# The sender-login restrictions are NOT here. They live on the submission
+# service in master.cf, and NE7 is why.
+#
+# Postfix ignores `reject_sender_login_mismatch` and its authenticated variant
+# in any smtpd that does not have SASL enabled, and says so:
+#
+#   warning: restriction `reject_unauthenticated_sender_login_mismatch'
+#            ignored: no SASL support
+#
+# Port 25 has SASL disabled by design — an MX that demands a password receives
+# no mail — so listing them globally achieved exactly nothing on the public
+# MX while printing two warning lines for every inbound connection. At any
+# real volume that buries genuine warnings, and a configuration that states a
+# protection it does not apply is worse than one that does not claim it.
+#
+# On inbound mail the defence against a forged sender is not this: it is SPF,
+# DKIM and DMARC evaluation by Rspamd, which runs on every message. `-all` on
+# the platform sender's SPF record is what makes a forgery fail there.
 smtpd_sender_restrictions =
     reject_non_fqdn_sender,
     reject_unknown_sender_domain,
-    reject_authenticated_sender_login_mismatch,
-    reject_sender_login_mismatch,
     check_policy_service inet:127.0.0.1:10032
 
 # The rate-limit service lives inside this container on loopback, so it is not

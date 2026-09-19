@@ -185,11 +185,15 @@ def test_no_mailcow_service_is_in_the_native_stack():
 
 def _submission_overrides() -> str:
     """
-    The `-o` lines belonging to the `submission` service.
+    Everything indented under the `submission` service entry.
 
     Parsed the way master.cf is actually structured — a service line at column
     zero followed by indented overrides — rather than by splitting on the word
     "submission", which also appears in the comments above it.
+
+    Not only lines starting with `-o`: NE7 added a multi-line `-o { ... }`
+    override whose continuation lines would otherwise be dropped, taking the
+    sender-ownership restrictions with them.
     """
     lines = MASTER_CF.read_text(encoding="utf-8").splitlines()
     start = next(i for i, l in enumerate(lines)
@@ -198,8 +202,9 @@ def _submission_overrides() -> str:
     for line in lines[start + 1:]:
         if line[:1] not in (" ", "\t"):
             break
-        if line.strip().startswith("-o"):
-            out.append(line.strip())
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            out.append(stripped)
     assert out, "the submission service has no overrides at all"
     return "\n".join(out)
 
@@ -218,7 +223,12 @@ def test_submission_requires_starttls():
 def test_submission_requires_authentication():
     flat = _submission_overrides().replace(" ", "")
     assert "smtpd_sasl_auth_enable=yes" in flat
-    assert flat.rstrip().endswith("reject"), (
+    # The client restriction line specifically, not the last line of the
+    # block: NE7 added a multi-line `-o { ... }` override after it, and
+    # checking the tail of the whole block would silently stop testing this.
+    client = next(l for l in flat.splitlines()
+                  if "smtpd_client_restrictions=" in l)
+    assert client.rstrip().endswith("reject"), (
         "submission client restrictions must end in reject, or anything the "
         "gateway forwards could relay unauthenticated")
 
@@ -239,9 +249,17 @@ def test_mynetworks_cannot_turn_the_gateway_into_an_open_relay():
 
 
 def test_the_engine_still_refuses_a_sender_the_login_does_not_own():
+    """
+    NE7 moved these restrictions from main.cf onto the submission service,
+    because Postfix ignores them in any smtpd without SASL — which port 25 is,
+    by design. The property NE6 cares about is unchanged: an authenticated
+    client may only use an address it owns.
+    """
     main = MAIN_CF.read_text(encoding="utf-8")
-    assert "reject_sender_login_mismatch" in main
-    assert "reject_authenticated_sender_login_mismatch" in main
+    assert "smtpd_sender_login_maps" in main, "the ownership map is still global"
+    submission = _submission_overrides()
+    assert "reject_sender_login_mismatch" in submission
+    assert "reject_authenticated_sender_login_mismatch" in submission
 
 
 def test_the_rate_limit_policy_service_is_still_consulted():

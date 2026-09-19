@@ -245,7 +245,15 @@ services:
       # volume rather than an inet listener, so a customer's password is
       # never on the container network.
       - native_auth:/run/dovecot-auth
-    networks: [engine]
+    networks:
+      engine:
+        # Pinned because Postfix delivers to this ADDRESS rather than to the
+        # name `dovecot`. A name disappears from Docker's DNS when the
+        # container stops, and Postfix bounces mail for a host that does not
+        # exist; an address that refuses a connection only defers it.
+        # .24 matches the LMTP port and sits clear of the DHCP range, which
+        # allocates upward from .2, and of Unbound's .53.
+        ipv4_address: 172.27.0.24
     # IMAPS only. 143, 110 and 995 are not published AND do not listen inside
     # the container (dovecot.conf sets the imap listener to port 0), so there
     # is no plaintext path to a password even by accident.

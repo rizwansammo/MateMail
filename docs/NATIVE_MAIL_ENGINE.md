@@ -2828,3 +2828,102 @@ moved to the Mailcow gateway, MateMail authenticated against Mailcow submission
 over TLS 1.3, and the alias was moved back to Native. A subsequent message was
 logged by Native and not by Mailcow. Mailcow retains its platform domain,
 mailbox, DKIM key, credential and gateway configuration.
+
+
+---
+
+## NE7 — the engine becomes a public Internet mail server
+
+```
+Internet sender  ->  mx.matemail.online:25   ->  Postfix  ->  Rspamd/ClamAV/Olefy
+                                                          ->  Dovecot LMTP  ->  Maildir
+Mail client      ->  mx.matemail.online:587  ->  STARTTLS + AUTH  ->  Postfix  ->  Internet MX
+Mail client      ->  mx.matemail.online:993  ->  Dovecot  ->  Maildir
+MateMail app     ->  private gateway (NE6)   ->  Postfix  ->  Internet MX
+```
+
+No Mailcow service appears in any of those paths.
+
+### Ports
+
+| Port | State | Notes |
+|---|---|---|
+| 25 | public | Internet MX. No AUTH, STARTTLS offered but **not** required. |
+| 587 | public | Submission. STARTTLS and SASL both mandatory. |
+| 993 | public | IMAPS, TLS from the first byte. |
+| 110 / 995 | closed | POP3 not offered at all. |
+| 143 | closed **and not listening** | `port = 0` in dovecot.conf. |
+| 465 | closed | Deliberate omission (DEC-042). |
+
+All three bind `${NATIVE_PUBLIC_IP}`, never `0.0.0.0`, because Mailcow holds the
+same port numbers on loopback and rollback depends on both being able to listen
+(DEC-041).
+
+**UFW is not what closes these.** Docker-published ports bypass it entirely —
+proven by removing the 993 rule and finding 993 still reachable. The bind
+address is the access control; the UFW rules document intent.
+
+### Why 25 differs from 587
+
+Requiring STARTTLS on an MX silently drops mail from any sender that cannot
+negotiate it, and the alternative to an unencrypted delivery is no delivery.
+Requiring AUTH on an MX means receiving no mail at all. What protects port 25
+is the relay policy — `reject_unauth_destination`, verified denied both in
+plaintext and over TLS — not a password.
+
+### Sender ownership lives on submission
+
+`reject_sender_login_mismatch` and its authenticated variant require SASL to be
+enabled in the smtpd running them. Port 25 has it disabled by design, so
+Postfix silently ignored both there and warned on every inbound connection.
+They now sit on the submission service, which is the only place they can take
+effect, and the only place sender ownership means anything.
+
+### Abuse protection
+
+fail2ban, two jails, bans written into `DOCKER-USER` because the stock action
+writes into `INPUT` which Docker-published traffic never reaches (DEC-043). No
+sshd jail. The operator's address is added to `ignoreip` at install time from
+`SSH_CLIENT`.
+
+### Proven on 2026-09-20
+
+```
+INBOUND   Gmail MX mail-pz2-f12.google.com[74.125.228.12] -> public :25
+          STARTTLS TLSv1.3 negotiated by the sender
+          queue 372E5105F27 -> Rspamd -2.00/15.00
+          R_SPF_ALLOW, R_DKIM_ALLOW, DMARC_POLICY_ALLOW, ARC_ALLOW
+          LMTP -> 172.27.0.24 -> status=sent, queue removed
+          landed in the provisioned mailbox's own storage_id
+          read back over public IMAPS with correct headers, body and flags
+
+OUTBOUND  external client -> public :587, STARTTLS, AUTH PLAIN
+          Received: ... with ESMTPSA  (an external client, not the gateway)
+          Gmail: spf=pass, dkim=pass (s=mm1), dmarc=pass, Primary Inbox
+
+REFUSED   open relay plaintext and over TLS       554 5.7.1
+          unknown recipient                        550 5.1.1
+          inactive mailbox / inactive domain       550 5.1.1
+          submission without STARTTLS              530 5.7.0
+          wrong password (SMTP and IMAP)           535 / AUTHENTICATIONFAILED
+          sender not owned by the login            553 5.7.1
+          EICAR attachment                         554, CLAM_VIRUS(2000)
+
+INTEROP   Google, Microsoft and Zoho MX: resolve, TCP/25, STARTTLS, TLS 1.3
+```
+
+### Two defects this phase found, both silent
+
+**Inbound mail hard-bounced during a Dovecot restart.** `lmtp:inet:dovecot:24`
+plus a stopped container meant NXDOMAIN, which Postfix treats as permanent:
+`dsn=5.4.4, status=bounced`. Customer mail returned to senders during ordinary
+maintenance. Now delivers to a pinned address, which defers instead (DEC-044).
+
+**IMAP authentication was invisible to monitoring, twice over.** The collector
+captured only stdout while Dovecot logs to stderr, and its patterns carried
+Dovecot 2.3's wording (`Login: user=`) where 2.4 says `Logged in: user=` and
+`Login aborted:`. Either bug alone was enough. The same 2.3 wording was in the
+fail2ban filter, which had been validated against a hand-written sample of that
+wording — so it matched zero real lines and would never have banned an IMAP
+brute-force while reporting itself healthy. Both now tested against log lines
+captured from the running server.

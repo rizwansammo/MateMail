@@ -527,10 +527,15 @@ LOG_PATTERNS = {
         ("smtp_5xx", re.compile(r"said: 5\d\d")),
     ],
     "dovecot": [
-        ("auth_failed", re.compile(r"auth(?:entication)? failed|"
+        # Dovecot 2.4 wording, verified against this server's own log rather
+        # than remembered. 2.3 said "Aborted login" and "Login: user="; 2.4
+        # says "Login aborted:" and "Logged in: user=". The 2.3 spellings are
+        # kept as alternates, but it was the 2.4 ones that were missing, and
+        # the counters read a confident zero through every real login.
+        ("auth_failed", re.compile(r"auth[ _]failed|Login aborted:|"
                                    r"Aborted login|password mismatch",
                                    re.IGNORECASE)),
-        ("auth_ok", re.compile(r"Login: user=")),
+        ("auth_ok", re.compile(r"Logged in: user=|Login: user=")),
         ("lmtp_error", re.compile(r"lmtp.*(?:error|failed)", re.IGNORECASE)),
         ("quota_exceeded", re.compile(r"[Qq]uota exceeded")),
     ],
@@ -562,7 +567,18 @@ def sec_log_counters():
         cmd = ["docker", "logs", "--timestamps"]
         cmd += ["--since", since] if since else ["--since", "15m"]
         cmd += [container]
-        out = try_run(cmd, timeout=30)
+        # BOTH streams, merged.
+        #
+        # `docker logs` reproduces each stream on the corresponding handle:
+        # Postfix writes its maillog to stdout, Dovecot writes to stderr. This
+        # collector read only stdout, so every Dovecot line was invisible — no
+        # cursor was ever stored for it and its auth counters reported a
+        # confident zero from the day they were written, through every real
+        # login and every real failure. Found in NE7, alongside the separate
+        # bug that the patterns carried Dovecot 2.3's wording.
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=30,
+                             stdin=subprocess.DEVNULL)
+        out = (out.stdout or "") + (out.stderr or "")
         newest = since
         for line in out.splitlines():
             parts = line.split(" ", 1)

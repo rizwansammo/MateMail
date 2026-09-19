@@ -378,3 +378,38 @@ adapter is retired at NE8.
 engine network as "internal (no egress)". It is not, and must not be — Postfix
 needs outbound SMTP, ClamAV needs signature updates, Unbound needs DNS. The
 live network is `internal=false`, which is correct; only the comment is wrong.
+
+---
+
+## Found during NE7 (2026-09-20)
+
+✅ **Inbound mail hard-bounced during a Dovecot restart.** `lmtp:inet:dovecot:24`
+meant a stopped container produced NXDOMAIN, which Postfix treats as permanent
+(`dsn=5.4.4`), returning customer mail to senders during ordinary maintenance.
+Fixed by delivering to a pinned address (DEC-044).
+
+✅ **fail2ban's IMAP filter matched nothing real.** It carried Dovecot 2.3's
+wording and had been validated against a hand-written sample of the same
+wording. Dovecot 2.4 says `Login aborted:`. Fixed, and the tests now use log
+lines captured from the running server.
+
+✅ **IMAP auth was invisible to monitoring for two independent reasons** — the
+collector read only stdout while Dovecot logs to stderr, and the patterns used
+2.3 wording. Both fixed.
+
+✅ **Sender-login restrictions were declared on port 25 where Postfix ignores
+them**, warning on every inbound connection. Moved to submission.
+
+⬜ **`MAIL_ENGINE_API_KEY` rotation** (carried from NE6). Still legacy,
+private-network-only and unused by the Native adapter. NE7 deliberately did not
+rotate it: the Mailcow API path is part of the rollback story until NE8, and
+changing it now would mean testing a rollback path that is meant to stay
+untouched. Rotate at NE8 when Mailcow is removed, or sooner if convenient.
+
+⬜ **No automatic client configuration** (autoconfig / autodiscover). Manual
+settings are documented in `docs/MAIL_CLIENT_SETUP.md`. A product feature, not
+a prerequisite.
+
+⬜ **Microsoft and Zoho real inbox delivery untested.** Protocol interop to both
+is verified (MX resolution, TCP/25, STARTTLS, TLS 1.3), but no
+operator-controlled mailbox exists on either, and NE7 did not invent one.

@@ -113,6 +113,13 @@ def test_only_postfix_and_dovecot_publish_anything():
 # ─── port 25: the Internet MX ───────────────────────────────────────────────
 
 def _service_overrides(name: str) -> str:
+    """
+    Everything indented under a master.cf service entry.
+
+    Not only lines beginning with `-o`: Postfix's braces form spreads a single
+    setting over several lines, and a parser that looked for `-o` alone would
+    silently miss the restriction list that matters most here.
+    """
     lines = MASTER_CF.read_text(encoding="utf-8").splitlines()
     start = next(i for i, l in enumerate(lines)
                  if l.startswith(name) and "inet" in l)
@@ -120,8 +127,12 @@ def _service_overrides(name: str) -> str:
     for line in lines[start + 1:]:
         if line[:1] not in (" ", "\t"):
             break
-        if line.strip().startswith("-o"):
-            out.append(line.strip())
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            out.append(stripped)
+    # An empty result is meaningful, not an error: the `smtp` service on port
+    # 25 deliberately has no overrides and inherits main.cf, and two tests
+    # below assert exactly that.
     return "\n".join(out)
 
 
@@ -165,7 +176,10 @@ def test_submission_requires_both_tls_and_authentication():
     overrides = _service_overrides("submission").replace(" ", "")
     assert "smtpd_tls_security_level=encrypt" in overrides
     assert "smtpd_sasl_auth_enable=yes" in overrides
-    assert overrides.rstrip().endswith("reject")
+    client = next(l for l in overrides.splitlines()
+                  if "smtpd_client_restrictions=" in l)
+    assert client.rstrip().endswith("reject"), (
+        "submission client restrictions must end in reject")
 
 
 def test_authentication_cannot_be_offered_before_tls():
@@ -179,10 +193,16 @@ def test_authentication_cannot_be_offered_before_tls():
 
 
 def test_sender_ownership_survives_going_public():
+    """
+    The map deciding who owns which address stays global — it is data, not a
+    restriction. Where the restrictions themselves live is pinned by
+    test_sender_ownership_lives_where_sasl_actually_exists.
+    """
     main = MAIN_CF.read_text(encoding="utf-8")
-    assert "reject_sender_login_mismatch" in main
-    assert "reject_authenticated_sender_login_mismatch" in main
     assert "smtpd_sender_login_maps" in main
+    submission = _service_overrides("submission")
+    assert "reject_sender_login_mismatch" in submission
+    assert "reject_authenticated_sender_login_mismatch" in submission
 
 
 def test_the_rate_limiter_still_sees_public_submission():
@@ -345,22 +365,33 @@ POSTFIX_INNOCENT = [
     "rejected: User unknown",
 ]
 
+#: Captured VERBATIM from this server's Dovecot 2.4, not written from memory
+#: of the format. The first version of these fixtures used the Dovecot 2.3
+#: wording ("Aborted login"), the filter was written to match it, and both
+#: agreed with each other while matching NOTHING the real server produces.
+#: fail2ban would have run healthy and never banned an IMAP brute-force.
 DOVECOT_ATTACKS = [
-    "Sep 20 02:10:11 imap-login: Info: Disconnected (auth failed, 1 attempts in 4 secs): "
-    "user=<victim@matemail.online>, method=PLAIN, rip=203.0.113.9, lip=172.27.0.8, "
-    "TLS, session=<abc>",
-    "Sep 20 02:10:20 imap-login: Info: Aborted login (auth failed, 3 attempts in 9 secs): "
-    "user=<victim@matemail.online>, method=PLAIN, rip=203.0.113.9, lip=172.27.0.8, TLS",
+    "Sep 19 19:09:30 imap-login: Info: Login aborted: Connection closed "
+    "(auth failed, 1 attempts in 2 secs) (auth_failed): "
+    "user=<victim@matemail.online>, method=PLAIN, rip=203.0.113.9, "
+    "lip=172.27.0.24, TLS: Connection closed, session=<fz2BwdpbqNg7mREh>",
+    # The 2.3 wording, kept because the filter still accepts it.
+    "Sep 20 02:10:20 imap-login: Info: Aborted login (auth failed, 3 attempts "
+    "in 9 secs): user=<victim@matemail.online>, method=PLAIN, "
+    "rip=203.0.113.9, lip=172.27.0.24, TLS",
 ]
 
 DOVECOT_INNOCENT = [
+    # A successful login. Contains "Logged in", not an auth failure.
+    "Sep 19 19:06:50 imap-login: Info: Logged in: user=<ok@matemail.online>, "
+    "method=PLAIN, rip=203.0.113.9, lip=172.27.0.24, mpid=388, TLS, "
+    "session=<nDcauNpbSuw7mREh>",
+    # A clean logout. Contains BOTH "Disconnected" and "Logged out", which is
+    # exactly the shape a careless filter treats as a failure.
+    "Sep 19 19:06:53 imap(ok@matemail.online)<388><nDcauNpbSuw7mREh>: Info: "
+    "Disconnected: Logged out in=477 out=2671 deleted=0 expunged=0 trashed=0",
     "Sep 19 17:04:40 lmtp(noreply@mail.matemail.online)<16063><e9s>: Info: "
     "msgid=<x@y>: saved mail to INBOX",
-    "Sep 20 02:11:00 imap-login: Info: Login: user=<ok@matemail.online>, "
-    "method=PLAIN, rip=203.0.113.9, lip=172.27.0.8, mpid=1, TLS",
-    # A client giving up without failing auth is not an attack.
-    "Sep 20 02:12:00 imap-login: Info: Disconnected (no auth attempts in 0 secs): "
-    "rip=203.0.113.9, lip=172.27.0.8, TLS handshaking",
 ]
 
 #: What fail2ban substitutes for <HOST>, reduced to the IPv4 case.
@@ -460,3 +491,155 @@ def test_no_attacker_address_becomes_a_metric_label():
     assert '{"jail": jail}' in section
     for forbidden in ('"ip"', '"address"', '"host": ip', '"banned_ip"'):
         assert forbidden not in section
+
+
+def test_sender_ownership_lives_where_sasl_actually_exists():
+    """
+    Regression, found by probing the public MX during NE7.
+
+    `reject_sender_login_mismatch` and its authenticated variant require SASL
+    to be enabled in the smtpd running them. Port 25 has it disabled by
+    design — an MX that demands a password receives no mail — so Postfix
+    silently ignored both and printed
+
+        warning: restriction `reject_unauthenticated_sender_login_mismatch'
+                 ignored: no SASL support
+
+    for EVERY inbound connection. The protection was not there, the
+    configuration said it was, and the noise would bury real warnings at any
+    volume.
+
+    They belong on submission, which is the only service that has SASL and the
+    only place sender ownership means anything.
+    """
+    main = MAIN_CF.read_text(encoding="utf-8")
+    directives = "\n".join(l for l in main.splitlines()
+                           if not l.lstrip().startswith("#"))
+    sender_block = directives.split("smtpd_sender_restrictions", 1)[1].split(
+        "\n\n", 1)[0]
+    assert "sender_login_mismatch" not in sender_block, (
+        "a restriction Postfix ignores on port 25 must not be declared "
+        "globally as though it applied")
+
+    submission = _service_overrides("submission")
+    assert "reject_sender_login_mismatch" in submission
+    assert "reject_authenticated_sender_login_mismatch" in submission
+    assert "smtpd_sender_restrictions" in submission
+
+
+def test_submission_keeps_the_generic_sender_hygiene_checks_too():
+    """
+    Overriding smtpd_sender_restrictions on the service REPLACES the global
+    list rather than extending it, so anything dropped from the override is
+    simply gone for submission.
+    """
+    submission = _service_overrides("submission")
+    for restriction in ("reject_non_fqdn_sender", "reject_unknown_sender_domain",
+                        "check_policy_service"):
+        assert restriction in submission, (
+            f"{restriction} was lost when the override replaced the global list")
+
+
+def test_the_mx_still_refuses_forged_local_senders_at_a_later_layer():
+    """
+    Removing the ignored restrictions does not weaken inbound: it was never
+    applying. The real defence is SPF/DKIM/DMARC evaluation on every message,
+    and the platform sender publishes `-all`.
+    """
+    main = MAIN_CF.read_text(encoding="utf-8")
+    assert "smtpd_milters" in main, "Rspamd must see every inbound message"
+
+
+def test_lmtp_delivery_cannot_bounce_when_dovecot_is_restarting():
+    """
+    Regression, found by stopping Dovecot during NE7 and watching inbound mail
+    come back to the sender.
+
+    With `lmtp:inet:dovecot:24`, a stopped container means Docker's embedded
+    DNS answers NXDOMAIN for the name. Postfix treats a host that does not
+    exist as a PERMANENT failure:
+
+        status=bounced (Host or domain name not found. Name service error
+        for name=dovecot type=A: Host not found)   dsn=5.4.4
+
+    So a routine restart returned customer mail to its senders instead of
+    queueing it for the few seconds the restart took — mail loss during a
+    deploy, reported to the sender as a hard failure.
+
+    An address cannot be NXDOMAIN. A refused connection is temporary, so the
+    message waits in the queue instead.
+    """
+    main = MAIN_CF.read_text(encoding="utf-8")
+    transport = next(l for l in main.splitlines()
+                     if l.startswith("virtual_transport"))
+    assert re.search(r"lmtp:inet:\d+\.\d+\.\d+\.\d+:\d+", transport), (
+        f"LMTP must target an address, not a name: {transport}")
+
+    address = re.search(r"lmtp:inet:(\d+\.\d+\.\d+\.\d+):", transport).group(1)
+    dovecot = compose()["services"]["dovecot"]["networks"]["engine"]
+    assert dovecot["ipv4_address"] == address, (
+        f"Postfix delivers to {address} but dovecot is pinned to "
+        f"{dovecot.get('ipv4_address')}")
+
+
+def test_the_pinned_delivery_address_cannot_collide():
+    """
+    Docker allocates dynamically upward from .2, so a pinned address must sit
+    clear of the range the engine's own services will reach.
+    """
+    engine = compose()["services"]
+    pinned = {}
+    for name, svc in engine.items():
+        nets = svc.get("networks") or {}
+        if isinstance(nets, dict):
+            cfg = nets.get("engine") or {}
+            if isinstance(cfg, dict) and cfg.get("ipv4_address"):
+                pinned[name] = cfg["ipv4_address"]
+    assert len(set(pinned.values())) == len(pinned), f"duplicate pins: {pinned}"
+    for name, addr in pinned.items():
+        last = int(addr.rsplit(".", 1)[1])
+        assert last > len(engine) + 5, (
+            f"{name} is pinned at {addr}, close enough to the dynamic range "
+            f"that a new service could collide with it")
+
+
+def test_the_collector_counts_real_dovecot_24_auth_events():
+    """
+    Regression. Dovecot 2.3 logged `Login: user=`; 2.4 logs `Logged in: user=`
+    and `Login aborted:`. The collector carried the 2.3 spellings, so
+    matemail_dovecot_events_total reported a confident zero through every real
+    login and every real failure — the same class of silent miss as the
+    fail2ban filter, found in the same hour.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("collector_under_test", COLLECTOR)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    patterns = mod.LOG_PATTERNS["dovecot"]
+
+    def hits(line):
+        return {key for key, rx in patterns if rx.search(line)}
+
+    assert "auth_ok" in hits(DOVECOT_INNOCENT[0]), "a real 2.4 login is not counted"
+    assert "auth_failed" in hits(DOVECOT_ATTACKS[0]), "a real 2.4 failure is not counted"
+    assert not hits(DOVECOT_INNOCENT[1]), "a clean logout is counted as something"
+
+
+def test_log_counters_read_both_streams():
+    """
+    Regression. `docker logs` writes each stream to the corresponding handle:
+    Postfix logs to stdout, Dovecot to stderr. The collector captured stdout
+    only, so it never saw a single Dovecot line — no cursor was ever stored for
+    it, and its auth counters reported a confident zero from the day they were
+    written.
+
+    Two independent bugs were hiding the same signal: this, and patterns that
+    carried Dovecot 2.3's wording. Either alone would have been enough to make
+    IMAP authentication invisible.
+    """
+    body = COLLECTOR.read_text(encoding="utf-8")
+    section = body.split("def sec_log_counters", 1)[1].split("\ndef ", 1)[0]
+    assert "out.stderr" in section, (
+        "the log reader must merge stderr, or a service that logs there is "
+        "silently unmonitored")
+    assert "out.stdout" in section
