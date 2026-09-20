@@ -1,3 +1,7 @@
+from email.message import EmailMessage
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
 import pyotp
 from django.test import TestCase
 from django.utils import timezone
@@ -216,3 +220,62 @@ class ConnectedAppIntegrationTests(TestCase):
             keys,
             {"mailbox.read", "mail.read", "mail.modify", "mail.send"},
         )
+
+
+    @patch("apps.integrations.views.imap.open_mailbox")
+    @patch("apps.integrations.views.sending.submit")
+    @patch("apps.integrations.views.sending.assert_organization_may_send")
+    @patch("apps.integrations.views.ratelimit.hit")
+    @patch("apps.integrations.views.IntegrationSendView.build")
+    def test_connected_send_forces_the_approved_mailbox(
+        self,
+        build,
+        rate_hit,
+        org_check,
+        submit,
+        open_mailbox,
+    ):
+        _, integration = Integration.issue(
+            tenant=self.tenant,
+            mailbox=self.mailbox,
+            name="CRM",
+            purpose="sales_crm",
+            created_by=self.user,
+            permissions=["mailbox.read", "mail.send"],
+        )
+        raw, _ = AccessToken.issue(integration)
+        external = APIClient()
+        external.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {raw}",
+            HTTP_X_MATEMAIL_TENANT=str(self.tenant.id),
+        )
+
+        rate_hit.return_value = SimpleNamespace(allowed=True, retry_after=0)
+        message = EmailMessage()
+        message["Message-ID"] = "<connected-app-test@example.com>"
+        build.return_value = (
+            message,
+            SimpleNamespace(address=self.mailbox.email),
+        )
+        connection = MagicMock()
+        connection.list_folders.return_value = [
+            SimpleNamespace(role="sent", name="Sent")
+        ]
+        open_mailbox.return_value.__enter__.return_value = connection
+
+        response = external.post(
+            "/api/integrations/external/send/",
+            {
+                "to": ["customer@example.net"],
+                "subject": "Hello",
+                "text": "Test",
+                "idempotency_key": "crm-draft-1",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = build.call_args.args[0]
+        self.assertEqual(data["from_address"], self.mailbox.email)
+        submit.assert_called_once()
+        self.assertEqual(response.data["mailbox"], self.mailbox.email)
