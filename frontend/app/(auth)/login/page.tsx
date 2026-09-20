@@ -8,6 +8,11 @@ import { ApiError } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
+  const requestedNext =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("next") || ""
+      : "";
+  const next = requestedNext.startsWith("/app/") ? requestedNext : "/app";
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,9 +26,9 @@ export default function LoginPage() {
     try {
       const result = await login(email, password);
       if (result.requires_2fa && result.partial_token) {
-        router.push(`/2fa?token=${encodeURIComponent(result.partial_token)}`);
+        router.push(`/2fa?token=${encodeURIComponent(result.partial_token)}&next=${encodeURIComponent(next)}`);
       } else {
-        router.push("/app");
+        router.push(next);
       }
     } catch (err) {
       if (err instanceof ApiError) {

@@ -196,6 +196,26 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* Connected apps */}
+      {canEdit && (
+        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-slate-800">Connected Apps</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Connect trusted apps to one exact MateMail mailbox.
+              </p>
+            </div>
+            <Link
+              href="/app/settings/integrations"
+              className="inline-flex items-center rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Manage
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Suspended warning */}
       {workspace.status === "suspended" && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">

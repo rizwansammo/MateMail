@@ -47,6 +47,7 @@ LOCAL_APPS = [
     "apps.backups",
     "apps.billing",
     "apps.teams",
+    "apps.integrations",
     "apps.platform_admin",
     "apps.webmail",
     "apps.postbox",
