@@ -291,6 +291,11 @@ FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 APP_BASE_URL = env("APP_BASE_URL", default="http://localhost:3000")
 WEBMAIL_BASE_URL = env("WEBMAIL_BASE_URL", default="http://localhost:3000")
 
+#: The Platform Console, which is a separate hostname from the Organization
+#: Console so that the two audiences never share a login page (DEC-045). Same
+#: frontend image and same backend; nginx routes by Host.
+PLATFORM_BASE_URL = env("PLATFORM_BASE_URL", default="http://localhost:3000")
+
 # Transactional application email, sent through MateMail's own Mail Engine
 # (DEC-013). The default here keeps every environment from falling back to
 # Django's global "webmaster@localhost", which names no product and would be a

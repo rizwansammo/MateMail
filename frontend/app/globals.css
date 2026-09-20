@@ -26,3 +26,274 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Platform Console theme
+   ─────────────────────────────────────────────────────────────────────────────
+   Scoped to `.pf`, which wraps the Platform Console only. The Organization
+   Console keeps the colours it already has — this phase is not a redesign of
+   the customer application, and sharing one token set would have made it one.
+
+   Three states, not two. An explicit choice stamps `data-pf-theme` on <html>;
+   the default "system" setting stamps nothing, and most people never touch a
+   toggle, so the un-stamped document is the common case and must be correct on
+   its own. Hence: light values on `.pf`, a `prefers-color-scheme` block guarded
+   with `:not([data-pf-theme="light"])` so an explicit light choice still beats
+   a dark OS, and a `[data-pf-theme="dark"]` block so the toggle wins the other
+   way.
+
+   Every colour below is a token. A component that reaches for `slate-900`
+   directly is the thing that renders black-on-black the first time somebody
+   switches theme, which is why the console's surfaces, borders and text all
+   come from here.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.pf {
+  --pf-canvas: #f1f5f9;
+  --pf-surface: #ffffff;
+  --pf-surface-2: #f8fafc;
+  --pf-surface-3: #f1f5f9;
+  --pf-border: #e2e8f0;
+  --pf-border-strong: #cbd5e1;
+
+  --pf-text: #0f172a;
+  --pf-text-muted: #64748b;
+  --pf-text-faint: #94a3b8;
+  --pf-text-inverse: #ffffff;
+
+  /* The mark's navy, which is where the console's accent comes from. */
+  --pf-accent: #1d4ed8;
+  --pf-accent-hover: #1e40af;
+  --pf-accent-soft: #eff6ff;
+  --pf-accent-text: #1e40af;
+
+  /* Semantic, and deliberately separate from the accent: "this is healthy"
+     must not be the same signal as "this is the primary button". */
+  --pf-ok: #047857;
+  --pf-ok-soft: #ecfdf5;
+  --pf-warn: #b45309;
+  --pf-warn-soft: #fffbeb;
+  --pf-danger: #b91c1c;
+  --pf-danger-soft: #fef2f2;
+  --pf-info: #0369a1;
+  --pf-info-soft: #f0f9ff;
+  --pf-neutral: #475569;
+  --pf-neutral-soft: #f1f5f9;
+
+  --pf-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.04);
+  --pf-ring: #93c5fd;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-pf-theme="light"]) .pf {
+    --pf-canvas: #0b1120;
+    --pf-surface: #111827;
+    --pf-surface-2: #172032;
+    --pf-surface-3: #1e293b;
+    --pf-border: #24304a;
+    --pf-border-strong: #334155;
+
+    --pf-text: #e8eefc;
+    --pf-text-muted: #93a3bd;
+    --pf-text-faint: #64748b;
+    --pf-text-inverse: #0b1120;
+
+    --pf-accent: #60a5fa;
+    --pf-accent-hover: #93c5fd;
+    --pf-accent-soft: #15233d;
+    --pf-accent-text: #bfdbfe;
+
+    --pf-ok: #34d399;
+    --pf-ok-soft: #0c2a22;
+    --pf-warn: #fbbf24;
+    --pf-warn-soft: #2e2410;
+    --pf-danger: #f87171;
+    --pf-danger-soft: #331717;
+    --pf-info: #38bdf8;
+    --pf-info-soft: #0b2839;
+    --pf-neutral: #cbd5e1;
+    --pf-neutral-soft: #1e293b;
+
+    --pf-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
+    --pf-ring: #1d4ed8;
+  }
+}
+
+:root[data-pf-theme="dark"] .pf {
+  --pf-canvas: #0b1120;
+  --pf-surface: #111827;
+  --pf-surface-2: #172032;
+  --pf-surface-3: #1e293b;
+  --pf-border: #24304a;
+  --pf-border-strong: #334155;
+
+  --pf-text: #e8eefc;
+  --pf-text-muted: #93a3bd;
+  --pf-text-faint: #64748b;
+  --pf-text-inverse: #0b1120;
+
+  --pf-accent: #60a5fa;
+  --pf-accent-hover: #93c5fd;
+  --pf-accent-soft: #15233d;
+  --pf-accent-text: #bfdbfe;
+
+  --pf-ok: #34d399;
+  --pf-ok-soft: #0c2a22;
+  --pf-warn: #fbbf24;
+  --pf-warn-soft: #2e2410;
+  --pf-danger: #f87171;
+  --pf-danger-soft: #331717;
+  --pf-info: #38bdf8;
+  --pf-info-soft: #0b2839;
+  --pf-neutral: #cbd5e1;
+  --pf-neutral-soft: #1e293b;
+
+  --pf-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
+  --pf-ring: #1d4ed8;
+}
+
+/* The console paints its own ground. Without this it composites over the
+   body background above and shows the customer app's colour in dark mode. */
+.pf {
+  background: var(--pf-canvas);
+  color: var(--pf-text);
+}
+
+/* ── Console primitives ──────────────────────────────────────────────────── */
+
+.pf-card {
+  background: var(--pf-surface);
+  border: 1px solid var(--pf-border);
+  border-radius: 10px;
+  box-shadow: var(--pf-shadow);
+}
+
+.pf-muted { color: var(--pf-text-muted); }
+.pf-faint { color: var(--pf-text-faint); }
+
+.pf-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pf-text-faint);
+}
+
+.pf-input,
+.pf-select {
+  width: 100%;
+  background: var(--pf-surface);
+  border: 1px solid var(--pf-border-strong);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.875rem;
+  color: var(--pf-text);
+}
+
+.pf-input::placeholder { color: var(--pf-text-faint); }
+
+.pf-input:focus-visible,
+.pf-select:focus-visible,
+.pf-btn:focus-visible,
+.pf-nav-item:focus-visible {
+  outline: 2px solid var(--pf-ring);
+  outline-offset: 2px;
+}
+
+.pf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.pf-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.pf-btn-primary {
+  background: var(--pf-accent);
+  color: var(--pf-text-inverse);
+}
+.pf-btn-primary:hover:not(:disabled) { background: var(--pf-accent-hover); }
+
+.pf-btn-ghost {
+  background: transparent;
+  border-color: var(--pf-border-strong);
+  color: var(--pf-text);
+}
+.pf-btn-ghost:hover:not(:disabled) { background: var(--pf-surface-3); }
+
+.pf-btn-danger {
+  background: var(--pf-danger);
+  color: #fff;
+}
+.pf-btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
+
+.pf-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+
+.pf-table th {
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pf-text-faint);
+  border-bottom: 1px solid var(--pf-border);
+  white-space: nowrap;
+}
+
+.pf-table td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--pf-border);
+  color: var(--pf-text);
+  vertical-align: top;
+}
+
+.pf-table tbody tr:hover { background: var(--pf-surface-2); }
+.pf-table tbody tr:last-child td { border-bottom: none; }
+
+/* Digits that line up in a column read as a quantity; digits that do not read
+   as noise. */
+.pf-num { font-variant-numeric: tabular-nums; }
+
+.pf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pf-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8125rem;
+  color: var(--pf-text-muted);
+  text-decoration: none;
+}
+.pf-nav-item:hover { background: var(--pf-surface-3); color: var(--pf-text); }
+
+.pf-nav-item[aria-current="page"] {
+  background: var(--pf-accent-soft);
+  color: var(--pf-accent-text);
+  font-weight: 600;
+}
+
+.pf-scroll-x { overflow-x: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-btn { transition: none; }
+}

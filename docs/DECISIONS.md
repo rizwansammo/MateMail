@@ -2269,3 +2269,159 @@ Dovecot's address is pinned in the compose file exactly as Unbound's already
 was, and for the same class of reason: something else depends on finding it at
 a fixed place. A test asserts the two stay in agreement, and that pinned
 addresses sit clear of the range Docker allocates dynamically.
+
+---
+
+## DEC-045 — Two consoles, two hostnames, one application
+
+**Status:** Accepted · **Phase:** Platform Admin Completion · **Date:** 2026-09-20
+
+### Decision
+
+`app.matemail.online` is the Organization Console, for customers.
+`platform.matemail.online` is the Platform Console, for NetaMate staff.
+
+Both are served by the same Next.js image on `127.0.0.1:3020` and the same
+Django backend on `127.0.0.1:8020`. The split is made by the `Host` header in
+`frontend/middleware.ts`, which mounts the `/platform` subtree at the root of
+the platform hostname. No second frontend, no second container, no new port.
+
+### Why
+
+The two audiences must never share a login page. A customer login reasonably
+offers signup and a trial; a console that can suspend every organization on
+the platform must offer neither, and must not be somewhere a customer can
+arrive by accident.
+
+A separate hostname also makes the boundary legible in the one place people
+actually look — the address bar — and lets the vhost apply a tighter policy
+(`X-Frame-Options: DENY`, no `/django-admin/`, a 2 MB body limit) without
+loosening anything for customers.
+
+What it is **not** is a security boundary. Every `/api/platform/` endpoint
+enforces `IsPlatformAdmin` server-side, and a customer who sends a request to
+the platform hostname with a tenant session still receives a 403 from Django.
+Hostname separation is routing; authorization is in the backend.
+
+### Consequences
+
+- `/admin` and `/admin/tenants/...` redirect 308 to the platform hostname.
+- The redirects are one-hop and asymmetric — the app host redirects, the
+  platform host only rewrites — so no loop is possible.
+- `NEXT_PUBLIC_PLATFORM_HOST` is a build arg, because the comparison happens
+  in middleware and `NEXT_PUBLIC_*` values are inlined at build time.
+
+---
+
+## DEC-046 — Platform Admin sign-in requires an emailed code, always
+
+**Status:** Accepted · **Phase:** Platform Admin Completion · **Date:** 2026-09-20
+
+### Decision
+
+A platform administrator signs in at `/api/platform/auth/login/` with a
+password, receives an opaque challenge and a six-digit code by email, and
+only `/api/platform/auth/verify/` issues a session. There is no enrolment
+step and no flag that turns it off.
+
+`/api/auth/login/` — the organization login — now **refuses** any account with
+`is_platform_admin=True` and directs it to the Platform Console.
+
+### Why
+
+The organization login's second factor is *optional*: it fires only when
+`User.two_factor_enabled` is set, which defaults to False. A platform
+administrator who had not enrolled in TOTP therefore received a full session
+from a password alone, and `/api/platform/` accepts that session exactly like
+one earned through the emailed code. The hostname split in DEC-045 would have
+been decoration over an open door.
+
+Refusal rather than a second implementation of the code flow: there is one
+place that issues platform credentials, and a second one is a second place for
+the requirement to be forgotten.
+
+### Design notes
+
+- The challenge is 32 bytes of opaque entropy, never a JWT, so DRF's
+  `JWTAuthentication` cannot parse it and it cannot be replayed as an access
+  token. No access token and no refresh cookie exist before verification.
+- The code digest is salted with the challenge token:
+  `sha256(challenge + ":" + code)`. A bare digest of six digits falls to an
+  offline search of a million candidates; the challenge is never stored, so a
+  dumped table yields nothing to search.
+- The challenge carries a fingerprint of the password hash, so a password
+  change voids every outstanding challenge without a reverse index.
+- Eligibility is re-checked at verification, not only at issue: an
+  administrator demoted or deactivated while a challenge is outstanding cannot
+  complete it.
+- Password recovery answers identically for every address, including addresses
+  with no platform account, which receive a decoy challenge. Anything else
+  publishes the list of platform administrators.
+
+---
+
+## DEC-047 — Primary Owner recovery cannot be aimed
+
+**Status:** Accepted · **Phase:** Platform Admin Completion · **Date:** 2026-09-20
+
+### Decision
+
+Owner recovery endpoints derive their subject from `tenant.owner`, taken from
+the URL. No request field names a user.
+
+A platform administrator may email the owner a password-reset link and revoke
+the owner's sessions. They may not read the existing password, set a new one,
+receive the reset token, or reach the owner's mailbox.
+
+### Why
+
+Two failure modes, removed by construction rather than by validation.
+
+The first is the wrong target: an operator with two tabs open recovering the
+wrong account, or a crafted request pointing at another organization's owner,
+an ordinary member, or another administrator. With no field to tamper with,
+there is no request that can express it.
+
+The second is escalation. Recovery that produced a token the operator could
+see would be a way to take over any customer account on the platform. The
+operator starts recovery; only the owner's mailbox finishes it. The token is
+never returned in a response, never logged, and never written to the audit
+metadata — which the audit writer enforces by refusing secret-looking keys.
+
+Account recovery and mailbox access are separate boundaries, and nothing in
+this phase crosses the second one. There is no impersonation, no "log in as
+customer", and no message-content viewer.
+
+---
+
+## DEC-048 — The console reports what it can check, and says "unknown" otherwise
+
+**Status:** Accepted · **Phase:** Platform Admin Completion · **Date:** 2026-09-20
+
+### Decision
+
+System Health probes PostgreSQL, Redis, the Mail Engine API and the Celery
+workers for real. Postfix, Dovecot and Rspamd are reported as `unknown`, with
+the reason and where to look, because the Django process has no authoritative
+way to ask them anything.
+
+The Backups page reports that platform backup state is **not observable from
+the application**, and names the host commands and metrics that do answer it.
+
+### Why
+
+`run_backup_task` used to count a tenant's domains and mailboxes, derive
+`size_mb = domains * 2 + mailboxes * 5`, write a `storage_location` pointing at
+a `.tar.gz` that was never created, and mark the job COMPLETED. Nothing was
+ever archived. Every one of those fields reads as evidence, and the only
+moment the claim would have been tested is a restore — the one moment there is
+nothing to fall back on.
+
+The same reasoning applies to a green tick derived from "the database is up".
+A component that was not contacted does not get one, because the tick is what
+stops somebody looking.
+
+The real backups are the P6 restic system on the host, deliberately outside
+the application: a backup system the application can write to is one an
+application compromise can destroy. Not being able to read its state from here
+is the cost of that design, and stating it plainly is the honest way to pay it.

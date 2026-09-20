@@ -41,7 +41,18 @@ TRUSTED_PROXY_COUNT = env.int("TRUSTED_PROXY_COUNT", default=1)
 SECURE_REDIRECT_EXEMPT = [r"^api/health/", r"^api/internal/"]
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_BROWSER_XSS_FILTER = True
-X_FRAME_OPTIONS = "SAMEORIGIN"
+# DENY, not SAMEORIGIN, and `check --deploy` was right to complain.
+#
+# SAMEORIGIN permits this origin to frame itself. Nothing does: the backend
+# serves JSON to a separate Next.js origin plus django-admin, the webmail SSO
+# is a token handshake rather than an embed, and no template in the repository
+# contains an iframe. So the allowance bought nothing and left django-admin
+# frameable by anything this origin also served.
+#
+# It matters more now than it did. The Platform Console drives destructive
+# operations — suspend an organization, disable outbound mail — and a framed
+# admin surface is what clickjacking needs.
+X_FRAME_OPTIONS = "DENY"
 
 # ── Static files ──────────────────────────────────────────────────────────────
 # WhiteNoise with content-hashed filenames plus gzip/brotli variants, so nginx

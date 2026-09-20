@@ -20,8 +20,13 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_API_URL=https://app.matemail.online
 ARG NEXT_PUBLIC_APP_URL=https://app.matemail.online
+# The Platform Console's hostname. middleware.ts compares the incoming
+# Host against it to decide which console to serve, so it is inlined at
+# build time like the others rather than read from the container's env.
+ARG NEXT_PUBLIC_PLATFORM_HOST=platform.matemail.online
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_PLATFORM_HOST=$NEXT_PUBLIC_PLATFORM_HOST
 RUN npm run build
 
 FROM node:24-alpine AS runner

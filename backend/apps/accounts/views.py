@@ -107,6 +107,17 @@ def _enforce(decision, detail):
         raise Throttled(wait=decision.retry_after, detail=detail)
 
 
+def platform_console_login_url() -> str:
+    """
+    Where a platform administrator signs in.
+
+    Read from settings rather than hard-coded so a development environment
+    points at localhost and production points at platform.matemail.online,
+    without the refusal above becoming a broken link in either.
+    """
+    return f"{settings.PLATFORM_BASE_URL.rstrip('/')}/login"
+
+
 def _tenant_brief(tenant):
     return {"id": str(tenant.id), "name": tenant.name, "slug": tenant.slug, "status": tenant.status}
 
@@ -242,6 +253,36 @@ class LoginView(APIView):
         # is the password, and it has just been presented correctly.
         ratelimit.reset(LOGIN_PER_IP.bucket, client_ip, window=LOGIN_PER_IP.window)
         ratelimit.reset(LOGIN_PER_ACCOUNT.bucket, account_key, window=LOGIN_PER_ACCOUNT.window)
+
+        # A platform administrator does not finish a login here, ever.
+        #
+        # This endpoint's second factor is OPTIONAL — it fires only when the
+        # account has enrolled in TOTP. A platform administrator who had not
+        # enrolled would therefore receive a full session from a password
+        # alone, and that session is accepted by /api/platform/ exactly like
+        # one earned through the Console's mandatory emailed code. The
+        # hostname split would have been decoration over an open door.
+        #
+        # So the answer is refusal, not a second implementation of the code
+        # flow: there is one place that issues platform credentials, and it is
+        # PlatformVerifyView. The password was correct, so saying where to go
+        # next reveals nothing that the person does not already know.
+        if user.is_platform_admin:
+            logger.info(
+                "Platform admin %s used the organization login; redirected to "
+                "the Platform Console.", user.pk,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "Platform administrators sign in at the MateMail "
+                        "Platform Console."
+                    ),
+                    "platform_admin": True,
+                    "platform_login_url": platform_console_login_url(),
+                },
+                status=403,
+            )
 
         membership = (
             TenantMembership.objects.select_related("tenant")

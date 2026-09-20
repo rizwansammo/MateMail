@@ -56,6 +56,121 @@ function buildCsp(nonce: string): string {
   ].join("; ");
 }
 
+/**
+ * Host-based routing for the two consoles.
+ *
+ * One Next.js application serves both. `platform.matemail.online` is the
+ * Platform Console and `app.matemail.online` is the Organization Console, and
+ * which one a request gets is decided here by the Host header rather than by
+ * running a second deployment.
+ *
+ * On the platform host the whole `/platform` subtree is mounted at the root, so
+ * an operator sees `/organizations`, not `/platform/organizations`. That is a
+ * REWRITE, not a redirect: the URL stays clean and the route files stay in one
+ * place. The console's own links are written as `/platform/...`, which the
+ * rewrite below also accepts, so a link never 404s whichever host it is on.
+ *
+ * WHY THERE IS NO REDIRECT LOOP
+ *   The two hosts push in opposite directions, so the rules have to be
+ *   asymmetric:
+ *     - platform host: `/x` is rewritten to `/platform/x` internally. A rewrite
+ *       does not change the browser's URL, so nothing re-enters the middleware.
+ *     - app host: `/platform/...` and `/admin/...` REDIRECT to the platform
+ *       host. Those land on the platform host, where the first rule rewrites
+ *       rather than redirects. The chain therefore terminates after one hop.
+ *   Anything already under `/_next`, `/api` or the icons is left alone on both.
+ */
+
+/** The Platform Console's hostname, if one is configured for this deployment. */
+const PLATFORM_HOST = process.env.NEXT_PUBLIC_PLATFORM_HOST ?? "";
+
+function hostOf(request: NextRequest): string {
+  // `host` is what nginx forwards; it carries the port in development.
+  return (request.headers.get("host") ?? "").toLowerCase().split(":")[0];
+}
+
+function isPlatformHost(host: string): boolean {
+  if (PLATFORM_HOST) return host === PLATFORM_HOST.toLowerCase();
+  // Fallback so a deployment that has not set the variable still behaves, and
+  // so `platform.localhost` works for local testing.
+  return host.startsWith("platform.");
+}
+
+/** Paths that are never console routes and must pass through untouched. */
+function isInfrastructurePath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/api") ||
+    pathname === "/icon.png" ||
+    pathname === "/apple-icon.png" ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml"
+  );
+}
+
+/** Either an internal rewrite target or an external redirect target. */
+type Routing =
+  | { kind: "rewrite"; url: URL }
+  | { kind: "redirect"; url: URL; status: 307 | 308 }
+  | null;
+
+function routeForHost(request: NextRequest): Routing {
+  const host = hostOf(request);
+  const { pathname, search } = request.nextUrl;
+
+  if (isInfrastructurePath(pathname)) return null;
+
+  if (isPlatformHost(host)) {
+    // Already inside the subtree — the console's own links look like this.
+    if (pathname === "/platform" || pathname.startsWith("/platform/")) return null;
+
+    // Customer surfaces do not exist on this hostname. Sending them to the
+    // console root rather than 404ing keeps a stale bookmark useful, and there
+    // is deliberately no signup or trial route to reach here at all.
+    const url = request.nextUrl.clone();
+    url.pathname = pathname === "/" ? "/platform" : `/platform${pathname}`;
+    url.search = search;
+    return { kind: "rewrite", url };
+  }
+
+  // Organization host. The Platform Console has a canonical home, so send
+  // people there instead of serving a second copy on the customer hostname.
+  if (PLATFORM_HOST && (pathname === "/platform" || pathname.startsWith("/platform/"))) {
+    const target = new URL(request.url);
+    target.host = PLATFORM_HOST;
+    target.protocol = "https:";
+    target.port = "";
+    target.pathname = pathname.replace(/^\/platform/, "") || "/";
+    return { kind: "redirect", url: target, status: 308 };
+  }
+
+  // The pre-existing admin screens. Their URLs are kept working, pointed at
+  // the equivalent page on the canonical hostname.
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    const rest = pathname.replace(/^\/admin/, "");
+    const mapped =
+      rest === "" || rest === "/"
+        ? "/"
+        : rest.replace(/^\/tenants/, "/organizations");
+
+    if (PLATFORM_HOST) {
+      const target = new URL(request.url);
+      target.host = PLATFORM_HOST;
+      target.protocol = "https:";
+      target.port = "";
+      target.pathname = mapped;
+      return { kind: "redirect", url: target, status: 308 };
+    }
+
+    // No platform hostname configured (development): keep it on this host.
+    const url = request.nextUrl.clone();
+    url.pathname = `/platform${mapped === "/" ? "" : mapped}`;
+    return { kind: "redirect", url, status: 307 };
+  }
+
+  return null;
+}
+
 export function middleware(request: NextRequest) {
   // crypto.randomUUID is available in the Edge runtime and is cryptographically
   // random. Base64 keeps the header value compact and CSP-safe.
@@ -69,7 +184,23 @@ export function middleware(request: NextRequest) {
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
 
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  const routed = routeForHost(request);
+
+  // A redirect carries no document, so it needs no nonce — but it still gets
+  // the policy, because a browser applies CSP to whatever response it receives.
+  if (routed?.kind === "redirect") {
+    const redirect = NextResponse.redirect(routed.url, routed.status);
+    redirect.headers.set("Content-Security-Policy", csp);
+    return redirect;
+  }
+
+  // Both branches pass `request.headers` through, because the rewritten route
+  // renders the document and Next.js reads the nonce off the request.
+  const response =
+    routed?.kind === "rewrite"
+      ? NextResponse.rewrite(routed.url, { request: { headers: requestHeaders } })
+      : NextResponse.next({ request: { headers: requestHeaders } });
+
   response.headers.set("Content-Security-Policy", csp);
   return response;
 }

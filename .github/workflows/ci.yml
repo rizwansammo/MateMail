@@ -381,6 +381,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=https://app.matemail.online
             NEXT_PUBLIC_APP_URL=https://app.matemail.online
+            NEXT_PUBLIC_PLATFORM_HOST=platform.matemail.online
           tags: |
             ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
             ${{ env.FRONTEND_IMAGE }}:main

@@ -181,6 +181,19 @@ class AdminTenantDetailView(APIView):
             "owner_id": str(tenant.owner_id),
             "created_at": tenant.created_at.isoformat(),
             "updated_at": tenant.updated_at.isoformat(),
+            # Approval and outbound state. Both are current facts a console
+            # operator acts on, and both were previously only derivable by
+            # reading the audit log — which meant the detail page could not
+            # show whether sending was switched off without a second request.
+            "approved_at": tenant.approved_at.isoformat() if tenant.approved_at else None,
+            "approved_by": tenant.approved_by.email if tenant.approved_by else None,
+            "review_reason": tenant.review_reason,
+            "outbound_disabled": tenant.outbound_disabled,
+            "outbound_disabled_at": (
+                tenant.outbound_disabled_at.isoformat()
+                if tenant.outbound_disabled_at else None
+            ),
+            "can_send_outbound": tenant.can_send_mail,
             "domain_count": tenant.domains.count(),
             "mailbox_count": tenant.mailboxes.count(),
             "member_count": tenant.memberships.filter(status="active").count(),

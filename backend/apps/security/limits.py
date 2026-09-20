@@ -53,3 +53,30 @@ TWO_FACTOR_MANAGE_PER_USER = Limit("2fa:manage", 10, QUARTER_HOUR)
 #: valid_window=1, so a code is accepted for the timestep before, during and
 #: after its own — 90 seconds. 120 covers that with margin for clock skew.
 TOTP_REPLAY_TTL = 120
+
+#: Platform Console login attempts per IP. Tighter than the tenant limit: the
+#: population of platform administrators is a handful of people, so a legitimate
+#: burst does not exist and anything that looks like one is an attack.
+PLATFORM_LOGIN_PER_IP = Limit("platform:login:ip", 5, QUARTER_HOUR)
+
+#: Platform Console login attempts per account.
+PLATFORM_LOGIN_PER_ACCOUNT = Limit("platform:login:account", 5, QUARTER_HOUR)
+
+#: Emailed security codes issued per account, counted across both login and
+#: password reset. This is the mailbox-flooding control: without it, anyone who
+#: knows a platform administrator's address can post the login form repeatedly
+#: and fill their inbox.
+PLATFORM_CODE_PER_ACCOUNT = Limit("platform:code:account", 5, QUARTER_HOUR)
+
+#: Resend requests against one outstanding challenge.
+PLATFORM_CODE_RESEND = Limit("platform:code:resend", 3, QUARTER_HOUR)
+
+#: Platform password-reset requests per normalised email address. Counted for
+#: every request, existing account or not, so the limit cannot be used to
+#: discover who the platform administrators are.
+PLATFORM_RESET_PER_EMAIL = Limit("platform:reset:email", 3, HOUR)
+
+#: Owner-recovery actions a platform administrator may trigger per hour. These
+#: send mail to a customer, so an operator with a stuck script must not be able
+#: to turn the console into a way of mailbombing an organization's owner.
+OWNER_RECOVERY_PER_ADMIN = Limit("platform:recovery:admin", 20, HOUR)
