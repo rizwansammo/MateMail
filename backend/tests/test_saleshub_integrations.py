@@ -17,7 +17,7 @@ from apps.tenants.models import (
 )
 
 
-class SalesHubIntegrationTests(TestCase):
+class ConnectedAppIntegrationTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
             email="owner@example.com",
@@ -57,9 +57,10 @@ class SalesHubIntegrationTests(TestCase):
         response = self.client.post(
             "/api/integrations/",
             {
-                "name": "SalesHub",
+                "name": "Example CRM",
+                "purpose": "sales_crm",
                 "mailbox_id": str(self.mailbox.id),
-                "permissions": ["send_email", "use_signatures"],
+                "permissions": ["mailbox.read", "mail.send", "signatures.read"],
             },
             format="json",
         )
@@ -79,9 +80,9 @@ class SalesHubIntegrationTests(TestCase):
         secret, _ = Integration.issue(
             tenant=self.tenant,
             mailbox=self.mailbox,
-            name="SalesHub",
+            name="Example App",
             created_by=self.user,
-            permissions=["send_email"],
+            permissions=["mailbox.read", "mail.send"],
         )
         public = APIClient()
         started = public.post(
@@ -141,9 +142,9 @@ class SalesHubIntegrationTests(TestCase):
         _, integration = Integration.issue(
             tenant=self.tenant,
             mailbox=self.mailbox,
-            name="SalesHub",
+            name="Example App",
             created_by=self.user,
-            permissions=["send_email"],
+            permissions=["mailbox.read", "mail.send"],
         )
         raw, token = AccessToken.issue(integration)
         external = APIClient()
@@ -178,4 +179,40 @@ class SalesHubIntegrationTests(TestCase):
         self.assertEqual(
             external.get("/api/integrations/external/profile/").status_code,
             401,
+        )
+
+
+    def test_scope_denies_unapproved_mail_read(self):
+        _, integration = Integration.issue(
+            tenant=self.tenant,
+            mailbox=self.mailbox,
+            name="CRM",
+            purpose="sales_crm",
+            created_by=self.user,
+            permissions=["mailbox.read", "mail.send"],
+        )
+        raw, _ = AccessToken.issue(integration)
+        external = APIClient()
+        external.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {raw}",
+            HTTP_X_MATEMAIL_TENANT=str(self.tenant.id),
+        )
+        response = external.get("/api/integrations/external/messages/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_helpdesk_preset_grants_mail_read_and_modify(self):
+        response = self.client.post(
+            "/api/integrations/",
+            {
+                "name": "External Helpdesk",
+                "purpose": "helpdesk",
+                "mailbox_id": str(self.mailbox.id),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        keys = {item["key"] for item in response.data["permissions"]}
+        self.assertEqual(
+            keys,
+            {"mailbox.read", "mail.read", "mail.modify", "mail.send"},
         )
