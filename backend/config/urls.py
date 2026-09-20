@@ -27,6 +27,8 @@ urlpatterns = [
     path("api/platform/", include("apps.platform_admin.urls")),
     # Team invites + API keys
     path("api/teams/", include("apps.teams.urls")),
+    # Tenant-scoped connected apps (SalesHub first-party integration).
+    path("api/integrations/", include("apps.integrations.urls")),
     # Backup jobs — list, trigger, detail
     path("api/backups/", include("apps.backups.urls")),
 ]
