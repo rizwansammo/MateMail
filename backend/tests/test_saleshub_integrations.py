@@ -163,7 +163,7 @@ class SalesHubIntegrationTests(TestCase):
         )
         self.assertEqual(
             wrong_tenant.get("/api/integrations/external/profile/").status_code,
-            401,
+            403,
         )
 
         disconnected = external.post(
