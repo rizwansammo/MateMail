@@ -34,6 +34,11 @@ function AuthorizationContent() {
         "/api/integrations/authorize/?request=" + encodeURIComponent(requestToken)
       );
       const body = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        const next = window.location.pathname + window.location.search;
+        window.location.href = "/login?next=" + encodeURIComponent(next);
+        return;
+      }
       if (!res.ok) {
         setError(body.detail || "This connection request could not be loaded.");
         return;
