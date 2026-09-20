@@ -21,6 +21,9 @@ class IntegrationPrincipal:
 class IntegrationAccessAuthentication(authentication.BaseAuthentication):
     """Authenticate a revocable mmc_ token bound to one tenant and mailbox."""
 
+    def authenticate_header(self, request):
+        return "Bearer"
+
     def authenticate(self, request):
         auth = request.META.get("HTTP_AUTHORIZATION", "")
         if not auth.startswith("Bearer mmc_"):
