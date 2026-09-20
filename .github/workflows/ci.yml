@@ -221,6 +221,11 @@ jobs:
           POSTGRES_PASSWORD: ci-placeholder
           INTERNAL_API_SECRET: ci-placeholder
           EMAIL_HOST: localhost
+          # The Dovecot master credential PostBox opens mailboxes with. Declared
+          # ${POSTBOX_MASTER_PASSWORD:?required} in the compose file as of P11,
+          # so interpolation fails without it. A placeholder here, never a real
+          # value: this job resolves the file, it does not start anything.
+          POSTBOX_MASTER_PASSWORD: ci-placeholder
         run: docker compose config --quiet && echo "production compose is valid"
 
       - name: Assert NetaMate standard (network isolation, ports, images)
@@ -232,6 +237,11 @@ jobs:
           POSTGRES_PASSWORD: ci-placeholder
           INTERNAL_API_SECRET: ci-placeholder
           EMAIL_HOST: localhost
+          # The Dovecot master credential PostBox opens mailboxes with. Declared
+          # ${POSTBOX_MASTER_PASSWORD:?required} in the compose file as of P11,
+          # so interpolation fails without it. A placeholder here, never a real
+          # value: this job resolves the file, it does not start anything.
+          POSTBOX_MASTER_PASSWORD: ci-placeholder
         run: |
           docker compose config > resolved.yml
           python3 - <<'PY'
