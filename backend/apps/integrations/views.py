@@ -23,6 +23,7 @@ from .models import (
     AccessToken,
     ConnectionRequest,
     Integration,
+    IntegrationDelivery,
     PERMISSION_LABELS,
 )
 from .security import mailbox_verification_requirement, verify_fresh_authorization
@@ -361,7 +362,35 @@ class IntegrationSendView(APIView, ComposeMixin):
                 {"detail": "This connection cannot send email."}, status=403
             )
 
-        serializer = ComposeSerializer(data=request.data)
+        idempotency_key = str(request.data.get("idempotency_key") or "").strip()
+        if not idempotency_key:
+            return Response({"detail": "idempotency_key is required."}, status=400)
+        if len(idempotency_key) > 100:
+            return Response({"detail": "idempotency_key is too long."}, status=400)
+
+        delivery, created = IntegrationDelivery.objects.get_or_create(
+            integration=integration,
+            idempotency_key=idempotency_key,
+        )
+        if not created:
+            if delivery.status == "sent":
+                return Response({
+                    "sent": True,
+                    "message_id": delivery.message_id,
+                    "filed_in_sent": delivery.filed_in_sent,
+                    "mailbox": integration.mailbox.email,
+                    "idempotent_replay": True,
+                })
+            return Response(
+                {"detail": "This message is already being processed. It will not be sent again."},
+                status=409,
+            )
+
+        compose_payload = {
+            key: value for key, value in request.data.items()
+            if key != "idempotency_key"
+        }
+        serializer = ComposeSerializer(data=compose_payload)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
         data["from_address"] = integration.mailbox.email
@@ -427,6 +456,14 @@ class IntegrationSendView(APIView, ComposeMixin):
                 mailbox.pk,
                 exc,
             )
+
+        delivery.status = "sent"
+        delivery.message_id = message["Message-ID"] or ""
+        delivery.filed_in_sent = filed
+        delivery.completed_at = timezone.now()
+        delivery.save(
+            update_fields=["status", "message_id", "filed_in_sent", "completed_at"]
+        )
 
         return Response(
             {
