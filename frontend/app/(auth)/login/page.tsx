@@ -2,14 +2,16 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { ApiError } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
-  const params = useSearchParams();
-  const requestedNext = params.get("next") || "";
+  const requestedNext =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("next") || ""
+      : "";
   const next = requestedNext.startsWith("/app/") ? requestedNext : "/app";
   const { login } = useAuth();
   const [email, setEmail] = useState("");
