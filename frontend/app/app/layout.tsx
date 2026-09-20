@@ -46,9 +46,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      router.push("/login");
+      if (pathname.startsWith("/app/integrations/authorize")) {
+        const query = typeof window !== "undefined" ? window.location.search : "";
+        router.push("/login?next=" + encodeURIComponent(pathname + query));
+      } else {
+        router.push("/login");
+      }
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated, pathname, router]);
 
   if (isLoading) {
     return (
