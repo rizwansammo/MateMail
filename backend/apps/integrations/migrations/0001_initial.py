@@ -30,6 +30,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 ("name", models.CharField(max_length=100)),
+                ("purpose", models.CharField(default="custom", max_length=20)),
                 ("secret_prefix", models.CharField(max_length=16)),
                 ("secret_hash", models.CharField(max_length=64, unique=True)),
                 (
