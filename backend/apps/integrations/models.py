@@ -9,14 +9,28 @@ from django.utils import timezone
 
 
 PERMISSION_LABELS = {
-    "send_email": "Send email from this mailbox",
-    "use_signatures": "Use this mailbox's signatures",
+    "mailbox.read": "See this mailbox's address and basic details",
+    "mail.send": "Send email from this mailbox",
+    "mail.read": "Read email in this mailbox",
+    "mail.modify": "Mark email as read or unread",
+    "signatures.read": "Use this mailbox's signatures",
 }
 ALLOWED_PERMISSIONS = frozenset(PERMISSION_LABELS)
 
+PURPOSE_LABELS = {
+    "sales_crm": "Sales / CRM",
+    "helpdesk": "Helpdesk / Ticketing",
+    "custom": "Custom application",
+}
+PURPOSE_PERMISSIONS = {
+    "sales_crm": ["mailbox.read", "mail.send", "signatures.read"],
+    "helpdesk": ["mailbox.read", "mail.read", "mail.modify", "mail.send"],
+    "custom": ["mailbox.read"],
+}
+
 
 def default_permissions():
-    return ["send_email", "use_signatures"]
+    return list(PURPOSE_PERMISSIONS["sales_crm"])
 
 
 def normalise_permissions(values):
@@ -40,6 +54,7 @@ class Integration(models.Model):
         "mailboxes.Mailbox", on_delete=models.PROTECT, related_name="integrations"
     )
     name = models.CharField(max_length=100)
+    purpose = models.CharField(max_length=20, default="custom")
     secret_prefix = models.CharField(max_length=16)
     secret_hash = models.CharField(max_length=64, unique=True)
     permissions = models.JSONField(default=default_permissions)
@@ -62,12 +77,13 @@ class Integration(models.Model):
         return self.revoked_at is None
 
     @classmethod
-    def issue(cls, *, tenant, mailbox, name, created_by, permissions):
+    def issue(cls, *, tenant, mailbox, name, purpose, created_by, permissions):
         raw = "mmi_" + secrets.token_urlsafe(40)
         obj = cls.objects.create(
             tenant=tenant,
             mailbox=mailbox,
             name=name,
+            purpose=purpose if purpose in PURPOSE_LABELS else "custom",
             secret_prefix=raw[:12],
             secret_hash=_digest(raw),
             created_by=created_by,
