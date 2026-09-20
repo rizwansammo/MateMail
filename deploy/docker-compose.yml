@@ -36,7 +36,11 @@ x-backend-env: &backend_env
   DJANGO_SETTINGS_MODULE: config.settings.prod
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?required}
   DJANGO_DEBUG: "False"
-  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-app.matemail.online,matemail.online,localhost,127.0.0.1}
+  # platform.matemail.online is listed because nginx forwards the Host header
+  # unchanged — that is what lets the frontend middleware tell the two
+  # consoles apart, so Django must accept it or every Platform API call is
+  # a 400 DisallowedHost.
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-app.matemail.online,platform.matemail.online,matemail.online,localhost,127.0.0.1}
   DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:-matemail}
   REDIS_URL: redis://redis:6379/0
   INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?required}

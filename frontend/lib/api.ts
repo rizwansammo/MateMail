@@ -1,6 +1,35 @@
 import { clearTokens, getAccessToken, isTokenExpired, setAccessToken } from "./auth";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+/**
+ * Where the API lives, from wherever this code is running.
+ *
+ * IN THE BROWSER, IN PRODUCTION: same origin, always.
+ *
+ * This used to be the baked value of NEXT_PUBLIC_API_URL —
+ * `https://app.matemail.online` — which broke the Platform Console outright.
+ * From platform.matemail.online the browser would attempt a cross-origin
+ * request to app.matemail.online, and the Content-Security-Policy that
+ * middleware.ts sets on that hostname says `connect-src 'self'`. The fetch was
+ * refused before it left the browser, so every Platform page reported a
+ * generic failure while the endpoint itself was perfectly healthy.
+ *
+ * Relative is not merely a workaround, it is the correct answer: nginx proxies
+ * /api/ to the same Django backend on BOTH hostnames, so a relative path
+ * follows whichever console the operator is on. It also keeps the HttpOnly
+ * refresh cookie first-party to that console rather than trying to share one
+ * cookie across two sites — which the browser would not do anyway.
+ *
+ * ANYWHERE ELSE: the configured absolute URL. Development runs the app on
+ * :3000 and Django on :8000, where same-origin is wrong, and a server-side
+ * render cannot fetch a relative URL at all.
+ */
+const CONFIGURED_API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+const API_BASE =
+  typeof window !== "undefined" && process.env.NODE_ENV === "production"
+    ? ""
+    : CONFIGURED_API_BASE;
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -60,10 +89,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   // `credentials: "include"` is what carries the HttpOnly refresh cookie.
-  // fetch defaults to "same-origin", which is enough in production (the API and
-  // the app share app.matemail.online) but not in development, where the app
-  // runs on :3000 and the API on :8000. The cookie's own Path limits it to
-  // /api/auth/, so this does not attach a credential to anything else.
+  // fetch defaults to "same-origin", which is enough in production — every
+  // console now calls its own origin, see API_BASE above — but not in
+  // development, where the app runs on :3000 and the API on :8000. The
+  // cookie's own Path limits it to /api/auth/, so this does not attach a
+  // credential to anything else.
   const res = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
     ...options,
