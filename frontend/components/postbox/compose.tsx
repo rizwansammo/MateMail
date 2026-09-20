@@ -153,8 +153,12 @@ export function Compose({
   const submit = useCallback(
     async (schedule: boolean) => {
       setError(null);
-      if (splitAddresses(to).length === 0 && splitAddresses(cc).length === 0
-          && splitAddresses(bcc).length === 0) {
+      const recipients = [
+        ...splitAddresses(to),
+        ...splitAddresses(cc),
+        ...splitAddresses(bcc),
+      ];
+      if (recipients.length === 0) {
         setError("Add at least one recipient.");
         return;
       }
@@ -169,7 +173,13 @@ export function Compose({
           ...payload(),
           send_at: schedule ? new Date(scheduleAt).toISOString() : null,
         });
-        onSent(result.scheduled ? "Message scheduled." : "Message sent.");
+        if (result.scheduled) {
+          onSent("Message scheduled.");
+        } else {
+          const firstRecipient = recipients[0];
+          const more = recipients.length > 1 ? ` +${recipients.length - 1} more` : "";
+          onSent(`Message sent to ${firstRecipient}${more}`);
+        }
         onClose();
       } catch (caught) {
         setError(describePostBoxError(caught, "Your message could not be sent."));

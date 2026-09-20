@@ -144,7 +144,10 @@ export default function PostBoxAppLayout({
         </div>
 
         <div className="p-3">
-          <Link href="/postbox?compose=new" className="pb-btn pb-btn-primary w-full">
+          <Link
+            href="/postbox?compose=new"
+            className="pb-btn pb-btn-primary pb-compose-cta w-full"
+          >
             Compose
           </Link>
         </div>

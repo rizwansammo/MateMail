@@ -514,6 +514,26 @@ body {
 .pb-btn-primary { background: var(--pb-primary); color: var(--pb-primary-fg); }
 .pb-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
 
+/* The primary PostBox action should read immediately against the dark rail. */
+.pb-compose-cta {
+  background: #168bd0;
+  border-color: #2ca3e4;
+  color: #ffffff;
+  box-shadow: 0 5px 18px rgb(22 139 208 / 0.28);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+.pb-compose-cta:hover:not(:disabled) {
+  background: #22a0e8;
+  border-color: #55b9ef;
+  box-shadow: 0 7px 22px rgb(34 160 232 / 0.34);
+  filter: none;
+  transform: translateY(-1px);
+}
+
 .pb-btn-ghost {
   background: transparent;
   border-color: var(--pb-border-strong);

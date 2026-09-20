@@ -13,11 +13,12 @@
  * before it was sent. Nothing is cleaned here — a second, weaker sanitiser in
  * the browser would be the one people trusted.
  */
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
   ArrowLeft,
+  CheckCircle2,
   CornerUpLeft,
   CornerUpRight,
   Download,
@@ -33,6 +34,7 @@ import {
   ShieldCheck,
   Star,
   Trash2,
+  X,
 } from "lucide-react";
 
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
@@ -112,6 +114,9 @@ function Mailbox() {
 
   const [explicitCompose, setExplicitCompose] = useState<ComposeInitial | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [successVisible, setSuccessVisible] = useState(false);
+  const successToastRef = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Debounce the search box so typing does not run an IMAP SEARCH per keystroke.
@@ -156,6 +161,27 @@ function Mailbox() {
       router.replace(`/postbox?folder=${encodeURIComponent(folder)}`);
     }
   }, [composeRequested, folder, router]);
+
+  const dismissSuccess = useCallback(() => {
+    setSuccessVisible(false);
+    window.setTimeout(() => setSuccessNotice(null), 180);
+  }, []);
+
+  useEffect(() => {
+    if (!successNotice) return;
+
+    const autoDismiss = window.setTimeout(dismissSuccess, 6000);
+    const dismissOnOutsideClick = (event: PointerEvent) => {
+      const toast = successToastRef.current;
+      if (toast && !toast.contains(event.target as Node)) dismissSuccess();
+    };
+
+    document.addEventListener("pointerdown", dismissOnOutsideClick);
+    return () => {
+      window.clearTimeout(autoDismiss);
+      document.removeEventListener("pointerdown", dismissOnOutsideClick);
+    };
+  }, [dismissSuccess, successNotice]);
 
   const openMessage = useCallback(
     async (summary: MessageSummary, remote = false) => {
@@ -305,6 +331,40 @@ function Mailbox() {
         </div>
       )}
 
+      {successNotice && (
+        <div
+          ref={successToastRef}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className={`fixed left-1/2 top-1/2 z-[70] flex max-w-[min(90vw,30rem)] -translate-x-1/2 -translate-y-1/2 items-center gap-2 border px-3 py-2 text-sm shadow-2xl transition-all duration-200 ${
+            successVisible ? "scale-100 opacity-100" : "scale-95 opacity-0"
+          }`}
+          style={{
+            background: "var(--pb-success-soft)",
+            borderColor: "var(--pb-success)",
+            color: "var(--pb-fg)",
+            borderLeftWidth: "3px",
+            boxShadow: "0 16px 42px rgb(0 0 0 / 0.28)",
+          }}
+        >
+          <CheckCircle2
+            className="h-4 w-4 shrink-0"
+            style={{ color: "var(--pb-success)" }}
+            aria-hidden="true"
+          />
+          <span className="min-w-0 flex-1 truncate font-medium">{successNotice}</span>
+          <button
+            type="button"
+            className="pb-btn pb-btn-plain -mr-1"
+            aria-label="Dismiss confirmation"
+            onClick={dismissSuccess}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       {/* ── list + reader ──────────────────────────────────────────────── */}
       <div className={`flex min-h-0 flex-1 ${paneRight ? "flex-row" : "flex-col"}`}>
         <div
@@ -443,7 +503,9 @@ function Mailbox() {
           signatures={signatures}
           onClose={closeCompose}
           onSent={(message) => {
-            setNotice(message);
+            setNotice(null);
+            setSuccessNotice(message);
+            setSuccessVisible(true);
             void loadList();
           }}
         />
