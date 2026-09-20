@@ -389,6 +389,9 @@ class IntegrationSendView(APIView, ComposeMixin):
             key: value for key, value in request.data.items()
             if key != "idempotency_key"
         }
+        # Connected apps never choose the From address. It is always the exact
+        # mailbox the integration was approved for.
+        compose_payload["from_address"] = integration.mailbox.email
         serializer = ComposeSerializer(data=compose_payload)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
