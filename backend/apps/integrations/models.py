@@ -77,7 +77,7 @@ class Integration(models.Model):
         return self.revoked_at is None
 
     @classmethod
-    def issue(cls, *, tenant, mailbox, name, purpose, created_by, permissions):
+    def issue(cls, *, tenant, mailbox, name, purpose="custom", created_by, permissions):
         raw = "mmi_" + secrets.token_urlsafe(40)
         obj = cls.objects.create(
             tenant=tenant,
