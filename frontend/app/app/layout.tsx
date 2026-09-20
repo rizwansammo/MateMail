@@ -10,7 +10,6 @@ import {
   CreditCard,
   DatabaseBackup,
   ExternalLink,
-  FileText,
   Globe2,
   Layers,
   LogOut,
@@ -34,7 +33,6 @@ const nav = [
   // cross-domain page here only once that route is actually built.
   { label: "Spam", href: "/app/spam", icon: Shield },
   { label: "Queue", href: "/app/queue", icon: Clock },
-  { label: "Logs", href: "/app/logs", icon: FileText },
   { label: "Backups", href: "/app/backups", icon: DatabaseBackup },
   { label: "Billing", href: "/app/billing", icon: CreditCard },
   { label: "Team", href: "/app/team", icon: UserPlus },
