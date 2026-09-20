@@ -1,16 +1,30 @@
 from rest_framework import serializers
 
-from .models import ALLOWED_PERMISSIONS, normalise_permissions
+from .models import (
+    ALLOWED_PERMISSIONS,
+    PURPOSE_LABELS,
+    PURPOSE_PERMISSIONS,
+    normalise_permissions,
+)
 
 
 class IntegrationCreateSerializer(serializers.Serializer):
-    name = serializers.CharField(max_length=100, default="NetaMate SalesHub")
+    name = serializers.CharField(max_length=100)
+    purpose = serializers.ChoiceField(
+        choices=tuple((key, label) for key, label in PURPOSE_LABELS.items()),
+        default="custom",
+    )
     mailbox_id = serializers.UUIDField()
     permissions = serializers.ListField(
         child=serializers.CharField(),
         required=False,
-        default=lambda: ["send_email", "use_signatures"],
     )
+
+    def validate(self, attrs):
+        purpose = attrs.get("purpose", "custom")
+        if "permissions" not in attrs:
+            attrs["permissions"] = list(PURPOSE_PERMISSIONS[purpose])
+        return attrs
 
     def validate_permissions(self, values):
         invalid = sorted(set(values) - ALLOWED_PERMISSIONS)
@@ -19,9 +33,9 @@ class IntegrationCreateSerializer(serializers.Serializer):
                 "Unknown permission: " + ", ".join(invalid)
             )
         cleaned = normalise_permissions(values)
-        if "send_email" not in cleaned:
+        if not cleaned:
             raise serializers.ValidationError(
-                "SalesHub connections must be allowed to send email."
+                "Choose at least one permission for this connected app."
             )
         return cleaned
 
