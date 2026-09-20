@@ -159,3 +159,25 @@ class AccessToken(models.Model):
             .filter(token_hash=_digest(raw), revoked_at__isnull=True)
             .first()
         )
+
+
+
+class IntegrationDelivery(models.Model):
+    integration = models.ForeignKey(
+        Integration, on_delete=models.CASCADE, related_name="deliveries"
+    )
+    idempotency_key = models.CharField(max_length=100)
+    status = models.CharField(max_length=16, default="processing")
+    message_id = models.CharField(max_length=998, blank=True, default="")
+    filed_in_sent = models.BooleanField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "integrations_delivery"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["integration", "idempotency_key"],
+                name="uniq_integration_delivery_key",
+            )
+        ]
