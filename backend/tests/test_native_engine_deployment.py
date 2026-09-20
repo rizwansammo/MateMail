@@ -802,6 +802,25 @@ class DovecotImageContractTest(unittest.TestCase):
                 self.assertIn("groupadd --system " + identity, self.directives)
                 self.assertIn("nologin " + identity, self.directives)
 
+    def test_postbox_master_file_is_precreated_for_the_auth_worker(self):
+        """
+        Dovecot's auth worker runs as the unprivileged `dovecot` identity.
+
+        P11 originally rendered the master passwd-file with umask 077, which
+        made it 0600 root:root. The daemon was healthy, but every PostBox master
+        login failed with "Permission denied" because uid/gid 999 could not read
+        the file. The image must pre-create that exact path as 0640 root:dovecot;
+        the entrypoint then truncates it in place without changing metadata.
+        """
+        self.assertIn(
+            "COPY --from=layout --chown=0:dovecot --chmod=0640 "
+            "/layout/etc/dovecot/postbox-master /etc/dovecot/postbox-master",
+            self.directives,
+        )
+        entrypoint = (NE / "images" / "dovecot" / "entrypoint.sh").read_text(
+            encoding="utf-8")
+        self.assertIn("> /etc/dovecot/postbox-master", entrypoint)
+
     def test_the_master_can_drop_privileges(self):
         """
         Dovecot drops from root to dovenull, dovecot and vmail. An unprivileged

@@ -48,7 +48,9 @@ FROM debian:12-slim AS layout
 
 RUN set -eux; \
     mkdir -p /layout/srv/vmail /layout/var/lib/dovecot \
-             /layout/var/vmail /layout/var/vmail_index; \
+             /layout/var/vmail /layout/var/vmail_index \
+             /layout/etc/dovecot; \
+    : > /layout/etc/dovecot/postbox-master; \
     chmod 0700 /layout/srv/vmail; \
     chmod 0770 /layout/var/lib/dovecot; \
     chmod 0750 /layout/var/vmail /layout/var/vmail_index; \
@@ -76,6 +78,15 @@ RUN set -eux; \
     useradd  --system --gid dovenull --no-create-home \
              --home-dir /nonexistent --shell /usr/sbin/nologin dovenull; \
     groupadd --system --gid 2102 smtpauth
+
+# PostBox's master passwd-file is intentionally EMPTY in the image. The runtime
+# entrypoint writes the real secret into this path, but Dovecot's auth worker
+# runs as the unprivileged `dovecot` identity and therefore cannot read a 0600
+# root-owned file. Pre-creating the inode as 0640 root:dovecot gives that one
+# worker read access without making the master credential world-readable.
+# Shell redirection in the entrypoint truncates this existing file and preserves
+# its ownership and mode. No secret is baked into the image.
+COPY --from=layout --chown=0:dovecot --chmod=0640 /layout/etc/dovecot/postbox-master /etc/dovecot/postbox-master
 
 # `smtpauth` (gid 2102) is how Postfix reaches Dovecot's SASL socket. NE3 hands
 # SMTP authentication to Dovecot over a unix socket on a shared volume rather

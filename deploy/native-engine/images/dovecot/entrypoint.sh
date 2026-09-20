@@ -18,8 +18,11 @@
 #   tr. (The image Dockerfile relies on the same fact when it borrows a chown
 #   from a builder stage.) Everything below is `case`, `echo`, redirection and
 #   `exec`, all builtins, so this script depends on nothing that is not there.
-#   File mode comes from umask rather than a chmod that does not exist, and the
-#   owner is root because that is who runs this.
+#   Generated root-only files get their mode from umask rather than a chmod that
+#   does not exist. The PostBox master passwd-file is the one exception:
+#   Dockerfile pre-creates it 0640 root:dovecot so the unprivileged auth worker
+#   can read it; shell redirection truncates that existing file without changing
+#   its ownership or mode.
 set -eu
 
 CONF=/etc/dovecot/engine-db.conf
@@ -145,6 +148,11 @@ case "$NATIVE_POSTBOX_MASTER_PASSWORD" in
         ;;
 esac
 
+# Dockerfile pre-creates this exact path as 0640 root:dovecot. Redirection
+# truncates that existing inode and therefore preserves the access the auth
+# worker needs. Keep umask 077 as a fail-closed fallback: if the placeholder is
+# ever removed from the image, the new file becomes 0600 root and master auth
+# fails loudly instead of broadening access to the credential.
 umask 077
 {
     echo "# Generated at container start by images/dovecot/entrypoint.sh."
