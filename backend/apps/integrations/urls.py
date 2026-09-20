@@ -1,5 +1,12 @@
 from django.urls import path
 
+from .mail_api import (
+    ConnectedFolderListView,
+    ConnectedMessageDetailView,
+    ConnectedMessageListView,
+    ConnectedMessageRawView,
+    ConnectedMessageSeenView,
+)
 from .views import (
     AuthorizationView,
     ConnectStartView,
@@ -38,6 +45,31 @@ urlpatterns = [
         "external/profile/",
         IntegrationProfileView.as_view(),
         name="integration-profile",
+    ),
+    path(
+        "external/folders/",
+        ConnectedFolderListView.as_view(),
+        name="integration-folders",
+    ),
+    path(
+        "external/messages/",
+        ConnectedMessageListView.as_view(),
+        name="integration-messages",
+    ),
+    path(
+        "external/messages/detail/",
+        ConnectedMessageDetailView.as_view(),
+        name="integration-message-detail",
+    ),
+    path(
+        "external/messages/raw/",
+        ConnectedMessageRawView.as_view(),
+        name="integration-message-raw",
+    ),
+    path(
+        "external/messages/seen/",
+        ConnectedMessageSeenView.as_view(),
+        name="integration-message-seen",
     ),
     path(
         "external/signatures/",
