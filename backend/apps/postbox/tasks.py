@@ -118,7 +118,7 @@ def send_scheduled_message(scheduled_id: str) -> str:
 
         from_address = email_module.utils.parseaddr(message.get("From", ""))[1]
         sending.assert_may_send_as(mailbox, from_address)
-        sending.submit(message, envelope_from=from_address, recipients=recipients)
+        sending.submit(\n            message, mailbox=mailbox, envelope_from=from_address, recipients=recipients\n        )
 
     except Exception as exc:  # noqa: BLE001 - recorded, never swallowed
         message_text = getattr(exc, "customer_message", None) or "The message could not be sent."

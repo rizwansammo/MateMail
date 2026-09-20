@@ -286,6 +286,68 @@ class SenderAuthorisationTest(TestCase):
         with self.assertRaises(sending.SendFailed):
             sending.assert_organization_may_send(self.alice)
 
+    @override_settings(
+        EMAIL_HOST="mx.matemail.online",
+        EMAIL_PORT=587,
+        EMAIL_USE_TLS=True,
+        EMAIL_HOST_USER="noreply@mail.matemail.online",
+        EMAIL_HOST_PASSWORD="platform-secret",
+        POSTBOX_MASTER_USER="postbox",
+        POSTBOX_MASTER_PASSWORD="postbox-master-secret",
+        POSTBOX_MASTER_SEPARATOR="*",
+    )
+    def test_submission_authenticates_as_the_mailbox_not_platform_sender(self):
+        message = mime.build_message(
+            from_address=self.alice.email,
+            to=["recipient@example.test"],
+            subject="x",
+            text="body",
+        )
+        smtp = mock.MagicMock()
+        context = mock.MagicMock()
+        context.__enter__.return_value = smtp
+
+        with mock.patch("apps.postbox.sending.smtplib.SMTP", return_value=context):
+            sending.submit(
+                message,
+                mailbox=self.alice,
+                envelope_from=self.alice.email,
+                recipients=["recipient@example.test"],
+            )
+
+        smtp.login.assert_called_once_with(
+            "alice@acme.test*postbox", "postbox-master-secret"
+        )
+        self.assertNotEqual(
+            smtp.login.call_args.args[0], "noreply@mail.matemail.online"
+        )
+        smtp.send_message.assert_called_once_with(
+            message,
+            from_addr="alice@acme.test",
+            to_addrs=["recipient@example.test"],
+        )
+
+    @override_settings(
+        EMAIL_HOST="mx.matemail.online",
+        POSTBOX_MASTER_PASSWORD="",
+    )
+    def test_submission_fails_closed_without_postbox_master_credential(self):
+        message = mime.build_message(
+            from_address=self.alice.email,
+            to=["recipient@example.test"],
+            subject="x",
+            text="body",
+        )
+        with mock.patch("apps.postbox.sending.smtplib.SMTP") as smtp:
+            with self.assertRaises(sending.SendFailed):
+                sending.submit(
+                    message,
+                    mailbox=self.alice,
+                    envelope_from=self.alice.email,
+                    recipients=["recipient@example.test"],
+                )
+        smtp.assert_not_called()
+
 
 @override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS)
 class ScheduledSendIdempotencyTest(TestCase):

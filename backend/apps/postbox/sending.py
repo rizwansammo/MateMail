@@ -147,24 +147,38 @@ def assert_organization_may_send(mailbox: Mailbox) -> None:
         )
 
 
-def submit(message: EmailMessage, *, envelope_from: str, recipients: list[str]) -> None:
+def submit(
+    message: EmailMessage,
+    *,
+    mailbox: Mailbox,
+    envelope_from: str,
+    recipients: list[str],
+) -> None:
     """
     Hand the message to Postfix over authenticated submission.
 
-    The same host, port and credential the rest of MateMail uses — the
-    platform submission identity on 587 with STARTTLS, through the private
-    gateway. PostBox does not open its own relay and does not hold a second
-    credential.
+    PostBox must authenticate to submission as the mailbox whose session is
+    sending. Using MateMail's platform sender credential here authenticates as
+    noreply@mail.matemail.online, and Postfix correctly rejects a customer
+    envelope sender with reject_sender_login_mismatch.
 
-    Recipients come from the ENVELOPE, which is why Bcc works: the header was
+    We deliberately do not retain the mailbox password typed at PostBox login.
+    Instead the same Dovecot master identity already used for PostBox IMAP
+    access authenticates as mailbox*postbox. Dovecot resolves that master
+    login to the target mailbox identity, so Postfix's authoritative
+    sender-login map still enforces mailbox and alias ownership. No relay
+    bypass is introduced and the platform sender credential is not reused.
+
+    Recipients come from the envelope, which is why Bcc works: the header was
     never written, and the address is simply in the RCPT list.
     """
     host = getattr(settings, "EMAIL_HOST", "")
     port = int(getattr(settings, "EMAIL_PORT", 587))
-    user = getattr(settings, "EMAIL_HOST_USER", "")
-    password = getattr(settings, "EMAIL_HOST_PASSWORD", "")
     use_tls = bool(getattr(settings, "EMAIL_USE_TLS", True))
     timeout = int(getattr(settings, "POSTBOX_SMTP_TIMEOUT", 30))
+    master_user = getattr(settings, "POSTBOX_MASTER_USER", "postbox")
+    master_password = getattr(settings, "POSTBOX_MASTER_PASSWORD", "")
+    separator = getattr(settings, "POSTBOX_MASTER_SEPARATOR", "*")
 
     if not host:
         raise SendFailed(
@@ -172,8 +186,16 @@ def submit(message: EmailMessage, *, envelope_from: str, recipients: list[str]) 
             "EMAIL_HOST is unset — PostBox cannot submit mail.",
         )
 
+    if not master_password:
+        raise SendFailed(
+            "Sending is not configured. Please contact your administrator.",
+            "POSTBOX_MASTER_PASSWORD is unset — PostBox cannot authenticate submission.",
+        )
+
     if not recipients:
         raise SendFailed("Add at least one recipient.")
+
+    auth_user = f"{mailbox.email}{separator}{master_user}"
 
     try:
         with smtplib.SMTP(host, port, timeout=timeout) as smtp:
@@ -181,8 +203,7 @@ def submit(message: EmailMessage, *, envelope_from: str, recipients: list[str]) 
             if use_tls:
                 smtp.starttls(context=ssl.create_default_context())
                 smtp.ehlo()
-            if user:
-                smtp.login(user, password)
+            smtp.login(auth_user, master_password)
             smtp.send_message(message, from_addr=envelope_from, to_addrs=recipients)
     except smtplib.SMTPRecipientsRefused as exc:
         refused = ", ".join(sorted(exc.recipients)) if exc.recipients else ""
@@ -192,15 +213,11 @@ def submit(message: EmailMessage, *, envelope_from: str, recipients: list[str]) 
             f"recipients refused: {exc.recipients!r}",
         ) from exc
     except smtplib.SMTPSenderRefused as exc:
-        # Usually sender-login mismatch — the engine enforcing the same rule
-        # `assert_may_send_as` enforces, from the other side.
         raise SendFailed(
             "The server refused that sender address.",
             f"sender refused: {exc.smtp_code} {exc.smtp_error!r}",
         ) from exc
     except smtplib.SMTPResponseException as exc:
-        # 4xx is temporary and worth retrying; 5xx is not, and saying so stops
-        # somebody pressing Send ten more times.
         temporary = 400 <= int(exc.smtp_code or 0) < 500
         raise SendFailed(
             "The mail server is temporarily unavailable. Your message was not sent."
@@ -213,7 +230,6 @@ def submit(message: EmailMessage, *, envelope_from: str, recipients: list[str]) 
             "Your message could not be sent. Please try again.",
             f"submission failed: {exc!r}",
         ) from exc
-
 
 def envelope_recipients(to: list[str], cc: list[str], bcc: list[str]) -> list[str]:
     """

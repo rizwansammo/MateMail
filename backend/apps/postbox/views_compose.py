@@ -193,7 +193,7 @@ class SendView(PostBoxView, ComposeMixin):
         if send_at:
             return self._schedule(message, data, send_at, recipients, mailbox)
 
-        sending.submit(message, envelope_from=identity.address, recipients=recipients)
+        sending.submit(\n            message, mailbox=mailbox, envelope_from=identity.address, recipients=recipients\n        )
 
         # Only now. Submission succeeded, so this copy is true.
         appended = self._file_in_sent(mailbox, message)
