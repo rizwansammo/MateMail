@@ -13,6 +13,7 @@ class PlanSerializer(serializers.ModelSerializer):
             "max_domains",
             "max_mailboxes",
             "max_members",
+            "default_storage_per_mailbox_mb",
             "max_storage_per_mailbox_mb",
             "includes_spam_quarantine",
             "includes_audit_logs",

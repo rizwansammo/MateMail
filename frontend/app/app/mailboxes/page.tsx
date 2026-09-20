@@ -11,6 +11,16 @@ interface Domain {
   ownership_verified: boolean;
 }
 
+interface BillingData {
+  subscription: {
+    plan: {
+      display_name: string;
+      default_storage_per_mailbox_mb: number;
+      max_storage_per_mailbox_mb: number;
+    };
+  } | null;
+}
+
 interface Mailbox {
   id: string;
   email: string;
@@ -43,22 +53,38 @@ export default function MailboxesPage() {
   const [domainId, setDomainId] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
-  const [quotaMb, setQuotaMb] = useState(10240);
-  const [addErrors, setAddErrors] = useState<Record<string, string>>({});
+  const [quotaMb, setQuotaMb] = useState(1024);
+  const [quotaDefaultMb, setQuotaDefaultMb] = useState(1024);
+  const [quotaMaxMb, setQuotaMaxMb] = useState(1024);
+  const [planName, setPlanName] = useState("");
+  const [addErrors, setAddErrors] = useState<Record<string, string | string[]>>({});
   const [adding, setAdding] = useState(false);
 
   async function fetchAll() {
     setLoading(true);
     try {
-      const [mbRes, dmRes] = await Promise.all([
+      const [mbRes, dmRes, billingRes] = await Promise.all([
         apiRequest("/api/mailboxes/"),
         apiRequest("/api/domains/"),
+        apiRequest("/api/billing/"),
       ]);
       if (mbRes.ok) setMailboxes(await mbRes.json());
       if (dmRes.ok) {
         const d = await dmRes.json();
         setDomains(d);
         if (d.length > 0 && !domainId) setDomainId(d[0].id);
+      }
+      if (billingRes.ok) {
+        const billing = (await billingRes.json()) as BillingData;
+        const plan = billing.subscription?.plan;
+        if (plan) {
+          const defaultMb = Number(plan.default_storage_per_mailbox_mb) || 1024;
+          const maxMb = Number(plan.max_storage_per_mailbox_mb) || defaultMb;
+          setQuotaDefaultMb(defaultMb);
+          setQuotaMaxMb(maxMb);
+          setQuotaMb(Math.min(defaultMb, maxMb));
+          setPlanName(plan.display_name);
+        }
       }
     } finally {
       setLoading(false);
@@ -81,21 +107,33 @@ export default function MailboxesPage() {
         quota_mb: quotaMb,
         password,
       });
-      setLocalPart(""); setFullName(""); setPassword(""); setQuotaMb(10240);
+      setLocalPart(""); setFullName(""); setPassword(""); setQuotaMb(quotaDefaultMb);
       setAddOpen(false);
       await fetchAll();
     } catch (err) {
       if (err instanceof ApiError) {
         try {
           const body = JSON.parse(err.message);
-          setAddErrors(typeof body === "object" ? body : { detail: err.message });
+          setAddErrors(typeof body === "object" && body !== null ? body : { detail: err.message });
         } catch {
-          setAddErrors({ detail: "Failed to create mailbox." });
+          setAddErrors({ detail: err.message || "Failed to create mailbox." });
         }
+      } else {
+        setAddErrors({ detail: "Failed to create mailbox. Please try again." });
       }
     } finally {
       setAdding(false);
     }
+  }
+
+  function errorText(value: string | string[] | undefined) {
+    if (!value) return "";
+    return Array.isArray(value) ? value.join(" ") : value;
+  }
+
+  function formatStorage(mb: number) {
+    if (mb >= 1024 && mb % 1024 === 0) return `${mb / 1024} GB`;
+    return `${mb} MB`;
   }
 
   return (
@@ -152,8 +190,8 @@ export default function MailboxesPage() {
                   ))}
                 </select>
               </div>
-              {addErrors.local_part && <p className="mt-1 text-xs text-red-600">{addErrors.local_part}</p>}
-              {addErrors.domain_id && <p className="mt-1 text-xs text-red-600">{addErrors.domain_id}</p>}
+              {addErrors.local_part && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.local_part)}</p>}
+              {addErrors.domain_id && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.domain_id)}</p>}
             </div>
 
             {/* Display name */}
@@ -166,6 +204,7 @@ export default function MailboxesPage() {
                 onChange={(e) => setFullName(e.target.value)}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
               />
+              {addErrors.full_name && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.full_name)}</p>}
             </div>
 
             {/* Password */}
@@ -178,22 +217,25 @@ export default function MailboxesPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
               />
+              {addErrors.password && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.password)}</p>}
             </div>
 
             {/* Quota */}
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-700">
-                Quota — {Math.round(quotaMb / 1024)} GB
+                Quota — {formatStorage(quotaMb)}
+                {planName ? ` · ${planName} max ${formatStorage(quotaMaxMb)}` : ""}
               </label>
               <input
                 type="range"
-                min={1024}
-                max={51200}
+                min={Math.min(1024, quotaMaxMb)}
+                max={quotaMaxMb}
                 step={1024}
-                value={quotaMb}
+                value={Math.min(quotaMb, quotaMaxMb)}
                 onChange={(e) => setQuotaMb(Number(e.target.value))}
                 className="w-full"
               />
+              {addErrors.quota_mb && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.quota_mb)}</p>}
             </div>
 
             <div className="flex gap-3 pt-1">
