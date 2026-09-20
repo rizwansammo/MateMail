@@ -25,6 +25,7 @@ from .models import (
     Integration,
     IntegrationDelivery,
     PERMISSION_LABELS,
+    PURPOSE_LABELS,
 )
 from .security import mailbox_verification_requirement, verify_fresh_authorization
 from .serializers import (
@@ -45,6 +46,8 @@ def _integration_payload(integration):
     return {
         "id": str(integration.id),
         "name": integration.name,
+        "purpose": integration.purpose,
+        "purpose_label": PURPOSE_LABELS.get(integration.purpose, "Custom application"),
         "tenant_id": str(integration.tenant_id),
         "organization": integration.tenant.name,
         "mailbox_id": str(integration.mailbox_id),
@@ -103,6 +106,7 @@ class IntegrationListView(APIView):
             tenant=request.tenant,
             mailbox=mailbox,
             name=data["name"].strip(),
+            purpose=data["purpose"],
             created_by=request.user,
             permissions=data["permissions"],
         )
@@ -315,11 +319,24 @@ class AuthorizationView(APIView):
         return Response({"status": "approved"})
 
 
+def _require_scope(integration, scope, message):
+    if not integration.has_permission(scope):
+        return Response({"detail": message}, status=403)
+    return None
+
+
 class IntegrationProfileView(APIView):
     authentication_classes = [IntegrationAccessAuthentication]
     permission_classes = []
 
     def get(self, request):
+        denied = _require_scope(
+            request.integration,
+            "mailbox.read",
+            "This connection cannot view mailbox details.",
+        )
+        if denied:
+            return denied
         return Response(_integration_payload(request.integration))
 
 
@@ -329,7 +346,7 @@ class SignatureListView(APIView):
 
     def get(self, request):
         integration = request.integration
-        if not integration.has_permission("use_signatures"):
+        if not integration.has_permission("signatures.read"):
             return Response(
                 {"detail": "This connection cannot use signatures."}, status=403
             )
@@ -357,7 +374,7 @@ class IntegrationSendView(APIView, ComposeMixin):
 
     def post(self, request):
         integration = request.integration
-        if not integration.has_permission("send_email"):
+        if not integration.has_permission("mail.send"):
             return Response(
                 {"detail": "This connection cannot send email."}, status=403
             )
@@ -379,7 +396,7 @@ class IntegrationSendView(APIView, ComposeMixin):
 
         if (
             data.get("signature_id")
-            and not integration.has_permission("use_signatures")
+            and not integration.has_permission("signatures.read")
         ):
             return Response(
                 {"detail": "This connection cannot use signatures."}, status=403
