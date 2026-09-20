@@ -368,24 +368,6 @@ class IntegrationSendView(APIView, ComposeMixin):
         if len(idempotency_key) > 100:
             return Response({"detail": "idempotency_key is too long."}, status=400)
 
-        delivery, created = IntegrationDelivery.objects.get_or_create(
-            integration=integration,
-            idempotency_key=idempotency_key,
-        )
-        if not created:
-            if delivery.status == "sent":
-                return Response({
-                    "sent": True,
-                    "message_id": delivery.message_id,
-                    "filed_in_sent": delivery.filed_in_sent,
-                    "mailbox": integration.mailbox.email,
-                    "idempotent_replay": True,
-                })
-            return Response(
-                {"detail": "This message is already being processed. It will not be sent again."},
-                status=409,
-            )
-
         compose_payload = {
             key: value for key, value in request.data.items()
             if key != "idempotency_key"
@@ -428,6 +410,28 @@ class IntegrationSendView(APIView, ComposeMixin):
             )
 
         message, identity = self.build(data, mailbox=mailbox)
+
+        # Only reserve the idempotency key after all local validation succeeds.
+        # Once reserved, a retry never sends again unless the first attempt
+        # completed and recorded the original result.
+        delivery, created = IntegrationDelivery.objects.get_or_create(
+            integration=integration,
+            idempotency_key=idempotency_key,
+        )
+        if not created:
+            if delivery.status == "sent":
+                return Response({
+                    "sent": True,
+                    "message_id": delivery.message_id,
+                    "filed_in_sent": delivery.filed_in_sent,
+                    "mailbox": integration.mailbox.email,
+                    "idempotent_replay": True,
+                })
+            return Response(
+                {"detail": "This message is already being processed. It will not be sent again."},
+                status=409,
+            )
+
         sending.submit(
             message,
             mailbox=mailbox,
