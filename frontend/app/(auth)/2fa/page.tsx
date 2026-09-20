@@ -12,6 +12,8 @@ function TwoFactorContent() {
   const router = useRouter();
   const params = useSearchParams();
   const partial_token = params.get("token") ?? "";
+  const requestedNext = params.get("next") || "";
+  const next = requestedNext.startsWith("/app/") ? requestedNext : "/app";
   const { verify2fa } = useAuth();
 
   const [code, setCode] = useState("");
@@ -25,7 +27,7 @@ function TwoFactorContent() {
     setLoading(true);
     try {
       await verify2fa(partial_token, code);
-      router.push("/app");
+      router.push(next);
     } catch (err) {
       if (err instanceof ApiError) {
         try {
