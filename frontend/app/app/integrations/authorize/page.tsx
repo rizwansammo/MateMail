@@ -6,6 +6,8 @@ import { apiRequest } from "@/lib/api";
 
 type Permission = { key: string; label: string };
 type Details = {
+  name: string;
+  purpose_label: string;
   organization: string;
   mailbox_email: string;
   mailbox_name: string;
@@ -106,10 +108,10 @@ function AuthorizationContent() {
   return (
     <div className="mx-auto mt-10 max-w-lg border border-slate-200 bg-white">
       <div className="border-b border-slate-200 p-5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">NetaMate SalesHub</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{details.name}</p>
         <h1 className="mt-1 text-xl font-semibold text-slate-900">Connect MateMail</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Approve access to one exact mailbox.
+          Approve {details.purpose_label.toLowerCase()} access to one exact mailbox.
         </p>
       </div>
 
