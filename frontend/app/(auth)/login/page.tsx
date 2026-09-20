@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { ApiError } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
+  const params = useSearchParams();
+  const requestedNext = params.get("next") || "";
+  const next = requestedNext.startsWith("/app/") ? requestedNext : "/app";
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,9 +24,9 @@ export default function LoginPage() {
     try {
       const result = await login(email, password);
       if (result.requires_2fa && result.partial_token) {
-        router.push(`/2fa?token=${encodeURIComponent(result.partial_token)}`);
+        router.push(`/2fa?token=${encodeURIComponent(result.partial_token)}&next=${encodeURIComponent(next)}`);
       } else {
-        router.push("/app");
+        router.push(next);
       }
     } catch (err) {
       if (err instanceof ApiError) {
