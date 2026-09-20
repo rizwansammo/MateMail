@@ -4,7 +4,7 @@
  * Aliases and forwarding, platform-wide.
  *
  * Oversight, not editing. Creating and changing these belongs to the
- * Organization Console; what a platform operator needs is the cross-tenant
+ * MateMail Workspace; what a platform operator needs is the cross-tenant
  * view an abuse report starts from, and one button to stop a rule that is
  * being used to relay.
  *
@@ -103,7 +103,7 @@ export default function RoutingPage() {
     <>
       <PageHeader
         title="Aliases & Forwarding"
-        description="Cross-organization oversight. Day-to-day changes belong to the Organization Console."
+        description="Cross-organization oversight. Day-to-day changes belong to the MateMail Workspace."
       />
 
       <Toolbar>

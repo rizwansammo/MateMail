@@ -165,7 +165,7 @@ MateServer. **No DNS is changed in P4A.**
 ### Certificate flow
 
 Host-native Certbot remains the single TLS authority on this box — it already
-owns `app.matemail.online`, `matemail.online` and `www.matemail.online`, and
+owns `portal.matemail.online`, `matemail.online` and `www.matemail.online`, and
 two ACME clients competing for port 80 is a renewal failure waiting to happen.
 
 Therefore: **`SKIP_LETS_ENCRYPT=y`**. mailcow's own ACME container is disabled

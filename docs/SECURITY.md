@@ -481,7 +481,7 @@ Three prefixes no scope can ever reach:
 - `/api/platform/` — internal staff surface, cross-tenant by design.
   `IsPlatformAdmin` refuses API-key requests as well, so the rule survives an
   endpoint being moved out of that prefix.
-- `/api/internal/` — the Mail Engine and webmail bridge.
+- `/api/internal/` — the Mail Engine's own callbacks.
 - `/api/auth/` — a key is not a session and must not mint one, change a
   password, or alter a second factor.
 
@@ -1694,3 +1694,119 @@ fail2ban-client set matemail-postfix unbanip <address>
 **What NE7 did not open:** no POP3, no implicit-TLS submission, no plaintext
 IMAP, no public signup, no free mailboxes. Mailcow keeps its platform domain,
 mailbox, DKIM key and credential, and remains the rollback.
+
+---
+
+## PostBox webmail (P11)
+
+PostBox is MateMail's own webmail, served from `postbox.matemail.online`. It
+reads mail over IMAP and sends through the same authenticated submission path
+as any other client, so every control above — sender identity, suspension,
+rate limits, no-open-relay — applies to it unchanged and none of it is
+reimplemented.
+
+### A Workspace login does not open a mailbox
+
+`WebmailSSOView` is removed (DEC-049). It let anyone holding `HasTenantAccess`
+mint a login token for **any** mailbox in their organization: the queryset was
+scoped with `Mailbox.objects.for_tenant(...)`, which is the right boundary for
+administering a mailbox and the wrong one for reading it. The Workspace UI
+shipped a button that did exactly that.
+
+It had never worked, because nothing could complete the login. Shipping PostBox
+would have completed it. The URL tree, the internal validator and the button
+are gone; `apps/webmail/views.py` is left in place, empty, carrying the
+explanation.
+
+Sign-in is the mailbox address and the mailbox password, verified against
+Dovecot. The session is bound to one mailbox at sign-in, and no request carries
+a mailbox identifier. Crossing surfaces is refused in both directions: a
+Workspace or Platform token is not accepted by `/api/postbox/`, and a PostBox
+session authenticates nowhere else. `PostBoxIdentity` is not a `User` — it
+reports `is_staff`, `is_superuser` and `is_platform_admin` as `False`, so a
+permission class that asks is answered correctly rather than by duck-typing.
+
+### The password is used once
+
+The typed password authenticates to Dovecot at sign-in and is then discarded.
+It is never written to Postgres, Redis, the session row, a log line, or the
+browser — there is no field for it anywhere.
+
+Subsequent requests open the mailbox with a Dovecot master identity,
+`address*postbox`, where the address comes from the session and never from the
+request. The session row stores a SHA-256 of its own token and a mailbox id;
+the token itself is only ever in the `__Host-postbox_session` cookie.
+
+The master credential is not in the repository, not in Django settings, and not
+in the application environment. It is rendered into Dovecot's master
+`passwd-file` by the engine image's entrypoint, which refuses to start when
+`NATIVE_POSTBOX_MASTER_PASSWORD` is unset (DEC-051).
+
+### Eligibility is re-checked per request
+
+Authentication answers "which mailbox", not "may it still be used". Every
+request re-checks that the mailbox is enabled, its domain active, and its
+tenant not suspended. A suspension takes effect at the next request rather than
+at session expiry, which for a remembered session would be thirty days later.
+
+### Sending
+
+`allowed_identities()` is the mailbox's own address plus its active aliases.
+`assert_may_send_as()` refuses anything else, so an authenticated person cannot
+send as a colleague. `assert_organization_may_send()` delegates to
+`Tenant.can_send_mail` — the same property the submission policy service uses,
+rather than a second copy of the rule.
+
+Bcc recipients exist only in the envelope. `build_message()` never writes a Bcc
+header, so the filed Sent copy cannot disclose them either.
+
+### Reading
+
+Message HTML is rebuilt from an allow-list with `nh3`; anything unlisted is
+removed (DEC-053). Remote references are stripped unless the reader asks for
+them, and the "remote content was blocked" notice comes from what the sanitiser
+actually removed rather than from the presence of HTML. `cid:` inline images
+keep working, because they arrived with the message and fetch nothing.
+
+Attachment filenames are sanitised before they are offered, and attachments are
+served with `Content-Disposition: attachment` and `X-Content-Type-Options:
+nosniff`, so a message cannot get a document rendered as a page on the PostBox
+origin.
+
+### Rules
+
+Rules are stored structurally and compiled to Sieve (DEC-052) — user-authored
+Sieve is never accepted, because the mail server executes it. Values are
+escaped into quoted strings and control characters are stripped.
+
+There is no forward or redirect action. `redirect` would re-inject mail with
+the mailbox as envelope sender to an unverified destination, from inside the
+delivery agent, bypassing the outbound abuse controls entirely. Forwarding
+stays in the Workspace, where it is authorized and rate limited.
+
+### Rate limits
+
+`POSTBOX_*` limits in `apps/security/limits.py` cover sign-in, message
+submission, and search. Sign-in failures are generic: the same message and the
+same work for an unknown address as for a wrong password, including the IMAP
+round trip, so the response does not say which mailboxes exist.
+
+### Changing a password
+
+A mailbox user may change their own password by proving the current one
+against Dovecot. The new password is applied through the Mail Engine adapter's
+`set_mailbox_password`; neither password is stored or logged, and the mailbox
+is **not** reprovisioned — deleting and recreating it to change a password
+would destroy the mail.
+
+All other sessions for that mailbox are revoked afterwards. Changing a password
+is what somebody does when they believe it is known, and leaving other sessions
+alive would make the act pointless.
+
+### What PostBox does not have
+
+No signup, no self-service password *reset*, no account creation, no "remember
+my password", no plaintext credential storage, and no administrative view of
+anyone else's mail. Someone who has forgotten their password goes to an
+administrator in the Workspace, where the reset is audited — there is no
+unauthenticated path to a mailbox credential.

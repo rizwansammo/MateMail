@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
  * injected script has no way to know the nonce, so it does not run.
  *
  * CSP now lives here rather than in nginx: only the process that renders the
- * markup can know the nonce it used. `deploy/nginx/app.matemail.online.conf`
+ * markup can know the nonce it used. `deploy/nginx/portal.matemail.online.conf`
  * no longer sets this header for frontend responses — two CSP headers are
  * enforced as an intersection, which would silently reintroduce a policy
  * nobody is reading.
@@ -45,7 +45,7 @@ function buildCsp(nonce: string): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    // The API is same-origin (app.matemail.online serves both). In development
+    // The API is same-origin (each hostname serves both). In development
     // it is a different port, so the dev origin is allowed there only.
     `connect-src 'self'${isDev ? " http://localhost:8000 ws://localhost:3000" : ""}`,
     "frame-ancestors 'self'",
@@ -57,12 +57,22 @@ function buildCsp(nonce: string): string {
 }
 
 /**
- * Host-based routing for the two consoles.
+ * Host-based routing for MateMail's three surfaces.
  *
- * One Next.js application serves both. `platform.matemail.online` is the
- * Platform Console and `app.matemail.online` is the Organization Console, and
- * which one a request gets is decided here by the Host header rather than by
- * running a second deployment.
+ * One Next.js application serves all of them, and which one a request gets is
+ * decided here by the Host header rather than by running three deployments:
+ *
+ *   portal.matemail.online    MateMail Workspace   — customers
+ *   platform.matemail.online  Platform Console     — NetaMate staff
+ *   postbox.matemail.online   MateMail PostBox     — mailbox users
+ *
+ * `app.matemail.online` is the Workspace's former hostname. It is a legacy
+ * redirect and nothing else: every path on it is sent, once, to the same
+ * path on the Workspace host. It is not a surface the product answers on,
+ * and no link, document or build argument should point at it.
+ *
+ * Each of the latter two mounts its subtree at the root of its own hostname,
+ * so nobody types `/platform` or `/postbox`.
  *
  * On the platform host the whole `/platform` subtree is mounted at the root, so
  * an operator sees `/organizations`, not `/platform/organizations`. That is a
@@ -75,14 +85,36 @@ function buildCsp(nonce: string): string {
  *   asymmetric:
  *     - platform host: `/x` is rewritten to `/platform/x` internally. A rewrite
  *       does not change the browser's URL, so nothing re-enters the middleware.
- *     - app host: `/platform/...` and `/admin/...` REDIRECT to the platform
- *       host. Those land on the platform host, where the first rule rewrites
- *       rather than redirects. The chain therefore terminates after one hop.
+ *     - Workspace host: `/platform/...` and `/admin/...` REDIRECT to the
+ *       platform host. Those land on the platform host, where the first rule
+ *       rewrites rather than redirects. The chain terminates after one hop.
+ *     - legacy host: everything REDIRECTS to the Workspace host, which is
+ *       not itself the legacy host, so that chain terminates too — at worst
+ *       legacy → Workspace → PostBox, which is two hops and no loop.
  *   Anything already under `/_next`, `/api` or the icons is left alone on both.
  */
 
 /** The Platform Console's hostname, if one is configured for this deployment. */
 const PLATFORM_HOST = process.env.NEXT_PUBLIC_PLATFORM_HOST ?? "";
+
+/** MateMail PostBox — where a mailbox user reads their own mail. */
+const POSTBOX_HOST = process.env.NEXT_PUBLIC_POSTBOX_HOST ?? "";
+
+/**
+ * MateMail Workspace — the customer surface. Unlike the two above this is
+ * also the fallback, so an unconfigured deployment still serves it; the
+ * constant exists so the legacy host has somewhere to redirect *to*.
+ */
+const WORKSPACE_HOST = process.env.NEXT_PUBLIC_WORKSPACE_HOST ?? "";
+
+/**
+ * The Workspace's former hostname. Comma-separated, so a second retired
+ * name can be added without another constant.
+ */
+const LEGACY_WORKSPACE_HOSTS = (process.env.NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS ?? "")
+  .split(",")
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
 
 function hostOf(request: NextRequest): string {
   // `host` is what nginx forwards; it carries the port in development.
@@ -94,6 +126,22 @@ function isPlatformHost(host: string): boolean {
   // Fallback so a deployment that has not set the variable still behaves, and
   // so `platform.localhost` works for local testing.
   return host.startsWith("platform.");
+}
+
+function isPostBoxHost(host: string): boolean {
+  if (POSTBOX_HOST) return host === POSTBOX_HOST.toLowerCase();
+  return host.startsWith("postbox.");
+}
+
+/**
+ * A retired hostname, which is only ever redirected.
+ *
+ * This is an allow-list of exact names, not a prefix test like the two
+ * above: a prefix test would be guessing which names are retired, and
+ * guessing wrong means redirecting a hostname that was meant to work.
+ */
+function isLegacyWorkspaceHost(host: string): boolean {
+  return LEGACY_WORKSPACE_HOSTS.includes(host);
 }
 
 /** Paths that are never console routes and must pass through untouched. */
@@ -120,6 +168,34 @@ function routeForHost(request: NextRequest): Routing {
 
   if (isInfrastructurePath(pathname)) return null;
 
+  // First, because a retired hostname serves nothing. Every path moves to
+  // the same path on the Workspace host, so an old bookmark lands where it
+  // used to rather than on a home page.
+  //
+  // Without a configured Workspace host there is nowhere to send it, and
+  // redirecting to a guess would be worse than continuing to serve — so it
+  // falls through and behaves as it always did.
+  if (WORKSPACE_HOST && isLegacyWorkspaceHost(host)) {
+    const target = new URL(request.url);
+    target.host = WORKSPACE_HOST;
+    target.protocol = "https:";
+    target.port = "";
+    target.search = search;
+    return { kind: "redirect", url: target, status: 308 };
+  }
+
+  if (isPostBoxHost(host)) {
+    // PostBox mounts at the root of its own hostname, so a mailbox user never
+    // types `/postbox`. Same mechanism as the Platform Console: a REWRITE, so
+    // the URL stays clean and nothing re-enters this function.
+    if (pathname === "/postbox" || pathname.startsWith("/postbox/")) return null;
+
+    const url = request.nextUrl.clone();
+    url.pathname = pathname === "/" ? "/postbox" : `/postbox${pathname}`;
+    url.search = search;
+    return { kind: "rewrite", url };
+  }
+
   if (isPlatformHost(host)) {
     // Already inside the subtree — the console's own links look like this.
     if (pathname === "/platform" || pathname.startsWith("/platform/")) return null;
@@ -133,8 +209,18 @@ function routeForHost(request: NextRequest): Routing {
     return { kind: "rewrite", url };
   }
 
-  // Organization host. The Platform Console has a canonical home, so send
-  // people there instead of serving a second copy on the customer hostname.
+  // The Workspace host, and the fallback for anything unrecognised. The
+  // other two consoles have canonical homes, so send people there instead of
+  // serving a second copy of either on the customer hostname.
+  if (POSTBOX_HOST && (pathname === "/postbox" || pathname.startsWith("/postbox/"))) {
+    const target = new URL(request.url);
+    target.host = POSTBOX_HOST;
+    target.protocol = "https:";
+    target.port = "";
+    target.pathname = pathname.replace(/^\/postbox/, "") || "/";
+    return { kind: "redirect", url: target, status: 308 };
+  }
+
   if (PLATFORM_HOST && (pathname === "/platform" || pathname.startsWith("/platform/"))) {
     const target = new URL(request.url);
     target.host = PLATFORM_HOST;

@@ -189,7 +189,7 @@ class PlatformBackupStatusView(APIView):
                 "supported": False,
                 "detail": (
                     "Per-organization backup export is not implemented. Jobs "
-                    "requested through the Organization Console are recorded "
+                    "requested through the MateMail Workspace are recorded "
                     "and explicitly fail; no archive is produced."
                 ),
                 "recent": [

@@ -49,6 +49,7 @@ LOCAL_APPS = [
     "apps.teams",
     "apps.platform_admin",
     "apps.webmail",
+    "apps.postbox",
     "apps.mail_engine",
     "apps.smtp_policy",
     "apps.security",
@@ -196,6 +197,18 @@ CELERY_BEAT_SCHEDULE = {
         "task": "billing.expire_trials",
         "schedule": crontab(hour="3", minute="0"),  # daily at 03:00 UTC
     },
+    # PostBox scheduled send. Every minute, because the promise the UI makes is
+    # a time, and a coarser beat would make "send at 09:00" mean "09:00 or so".
+    # The task claims each row conditionally, so overlapping runs cannot send
+    # the same message twice.
+    "postbox-dispatch-scheduled": {
+        "task": "postbox.dispatch_scheduled_messages",
+        "schedule": crontab(minute="*"),
+    },
+    "postbox-prune-sessions": {
+        "task": "postbox.prune_expired_sessions",
+        "schedule": crontab(hour="4", minute="10"),
+    },
 }
 
 # DRF
@@ -289,12 +302,53 @@ DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
 # Frontend URLs
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
 APP_BASE_URL = env("APP_BASE_URL", default="http://localhost:3000")
-WEBMAIL_BASE_URL = env("WEBMAIL_BASE_URL", default="http://localhost:3000")
+#: There is deliberately no WEBMAIL_BASE_URL. It was never read by any code,
+#: and a configurable webmail address is how the engine's own SOGo ends up
+#: linked to customers (audit item L6). PostBox is served from
+#: `postbox.matemail.online` by the same frontend image, routed by Host.
 
 #: The Platform Console, which is a separate hostname from the Organization
 #: Console so that the two audiences never share a login page (DEC-045). Same
 #: frontend image and same backend; nginx routes by Host.
 PLATFORM_BASE_URL = env("PLATFORM_BASE_URL", default="http://localhost:3000")
+
+# ── MateMail PostBox (P11) ───────────────────────────────────────────────────
+#
+# PostBox reaches Dovecot through the Native Engine's private gateway, which
+# forwards 993 and 4190 and offers nothing else. Dovecot itself is deliberately
+# not on the link network: joining it would also expose LMTP, where mail can be
+# injected into any mailbox WITHOUT authenticating, and the doveadm API.
+#
+# The host is the gateway's network alias, which is the name on the certificate
+# Dovecot presents — so TLS verification is real verification of Dovecot, not
+# of a proxy.
+POSTBOX_IMAP_HOST = env("POSTBOX_IMAP_HOST", default="mx.matemail.online")
+POSTBOX_IMAP_PORT = env.int("POSTBOX_IMAP_PORT", default=993)
+POSTBOX_IMAP_TIMEOUT = env.int("POSTBOX_IMAP_TIMEOUT", default=20)
+POSTBOX_IMAP_VERIFY = env.bool("POSTBOX_IMAP_VERIFY", default=True)
+
+POSTBOX_SIEVE_HOST = env("POSTBOX_SIEVE_HOST", default=POSTBOX_IMAP_HOST)
+POSTBOX_SIEVE_PORT = env.int("POSTBOX_SIEVE_PORT", default=4190)
+POSTBOX_SIEVE_STARTTLS = env.bool("POSTBOX_SIEVE_STARTTLS", default=False)
+
+# The Dovecot master identity PostBox reads mailboxes with. A mailbox user
+# still signs in with their OWN password; this is how the server keeps reading
+# that one mailbox afterwards without MateMail storing what they typed.
+#
+# Empty by default and empty in tests. Every code path that needs it fails
+# closed with a message rather than half-working — a webmail client that
+# silently could not open a mailbox would be diagnosed as a Dovecot fault.
+POSTBOX_MASTER_USER = env("POSTBOX_MASTER_USER", default="postbox")
+POSTBOX_MASTER_PASSWORD = env("POSTBOX_MASTER_PASSWORD", default="")
+POSTBOX_MASTER_SEPARATOR = env("POSTBOX_MASTER_SEPARATOR", default="*")
+
+POSTBOX_SMTP_TIMEOUT = env.int("POSTBOX_SMTP_TIMEOUT", default=30)
+
+#: Per-attachment and per-message ceilings. Chosen to sit under what the
+#: engine's Postfix accepts, so a message PostBox allows is not then rejected
+#: after the person has typed it.
+POSTBOX_MAX_ATTACHMENT_MB = env.int("POSTBOX_MAX_ATTACHMENT_MB", default=20)
+POSTBOX_MAX_MESSAGE_MB = env.int("POSTBOX_MAX_MESSAGE_MB", default=25)
 
 # Transactional application email, sent through MateMail's own Mail Engine
 # (DEC-013). The default here keeps every environment from falling back to

@@ -5,10 +5,10 @@ import { clearTokens, getAccessToken, isTokenExpired, setAccessToken } from "./a
  *
  * IN THE BROWSER, IN PRODUCTION: same origin, always.
  *
- * This used to be the baked value of NEXT_PUBLIC_API_URL —
- * `https://app.matemail.online` — which broke the Platform Console outright.
+ * This used to be the baked value of NEXT_PUBLIC_API_URL — the Workspace's
+ * absolute origin — which broke the Platform Console outright.
  * From platform.matemail.online the browser would attempt a cross-origin
- * request to app.matemail.online, and the Content-Security-Policy that
+ * cross-origin request to the Workspace host, and the Content-Security-Policy that
  * middleware.ts sets on that hostname says `connect-src 'self'`. The fetch was
  * refused before it left the browser, so every Platform page reported a
  * generic failure while the endpoint itself was perfectly healthy.

@@ -22,8 +22,10 @@ Before deployment, the following DNS records must be set for `matemail.online`:
 | Type | Host | Value | Purpose |
 |------|------|-------|---------|
 | A | matemail.online | `<VPS_IP>` | Landing page |
-| A | app.matemail.online | `<VPS_IP>` | Admin dashboard |
-| A | webmail.matemail.online | `<VPS_IP>` | Webmail |
+| A | portal.matemail.online | `<VPS_IP>` | MateMail Workspace (customers) |
+| A | app.matemail.online | `<VPS_IP>` | **Legacy** — 308 redirect to the Workspace only |
+| A | platform.matemail.online | `<VPS_IP>` | Platform Console (NetaMate staff) |
+| A | postbox.matemail.online | `<VPS_IP>` | PostBox webmail |
 | A | docs.matemail.online | `<VPS_IP>` | Documentation |
 | A | mx.matemail.online | `<VPS_IP>` | Mail reception hostname |
 | A | imap.matemail.online | `<VPS_IP>` | IMAP client config |
@@ -117,7 +119,7 @@ See `.env.example` for the full list. Key variables:
 # Django
 DJANGO_SECRET_KEY=<50+ random chars>
 DJANGO_DEBUG=False
-DJANGO_ALLOWED_HOSTS=app.matemail.online,webmail.matemail.online,matemail.online
+DJANGO_ALLOWED_HOSTS=portal.matemail.online,postbox.matemail.online,platform.matemail.online,app.matemail.online,matemail.online
 
 # Database
 POSTGRES_DB=matemail
@@ -130,8 +132,8 @@ REDIS_URL=redis://redis:6379/0
 
 # Frontend
 FRONTEND_URL=https://matemail.online
-APP_BASE_URL=https://app.matemail.online
-WEBMAIL_BASE_URL=https://webmail.matemail.online
+APP_BASE_URL=https://portal.matemail.online
+PLATFORM_BASE_URL=https://platform.matemail.online
 
 # Mail
 MAIL_DOMAIN=matemail.online
@@ -242,10 +244,10 @@ docker compose exec backend python manage.py migrate
 docker compose exec backend python manage.py createsuperuser
 
 # 7. Verify health endpoints
-curl https://app.matemail.online/api/health/
-curl https://app.matemail.online/api/health/db/
-curl https://app.matemail.online/api/health/redis/
-curl https://app.matemail.online/api/health/mail-engine/
+curl https://portal.matemail.online/api/health/
+curl https://portal.matemail.online/api/health/db/
+curl https://portal.matemail.online/api/health/redis/
+curl https://portal.matemail.online/api/health/mail-engine/
 ```
 
 ---
@@ -255,8 +257,10 @@ curl https://app.matemail.online/api/health/mail-engine/
 ### Option A — Certbot (Nginx)
 ```bash
 apt install certbot python3-certbot-nginx
-certbot --nginx -d matemail.online -d app.matemail.online \
-  -d webmail.matemail.online -d docs.matemail.online \
+certbot --nginx -d matemail.online -d portal.matemail.online \
+  -d platform.matemail.online -d postbox.matemail.online \
+  -d app.matemail.online \
+  -d docs.matemail.online \
   -d imap.matemail.online -d smtp.matemail.online \
   -d mx.matemail.online
 ```
@@ -528,3 +532,226 @@ along.
 The engine also enforces `defquota <= maxquota <= quota` and refuses the whole
 domain otherwise. `quota: 0` does **not** mean unlimited — it is a hard total of
 zero, so any positive ceiling above it is a contradiction. See DEC-016.
+
+---
+
+## PostBox deployment (P11)
+
+PostBox adds **no container and no host port**. It is the same frontend image
+and the same Django backend, on a third hostname. What it does add is one
+credential, one gateway frontend, and a Dovecot image rebuild — and the order
+of those matters, because two of them fail loudly if done out of order.
+
+### Order of operations
+
+1. Generate the Dovecot master password and put it in **both** `.env` files.
+2. Rebuild and redeploy the Native Engine Dovecot image.
+3. Deploy the application images.
+4. Add DNS, the nginx vhost and the certificate.
+
+Step 2 before step 1 will not start: the entrypoint refuses to run without
+`NATIVE_POSTBOX_MASTER_PASSWORD`, by design (DEC-051) — a Dovecot that started
+without the master identity would work for every mail client and fail only for
+PostBox, days later, as an unexplained login problem.
+
+### 1 — The Dovecot master credential
+
+One value, written to two places, never to a third:
+
+```bash
+# On MateServer, as root. Not echoed to the terminal.
+umask 077
+PW="$(openssl rand -base64 33 | tr -d '/+=' | cut -c1-40)"
+
+printf 'NATIVE_POSTBOX_MASTER_PASSWORD=%s\n' "$PW" >> /opt/matemail-native-engine/.env
+printf 'POSTBOX_MASTER_PASSWORD=%s\n'        "$PW" >> /opt/MateMail/.env
+unset PW
+```
+
+The two names differ because they are two different systems' views of the same
+secret: the engine side is what Dovecot will accept, the application side is
+what PostBox will present. They must be equal, and nothing checks that for you
+— a mismatch shows up as every PostBox sign-in failing with an authentication
+error while IMAP clients work normally.
+
+The character set is restricted deliberately. The value is written into a
+Dovecot `passwd-file`, which is colon-delimited, so a `:` in the password would
+silently produce a different credential; the entrypoint refuses such a value
+rather than accepting it and misbehaving.
+
+This is the one credential on the platform that can open any mailbox. It is not
+in Git, not in an image, and not in the application's environment at build
+time. Rotating it means changing both files and restarting both sides.
+
+### 2 — Rebuild the Dovecot image
+
+The master `passwd-file` is rendered by the image's entrypoint, so the running
+image must be the one that knows how. Build through the
+`native-engine-images.yml` workflow with the `dovecot` component, then on the
+server:
+
+```bash
+cd /opt/matemail-native-engine
+docker compose pull dovecot
+docker compose up -d dovecot
+docker compose logs --tail=40 dovecot     # expect no "refusing" line
+```
+
+Verify the master identity actually works before going further — this is the
+step that catches a mismatch while it is still cheap:
+
+```bash
+docker compose exec dovecot doveadm auth login 'someone@example.com*postbox'
+```
+
+### 3 — The IMAPS gateway frontend
+
+`deploy/native-engine/gateway/haproxy.cfg` gains an `imaps` frontend so the
+application can reach Dovecot without joining the engine network (DEC-050). It
+runs in `mode tcp`, terminates nothing and holds no certificate — Dovecot still
+sees the TLS session.
+
+```bash
+docker compose up -d gateway
+```
+
+Check it from the consumer rather than from the gateway — what matters is that
+the *backend* can complete an IMAP greeting, which is the whole path:
+
+```bash
+docker compose -f /opt/MateMail/docker-compose.yml exec backend python - <<'PY'
+import imaplib, os
+host = os.environ["POSTBOX_IMAP_HOST"]
+with imaplib.IMAP4_SSL(host, 993, timeout=10) as c:
+    print(host, "->", c.welcome.decode())
+PY
+```
+
+Dovecot must **not** appear on `matemail_engine_link`. If it does, the
+application can also reach LMTP, which has no authentication:
+
+```bash
+docker network inspect matemail_engine_link \
+  --format '{{range .Containers}}{{println .Name}}{{end}}'
+# expect the Native API and the MateMail backend only
+```
+
+### 4 — DNS, nginx and TLS
+
+```bash
+# DNS: A  postbox.matemail.online → <VPS_IP>   (set before certbot runs)
+
+sudo cp deploy/nginx/postbox.matemail.online.conf \
+        /etc/nginx/sites-available/matemail-postbox
+sudo ln -s /etc/nginx/sites-available/matemail-postbox /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo certbot certonly --nginx -d postbox.matemail.online
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+The vhost does not redeclare the `matemail_backend` / `matemail_frontend`
+upstreams — those are declared once in the app vhost, and a second declaration
+stops nginx starting.
+
+`postbox.matemail.online` must also be in `DJANGO_ALLOWED_HOSTS`, or every
+request returns 400 with `DisallowedHost` before it reaches a view.
+
+### 5 — Verify, and mean it
+
+```bash
+curl -sI https://postbox.matemail.online/            # 200, X-Frame-Options: DENY
+curl -sI https://postbox.matemail.online/api/internal/health/   # 403 from nginx
+curl -s  https://portal.matemail.online/postbox -o /dev/null -w '%{http_code}\n' # 308
+curl -s  https://app.matemail.online/         -o /dev/null -w '%{http_code}\n' # 308 legacy
+```
+
+Then sign in as a real mailbox and check four things that only a real session
+proves: the Inbox lists messages, opening one renders sanitised HTML with
+remote images blocked, sending arrives at an external address, and the sent
+copy appears in Sent. An endpoint returning 200 is not evidence for any of
+them.
+
+### What PostBox does not need
+
+No new firewall rule, no new published port, no separate container, no
+third-party webmail, and no mailbox password stored anywhere. If a deployment
+step seems to ask for one of those, it is the wrong step.
+
+---
+
+## Workspace hostname migration — app → portal (DEC-055)
+
+The customer console moved from `app.matemail.online` to
+`portal.matemail.online`. The old name keeps working as a 308 redirect and
+serves nothing (DEC-055).
+
+Order matters: the certificate must cover the new name before nginx is asked
+to serve it, and the new name must resolve before certbot can prove it.
+
+```bash
+# 1. DNS, first. A  portal.matemail.online → <VPS_IP>
+#    Leave the app.matemail.online record in place — the redirect needs it.
+dig +short portal.matemail.online
+
+# 2. One certificate covering both names, plus the apex.
+sudo certbot certonly --nginx \
+  -d portal.matemail.online -d matemail.online -d www.matemail.online \
+  -d app.matemail.online
+
+# 3. Replace the vhost. The file was renamed, so remove the old symlink —
+#    leaving both enabled is a duplicate-upstream error and nginx will not start.
+sudo rm -f /etc/nginx/sites-enabled/matemail
+sudo cp deploy/nginx/portal.matemail.online.conf \
+        /etc/nginx/sites-available/matemail
+sudo ln -s /etc/nginx/sites-available/matemail /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# 4. Application config. Both names stay in ALLOWED_HOSTS: the redirect is
+#    served by nginx, but anything that reaches Django on the old name during
+#    the cutover must not 400.
+#    In /opt/MateMail/.env:
+#      DJANGO_ALLOWED_HOSTS=portal.matemail.online,postbox.matemail.online,\
+#                           platform.matemail.online,app.matemail.online,matemail.online
+#      FRONTEND_URL=https://portal.matemail.online
+#      APP_BASE_URL=https://portal.matemail.online
+#      CORS_ALLOWED_ORIGINS=https://portal.matemail.online,...
+docker compose -f /opt/MateMail/docker-compose.yml up -d backend celery-worker celery-beat
+```
+
+### The frontend image must be rebuilt
+
+`NEXT_PUBLIC_*` values are inlined at build time, so changing them in `.env`
+does nothing to the browser bundle. A frontend still built with the old
+hostname will keep treating `app.matemail.online` as the Workspace and will not
+redirect it. Rebuild through CI and redeploy:
+
+```bash
+docker compose -f /opt/MateMail/docker-compose.yml pull frontend
+docker compose -f /opt/MateMail/docker-compose.yml up -d frontend
+```
+
+### Verify
+
+```bash
+curl -sI https://portal.matemail.online/login | head -1     # 200
+curl -sI https://app.matemail.online/login    | head -1     # 308
+curl -sI https://app.matemail.online/login | grep -i location
+# expect: location: https://portal.matemail.online/login   (path preserved)
+```
+
+Path preservation is the thing to actually check. A redirect that drops the
+path sends everyone to a login page instead of where their bookmark pointed,
+and it looks like it is working.
+
+### Retiring the old name
+
+Not on a date. The access log is the only evidence of who still uses it:
+
+```bash
+sudo awk '$0 ~ /app\.matemail\.online/ {n++} END {print n+0}' \
+  /var/log/nginx/access.log
+```
+
+When that is durably zero: delete the legacy server block, drop the name from
+the port-80 block and from the certificate, and drop
+`NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS` from the frontend build.

@@ -50,7 +50,7 @@ without the mechanism underneath. Read this section before trusting the tables.
 | 1 | **No Mail Engine.** `docker-compose.mailengine.yml` is an nginx placeholder. The engine was never installed, so no mail has ever been sent or received. `MailcowAdapter` is written but has nothing to call. | Open |
 | 2 | **Outbound SMTP policy never consulted.** The documented Postfix restriction order puts `permit_sasl_authenticated` before `check_policy_service`, so rate limits, sender-equals-auth and tenant suspension are not enforced for sending. | Open |
 | 3 | **Backups are simulated.** `run_backup_task` counts rows, invents a size and marks the job complete. Nothing is backed up and there is no restore path. Domain deletion cascades to permanent mail destruction. | Open |
-| 4 | **No webmail.** No inbox/compose/thread routes exist. The SSO bridge cannot authenticate anyone, because webmail needs the mailbox IMAP password and MateMail deliberately never stores it. Direction fixed by DEC-005r (MateMail-built, not SOGo); auth mechanism still open as TBD-G. | Open |
+| 4 | ~~No webmail.~~ **PostBox is built (P11)** — inbox, reader, composer, folders, search, contacts, signatures, rules and settings, against real IMAP. TBD-G is resolved: a Dovecot master identity, with the person's own password used once at sign-in and never stored (DEC-051). The SSO bridge is removed rather than finished — it could mint a login token for any mailbox in a tenant (DEC-049). **Not yet proven in production:** the code is complete and tested locally, but no mail has been read or sent through PostBox on MateServer, because the Dovecot image carrying the master identity has not been built and deployed. | Built, unproven in production |
 | 5 | **Queue, quarantine and storage usage are empty shells.** Nothing writes `QueueMessage` or `QuarantineMessage`; `storage_used_mb` is never assigned. No mailcow→MateMail sync task exists. | Open |
 | 6 | ~~Domain ownership is not verified before a domain is provisioned into the mail engine.~~ | ✅ Closed in P3a |
 | 7 | ~~Deployment architecture is contradictory.~~ | ✅ Closed in P2 |
@@ -229,7 +229,7 @@ broken audit log. See the Phase 0 section below.
 | — | **PRIVATE BETA gate** — requires all of P0–P7.5; tests **both** business and free mailboxes | Blocked on P7.5 |
 | P9 | Public launch readiness | Pending |
 | — | **PUBLIC LAUNCH** | Blocked on P9 |
-| P8 | MateMail webmail — before or after P9; **not a launch blocker**, but gates *broad* free availability (DEC-015) | Pending |
+| P8 | MateMail webmail — **delivered as P11 (PostBox)**; built and tested, not yet deployed | Superseded by P11 |
 
 Full detail, entry criteria and exit criteria: *Revised roadmap* below.
 
@@ -580,7 +580,7 @@ frontend file. That boundary is genuinely in place.
 | L3 | **RESOLVED in P1.** `ProvisionResult.raw` carries the engine's response dict through the port. Not currently serialized to customers, but nothing prevents it. | Medium |
 | L4 | **RESOLVED in P1.** `provision_forwarding` / `delete_forwarding` query `apps.forwarding.models` and implement `keep_copy` and active-rule-set semantics **inside the adapter**. This is MateMail product logic below the port: a replacement engine would have to reimplement it. | Medium |
 | L5 | **RESOLVED in P1.** Adapter methods take Django model instances, coupling the port to the ORM. `tasks.py` already works around this with `_FakeDomain` / `_FakeMailbox` shims. | Medium |
-| L6 | **OPEN — deferred to P8 (webmail).** `WEBMAIL_BASE_URL` points wherever webmail lives; if aimed at the engine's SOGo it becomes a customer-facing engine surface. Contradicts DEC-005r. | Medium |
+| L6 | **RESOLVED in P11.** `WEBMAIL_BASE_URL` was never read by any code, so it could only ever have done harm. The setting is deleted from `base.py`, the compose file and the env example. Webmail is PostBox, served from `postbox.matemail.online` by MateMail's own frontend image and routed by Host — there is no configurable address for it to be aimed at. | Medium |
 | L7 | **RESOLVED in P1.** `/api/health/` is public and reports `mail_engine` status, disclosing that a distinct mail engine exists and whether it is up. | Low |
 | L8 | **RESOLVED in P1.** Docstrings in `smtp_policy/views.py` and `webmail/views.py` name Postfix, Dovecot, Roundcube and SOGo. Internal-only, but should be reframed as Mail Engine components. | Low |
 | L9 | **OPEN — deferred to P4 per DEC-007r.** The port is now correct (`rotate_dkim_key` returns public material only, and no DTO may carry a private key), but the legacy column still exists. DKIM private key held in the control plane: Django generates the keypair, stores the PEM unencrypted in `Domain.dkim_private_key`, and pushes it to the engine over plaintext HTTP. Violates DEC-007r: the signing key must be generated and stored inside the engine, with MateMail reading only the public half. | High |
@@ -983,6 +983,14 @@ domain.
 
 ### P8 — MateMail webmail
 
+> **Superseded by P11 — PostBox.** This section is the plan as written
+> before the work; see *P11 — MateMail PostBox* at the end of this document
+> for what was actually built and what remains unproven. Two things changed
+> in the doing: the hostname is `postbox.matemail.online`, not
+> `webmail.matemail.online`; and the SSO bridge was removed rather than
+> completed, because it could mint a login token for any mailbox in a
+> tenant (DEC-049).
+
 **Not a launch blocker.** May be built before or after P9. Until it exists,
 customers use standard IMAP/SMTP clients (DEC-005r).
 
@@ -1277,7 +1285,7 @@ the storage backend was never active to fail.
 | `docker-compose.mailengine.yml` | An nginx container returning a fake `{"status":"stub"}` on `/api/v1/info` — a path P1 no longer even calls. Misleading placeholder, not infrastructure. The real engine arrives in P4. |
 | `nginx/mailengine-stub.conf` | Served the fake payload above. |
 | `nginx/conf.d/matemail.conf`, `nginx/conf.d/matemail-tls.conf`, `nginx/nginx.conf` | A containerized nginx model with Docker-DNS upstreams. No nginx service existed in any compose file, and DEC-011 makes host-native nginx the only public proxy. |
-| `nginx/matemail-vhost.conf` | Superseded by `deploy/nginx/app.matemail.online.conf` (correct ports, CSP, `/api/internal/` deny). |
+| `nginx/matemail-vhost.conf` | Superseded by the Workspace vhost — then `deploy/nginx/app.matemail.online.conf`, now `deploy/nginx/portal.matemail.online.conf` (correct ports, CSP, `/api/internal/` deny). |
 | `scripts/init-letsencrypt.sh` | Bootstrapped certs for nginx and certbot containers that do not exist. The host's certbot owns certificates. |
 | `scripts/deploy.sh` | Built from source on the server and interpolated an admin password into a shell string. Replaced by the deploy workflow. |
 
@@ -1288,7 +1296,8 @@ placeholders. Their `DJANGO_INTERNAL_URL` default was corrected to port 8020.
 ### Files added
 
 `deploy/docker-compose.yml`, `deploy/env.production.example`,
-`deploy/nginx/app.matemail.online.conf`, `deploy/README.md`,
+`deploy/nginx/app.matemail.online.conf` (renamed to
+`portal.matemail.online.conf` in P11), `deploy/README.md`,
 `.github/workflows/ci.yml`.
 
 ### P1 architecture preserved
@@ -1312,6 +1321,12 @@ error protection, `/api/internal/` protection, tenant isolation, DEC-007r. The
 ---
 
 ## P2.5 — Controlled production deployment of the control plane
+
+> **Hostname since renamed.** Everything below is the deployment as measured
+> on 2026-09-10 and is left unedited. The customer console is now the
+> MateMail Workspace at `portal.matemail.online`; `app.matemail.online` is a
+> legacy 308 redirect (DEC-055). The certificate names and expiry recorded
+> here are the ones issued then, not the current ones.
 
 **Completed 2026-09-10.** The MateMail **control plane** is live on MateServer at
 <https://app.matemail.online>. The Mail Engine was **not** deployed;
@@ -2940,3 +2955,126 @@ No POP3, no port 465, no plaintext IMAP, no public signup, no free mailboxes,
 no autoconfig, no Mailcow removal. Microsoft and Zoho protocol interop is
 verified; real inbox delivery to them is not, because no operator-controlled
 mailbox exists on either and NE7 did not invent one.
+
+---
+
+## P11 — MateMail PostBox (webmail)
+
+**Built and tested locally. Not deployed, and therefore not proven.** No
+message has been read or sent through PostBox on MateServer. Everything below
+distinguishes the two.
+
+### What exists
+
+A complete webmail application in `backend/apps/postbox/` and
+`frontend/app/postbox/`, served from `postbox.matemail.online` — a third
+hostname on the same two containers, with no new port and no new service.
+
+| Area | State |
+|------|-------|
+| Sign-in against Dovecot, session bound to one mailbox | Built |
+| Folder list, standard folders created if absent | Built |
+| Message list — paging, search, starred filter | Built |
+| Reader — sanitised HTML, blocked remote images, inline `cid:` images | Built |
+| Attachments — download, `Content-Disposition: attachment`, `nosniff` | Built |
+| Compose, reply, reply-all, forward, drafts, scheduled send | Built |
+| Flags and folder actions — read, star, archive, trash, restore, delete | Built |
+| Identities (mailbox + aliases), signatures | Built |
+| Contacts, scoped to the mailbox | Built |
+| Rules compiled to Sieve, vacation responder, via ManageSieve | Built |
+| Preferences — theme, density, reading pane, page size, timezone | Built |
+| Own-password change, with other sessions revoked | Built |
+| Thread view | **Not built** — messages are listed and read individually |
+
+### What was removed
+
+`WebmailSSOView`, `/api/webmail/`, the internal token validator, and the
+Workspace's "Open webmail" button. The view minted a login token for any
+mailbox in the caller's tenant; it was inert only because nothing could
+complete the login, and PostBox would have completed it (DEC-049).
+
+`WEBMAIL_BASE_URL`, which no code read — closing audit item L6.
+
+`conversation_view`, a stored preference the API returned as `true` while
+nothing anywhere grouped conversations. A preference that reports a capability
+the product does not have is a false claim in the API surface, so the field is
+gone rather than documented.
+
+### Tests
+
+| Suite | Result |
+|-------|--------|
+| `tests.test_postbox_security` + `tests.test_postbox_mail` | **73 tests, OK** |
+| Full Django suite (`manage.py test`) | **1560 tests, OK**, 5 skipped |
+| pytest-only regression files (the four CI names) | **217 passed**, 2 skipped |
+| `manage.py check` | no issues |
+| `manage.py check --deploy` (prod settings) | **no issues** |
+| `makemigrations --check` | no changes detected |
+| Frontend `tsc --noEmit` | clean |
+| Frontend ESLint | 17 errors / 18 warnings; **0 in PostBox code**; baseline 18 errors |
+| Frontend `next build` | compiled successfully; all four `/postbox` routes present |
+
+Host routing was checked against the production-shaped standalone server, with
+the same `NEXT_PUBLIC_*` build arguments and the same `HOSTNAME=0.0.0.0` the
+image sets:
+
+```
+portal.matemail.online/login               -> 200
+portal.matemail.online/app                 -> 200
+portal.matemail.online/postbox             -> 308 https://postbox.matemail.online/
+postbox.matemail.online/                   -> 200
+postbox.matemail.online/login              -> 200
+postbox.matemail.online/settings           -> 200
+postbox.matemail.online/contacts           -> 200
+platform.matemail.online/login             -> 200
+platform.matemail.online/organizations     -> 200
+app.matemail.online/                       -> 308 https://portal.matemail.online/
+app.matemail.online/login                  -> 308 https://portal.matemail.online/login
+app.matemail.online/app/domains            -> 308 https://portal.matemail.online/app/domains
+```
+
+The legacy host preserves the path. A redirect that dropped it would send
+everyone to a login page instead of to their bookmark, and would still look
+like it was working.
+
+One harness note worth keeping. Running the standalone server with
+`HOSTNAME=127.0.0.1` makes Next compute an origin that differs from the `Host`
+header, so it treats the middleware rewrite as an *external* proxy and fails
+with a TLS error. That is the harness, not the product — the image sets
+`HOSTNAME=0.0.0.0`, which is what the run above used.
+
+### Hostnames (DEC-055)
+
+The customer console is the **MateMail Workspace** at `portal.matemail.online`.
+`app.matemail.online` is a 308 redirect and serves nothing; nginx does it at the
+edge and `frontend/middleware.ts` does it as well, so the application is correct
+even where the vhost has not been installed. The old name stays on the
+certificate and in `DJANGO_ALLOWED_HOSTS` for as long as the redirect exists.
+
+**Not deployed.** `portal.matemail.online` has no DNS record, no certificate and
+no installed vhost. Until that is done the live customer hostname is still
+`app.matemail.online`, and the redirect above exists only in the repository.
+
+### What is NOT proven
+
+None of this has run against production. Specifically unproven:
+
+- No real sign-in against production Dovecot. The Dovecot image carrying the
+  master-identity entrypoint has not been built or deployed, so the credential
+  behind PostBox does not yet exist on the server.
+- No message read, sent, or received through PostBox.
+- The IMAPS gateway frontend is written but has never carried traffic.
+- `postbox.matemail.online` has no DNS record, no nginx vhost installed and no
+  certificate.
+- Sieve upload over ManageSieve has never reached a real Dovecot.
+
+A green test suite says the code does what it was written to do. It says
+nothing about whether Dovecot accepts the master identity on MateServer, and
+that is the one thing this phase cannot claim until it is deployed.
+
+### Deployment order
+
+The order matters and is written out in `docs/DEPLOYMENT.md` § *PostBox
+deployment (P11)*. In short: the master password into both `.env` files first,
+then the Dovecot image, then the application, then DNS/nginx/TLS. The Dovecot
+entrypoint refuses to start without the credential, by design.

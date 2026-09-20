@@ -432,7 +432,25 @@ New secrets in `.env` (generate independently, never reuse `NATIVE_API_SECRET`):
 ```
 NATIVE_CONTROL_SECRET     the queue/quarantine control API
 NATIVE_DOVEADM_API_KEY    Dovecot's administrative API
+NATIVE_POSTBOX_MASTER_PASSWORD  the Dovecot master identity PostBox reads
+                                mailboxes with (P11)
 ```
+
+`NATIVE_POSTBOX_MASTER_PASSWORD` is the one credential that can open any
+mailbox, so it is worth being explicit about what it is and is not:
+
+* It lives only in `/opt/MateMailNative/.env` (root-owned, 0600) and in the
+  MateMail application's own runtime environment. It is never in Git, never in
+  an image, and never reaches a browser.
+* It is a *service* identity. A PostBox user still signs in with their own
+  mailbox password; the master credential is how the server keeps reading that
+  one mailbox afterwards, bound to the session that was authenticated.
+* Its alphabet is restricted to `A-Za-z0-9._~+=/@-` — the Dovecot entrypoint
+  refuses anything else, because a passwd-file record is colon-separated and
+  line-oriented.
+* Rotating it means updating both `.env` files and restarting Dovecot and the
+  MateMail backend. Existing PostBox sessions survive: they are rows in
+  MateMail's database, not Dovecot state.
 
 ### Immutable image digests in production
 

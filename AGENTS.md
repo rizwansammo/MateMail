@@ -128,11 +128,16 @@ The production VPS should not require a Git checkout of the application reposito
 Preferred domains:
 
 * `matemail.online` — public MateMail website
-* `app.matemail.online` — MateMail customer control panel
+* `portal.matemail.online` — MateMail Workspace (customer console)
+* `platform.matemail.online` — Platform Console (NetaMate staff only)
+* `app.matemail.online` — **legacy redirect to the Workspace only.**
+  Never a surface, never canonical, never a build argument.
 * `webmail.matemail.online` — webmail
 * `mx.matemail.online` — mail server hostname
 
-Host-native nginx is the authority for `matemail.online` and `app.matemail.online`.
+Host-native nginx is the authority for `matemail.online`,
+`portal.matemail.online`, `postbox.matemail.online` and
+`platform.matemail.online`.
 
 Do not introduce a second containerized nginx architecture for the MateMail SaaS app.
 

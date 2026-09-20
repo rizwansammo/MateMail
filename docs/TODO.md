@@ -11,8 +11,10 @@ Legend: ✅ Done | 🔄 In Progress | ⬜ Pending | ❌ Blocked
 > work shipped, and they predate DEC-011 (MateMail as one integrated platform).
 >
 > The authoritative plan is now the **Production Readiness roadmap** in
-> `PROJECT_STATUS.md`. The Phase 7 "Webmail Data Flow" checklist below is the
-> closest thing to the webmail work still owed, and remains largely unbuilt.
+> `PROJECT_STATUS.md`. The Phase 7 "Webmail Data Flow" checklist below was
+> superseded by **P11 — PostBox**, which shipped the webmail product under
+> `/api/postbox/` rather than the `/api/webmail/` shape sketched here. The
+> checklist is kept for history; it is not the plan.
 >
 > Retained for history and because several unchecked items are still real work.
 
@@ -94,7 +96,7 @@ Legend: ✅ Done | 🔄 In Progress | ⬜ Pending | ❌ Blocked
 - ⬜ Create `billing` app
 - ⬜ Create `teams` app
 - ⬜ Create `platform_admin` app
-- ⬜ Create `webmail` app
+- ✅ Create webmail app — shipped as `postbox` (P11)
 
 ### Models
 - ⬜ Tenant model
@@ -214,6 +216,16 @@ Legend: ✅ Done | 🔄 In Progress | ⬜ Pending | ❌ Blocked
 
 ## PHASE 7 — Webmail Data Flow
 
+> **Superseded by P11 — PostBox.** Webmail shipped as `apps.postbox` under
+> `/api/postbox/`, on its own hostname `postbox.matemail.online`, with a
+> mailbox-bound session rather than a Workspace SSO bridge (DEC-049). The
+> `/api/webmail/` endpoints below were never built and will not be: the URL
+> tree is removed. Folders, messages, send, drafts, flags, folder actions,
+> the inbox, reading pane, composer and folder navigation all exist in
+> PostBox. Thread view is the one item genuinely still owed: PostBox lists
+> and reads individual messages, and neither groups a conversation nor
+> renders one as a thread.
+
 - ⬜ GET /api/webmail/folders/
 - ⬜ GET /api/webmail/messages/?folder=inbox
 - ⬜ GET /api/webmail/messages/:id/
@@ -268,7 +280,7 @@ Legend: ✅ Done | 🔄 In Progress | ⬜ Pending | ❌ Blocked
 | `inbound.yourbrand.example` | `mx.matemail.online` |
 | `spf.yourbrand.example` | `_spf.matemail.online` |
 | `yb._domainkey` | `mm1._domainkey` |
-| `admin.yourbrand.example` | `app.matemail.online` |
+| `admin.yourbrand.example` | `portal.matemail.online` |
 | `alerts@yourbrand.example` | `alerts@matemail.online` |
 | `imap.yourbrand.example` | `imap.matemail.online` |
 | `smtp.yourbrand.example` | `smtp.matemail.online` |
@@ -308,10 +320,10 @@ Legend: ✅ Done | 🔄 In Progress | ⬜ Pending | ❌ Blocked
 | `billing` | Billing page | ⬜ To build |
 | `team` | Team Members page | ⬜ To build |
 | `settings` | Settings page | ⬜ To build |
-| `webmail` | WebmailInbox | ⬜ To build |
-| `compose` | ComposeScreen | ⬜ To build |
+| `webmail` | PostBox inbox | ✅ P11 (`/postbox`) |
+| `compose` | PostBox composer | ✅ P11 (in-page, not a route) |
 | `webmail-thread` | ThreadView | ⬜ To build |
-| `webmail-settings` | WebmailSettings | ⬜ To build |
+| `webmail-settings` | PostBox settings | ✅ P11 (`/postbox/settings`) |
 | (platform admin) | Internal staff portal | ⬜ Phase 13 |
 
 ---

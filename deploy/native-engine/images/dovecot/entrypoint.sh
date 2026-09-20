@@ -110,5 +110,65 @@ else
     echo "# No API key configured; the administrative API is unusable."         > /etc/dovecot/engine-doveadm.conf
 fi
 
+# The PostBox master credential (P11).
+#
+# PostBox authenticates a person with the password they type, then keeps
+# reading their mailbox for the life of the session. MateMail stores no mailbox
+# password, so the alternative is retaining the customer's password wherever
+# the session lives. A master identity in one root-only file on one host is the
+# smaller exposure.
+#
+# NOT optional, unlike the two above. dovecot.conf sets
+# `auth_master_user_separator` unconditionally and includes this file with
+# `!include`. A missing render would leave the separator active with no master
+# passdb behind it: PostBox would fail to authenticate, and so would any
+# ordinary address that happened to contain the separator, in a way nobody
+# would trace back to here. Refusing to start says it once, loudly.
+if [ -z "${NATIVE_POSTBOX_MASTER_PASSWORD:-}" ]; then
+    echo "entrypoint: NATIVE_POSTBOX_MASTER_PASSWORD is unset or empty - refusing" >&2
+    echo "            to start. dovecot.conf enables master-user login and this" >&2
+    echo "            is the credential behind it; without it PostBox cannot read" >&2
+    echo "            any mailbox and addresses containing '*' would fail oddly." >&2
+    exit 78
+fi
+
+# Same alphabet rule as the database password, for the same reason: a passwd
+# file is colon-separated and line-oriented, so ':' or a newline in the value
+# would silently redefine the record. ':' is excluded here even though the
+# database password allows it.
+case "$NATIVE_POSTBOX_MASTER_PASSWORD" in
+    *[!A-Za-z0-9._~+=/@-]*)
+        echo "entrypoint: NATIVE_POSTBOX_MASTER_PASSWORD contains a character that" >&2
+        echo "            cannot be represented safely in a passwd-file record." >&2
+        echo "            Allowed: A-Z a-z 0-9 . _ ~ + = / @ -" >&2
+        exit 78
+        ;;
+esac
+
+umask 077
+{
+    echo "# Generated at container start by images/dovecot/entrypoint.sh."
+    echo "# One record, one secret. Never in Git and never in the image."
+    # user:password:uid:gid:gecos:home:shell:extra_fields
+    # Only the first two fields matter for a master passdb; the rest stay empty
+    # so this record can never be mistaken for a mail account.
+    echo "postbox:{PLAIN}${NATIVE_POSTBOX_MASTER_PASSWORD}::::::"
+} > /etc/dovecot/postbox-master
+
+{
+    echo "# Generated at container start by images/dovecot/entrypoint.sh."
+    echo "# The master passdb. The credential itself is in postbox-master."
+    echo "passdb passwd-file {"
+    echo "  master = yes"
+    echo "  passwd_file_path = /etc/dovecot/postbox-master"
+    # The record above stores the value in the clear inside a 0600 file that
+    # exists only in this container's writable layer. A hash would be better
+    # if this were a user database; for a single service credential that the
+    # operator rotates by restarting the container, the added moving part
+    # buys less than it costs.
+    echo "  default_password_scheme = PLAIN"
+    echo "}"
+} > /etc/dovecot/engine-postbox-master.conf
+
 # Upstream's entrypoint and command, unchanged.
 exec /usr/bin/tini -- /dovecot/sbin/dovecot -F

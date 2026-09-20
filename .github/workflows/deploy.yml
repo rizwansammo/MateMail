@@ -81,7 +81,7 @@ jobs:
     # `confirm` input are. Revisit if the repo becomes public or the plan changes.
     environment:
       name: production
-      url: https://app.matemail.online
+      url: https://portal.matemail.online
 
     # Least privilege: read the repo, read the packages this repo published.
     # GITHUB_TOKEN is scoped to this job and expires with it, so no long-lived

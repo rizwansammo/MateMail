@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     template: "%s | MateMail",
   },
   description:
-    "Host domain-based inboxes, manage DNS health, monitor deliverability, and give your team a polished webmail experience.",
+    "Host domain-based inboxes, manage DNS health, monitor deliverability, and give your team MateMail PostBox.",
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_APP_URL ?? "https://matemail.online"
   ),

@@ -22,7 +22,6 @@ INTERNAL_VIEW_NAMES = [
     "smtp-inbound-policy",
     "smtp-outbound-policy",
     "smtp-rate-limits",
-    "webmail-validate-token",
 ]
 
 
@@ -37,22 +36,35 @@ class InternalEndpointRoutingTest(TestCase):
                     f"{name} resolves to {path}, outside the nginx-protected prefix",
                 )
 
-    def test_validate_token_is_no_longer_publicly_routed(self):
-        """The old public path must not resolve to anything at all."""
+    def test_the_webmail_sso_bridge_is_gone(self):
+        """
+        P11 removed it. It minted a mailbox login token for any mailbox in the
+        caller's organization, with no check that the caller owned that
+        mailbox — so an administrator could have opened an employee's mail the
+        moment a webmail client existed to spend the token. PostBox
+        authenticates the mailbox user directly instead (DEC-049).
+        """
         resolver = get_resolver()
-        with self.assertRaises(Exception):
-            resolver.resolve("/api/webmail/validate-token/")
+        for path in ("/api/webmail/sso/", "/api/internal/webmail/validate-token/",
+                     "/api/webmail/validate-token/"):
+            with self.subTest(path=path):
+                with self.assertRaises(Exception):
+                    resolver.resolve(path)
 
-    def test_tenant_facing_sso_route_stays_outside_internal(self):
-        path = reverse("webmail-sso")
-        self.assertEqual(path, "/api/webmail/sso/")
-        self.assertFalse(path.startswith("/api/internal/"))
+    def test_no_route_can_mint_a_token_for_another_mailbox(self):
+        """
+        The rule, not just the two paths above: nothing in the URL conf may
+        accept a mailbox identifier and hand back a credential for it.
+        """
+        for name in ("webmail-sso", "webmail-validate-token"):
+            with self.subTest(name=name):
+                with self.assertRaises(NoReverseMatch):
+                    reverse(name)
 
     # ── Secret enforcement ───────────────────────────────────────────────────
 
     def test_internal_endpoints_reject_a_missing_secret(self):
         cases = [
-            ("webmail-validate-token", {"token": "x", "email": "a@b.example"}),
             ("smtp-inbound-policy", {"recipient": "a@b.example"}),
             ("smtp-outbound-policy", {"sender": "a@b.example", "sasl_username": "a@b.example"}),
         ]
@@ -62,31 +74,32 @@ class InternalEndpointRoutingTest(TestCase):
                 self.assertEqual(res.status_code, 403)
 
     def test_internal_endpoints_reject_a_wrong_secret(self):
+        # Uses the inbound SMTP policy because the webmail validator these
+        # cases were written against was removed with the SSO bridge in P11.
         res = APIClient().post(
-            reverse("webmail-validate-token"),
-            {"token": "x", "email": "a@b.example"},
+            reverse("smtp-inbound-policy"),
+            {"recipient": "a@b.example"},
             format="json",
             HTTP_X_INTERNAL_SECRET="not-the-secret",
         )
         self.assertEqual(res.status_code, 403)
 
     def test_internal_endpoint_accepts_the_correct_secret(self):
-        """Correct secret gets past auth (the token itself is still invalid)."""
+        """Correct secret gets past auth; the answer itself may still be a refusal."""
         res = APIClient().post(
-            reverse("webmail-validate-token"),
-            {"token": "no-such-sso-token", "email": "a@b.example"},
+            reverse("smtp-inbound-policy"),
+            {"recipient": "nobody@no-such-domain.example"},
             format="json",
             HTTP_X_INTERNAL_SECRET=INTERNAL_SECRET,
         )
-        self.assertEqual(res.status_code, 200)
-        self.assertFalse(res.data["valid"])
+        self.assertNotEqual(res.status_code, 403)
 
     @override_settings(INTERNAL_API_SECRET="")
     def test_unconfigured_secret_denies_rather_than_allows(self):
         """An empty secret must fail closed, never match an empty header."""
         res = APIClient().post(
-            reverse("webmail-validate-token"),
-            {"token": "x", "email": "a@b.example"},
+            reverse("smtp-inbound-policy"),
+            {"recipient": "a@b.example"},
             format="json",
             HTTP_X_INTERNAL_SECRET="",
         )
@@ -100,9 +113,10 @@ class InternalSecretComparisonTest(TestCase):
         import inspect
 
         from apps.smtp_policy import views as smtp_views
-        from apps.webmail import views as webmail_views
 
-        for module in (smtp_views, webmail_views):
+        # apps.webmail no longer has an `_authorized` — its views were removed
+        # with the SSO bridge in P11.
+        for module in (smtp_views,):
             with self.subTest(module=module.__name__):
                 source = inspect.getsource(module._authorized)
                 self.assertIn("compare_digest", source)

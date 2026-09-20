@@ -297,3 +297,350 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .pf-btn { transition: none; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MateMail PostBox
+   ─────────────────────────────────────────────────────────────────────────────
+   Scoped to `.pb`, so PostBox, the Workspace and the Platform
+   Console keep their own visual identities inside one Next.js application.
+
+   The palette, the type and the square geometry come from the PostBox design
+   prototype. `--pb-radius: 0` is the defining choice: this is a dense
+   operational mail client, and rounded cards everywhere would make it read as
+   a generic SaaS dashboard.
+
+   Three theme states, as elsewhere in MateMail: an explicit choice stamps
+   `data-pb-theme`, and the un-stamped document follows the operating system.
+   The un-stamped case is the common one, so it has to be correct on its own.
+
+   Hemi Head is used ONLY for the MateMail PostBox wordmark. Interface text,
+   buttons and message content use BusinessSans — a display face set at 13px in
+   a table row is unreadable, and branding is not the same job as reading.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: HemiHead;
+  src: url('/postbox/HemiHead-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: BusinessSans;
+  src: url('/postbox/BusinessSans-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: BusinessSans;
+  src: url('/postbox/BusinessSans-500.woff2') format('woff2');
+  font-weight: 500 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: BusinessSans;
+  src: url('/postbox/BusinessSans-700.woff2') format('woff2');
+  font-weight: 700 900;
+  font-display: swap;
+}
+
+.pb {
+  --pb-bg: #ffffff;
+  --pb-fg: #233244;
+  --pb-surface: #f9fafc;
+  --pb-surface-2: #f1f4f7;
+  --pb-sidebar: #f6f8fb;
+  --pb-selected: #eaf1f9;
+  --pb-border: #e2e7ed;
+  --pb-border-strong: #d5dde5;
+
+  --pb-primary: #153d62;
+  --pb-primary-fg: #ffffff;
+  --pb-accent: #edf3f9;
+  --pb-accent-fg: #153d62;
+
+  --pb-muted: #6c7a8c;
+  --pb-subtle: #718093;
+  --pb-danger: #b94444;
+  --pb-danger-soft: #fdf2f2;
+  --pb-success: #2d7968;
+  --pb-success-soft: #eefaf5;
+  --pb-warn: #9a6b18;
+  --pb-warn-soft: #fdf7ec;
+  --pb-ring: #507dab;
+
+  --pb-shadow: 0 1px 2px rgb(21 61 98 / 0.06);
+  --pb-shadow-lg: 0 18px 60px rgb(24 50 75 / 0.16);
+
+  /* Square, deliberately. See the block comment above. */
+  --pb-radius: 0px;
+
+  --pb-font: BusinessSans, "Segoe UI", system-ui, -apple-system, sans-serif;
+  --pb-brand-font: HemiHead, var(--pb-font);
+
+  background: var(--pb-bg);
+  color: var(--pb-fg);
+  font-family: var(--pb-font);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-pb-theme="light"]) .pb {
+    --pb-bg: #131c27;
+    --pb-fg: #e2e9f1;
+    --pb-surface: #16212d;
+    --pb-surface-2: #1c2939;
+    --pb-sidebar: #101923;
+    --pb-selected: #21354b;
+    --pb-border: #2a3747;
+    --pb-border-strong: #3c4d61;
+
+    --pb-primary: #85b4e0;
+    --pb-primary-fg: #102238;
+    --pb-accent: #243a50;
+    --pb-accent-fg: #b8d7f3;
+
+    --pb-muted: #96a6b9;
+    --pb-subtle: #8092a9;
+    --pb-danger: #ed8c8c;
+    --pb-danger-soft: #331a1a;
+    --pb-success: #78bfa8;
+    --pb-success-soft: #122b25;
+    --pb-warn: #dfb464;
+    --pb-warn-soft: #2d2514;
+    --pb-ring: #7faad3;
+
+    --pb-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
+    --pb-shadow-lg: 0 18px 60px rgb(0 0 0 / 0.55);
+  }
+}
+
+:root[data-pb-theme="dark"] .pb {
+  --pb-bg: #131c27;
+  --pb-fg: #e2e9f1;
+  --pb-surface: #16212d;
+  --pb-surface-2: #1c2939;
+  --pb-sidebar: #101923;
+  --pb-selected: #21354b;
+  --pb-border: #2a3747;
+  --pb-border-strong: #3c4d61;
+
+  --pb-primary: #85b4e0;
+  --pb-primary-fg: #102238;
+  --pb-accent: #243a50;
+  --pb-accent-fg: #b8d7f3;
+
+  --pb-muted: #96a6b9;
+  --pb-subtle: #8092a9;
+  --pb-danger: #ed8c8c;
+  --pb-danger-soft: #331a1a;
+  --pb-success: #78bfa8;
+  --pb-success-soft: #122b25;
+  --pb-warn: #dfb464;
+  --pb-warn-soft: #2d2514;
+  --pb-ring: #7faad3;
+
+  --pb-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
+  --pb-shadow-lg: 0 18px 60px rgb(0 0 0 / 0.55);
+}
+
+/* ── primitives ──────────────────────────────────────────────────────────── */
+
+.pb-brand {
+  font-family: var(--pb-brand-font);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.pb-panel {
+  background: var(--pb-bg);
+  border: 1px solid var(--pb-border);
+  border-radius: var(--pb-radius);
+}
+
+.pb-muted { color: var(--pb-muted); }
+.pb-subtle { color: var(--pb-subtle); }
+
+.pb-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--pb-subtle);
+}
+
+.pb-input,
+.pb-select,
+.pb-textarea {
+  width: 100%;
+  background: var(--pb-bg);
+  border: 1px solid var(--pb-border-strong);
+  border-radius: var(--pb-radius);
+  padding: 0.5rem 0.65rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  color: var(--pb-fg);
+}
+
+.pb-input::placeholder,
+.pb-textarea::placeholder { color: var(--pb-subtle); }
+
+.pb-input:focus-visible,
+.pb-select:focus-visible,
+.pb-textarea:focus-visible,
+.pb-btn:focus-visible,
+.pb-row:focus-visible,
+.pb-nav:focus-visible {
+  outline: 2px solid var(--pb-ring);
+  outline-offset: 1px;
+}
+
+.pb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--pb-radius);
+  padding: 0.45rem 0.8rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.pb-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.pb-btn-primary { background: var(--pb-primary); color: var(--pb-primary-fg); }
+.pb-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+
+.pb-btn-ghost {
+  background: transparent;
+  border-color: var(--pb-border-strong);
+  color: var(--pb-fg);
+}
+.pb-btn-ghost:hover:not(:disabled) { background: var(--pb-surface-2); }
+
+.pb-btn-plain {
+  background: transparent;
+  border-color: transparent;
+  color: var(--pb-muted);
+  padding: 0.35rem 0.5rem;
+}
+.pb-btn-plain:hover:not(:disabled) { background: var(--pb-surface-2); color: var(--pb-fg); }
+
+.pb-btn-danger { background: var(--pb-danger); color: #fff; }
+.pb-btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
+
+/* ── navigation ──────────────────────────────────────────────────────────── */
+
+.pb-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.4rem 0.7rem;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: var(--pb-radius);
+  background: transparent;
+  color: var(--pb-muted);
+  font-size: 0.8125rem;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+}
+.pb-nav:hover { background: var(--pb-surface-2); color: var(--pb-fg); }
+.pb-nav[aria-current="true"] {
+  background: var(--pb-selected);
+  border-left-color: var(--pb-primary);
+  color: var(--pb-accent-fg);
+  font-weight: 600;
+}
+
+.pb-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pb-subtle);
+}
+
+/* ── message list ────────────────────────────────────────────────────────── */
+
+.pb-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: start;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.6rem 0.85rem;
+  border: none;
+  border-bottom: 1px solid var(--pb-border);
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pb-row:hover { background: var(--pb-surface); }
+.pb-row[data-selected="true"] {
+  background: var(--pb-selected);
+  border-left-color: var(--pb-primary);
+}
+.pb-row[data-unread="true"] .pb-row-subject,
+.pb-row[data-unread="true"] .pb-row-from { font-weight: 700; }
+
+.pb-row-from { font-size: 0.8125rem; }
+.pb-row-subject { font-size: 0.8125rem; }
+.pb-row-preview { font-size: 0.75rem; color: var(--pb-subtle); }
+
+.pb-density-compact .pb-row { padding-top: 0.35rem; padding-bottom: 0.35rem; }
+
+/* ── the message body ────────────────────────────────────────────────────── */
+
+/* Email content is isolated so its own CSS cannot lay out the application
+   around it. `contain` and a new stacking context are the belt to the
+   sanitiser's braces — the sanitiser already removes `position`, and this
+   means even a property that slipped through cannot escape the box. */
+.pb-message-body {
+  contain: content;
+  isolation: isolate;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.pb-message-body img { max-width: 100%; height: auto; }
+.pb-message-body table { max-width: 100%; }
+.pb-message-body a { color: var(--pb-accent-fg); text-decoration: underline; }
+.pb-message-body blockquote {
+  margin: 0 0 0 0.75rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--pb-border-strong);
+  color: var(--pb-muted);
+}
+.pb-message-body pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+}
+
+.pb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--pb-border);
+  border-radius: var(--pb-radius);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pb-muted);
+  background: var(--pb-surface-2);
+}
+
+.pb-scroll { overflow-y: auto; overscroll-behavior: contain; }
+.pb-num { font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pb-btn, .pb-nav { transition: none; }
+}

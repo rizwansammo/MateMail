@@ -76,6 +76,27 @@ PLATFORM_CODE_RESEND = Limit("platform:code:resend", 3, QUARTER_HOUR)
 #: discover who the platform administrators are.
 PLATFORM_RESET_PER_EMAIL = Limit("platform:reset:email", 3, HOUR)
 
+#: PostBox sign-in attempts per IP. Each one costs a real IMAP connection to
+#: Dovecot, so unlike the Workspace login — where a failure is a local hash —
+#: these are counted on every attempt rather than only on failure.
+POSTBOX_SIGNIN_PER_IP = Limit("postbox:signin:ip", 10, QUARTER_HOUR)
+
+#: PostBox sign-in attempts per mailbox address, from anywhere.
+POSTBOX_SIGNIN_PER_ACCOUNT = Limit("postbox:signin:account", 8, QUARTER_HOUR)
+
+#: Mailbox password changes per mailbox. The current password is required, so
+#: this is a brute-force control on that check.
+POSTBOX_PASSWORD_CHANGE = Limit("postbox:password:mailbox", 5, HOUR)
+
+#: Mailbox searches. IMAP SEARCH without a full-text index is a server-side
+#: scan, so an unbounded search box is an easy way to load the mail server.
+POSTBOX_SEARCH_PER_MAILBOX = Limit("postbox:search:mailbox", 60, MINUTE)
+
+#: Messages submitted from PostBox per mailbox. This does NOT replace the
+#: engine's own per-mailbox rate limit, which still applies at submission —
+#: it stops a runaway client before it reaches the mail path.
+POSTBOX_SEND_PER_MAILBOX = Limit("postbox:send:mailbox", 60, HOUR)
+
 #: Owner-recovery actions a platform administrator may trigger per hour. These
 #: send mail to a customer, so an operator with a stuck script must not be able
 #: to turn the console into a way of mailbombing an organization's owner.

@@ -1,15 +1,10 @@
 """
-Internal-only webmail routes.
+Internal-only webmail routes — none.
 
-Mounted at /api/internal/webmail/ so the edge nginx rule that denies
-/api/internal/ actually covers them. These endpoints authenticate with
-INTERNAL_API_SECRET and are called by the webmail app over the internal
-network, never by a browser.
+`validate-token/` existed to let a webmail application exchange an SSO token
+for a mailbox address. The token it validated could be minted for somebody
+else's mailbox, so both halves were removed together in P11; keeping the
+validator would have left the second half of a mechanism whose first half was
+the flaw. See apps/webmail/views.py and DEC-049.
 """
-from django.urls import path
-
-from .views import WebmailTokenValidateView
-
-urlpatterns = [
-    path("validate-token/", WebmailTokenValidateView.as_view(), name="webmail-validate-token"),
-]
+urlpatterns: list = []

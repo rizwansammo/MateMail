@@ -106,12 +106,51 @@ def test_the_private_path_is_not_reachable_from_outside():
     assert compose()["networks"]["matemail_engine_link"]["external"] is True
 
 
-def test_the_gateway_forwards_one_port_to_one_upstream():
+def test_the_gateway_forwards_only_the_two_intended_ports():
+    """
+    The gateway is the whole of MateMail's reach into the mail path, so what it
+    listens on IS the security boundary.
+
+    Two listeners, deliberately:
+
+      587  submission, since NE6. MateMail's outbound mail.
+      993  IMAPS, since P11. PostBox reads the mail store through this rather
+           than Dovecot joining the link network — which would also have handed
+           the application LMTP on 24, where mail can be injected into any
+           mailbox WITHOUT AUTHENTICATION, and the doveadm API on 8080.
+
+    Both upstreams authenticate every connection they accept. A third listener,
+    or either of these pointed somewhere else, fails here.
+    """
     cfg = GATEWAY_CFG.read_text(encoding="utf-8")
-    binds = re.findall(r"^\s*bind\s+:(\d+)", cfg, re.M)
-    assert binds == ["587"], f"gateway listens on {binds}, expected only 587"
-    servers = re.findall(r"^\s*server\s+\S+\s+(\S+)", cfg, re.M)
-    assert servers == ["postfix:587"], f"gateway forwards to {servers}"
+
+    binds = sorted(re.findall(r"^\s*bind\s+:(\d+)", cfg, re.M))
+    assert binds == ["587", "993"], f"gateway listens on {binds}"
+
+    servers = sorted(re.findall(r"^\s*server\s+\S+\s+(\S+)", cfg, re.M))
+    assert servers == ["dovecot:993", "postfix:587"], f"gateway forwards to {servers}"
+
+    # Neither upstream may be an engine port that does not authenticate.
+    for forbidden, why in (
+        ("dovecot:24", "LMTP accepts mail for any mailbox without authenticating"),
+        ("dovecot:8080", "doveadm is the administrative API"),
+        ("postfix:25", "port 25 is the inbound MX, not MateMail's to use"),
+        ("db:5432", "the engine database is not MateMail's to reach"),
+    ):
+        assert forbidden not in cfg, f"{forbidden} must never be an upstream: {why}"
+
+
+def test_the_imaps_listener_does_not_terminate_tls():
+    """
+    993 is implicit TLS. If the gateway terminated it, this container would
+    hold the mail certificate's private key and would see every mailbox
+    password in the clear — the two things the submission path was shaped to
+    avoid. Dovecot presents its own certificate end to end.
+    """
+    cfg = GATEWAY_CFG.read_text(encoding="utf-8")
+    block = cfg.split("frontend imaps", 1)[1].split("backend", 1)[0]
+    assert "ssl" not in block, "the IMAPS listener must not terminate TLS"
+    assert "crt" not in cfg, "the gateway must hold no certificate at all"
 
 
 def test_the_gateway_does_not_terminate_tls():

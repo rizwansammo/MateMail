@@ -19,7 +19,9 @@ Mail Engine are both deployed; what follows is how they are configured.
 |---|---|
 | `docker-compose.yml` | Production stack. Copied to `/opt/MateMail/docker-compose.yml`. |
 | `env.production.example` | Template for `/opt/MateMail/.env`. Placeholders only. |
-| `nginx/app.matemail.online.conf` | Host-nginx vhost **template**. Not installed by P2. |
+| `nginx/portal.matemail.online.conf` | Host-nginx vhost **template** for the MateMail Workspace, and the legacy `app.matemail.online` redirect. Declares the shared upstreams. Not installed by P2. |
+| `nginx/postbox.matemail.online.conf` | Host-nginx vhost **template** for MateMail PostBox. |
+| `nginx/platform.matemail.online.conf` | Host-nginx vhost **template** for the Platform Console. |
 
 ---
 
@@ -110,9 +112,9 @@ install -m 0600 /dev/null /opt/MateMail/.env
 docker login ghcr.io -u <github-user>      # paste a read:packages PAT
 
 # 4. Host nginx vhost (template — review before installing).
-sudo cp deploy/nginx/app.matemail.online.conf /etc/nginx/sites-available/matemail
+sudo cp deploy/nginx/portal.matemail.online.conf /etc/nginx/sites-available/matemail
 sudo ln -s /etc/nginx/sites-available/matemail /etc/nginx/sites-enabled/
-sudo certbot --nginx -d app.matemail.online -d matemail.online
+sudo certbot --nginx -d portal.matemail.online -d matemail.online -d app.matemail.online
 sudo nginx -t && sudo systemctl reload nginx
 
 # 5. The private Mail Engine link. REQUIRED — backend and celery-worker join it,

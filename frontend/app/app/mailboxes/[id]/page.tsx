@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ArrowLeft, CheckCircle2, AlertCircle, ExternalLink,
+  ArrowLeft, CheckCircle2, AlertCircle,
   RefreshCw, Mail, Lock, HardDrive,
 } from "lucide-react";
 import { api, ApiError, apiRequest } from "@/lib/api";
@@ -38,8 +38,6 @@ export default function MailboxDetailPage() {
   const [loading, setLoading] = useState(true);
 
   // SSO state
-  const [ssoLoading, setSsoLoading] = useState(false);
-  const [ssoError, setSsoError] = useState("");
 
   // Status toggle state
   const [statusLoading, setStatusLoading] = useState(false);
@@ -61,24 +59,6 @@ export default function MailboxDetailPage() {
   }, [params.id]);
 
   useEffect(() => { fetchMailbox(); }, [fetchMailbox]);
-
-  async function openWebmail() {
-    if (!mailbox) return;
-    setSsoError("");
-    setSsoLoading(true);
-    try {
-      const res = await apiRequest(`/api/webmail/sso/?mailbox_id=${mailbox.id}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setSsoError(body.detail ?? "Could not open webmail.");
-        return;
-      }
-      const { url } = await res.json();
-      window.open(url, "_blank", "noopener,noreferrer");
-    } finally {
-      setSsoLoading(false);
-    }
-  }
 
   async function toggleStatus() {
     if (!mailbox || mailbox.status === "suspended") return;
@@ -172,25 +152,14 @@ export default function MailboxDetailPage() {
           </div>
         </div>
 
-        {/* Open Webmail */}
-        <button
-          onClick={openWebmail}
-          disabled={ssoLoading || !mailbox.mail_service_ready || mailbox.status !== "active"}
-          className="inline-flex items-center gap-1.5 rounded-md bg-cyan-600 px-3 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          title={!mailbox.mail_service_ready ? "Mail service setup in progress" : mailbox.status !== "active" ? "Mailbox is not active" : "Open webmail"}
-        >
-          {ssoLoading ? (
-            <RefreshCw className="h-4 w-4 animate-spin" />
-          ) : (
-            <ExternalLink className="h-4 w-4" />
-          )}
-          {ssoLoading ? "Opening…" : "Open Webmail"}
-        </button>
+        {/* The "Open Webmail" button was removed in P11.
+            It called /api/webmail/sso/, which minted a mailbox login token for
+            any mailbox in the organization — letting an administrator open an
+            employee's mail. Provisioning a mailbox and reading it are different
+            powers. The mailbox user signs in themselves at
+            postbox.matemail.online; see DEC-049. */}
       </div>
 
-      {ssoError && (
-        <p className="text-sm text-red-600">{ssoError}</p>
-      )}
 
       {/* Info card */}
       <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">

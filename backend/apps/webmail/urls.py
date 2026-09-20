@@ -1,14 +1,11 @@
 """
-Tenant-facing webmail routes.
+Tenant-facing webmail routes — none.
 
-The token *validation* endpoint is internal-only and lives in internal_urls.py,
-mounted under /api/internal/webmail/ — do not add it here, or the edge rule that
-denies /api/internal/ will no longer protect it.
+The SSO bridge that lived here was removed in P11. It allowed any user with
+tenant access to mint a login token for any mailbox in the organization, which
+is the mailbox-impersonation path the PostBox privacy boundary forbids. See
+apps/webmail/views.py and DEC-049.
+
+PostBox authenticates the mailbox user directly: /api/postbox/auth/login/.
 """
-from django.urls import path
-
-from .views import WebmailSSOView
-
-urlpatterns = [
-    path("sso/", WebmailSSOView.as_view(), name="webmail-sso"),
-]
+urlpatterns: list = []

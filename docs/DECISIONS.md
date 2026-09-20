@@ -83,7 +83,7 @@ Each entry documents a decision, the options considered, the choice made, and th
 **Decision:** JWT (access + refresh) for the SaaS app; separate IMAP/SMTP credentials for mail protocols
 
 **Reasoning:**
-- JWT allows the Next.js frontend to be stateless and makes multi-subdomain auth easier (app.matemail.online and webmail.matemail.online share JWT claims).
+- JWT allows the Next.js frontend to be stateless and makes multi-subdomain auth easier. (Written before PostBox existed; PostBox does **not** share these claims — it issues its own mailbox-bound session, see DEC-049.)
 - IMAP/SMTP auth is handled entirely by Dovecot (via mailcow) — completely separate auth path from web login.
 - Web login credentials and mailbox credentials are distinct (different passwords, different auth systems). Users set a separate mailbox password.
 
@@ -2281,6 +2281,11 @@ addresses sit clear of the range Docker allocates dynamically.
 `app.matemail.online` is the Organization Console, for customers.
 `platform.matemail.online` is the Platform Console, for NetaMate staff.
 
+> **Hostname superseded by DEC-055.** The customer console is now the
+> MateMail Workspace at `portal.matemail.online`; `app.matemail.online`
+> is a legacy redirect. Everything else in this record stands — the
+> reasoning was never about the particular name.
+
 Both are served by the same Next.js image on `127.0.0.1:3020` and the same
 Django backend on `127.0.0.1:8020`. The split is made by the `Host` header in
 `frontend/middleware.ts`, which mounts the `/platform` subtree at the root of
@@ -2425,3 +2430,288 @@ The real backups are the P6 restic system on the host, deliberately outside
 the application: a backup system the application can write to is one an
 application compromise can destroy. Not being able to read its state from here
 is the cost of that design, and stating it plainly is the honest way to pay it.
+
+---
+
+## DEC-049 — A Workspace login is not a mailbox login
+
+**Status:** Accepted · **Phase:** P11 — PostBox · **Date:** 2026-09-20
+
+### Decision
+
+`WebmailSSOView` and the `/api/webmail/` URL tree are removed, along with the
+"Open webmail" button on the Workspace mailbox detail page.
+
+PostBox authenticates the mailbox user directly against Dovecot with the
+password they type. The session it issues is bound to exactly one mailbox,
+recorded at sign-in. No request carries a mailbox identifier, and no token is
+ever minted on another person's behalf.
+
+A Workspace access token is not accepted by `/api/postbox/`, and a PostBox
+session is not accepted anywhere else.
+
+### Why
+
+The removed view scoped its lookup with `Mailbox.objects.for_tenant(...)` and
+stopped there. Tenant scoping is the right boundary for administering a
+mailbox and the wrong one for reading it: it made every mailbox in the
+organization reachable by anyone the tenant considered an administrator.
+
+It had never worked, because MateMail stores no mailbox password and nothing
+could complete the login. That is the only reason it was not already a
+breach — the token was a key to a door nobody had built. P11 builds the door.
+Shipping both would have turned a dormant design flaw into a working
+mailbox-impersonation path on the day PostBox launched.
+
+Provisioning a mailbox, suspending it, resetting its password, and reading its
+contents are four different powers. The first three belong to administrators.
+The fourth belongs to the person whose mail it is, and is exercised by knowing
+the password — which is why a password reset is visible to its owner, and
+silent access is not possible at all rather than merely disallowed.
+
+The same rule binds NetaMate. There is no impersonation, no "sign in as
+customer", and no message viewer in the Platform Console — see DEC-047.
+
+---
+
+## DEC-050 — PostBox reaches Dovecot through the gateway, not the engine network
+
+**Status:** Accepted · **Phase:** P11 — PostBox · **Date:** 2026-09-20
+
+### Decision
+
+The Django backend talks to Dovecot over IMAPS through the Native Engine's
+HAProxy gateway, which gained an `imaps` frontend for the purpose.
+
+Dovecot is **not** joined to `matemail_engine_link`, and the backend is not
+joined to `matemail_native_engine`.
+
+### Why
+
+Joining the two would have been one line of compose, and it would have put the
+whole Dovecot container on a network the application can reach — not only IMAP.
+That includes LMTP, which has no authentication at all, because its only caller
+is Postfix on a trusted network. An application-side compromise, or a
+server-side request forgery in any code path that takes a host, would then be
+able to inject mail into any mailbox on the platform as any sender, with no
+credential and no trace in the submission path. It also includes doveadm, which
+can read and modify any mailbox.
+
+The gateway already exists for the same reason on the Postfix side (DEC-038),
+and extending it keeps one rule: the application reaches the engine through
+explicitly published protocols, never by sharing its network. The IMAPS
+frontend runs in `mode tcp`, terminates nothing, and holds no key or
+certificate — it forwards a connection, and Dovecot remains the only thing
+that sees the TLS session or the credential.
+
+The cost is a hop and a second place to look when IMAP is unreachable. That is
+a worse debugging experience in exchange for removing an unauthenticated mail
+injection path, which is the trade we want.
+
+---
+
+## DEC-051 — The user's password is used once, and the master identity does the rest
+
+**Status:** Accepted · **Phase:** P11 — PostBox · **Date:** 2026-09-20
+
+### Decision
+
+At sign-in, PostBox authenticates to Dovecot as the user, with the password
+they typed. That password is then discarded. It is never written to Postgres,
+Redis, the session record, a log line, or the browser.
+
+Every subsequent request opens the mailbox with a Dovecot master identity —
+`user@example.com*postbox` — authorized only for the address the session is
+bound to.
+
+The master password is not in the repository, not in Django settings, and not
+in the application's environment. It reaches Dovecot only through the engine
+image's entrypoint, which renders the master `passwd-file` at start and
+**refuses to start** if `NATIVE_POSTBOX_MASTER_PASSWORD` is unset.
+
+### Why
+
+Webmail has a structural problem: HTTP is request-at-a-time and IMAP is a
+session, so something has to bridge them. The usual bridges are all bad. Keeping
+the password in the session store makes the session store a plaintext credential
+database. Keeping it in the browser makes every XSS a password disclosure.
+Holding an IMAP connection open per signed-in user makes an idle user cost a
+process on the mail server.
+
+The master identity removes the credential from the bridge entirely. What the
+session record holds is a SHA-256 of its own token and a mailbox id — take the
+whole database and you learn who has a mailbox, not how to read one.
+
+The authorization then moves to where it can be checked: `open_mailbox` takes
+the address from the session, never from the request, so there is no field to
+tamper with. Eligibility is re-checked on every request rather than trusted
+from sign-in time, so suspending a tenant or disabling a mailbox ends access at
+the next request instead of at session expiry.
+
+The entrypoint refusing to start is deliberate. A master identity that silently
+failed to render would leave a Dovecot that works for everything except
+PostBox, and the failure would surface as a login problem days later. Refusing
+loudly, at start, is the only honest behaviour for a credential nothing else
+can detect the absence of.
+
+---
+
+## DEC-052 — Rules compile to Sieve, and there is no forwarding action
+
+**Status:** Accepted · **Phase:** P11 — PostBox · **Date:** 2026-09-20
+
+### Decision
+
+Mail rules and vacation responders are stored structurally in Postgres and
+compiled to a Sieve script, uploaded over ManageSieve. Dovecot runs them at
+delivery. PostBox never evaluates a rule itself.
+
+The available actions are file-into, mark-read, star, and discard. There is
+deliberately **no forward and no redirect**, even though Sieve offers both.
+
+### Why
+
+Rules that run in the webmail client only apply when the webmail client is
+open, which means the same mailbox behaves differently through Outlook, on a
+phone, and overnight. Running them at delivery makes the rule a property of the
+mailbox rather than of the application, and it is the only place a rule can act
+before the message has been seen.
+
+Compiling from structured rows rather than storing raw Sieve is what makes
+that safe. Sieve is a real language and the script is executed by the mail
+server; accepting user-authored text would be accepting code. Values are
+escaped into quoted strings and control characters are stripped, so a header
+value cannot close its quote and start a new statement.
+
+Forwarding is withheld because `redirect` re-injects a message with the
+mailbox as envelope sender, to a destination nobody has verified. That is the
+exact shape of the abuse the platform's outbound protections exist to prevent,
+and it would bypass them by running inside the delivery agent rather than
+through submission. Forwarding stays where it can be authorized and rate
+limited: the Workspace console, with its own abuse controls.
+
+---
+
+## DEC-053 — Message HTML is rebuilt from an allow-list, and remote content waits to be asked for
+
+**Status:** Accepted · **Phase:** P11 — PostBox · **Date:** 2026-09-20
+
+### Decision
+
+HTML bodies are sanitised with `nh3` against an explicit allow-list of tags,
+attributes and CSS properties. Anything not listed is removed.
+
+Remote references — images, media, and anything else that would fetch on
+render — are stripped before sanitisation unless the reader has asked for
+them. When something was stripped, the reader is told so, from the
+sanitiser's own return value rather than from a guess.
+
+### Why
+
+The message body is attacker-controlled input rendered in the reader's
+session. A deny-list fails the moment a tag or attribute is invented, and the
+failure is silent and in the attacker's favour. An allow-list fails toward
+removing something legitimate, which is visible and recoverable.
+
+Remote images are a separate problem from script execution: a one-pixel image
+with a per-recipient URL reports that a message was opened, when, and from
+what address, to a sender the reader has not answered. Blocking by default
+makes that a choice; the notice makes it an informed one. Deriving the notice
+from what was actually stripped — rather than showing it on every HTML
+message — keeps it meaningful enough that people still read it.
+
+Inline images referenced by `cid:` are left working, because they arrived with
+the message and fetch nothing.
+
+---
+
+## DEC-054 — A message in Sent means Postfix accepted it
+
+**Status:** Accepted · **Phase:** P11 — PostBox · **Date:** 2026-09-20
+
+### Decision
+
+Submission happens first; the copy is filed in Sent second, always. If
+submission fails, nothing is filed and the error is shown. If filing fails
+after a successful submission, the send is still reported as successful, the
+failure is logged, and the response says the copy was not filed.
+
+### Why
+
+Sent is what a person checks to answer "did that go?". Filing first would put
+messages there that were never accepted — the folder would answer the question
+wrongly in exactly the case where being wrong matters. Filing second can only
+fail the other way: a message that was delivered but is missing from Sent is
+confusing, and the reader still has the truth available from the recipient.
+
+Reporting the send as successful when only the filing failed follows the same
+rule. The message is gone; saying otherwise would invite a second send, and a
+duplicate delivery is a worse outcome than an absent copy.
+
+---
+
+## DEC-055 — Four hostnames, four audiences, and one of them is retired
+
+**Status:** Accepted · **Phase:** P11 — PostBox · **Date:** 2026-09-20
+
+### Decision
+
+The customer-facing surfaces are finalized as:
+
+| Hostname | Surface | Audience |
+|----------|---------|----------|
+| `matemail.online` | Public homepage | anyone |
+| `portal.matemail.online` | **MateMail Workspace** | customers administering their organization |
+| `postbox.matemail.online` | **MateMail PostBox** | mailbox users reading their own mail |
+| `platform.matemail.online` | Platform Console | NetaMate staff |
+
+`app.matemail.online` was the customer console's hostname. It is now a legacy
+redirect and nothing else: every path on it is sent, once, with a 308, to the
+same path on `portal.matemail.online`. It serves nothing, proxies nothing, and
+must not appear as a canonical address, a build argument, a CORS origin or a
+link.
+
+The redirect exists in two places on purpose. nginx does it at the edge, so a
+request never reaches a container; `frontend/middleware.ts` does it as well, so
+the application is correct even where the vhost has not been installed.
+
+The product names are **MateMail Workspace** and **MateMail PostBox**. Not
+"tenant portal", not "control panel", not "webmail", and not "the app".
+
+### Why
+
+The old name was accurate when there was one thing to name. There are now
+three signed-in surfaces, and `app` says nothing about which one it is —
+worse, it reads like the whole product, so `app.matemail.online/postbox` looked
+like the reasonable address for webmail when PostBox is a separate audience
+with a separate login. Naming each surface for what it is removes that guess.
+
+`portal` over `app` also because the hostname appears in the one place people
+reliably read: the address bar. A mailbox user who is not an administrator
+should be able to tell at a glance that `portal` is not where their mail is.
+
+### What a retired hostname must not be
+
+A second live address for one surface, which is where this usually goes wrong.
+Two working hostnames means two cookie scopes, two CORS origins, two canonical
+URLs and two sets of links in old emails — and every one of those disagrees
+eventually, usually as a sign-in that succeeds on one name and fails on the
+other. The redirect is the whole point: it is one-way, it is permanent, and the
+old name never renders a page.
+
+It also cannot be removed on a schedule. The access log is the only evidence of
+who still uses it, so removal is a decision made from that log, not from a date.
+
+### Consequences
+
+- `NEXT_PUBLIC_WORKSPACE_HOST` and `NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS` join the
+  existing platform and postbox build args. All four are `NEXT_PUBLIC_*` because
+  middleware runs in the Edge runtime and never sees the container's environment.
+- `app.matemail.online` stays on the certificate and in `DJANGO_ALLOWED_HOSTS`
+  for as long as the redirect exists. A redirect reached only after a
+  certificate warning is worse than a dead name.
+- `deploy/nginx/app.matemail.online.conf` is renamed to
+  `portal.matemail.online.conf` and gains the legacy server block. It still
+  declares the shared upstreams; the other two vhosts reuse them by name.
+- DEC-045's hostname is superseded. Its reasoning — two audiences must never
+  share a login page — is unchanged and was never about the particular name.

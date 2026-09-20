@@ -7,8 +7,9 @@ WHY THIS EXISTS
     to curl. The cause was two correct-looking decisions that contradict each
     other:
 
-      1. `lib/api.ts` baked NEXT_PUBLIC_API_URL — `https://app.matemail.online`
-         — as the API base for the browser.
+      1. `lib/api.ts` baked NEXT_PUBLIC_API_URL — then
+         `https://app.matemail.online`, the Workspace's hostname before the
+         P11 rename — as the API base for the browser.
       2. `middleware.ts` sets `connect-src 'self'` on every console.
 
     On platform.matemail.online, `'self'` is the platform host, so a fetch to
@@ -54,8 +55,16 @@ class PlatformFrontendContractTest(SimpleTestCase):
         The specific regression. A literal hostname here is baked into the
         client bundle and becomes cross-origin on the other console.
         """
+        # Every hostname the product answers on, plus the retired one. A
+        # literal for any of them is cross-origin from at least one of the
+        # others, which is the whole failure this guards.
         base_block = self.api.split("async function request", 1)[0]
-        for literal in ("app.matemail.online", "platform.matemail.online"):
+        for literal in (
+            "portal.matemail.online",
+            "postbox.matemail.online",
+            "platform.matemail.online",
+            "app.matemail.online",
+        ):
             # Comments explain the history and may name the hosts; code must not.
             code = "\n".join(
                 line for line in base_block.splitlines()
@@ -76,20 +85,70 @@ class PlatformFrontendContractTest(SimpleTestCase):
         The hostname comparison belongs to configuration. Hard-coding it would
         make a staging deployment impossible to route.
         """
-        self.assertIn("NEXT_PUBLIC_PLATFORM_HOST", self.middleware)
+        for variable in (
+            "NEXT_PUBLIC_WORKSPACE_HOST",
+            "NEXT_PUBLIC_PLATFORM_HOST",
+            "NEXT_PUBLIC_POSTBOX_HOST",
+            "NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS",
+        ):
+            self.assertIn(variable, self.middleware)
+
+    def test_the_retired_hostname_is_a_redirect_and_not_a_surface(self):
+        """
+        `app.matemail.online` was the Workspace until P11. It has to keep
+        working for old bookmarks, and it must not become a second address
+        the product serves from — two live hostnames for one surface is how
+        cookies, CORS and canonical links quietly disagree.
+
+        The middleware is the authority checked here rather than the nginx
+        template, because the template may not be the file an operator
+        actually installed.
+        """
+        self.assertIn("isLegacyWorkspaceHost", self.middleware)
+        # It must be redirected, not rewritten: a rewrite would serve the
+        # Workspace from the old hostname rather than move people off it.
+        branch = self._top_level_branch(
+            "if (WORKSPACE_HOST && isLegacyWorkspaceHost(host))"
+        )
+        self.assertIn('kind: "redirect"', branch)
+        self.assertNotIn('kind: "rewrite"', branch)
+        # 308, so a re-submitted POST keeps its method and body.
+        self.assertIn("status: 308", branch)
+
+    def test_no_console_is_served_from_the_retired_hostname(self):
+        """
+        The Workspace host is the redirect's target. If the two were ever the
+        same value the redirect would loop, and the check above would still
+        pass — it only asserts the shape of the branch.
+        """
+        self.assertNotIn(
+            "NEXT_PUBLIC_WORKSPACE_HOST ?? \"app.matemail.online\"",
+            self.middleware,
+        )
 
     def test_the_host_rules_cannot_form_a_loop(self):
         """
-        The platform host REWRITES and the app host REDIRECTS. A rewrite does
-        not change the browser's URL, so it cannot re-enter the middleware;
-        that asymmetry is what terminates the chain after one hop.
+        The platform host REWRITES; the Workspace host REDIRECTS to it. A
+        rewrite does not change the browser's URL, so it cannot re-enter the
+        middleware; that asymmetry is what terminates the chain after one hop.
+
+        The branch is bounded by the next top-level `if (`, not by a comment.
+        An earlier version sliced on the text "// Organization host" and so
+        silently swallowed the rest of the file when that comment was renamed,
+        failing on another branch's redirect while reporting the platform host.
         """
-        platform_branch = self.middleware.split("if (isPlatformHost(host))", 1)
-        self.assertEqual(2, len(platform_branch), "platform-host branch missing")
-        branch = platform_branch[1].split("// Organization host", 1)[0]
+        branch = self._top_level_branch("if (isPlatformHost(host))")
         self.assertIn('kind: "rewrite"', branch)
         self.assertNotIn('kind: "redirect"', branch,
                          "the platform host must never redirect to itself")
+
+    def _top_level_branch(self, opening: str) -> str:
+        """The text from `opening` up to the next top-level `if (`."""
+        parts = self.middleware.split(opening, 1)
+        self.assertEqual(2, len(parts), f"branch missing: {opening}")
+        rest = parts[1]
+        end = rest.find("\n  if (")
+        return rest if end == -1 else rest[:end]
 
     def test_api_paths_are_rooted(self):
         """

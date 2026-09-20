@@ -18,15 +18,26 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-ARG NEXT_PUBLIC_API_URL=https://app.matemail.online
-ARG NEXT_PUBLIC_APP_URL=https://app.matemail.online
-# The Platform Console's hostname. middleware.ts compares the incoming
-# Host against it to decide which console to serve, so it is inlined at
-# build time like the others rather than read from the container's env.
+# MateMail Workspace — the customer surface. `app.matemail.online` was
+# this hostname until P11 and is now a legacy redirect only; nothing
+# built into the image may point at it.
+ARG NEXT_PUBLIC_API_URL=https://portal.matemail.online
+ARG NEXT_PUBLIC_APP_URL=https://portal.matemail.online
+# The three hostnames middleware.ts compares the incoming Host against,
+# inlined at build time like the others rather than read from the
+# container's env — middleware runs in the Edge runtime, which does not
+# see the container's environment.
+ARG NEXT_PUBLIC_WORKSPACE_HOST=portal.matemail.online
 ARG NEXT_PUBLIC_PLATFORM_HOST=platform.matemail.online
+ARG NEXT_PUBLIC_POSTBOX_HOST=postbox.matemail.online
+# Retired hostnames, redirected to the Workspace host and never served.
+ARG NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS=app.matemail.online
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_WORKSPACE_HOST=$NEXT_PUBLIC_WORKSPACE_HOST
 ENV NEXT_PUBLIC_PLATFORM_HOST=$NEXT_PUBLIC_PLATFORM_HOST
+ENV NEXT_PUBLIC_POSTBOX_HOST=$NEXT_PUBLIC_POSTBOX_HOST
+ENV NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS=$NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS
 RUN npm run build
 
 FROM node:24-alpine AS runner

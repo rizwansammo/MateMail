@@ -301,7 +301,8 @@ Each phase must build and pass basic tests before the next phase begins. `PROJEC
 **Goal:** Production deployment on Linux VPS.
 
 **Domains:**
-- `matemail.online`, `app.matemail.online`, `webmail.matemail.online`
+- `matemail.online`, `portal.matemail.online`, `postbox.matemail.online`,
+  `platform.matemail.online`
 - `docs.matemail.online`, `imap.matemail.online`, `smtp.matemail.online`, `mx.matemail.online`
 
 **Acceptance:**

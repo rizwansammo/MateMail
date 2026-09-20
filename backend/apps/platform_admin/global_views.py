@@ -229,7 +229,7 @@ class PlatformAliasListView(PlatformListView):
     """
     Alias oversight, not alias editing.
 
-    Day-to-day alias management belongs to the Organization Console. What a
+    Day-to-day alias management belongs to the MateMail Workspace. What a
     platform operator needs is the cross-organization view that an abuse
     report starts from.
     """

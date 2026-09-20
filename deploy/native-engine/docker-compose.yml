@@ -234,6 +234,11 @@ services:
       NATIVE_DOVECOT_CONFIG_HASH: ${NATIVE_DOVECOT_CONFIG_HASH:-unset}
       # NE4: the administrative API mailbox usage is measured through.
       NATIVE_DOVEADM_API_KEY: ${NATIVE_DOVEADM_API_KEY:?required}
+      # P11: the master identity PostBox reads mailboxes with. Required, not
+      # optional — dovecot.conf enables master-user login unconditionally and
+      # the entrypoint refuses to start without this, so a half-configured
+      # engine cannot come up looking healthy.
+      NATIVE_POSTBOX_MASTER_PASSWORD: ${NATIVE_POSTBOX_MASTER_PASSWORD:?required}
     volumes:
       - ./dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro
       # Native mail store. mailcow's vmail-vol-1 is NEVER mounted here — that

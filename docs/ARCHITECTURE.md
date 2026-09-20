@@ -135,8 +135,9 @@ MateServer (Ubuntu 26.04 LTS)
 │
 ├── Host-native nginx ─── owns :80 / :443 for all NetaMate apps
 │   ├── matemail.online          → MateMail public site
-│   ├── app.matemail.online      → MateMail control panel
-│   └── webmail.matemail.online  → MateMail webmail
+│   ├── portal.matemail.online   → MateMail Workspace (customers)
+│   ├── platform.matemail.online → Platform Console (NetaMate staff)
+│   └── postbox.matemail.online  → PostBox (webmail, mailbox users)
 │
 ├── MateMail application stack (Docker Compose)
 │   ├── frontend   127.0.0.1:3020   Next.js
@@ -237,9 +238,21 @@ engine's submission port; the engine consults MateMail's internal policy service
 before accepting, so suspension, sender identity and rate limits are enforced by
 MateMail, not by engine configuration.
 
-**Webmail**: the long-term direction is a MateMail-built webmail over IMAP/SMTP.
-SOGo may exist inside the engine as a by-product of mailcow; it is not the
-product and must not be presented to customers. See DEC-005r.
+**Webmail** is MateMail PostBox, built in-house and served from
+`postbox.matemail.online`. It reads and writes mail over IMAP against the
+engine's Dovecot and sends through the same authenticated submission path as
+any other client, so every policy above applies to it unchanged. No
+third-party webmail is used or exposed.
+
+PostBox reaches Dovecot over IMAPS through the engine's TCP gateway rather
+than by joining the engine network, which would also expose unauthenticated
+LMTP to the application (DEC-050). A mailbox is opened with a Dovecot master
+identity scoped to the signed-in address; the person's own password is used
+once, at sign-in, and never stored (DEC-051).
+
+PostBox is a third front door, not a section of the Workspace. A Workspace
+login does not open a mailbox and never could — administering a mailbox and
+reading it are different powers (DEC-049).
 
 ---
 
