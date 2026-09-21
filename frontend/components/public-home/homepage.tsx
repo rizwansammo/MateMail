@@ -782,8 +782,8 @@ export function MateMailPublicHome() {
                     <input name="name" autoComplete="name" required placeholder="Full name" />
                   </label>
                   <label>
-                    Business email
-                    <input type="email" name="email" autoComplete="email" required placeholder="you@company.com" />
+                    Recovery / Contact Email
+                    <input type="email" name="email" autoComplete="email" required placeholder="you@email.com" />
                   </label>
                   <label>
                     Account password
