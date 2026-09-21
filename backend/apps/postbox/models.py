@@ -234,7 +234,17 @@ class MailSignature(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["mailbox", "name"], name="postbox_signature_unique_name"
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["mailbox"],
+                condition=models.Q(use_for_new=True),
+                name="postbox_signature_one_default_new",
+            ),
+            models.UniqueConstraint(
+                fields=["mailbox"],
+                condition=models.Q(use_for_replies=True),
+                name="postbox_signature_one_default_replies",
+            ),
         ]
 
     def __str__(self):

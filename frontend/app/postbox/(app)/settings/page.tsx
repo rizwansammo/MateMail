@@ -301,6 +301,19 @@ function SignaturesSection() {
 
   useEffect(load, [load]);
 
+  const setDefault = async (
+    signatureId: string,
+    patch: Pick<Signature, "use_for_new"> | Pick<Signature, "use_for_replies">,
+  ) => {
+    setError(null);
+    try {
+      await postbox.updateSignature(signatureId, patch);
+      load();
+    } catch (caught) {
+      setError(describePostBoxError(caught, "That signature default could not be saved."));
+    }
+  };
+
   const add = async () => {
     setBusy(true);
     try {
@@ -356,21 +369,23 @@ function SignaturesSection() {
           />
           <div className="mt-2 flex flex-wrap gap-4 text-xs">
             <label className="flex items-center gap-1.5">
-              <input type="checkbox" defaultChecked={signature.use_for_new}
+              <input
+                type="checkbox"
+                checked={signature.use_for_new}
                 onChange={(e) =>
-                  void postbox.updateSignature(signature.id, {
-                    use_for_new: e.target.checked,
-                  })
-                } />
+                  void setDefault(signature.id, { use_for_new: e.target.checked })
+                }
+              />
               Default for new messages
             </label>
             <label className="flex items-center gap-1.5">
-              <input type="checkbox" defaultChecked={signature.use_for_replies}
+              <input
+                type="checkbox"
+                checked={signature.use_for_replies}
                 onChange={(e) =>
-                  void postbox.updateSignature(signature.id, {
-                    use_for_replies: e.target.checked,
-                  })
-                } />
+                  void setDefault(signature.id, { use_for_replies: e.target.checked })
+                }
+              />
               Default for replies
             </label>
           </div>

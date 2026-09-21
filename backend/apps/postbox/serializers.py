@@ -7,6 +7,7 @@ whatever field somebody adds next.
 """
 from __future__ import annotations
 
+from django.db import transaction
 from rest_framework import serializers
 
 from .models import Contact, MailRule, MailSignature, PostBoxPreference, VacationResponder
@@ -86,6 +87,39 @@ class SignatureSerializer(serializers.ModelSerializer):
         from .mime import sanitize_signature
 
         return sanitize_signature(value or "")
+
+    @staticmethod
+    def _clear_other_defaults(mailbox, instance, validated_data) -> None:
+        """
+        A mailbox has at most one default signature for each compose mode.
+
+        Lock the mailbox row, not merely existing signature rows. That also
+        serializes two concurrent first-signature creates, where there would be
+        no signature row to lock yet. The partial unique constraints on the
+        model are the final database-level guard.
+        """
+        type(mailbox).objects.select_for_update().get(pk=mailbox.pk)
+
+        siblings = MailSignature.objects.for_mailbox(mailbox)
+        if instance is not None:
+            siblings = siblings.exclude(pk=instance.pk)
+
+        if validated_data.get("use_for_new") is True:
+            siblings.filter(use_for_new=True).update(use_for_new=False)
+
+        if validated_data.get("use_for_replies") is True:
+            siblings.filter(use_for_replies=True).update(use_for_replies=False)
+
+    def create(self, validated_data):
+        mailbox = validated_data["mailbox"]
+        with transaction.atomic():
+            self._clear_other_defaults(mailbox, None, validated_data)
+            return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        with transaction.atomic():
+            self._clear_other_defaults(instance.mailbox, instance, validated_data)
+            return super().update(instance, validated_data)
 
 
 class ContactSerializer(serializers.ModelSerializer):
