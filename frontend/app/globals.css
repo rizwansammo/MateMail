@@ -28,6 +28,164 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   Workspace / Portal theme
+   ─────────────────────────────────────────────────────────────────────────────
+   Scoped to .ws. PostBox (.pb) and Platform Console (.pf) are intentionally
+   untouched. Portal keeps its existing visual hierarchy, but all geometry is
+   square and the existing slate utility palette is translated through these
+   tokens so the same pages work in light and dark modes.
+   ────────────────────────────────────────────────────────────────────────── */
+
+.ws {
+  --ws-canvas: #f8fafc;
+  --ws-surface: #ffffff;
+  --ws-surface-2: #f8fafc;
+  --ws-surface-3: #f1f5f9;
+  --ws-border: #e2e8f0;
+  --ws-border-strong: #cbd5e1;
+  --ws-text: #0f172a;
+  --ws-text-muted: #64748b;
+  --ws-text-faint: #94a3b8;
+  --ws-primary: #0f172a;
+  --ws-primary-fg: #ffffff;
+  --ws-accent: #0891b2;
+  --ws-accent-soft: #ecfeff;
+  --ws-ok: #047857;
+  --ws-ok-soft: #ecfdf5;
+  --ws-warn: #b45309;
+  --ws-warn-soft: #fffbeb;
+  --ws-danger: #b91c1c;
+  --ws-danger-soft: #fef2f2;
+  --ws-info: #1d4ed8;
+  --ws-info-soft: #eff6ff;
+  background: var(--ws-canvas);
+  color: var(--ws-text);
+}
+
+:root[data-ws-theme="dark"] .ws {
+  --ws-canvas: #0b1220;
+  --ws-surface: #111827;
+  --ws-surface-2: #172033;
+  --ws-surface-3: #1e293b;
+  --ws-border: #28364a;
+  --ws-border-strong: #3a4a61;
+  --ws-text: #e7edf6;
+  --ws-text-muted: #a0aec0;
+  --ws-text-faint: #74849a;
+  --ws-primary: #22d3ee;
+  --ws-primary-fg: #06202a;
+  --ws-accent: #67e8f9;
+  --ws-accent-soft: #11313a;
+  --ws-ok: #34d399;
+  --ws-ok-soft: #0c2a22;
+  --ws-warn: #fbbf24;
+  --ws-warn-soft: #2e2410;
+  --ws-danger: #f87171;
+  --ws-danger-soft: #331717;
+  --ws-info: #60a5fa;
+  --ws-info-soft: #15233d;
+}
+
+/* Square enterprise geometry across Portal, including cards, inputs, badges
+   and progress bars that were previously using Tailwind rounded utilities. */
+.ws [class*="rounded-"] {
+  border-radius: 0 !important;
+}
+
+.ws input:not([type="checkbox"]):not([type="radio"]),
+.ws select,
+.ws textarea,
+.ws button {
+  border-radius: 0 !important;
+}
+
+/* Existing Portal pages use Tailwind slate utilities directly. Mapping the
+   common utility classes here avoids a risky page-by-page redesign while
+   keeping both themes coherent. */
+.ws.bg-slate-50,
+.ws .bg-slate-50 { background-color: var(--ws-canvas) !important; }
+.ws .bg-white { background-color: var(--ws-surface) !important; }
+.ws .bg-slate-100 { background-color: var(--ws-surface-3) !important; }
+.ws .bg-slate-200 { background-color: var(--ws-border) !important; }
+.ws .bg-slate-900,
+.ws .bg-slate-950 { background-color: var(--ws-primary) !important; }
+
+.ws.text-slate-950,
+.ws .text-slate-950,
+.ws .text-slate-900,
+.ws .text-slate-800,
+.ws .text-slate-700 { color: var(--ws-text) !important; }
+.ws .text-slate-600,
+.ws .text-slate-500 { color: var(--ws-text-muted) !important; }
+.ws .text-slate-400,
+.ws .text-slate-300 { color: var(--ws-text-faint) !important; }
+.ws .text-white { color: var(--ws-primary-fg) !important; }
+
+.ws .border-slate-100,
+.ws .border-slate-200,
+.ws .border-slate-300 { border-color: var(--ws-border) !important; }
+.ws [class*="divide-slate-"] > * + * { border-color: var(--ws-border) !important; }
+
+.ws input:not([type="checkbox"]):not([type="radio"]),
+.ws select,
+.ws textarea {
+  background-color: var(--ws-surface) !important;
+  color: var(--ws-text) !important;
+  border-color: var(--ws-border-strong) !important;
+}
+.ws input::placeholder,
+.ws textarea::placeholder { color: var(--ws-text-faint) !important; }
+
+.ws .bg-cyan-50,
+.ws .bg-cyan-100 { background-color: var(--ws-accent-soft) !important; }
+.ws .text-cyan-600,
+.ws .text-cyan-700 { color: var(--ws-accent) !important; }
+
+.ws .bg-emerald-50,
+.ws .bg-emerald-100 { background-color: var(--ws-ok-soft) !important; }
+.ws .text-emerald-600,
+.ws .text-emerald-700,
+.ws .text-emerald-800 { color: var(--ws-ok) !important; }
+.ws .border-emerald-200 { border-color: color-mix(in srgb, var(--ws-ok) 38%, transparent) !important; }
+
+.ws .bg-amber-50,
+.ws .bg-amber-100 { background-color: var(--ws-warn-soft) !important; }
+.ws .text-amber-500,
+.ws .text-amber-600,
+.ws .text-amber-700,
+.ws .text-amber-800 { color: var(--ws-warn) !important; }
+.ws .border-amber-200 { border-color: color-mix(in srgb, var(--ws-warn) 38%, transparent) !important; }
+
+.ws .bg-red-50 { background-color: var(--ws-danger-soft) !important; }
+.ws .text-red-500,
+.ws .text-red-600,
+.ws .text-red-700 { color: var(--ws-danger) !important; }
+
+.ws .bg-blue-50 { background-color: var(--ws-info-soft) !important; }
+.ws .text-blue-600,
+.ws .text-blue-700 { color: var(--ws-info) !important; }
+
+.ws .hover\:bg-slate-50:hover { background-color: var(--ws-surface-3) !important; }
+.ws .hover\:text-slate-950:hover { color: var(--ws-text) !important; }
+.ws .hover\:bg-slate-700:hover,
+.ws .hover\:bg-slate-800:hover { filter: brightness(1.08); }
+
+.ws-theme-toggle button + button { border-left: 1px solid var(--ws-border); }
+
+/* Platform Console also uses strict square geometry. Keep this scoped so
+   PostBox remains exactly as it is. */
+.pf,
+.pf .pf-card,
+.pf .pf-input,
+.pf .pf-select,
+.pf .pf-btn,
+.pf .pf-badge,
+.pf .pf-nav-item,
+.pf [class*="rounded-"] {
+  border-radius: 0 !important;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    Platform Console theme
    ─────────────────────────────────────────────────────────────────────────────
    Scoped to `.pf`, which wraps the Platform Console only. The Organization
@@ -164,7 +322,7 @@ body {
 .pf-card {
   background: var(--pf-surface);
   border: 1px solid var(--pf-border);
-  border-radius: 10px;
+  border-radius: 0;
   box-shadow: var(--pf-shadow);
 }
 
@@ -184,7 +342,7 @@ body {
   width: 100%;
   background: var(--pf-surface);
   border: 1px solid var(--pf-border-strong);
-  border-radius: 8px;
+  border-radius: 0;
   padding: 0.5rem 0.7rem;
   font-size: 0.875rem;
   color: var(--pf-text);
@@ -205,7 +363,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  border-radius: 8px;
+  border-radius: 0;
   border: 1px solid transparent;
   padding: 0.45rem 0.8rem;
   font-size: 0.8125rem;
@@ -267,7 +425,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  border-radius: 999px;
+  border-radius: 0;
   padding: 0.1rem 0.5rem;
   font-size: 11px;
   font-weight: 600;
@@ -278,7 +436,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  border-radius: 8px;
+  border-radius: 0;
   padding: 0.4rem 0.6rem;
   font-size: 0.8125rem;
   color: var(--pf-text-muted);

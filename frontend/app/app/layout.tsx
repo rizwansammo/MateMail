@@ -20,6 +20,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
+import { WorkspaceThemeProvider, WorkspaceThemeToggle } from "@/components/workspace/theme";
 import { useAuth } from "@/contexts/auth-context";
 
 const nav = [
@@ -71,7 +72,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-950">
+    <WorkspaceThemeProvider>
+    <div className="ws flex min-h-screen bg-slate-50 text-slate-950">
       {/* Sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
         {/* Logo */}
@@ -126,9 +128,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               Admin console
             </Link>
           )}
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Appearance
+            </p>
+            <WorkspaceThemeToggle />
+          </div>
           <button
             onClick={handleLogout}
-            className="mt-2 flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-rose-600"
+            className="mt-3 flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-rose-600"
           >
             <LogOut className="h-3.5 w-3.5" />
             Sign out
@@ -141,5 +149,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
     </div>
+    </WorkspaceThemeProvider>
   );
 }
