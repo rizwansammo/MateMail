@@ -740,7 +740,11 @@ export function MateMailPublicHome() {
         className="mm-application-dialog"
         aria-labelledby="mm-application-title"
         onClose={() => setApplicationOpen(false)}
-        onClick={(event) => {
+        onPointerDown={(event) => {
+          // Close only when the pointer press itself starts on the backdrop.
+          // A native <select> can finish its interaction outside the dialog's
+          // DOM and then emit a click against the dialog surface in Chromium,
+          // which made choosing an option accidentally dismiss the form.
           if (event.target === event.currentTarget) closeApplication();
         }}
       >
