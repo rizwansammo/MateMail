@@ -197,7 +197,16 @@ function routeForHost(request: NextRequest): Routing {
   // above, so the homepage can hydrate without duplicating the Workspace UI on
   // the public hostname.
   if (isPublicHost(host)) {
-    if (pathname === "/") return null;
+    if (pathname === "/") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/public-home";
+      url.search = search;
+      return { kind: "rewrite", url };
+    }
+
+    // The internal target of the root rewrite is allowed through unchanged.
+    // It is not linked publicly; the browser remains at matemail.online/.
+    if (pathname === "/public-home") return null;
 
     if (WORKSPACE_HOST) {
       const target = new URL(request.url);
