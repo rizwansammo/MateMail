@@ -93,10 +93,12 @@ class AdminTenantListView(APIView):
             try:
                 sub = t.subscription
                 plan_tier = sub.plan.tier
+                plan_name = sub.plan.display_name
                 sub_status = sub.status
                 trial_ends_at = sub.trial_ends_at.isoformat() if sub.trial_ends_at else None
             except Exception:
                 plan_tier = None
+                plan_name = None
                 sub_status = None
                 trial_ends_at = None
 
@@ -107,6 +109,7 @@ class AdminTenantListView(APIView):
                 "status": t.status,
                 "plan": t.plan,
                 "plan_tier": plan_tier,
+                "plan_name": plan_name,
                 "sub_status": sub_status,
                 "trial_ends_at": trial_ends_at,
                 "owner_email": t.owner.email,
@@ -267,9 +270,8 @@ class AdminTenantPlanView(APIView):
     """
     POST /api/platform/tenants/{id}/plan/
 
-    Assign a plan or extend the trial:
-      {"plan_tier": "business"}       → set plan + mark subscription ACTIVE
-      {"extend_trial_days": 30}       → extend trial by N days from now
+    Assign a plan. Private Beta is approval-based, not time-limited, so there
+    is no trial-extension operation.
     """
     permission_classes = [IsAuthenticated, IsPlatformAdmin]
 
@@ -280,54 +282,40 @@ class AdminTenantPlanView(APIView):
             return Response({"detail": "Not found."}, status=404)
 
         plan_tier = request.data.get("plan_tier")
-        extend_days = request.data.get("extend_trial_days")
+        if not plan_tier:
+            return Response({"detail": "Provide plan_tier."}, status=400)
 
-        if not plan_tier and not extend_days:
-            return Response({"detail": "Provide plan_tier or extend_trial_days."}, status=400)
+        plan = Plan.objects.filter(tier=plan_tier, is_active=True).first()
+        if not plan:
+            return Response({"detail": f"Unknown plan tier: {plan_tier}"}, status=400)
 
         sub, _ = Subscription.objects.get_or_create(
             tenant=tenant,
             defaults={
-                "plan": Plan.objects.filter(tier=PlanTier.TRIAL).first(),
-                "status": SubscriptionStatus.TRIALING,
-                "trial_ends_at": timezone.now() + timezone.timedelta(days=30),
+                "plan": plan,
+                "status": SubscriptionStatus.ACTIVE,
+                "trial_ends_at": None,
             },
         )
+        sub.plan = plan
+        sub.status = SubscriptionStatus.ACTIVE
+        sub.trial_ends_at = None
+        sub.save(update_fields=["plan", "status", "trial_ends_at", "updated_at"])
 
-        if plan_tier:
-            plan = Plan.objects.filter(tier=plan_tier, is_active=True).first()
-            if not plan:
-                return Response({"detail": f"Unknown plan tier: {plan_tier}"}, status=400)
-            sub.plan = plan
-            sub.status = SubscriptionStatus.ACTIVE
-            sub.trial_ends_at = None
-            sub.save(update_fields=["plan", "status", "trial_ends_at", "updated_at"])
-            if tenant.status == TenantStatus.TRIAL:
-                tenant.status = TenantStatus.ACTIVE
-                tenant.save(update_fields=["status", "updated_at"])
-            logger.info(
-                "Platform admin %s assigned plan %s to tenant %s",
-                request.user.email, plan_tier, tenant.id,
-            )
-            log_event(tenant, LogEventType.PLAN_CHANGED, source=request.user.email,
-                      metadata={"plan": plan_tier})
+        if tenant.status == TenantStatus.TRIAL:
+            tenant.status = TenantStatus.ACTIVE
+            tenant.save(update_fields=["status", "updated_at"])
 
-        elif extend_days:
-            try:
-                extend_days = int(extend_days)
-            except (TypeError, ValueError):
-                return Response({"detail": "extend_trial_days must be an integer."}, status=400)
-            base = max(sub.trial_ends_at or timezone.now(), timezone.now())
-            sub.trial_ends_at = base + timezone.timedelta(days=extend_days)
-            sub.status = SubscriptionStatus.TRIALING
-            sub.save(update_fields=["trial_ends_at", "status", "updated_at"])
-            if tenant.status not in (TenantStatus.ACTIVE, TenantStatus.SUSPENDED):
-                tenant.status = TenantStatus.TRIAL
-                tenant.save(update_fields=["status", "updated_at"])
-            logger.info(
-                "Platform admin %s extended trial for tenant %s by %d days",
-                request.user.email, tenant.id, extend_days,
-            )
+        logger.info(
+            "Platform admin %s assigned plan %s to tenant %s",
+            request.user.email, plan_tier, tenant.id,
+        )
+        log_event(
+            tenant,
+            LogEventType.PLAN_CHANGED,
+            source=request.user.email,
+            metadata={"plan": plan_tier},
+        )
 
         return Response(SubscriptionSerializer(sub).data)
 

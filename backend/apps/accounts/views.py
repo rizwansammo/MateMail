@@ -16,7 +16,6 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.billing.utils import TRIAL_DAYS
 from apps.tenants.models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
 from .models import (
     EmailVerificationToken,
@@ -155,6 +154,7 @@ class SignupView(APIView):
         serializer = SignupSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        application_only = request.data.get("application_only") is True
 
         if User.objects.filter(email=data["email"]).exists():
             return Response({"email": "An account with this email already exists."}, status=400)
@@ -181,18 +181,30 @@ class SignupView(APIView):
                 role=MemberRole.OWNER,
                 status=MemberStatus.ACTIVE,
             )
-            # Create 30-day trial subscription
+            # Private Beta is approval-based, not time-limited. Keep the
+            # legacy beta tier key for database compatibility, but make the
+            # subscription active and non-expiring.
             from apps.billing.models import Plan, PlanTier, Subscription, SubscriptionStatus
-            trial_plan = Plan.objects.filter(tier=PlanTier.TRIAL, is_active=True).first()
-            if trial_plan:
+            beta_plan = Plan.objects.filter(tier=PlanTier.TRIAL, is_active=True).first()
+            if beta_plan:
                 Subscription.objects.create(
                     tenant=tenant,
-                    plan=trial_plan,
-                    status=SubscriptionStatus.TRIALING,
-                    trial_ends_at=timezone.now() + timezone.timedelta(days=TRIAL_DAYS),
+                    plan=beta_plan,
+                    status=SubscriptionStatus.ACTIVE,
+                    trial_ends_at=None,
                 )
 
         _send_verification_email(user)
+
+        if application_only:
+            return Response(
+                {
+                    "detail": "Application submitted.",
+                    "tenant": _tenant_brief(tenant),
+                },
+                status=201,
+            )
+
         tokens = make_tokens(user, tenant_id=tenant.id)
 
         return authenticated_response(

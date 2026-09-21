@@ -216,7 +216,7 @@ class ApprovalTransitionTest(TestCase):
             self.tenant.id, actor=self.admin, reason="verified by phone"
         )
 
-        self.assertEqual(tenant.status, TenantStatus.TRIAL)
+        self.assertEqual(tenant.status, TenantStatus.ACTIVE)
         self.assertIsNotNone(tenant.approved_at)
         self.assertEqual(tenant.approved_by, self.admin)
         self.assertTrue(tenant.can_use_mail)

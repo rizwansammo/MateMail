@@ -73,7 +73,7 @@ def approve_tenant(tenant_id, *, actor, reason: str = "") -> Tenant:
         )
 
     previous = tenant.status
-    tenant.status = TenantStatus.TRIAL
+    tenant.status = TenantStatus.ACTIVE
     tenant.approved_at = timezone.now()
     tenant.approved_by = actor
     tenant.review_reason = reason or ""

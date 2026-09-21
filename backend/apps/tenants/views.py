@@ -58,10 +58,10 @@ class WorkspaceCreateView(APIView):
     """
     Create an additional workspace for the authenticated user.
 
-    Capped by MAX_WORKSPACES_PER_USER. Each workspace carries a trial
-    subscription and its own domains and mailboxes, so an uncapped endpoint is
-    both a trial-abuse path and a way for one account to consume the platform's
-    provisioning capacity.
+    Capped by MAX_WORKSPACES_PER_USER. Each workspace has its own domains and
+    mailboxes, so an uncapped endpoint would let one account consume the
+    platform's provisioning capacity. Every new workspace still requires
+    platform approval before it can use the Mail Engine.
 
     Only workspaces the user *owns* count. Being invited into other people's
     workspaces is not abuse and must not stop someone creating their own.
@@ -100,7 +100,7 @@ class WorkspaceCreateView(APIView):
                 name=name,
                 slug=slug,
                 owner=request.user,
-                status=TenantStatus.TRIAL,
+                status=TenantStatus.PENDING_APPROVAL,
             )
             TenantMembership.objects.create(
                 tenant=tenant,
