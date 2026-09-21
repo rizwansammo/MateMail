@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 
 export default function AuthLayout({
@@ -6,6 +9,10 @@ export default function AuthLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+
+  if (pathname === "/login") return <>{children}</>;
+
   return (
     <div className="min-h-screen bg-slate-950 p-5 text-slate-950">
       <div className="mb-8">
@@ -18,7 +25,6 @@ export default function AuthLayout({
         </Link>
       </div>
       <div className="mx-auto max-w-5xl overflow-hidden border border-white/10 bg-white shadow-2xl md:grid md:grid-cols-[0.9fr_1.1fr]">
-        {/* Decorative panel */}
         <div className="hidden flex-col justify-between bg-slate-950 p-10 md:flex">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-400">
@@ -42,7 +48,6 @@ export default function AuthLayout({
             ))}
           </div>
         </div>
-        {/* Form panel */}
         <div className="p-8 md:p-10">{children}</div>
       </div>
     </div>

@@ -107,6 +107,13 @@ const POSTBOX_HOST = process.env.NEXT_PUBLIC_POSTBOX_HOST ?? "";
  */
 const WORKSPACE_HOST = process.env.NEXT_PUBLIC_WORKSPACE_HOST ?? "";
 
+/** The canonical public product website. */
+const PUBLIC_HOST = process.env.NEXT_PUBLIC_PUBLIC_HOST ?? "matemail.online";
+
+function isPublicHost(host: string): boolean {
+  return host === PUBLIC_HOST.toLowerCase();
+}
+
 /**
  * The Workspace's former hostname. Comma-separated, so a second retired
  * name can be added without another constant.
@@ -182,6 +189,24 @@ function routeForHost(request: NextRequest): Routing {
     target.port = "";
     target.search = search;
     return { kind: "redirect", url: target, status: 308 };
+  }
+
+  // matemail.online is now the public product homepage. Only the document root
+  // belongs to that surface; customer account routes remain canonical on
+  // portal.matemail.online. Static/_next/API paths already passed through
+  // above, so the homepage can hydrate without duplicating the Workspace UI on
+  // the public hostname.
+  if (isPublicHost(host)) {
+    if (pathname === "/") return null;
+
+    if (WORKSPACE_HOST) {
+      const target = new URL(request.url);
+      target.host = WORKSPACE_HOST;
+      target.protocol = "https:";
+      target.port = "";
+      target.search = search;
+      return { kind: "redirect", url: target, status: 308 };
+    }
   }
 
   if (isPostBoxHost(host)) {
