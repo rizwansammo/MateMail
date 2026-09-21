@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
-import { CreditCard, CheckCircle2, XCircle, Clock, AlertTriangle } from "lucide-react";
+import { CreditCard, CheckCircle2, XCircle } from "lucide-react";
 
 interface Plan {
   tier: string;
@@ -23,7 +23,6 @@ interface Subscription {
   status: string;
   status_display: string;
   plan: Plan;
-  trial_ends_at: string | null;
 }
 
 interface Usage {
@@ -40,11 +39,9 @@ interface Usage {
 interface BillingData {
   subscription: Subscription | null;
   usage: Usage;
-  trial_days_left: number;
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  trialing: "bg-cyan-50 text-cyan-700 ring-cyan-600/20",
   active:   "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
   past_due: "bg-red-50 text-red-700 ring-red-600/20",
   cancelled:"bg-slate-100 text-slate-500 ring-slate-400/20",
@@ -108,10 +105,8 @@ export default function BillingPage() {
     );
   }
 
-  const { subscription: sub, usage, trial_days_left } = data;
+  const { subscription: sub, usage } = data;
   const plan = sub.plan;
-  const isTrialing = sub.status === "trialing";
-  const isExpired = sub.status === "past_due";
 
   return (
     <div className="space-y-6 p-6">
@@ -120,31 +115,9 @@ export default function BillingPage() {
         <CreditCard className="h-5 w-5 text-slate-400" />
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Billing &amp; Plan</h1>
-          <p className="text-sm text-slate-500">Your current plan, usage, and trial status.</p>
+          <p className="text-sm text-slate-500">Your current plan and usage.</p>
         </div>
       </div>
-
-      {/* Trial expiry banner */}
-      {isExpired && (
-        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
-            <p className="font-semibold">Your free trial has expired.</p>
-            <p className="mt-0.5">You cannot add new domains or mailboxes. Contact us to upgrade your plan and restore full access.</p>
-          </div>
-        </div>
-      )}
-
-      {/* Trial countdown */}
-      {isTrialing && trial_days_left <= 7 && trial_days_left > 0 && (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          <Clock className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>
-            Your free trial ends in <strong>{trial_days_left} day{trial_days_left !== 1 ? "s" : ""}</strong>.
-            Contact us to upgrade before it expires.
-          </p>
-        </div>
-      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Plan card */}
@@ -163,16 +136,6 @@ export default function BillingPage() {
               {sub.status_display}
             </span>
           </div>
-
-          {isTrialing && sub.trial_ends_at && (
-            <div className="flex items-center gap-2 rounded-md bg-cyan-50 px-3 py-2 text-sm text-cyan-700">
-              <Clock className="h-4 w-4 shrink-0" />
-              <span>
-                Trial ends {new Date(sub.trial_ends_at).toLocaleDateString(undefined, { dateStyle: "medium" })}
-                {trial_days_left > 0 ? ` · ${trial_days_left} day${trial_days_left !== 1 ? "s" : ""} left` : " · Expired"}
-              </span>
-            </div>
-          )}
 
           <div className="border-t border-slate-100 pt-4 space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Included Features</p>

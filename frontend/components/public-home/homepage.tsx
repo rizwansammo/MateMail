@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
+import { api, ApiError } from "@/lib/api";
 
 type ThemeChoice = "light" | "dark" | "system";
 
@@ -111,6 +112,8 @@ export function MateMailPublicHome() {
   const [applicationOpen, setApplicationOpen] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState(false);
+  const [applicationError, setApplicationError] = useState("");
+  const [applicationBusy, setApplicationBusy] = useState(false);
   const dialogRef = useRef<HTMLDialogElement | null>(null);
 
   useEffect(() => {
@@ -175,6 +178,8 @@ export function MateMailPublicHome() {
     setMenuOpen(false);
     setSubmitted(false);
     setFormError(false);
+    setApplicationError("");
+    setApplicationBusy(false);
     setApplicationOpen(true);
   }
 
@@ -182,7 +187,7 @@ export function MateMailPublicHome() {
     setApplicationOpen(false);
   }
 
-  function submitApplication(event: FormEvent<HTMLFormElement>) {
+  async function submitApplication(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     if (!form.checkValidity()) {
@@ -190,8 +195,47 @@ export function MateMailPublicHome() {
       form.reportValidity();
       return;
     }
+
     setFormError(false);
-    setSubmitted(true);
+    setApplicationError("");
+    setApplicationBusy(true);
+
+    const formData = new FormData(form);
+
+    try {
+      await api.post("/api/auth/signup/", {
+        email: String(formData.get("email") ?? "").trim(),
+        password: String(formData.get("password") ?? ""),
+        full_name: String(formData.get("name") ?? "").trim(),
+        workspace_name: String(formData.get("organization") ?? "").trim(),
+        application_only: true,
+      });
+      setSubmitted(true);
+      form.reset();
+    } catch (caught) {
+      if (caught instanceof ApiError) {
+        try {
+          const body = JSON.parse(caught.message);
+          const first =
+            body?.email ??
+            body?.password ??
+            body?.full_name ??
+            body?.workspace_name ??
+            body?.detail;
+          setApplicationError(
+            Array.isArray(first)
+              ? String(first[0])
+              : String(first || "Application could not be submitted."),
+          );
+        } catch {
+          setApplicationError("Application could not be submitted. Please try again.");
+        }
+      } else {
+        setApplicationError("Network error. Please try again.");
+      }
+    } finally {
+      setApplicationBusy(false);
+    }
   }
 
   return (
@@ -721,8 +765,8 @@ export function MateMailPublicHome() {
 
               <form className="mm-application-form" onSubmit={submitApplication} noValidate>
                 <p className="mm-form-intro">
-                  Tell us about your organization. This application experience is currently
-                  frontend-only and does not transmit the submitted data.
+                  Tell us about your organization. Submitting creates your MateMail account
+                  and places the organization in the Platform approval queue.
                 </p>
                 <div className="mm-form-grid">
                   <label>
@@ -736,6 +780,17 @@ export function MateMailPublicHome() {
                   <label>
                     Business email
                     <input type="email" name="email" autoComplete="email" required placeholder="you@company.com" />
+                  </label>
+                  <label>
+                    Account password
+                    <input
+                      type="password"
+                      name="password"
+                      autoComplete="new-password"
+                      minLength={10}
+                      required
+                      placeholder="Minimum 10 characters"
+                    />
                   </label>
                   <label>
                     Business domain
@@ -792,12 +847,21 @@ export function MateMailPublicHome() {
                     Please complete the required fields before submitting.
                   </div>
                 )}
+                {applicationError && (
+                  <div className="mm-form-error" role="alert">
+                    {applicationError}
+                  </div>
+                )}
                 <div className="mm-form-actions">
                   <button type="button" className="mm-button mm-secondary" onClick={closeApplication}>
                     Cancel
                   </button>
-                  <button type="submit" className="mm-button mm-primary">
-                    Submit Application
+                  <button
+                    type="submit"
+                    className="mm-button mm-primary"
+                    disabled={applicationBusy}
+                  >
+                    {applicationBusy ? "Submitting…" : "Submit Application"}
                   </button>
                 </div>
               </form>
@@ -808,8 +872,8 @@ export function MateMailPublicHome() {
               <p className="mm-eyebrow">Application received</p>
               <h2 id="mm-application-title">Thanks. Your request is pending review.</h2>
               <p>
-                MateMail reviews Private Beta applications before activating an organization
-                workspace. This frontend flow does not transmit the submitted data.
+                Your MateMail account and organization have been created and are now waiting
+                for Platform approval. Once approved, the organization becomes Active.
               </p>
               <button type="button" className="mm-button mm-primary" onClick={closeApplication}>
                 Close

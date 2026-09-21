@@ -61,7 +61,7 @@ export default function SignupPage() {
         Create your account
       </h2>
       <p className="mt-2 text-sm text-slate-500">
-        Start a free trial — no card required.
+        Apply for Private Beta access — approval is required.
       </p>
 
       <form onSubmit={handleSubmit} className="mt-8 space-y-4">
@@ -102,7 +102,7 @@ export default function SignupPage() {
           disabled={loading}
           className="inline-flex w-full items-center justify-center bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? "Creating account…" : "Start free trial"}
+          {loading ? "Creating account…" : "Apply for Private Beta"}
         </button>
 
         <p className="text-center text-sm text-slate-500">

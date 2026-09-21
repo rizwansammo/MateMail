@@ -34,6 +34,7 @@ interface TenantRow {
   slug: string;
   status: string;
   plan_tier: string | null;
+  plan_name: string | null;
   sub_status: string | null;
   trial_ends_at: string | null;
   owner_email: string;
@@ -123,15 +124,9 @@ export default function OrganizationsPage() {
                   <Badge status={tenant.status} />
                 </td>
                 <td className="pf-muted">
-                  {tenant.plan_tier ? (
-                    <>
-                      {tenant.plan_tier}
-                      {tenant.sub_status && (
-                        <div className="text-xs pf-faint">{tenant.sub_status}</div>
-                      )}
-                    </>
-                  ) : (
-                    "—"
+                  {tenant.plan_name ?? tenant.plan_tier ?? "—"}
+                  {tenant.sub_status && (
+                    <div className="text-xs pf-faint">{tenant.sub_status}</div>
                   )}
                 </td>
                 <td className="pf-num">{tenant.domain_count}</td>

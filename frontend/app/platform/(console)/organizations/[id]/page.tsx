@@ -108,7 +108,6 @@ export default function OrganizationDetailPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const [planTier, setPlanTier] = useState("");
-  const [trialDays, setTrialDays] = useState("30");
   const [planBusy, setPlanBusy] = useState(false);
 
   const refreshAll = useCallback(() => {
@@ -336,81 +335,51 @@ export default function OrganizationDetailPage() {
         {/* ── plan ───────────────────────────────────────────────────── */}
         <Card>
           <h2 className="mb-1 text-sm font-semibold" style={{ color: "var(--pf-text)" }}>
-            Plan &amp; trial
+            Plan
           </h2>
           <p className="mb-3 text-xs pf-muted">
             {org.subscription
               ? `${org.subscription.plan?.display_name ?? org.subscription.plan?.tier ?? "—"} · ${
                   org.subscription.status ?? "—"
-                }${
-                  org.subscription.trial_ends_at
-                    ? ` · trial ends ${formatDateTime(org.subscription.trial_ends_at)}`
-                    : ""
                 }`
               : "No subscription record."}
           </p>
 
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="min-w-[10rem] flex-1">
-                <label htmlFor="pf-plan" className="pf-label">
-                  Assign plan
-                </label>
-                <select
-                  id="pf-plan"
-                  className="pf-select mt-1"
-                  value={planTier}
-                  onChange={(event) => setPlanTier(event.target.value)}
-                >
-                  <option value="">Select a plan…</option>
-                  {org.available_plans.map((plan) => (
-                    <option key={plan.tier} value={plan.tier}>
-                      {plan.display_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="button"
-                className="pf-btn pf-btn-ghost"
-                disabled={!planTier || planBusy}
-                onClick={() =>
-                  applyPlan({ plan_tier: planTier }, `Plan changed to ${planTier}.`)
-                }
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-[10rem] flex-1">
+              <label htmlFor="pf-plan" className="pf-label">
+                Assign plan
+              </label>
+              <select
+                id="pf-plan"
+                className="pf-select mt-1"
+                value={planTier}
+                onChange={(event) => setPlanTier(event.target.value)}
               >
-                Apply
-              </button>
+                <option value="">Select a plan…</option>
+                {org.available_plans.map((plan) => (
+                  <option key={plan.tier} value={plan.tier}>
+                    {plan.display_name}
+                  </option>
+                ))}
+              </select>
             </div>
-
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="w-28">
-                <label htmlFor="pf-trial" className="pf-label">
-                  Extend trial
-                </label>
-                <input
-                  id="pf-trial"
-                  className="pf-input mt-1 pf-num"
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={trialDays}
-                  onChange={(event) => setTrialDays(event.target.value)}
-                />
-              </div>
-              <button
-                type="button"
-                className="pf-btn pf-btn-ghost"
-                disabled={planBusy || !trialDays}
-                onClick={() =>
-                  applyPlan(
-                    { extend_trial_days: Number(trialDays) },
-                    `Trial extended by ${trialDays} days.`,
-                  )
-                }
-              >
-                Extend
-              </button>
-            </div>
+            <button
+              type="button"
+              className="pf-btn pf-btn-ghost"
+              disabled={!planTier || planBusy}
+              onClick={() =>
+                applyPlan(
+                  { plan_tier: planTier },
+                  `Plan changed to ${
+                    org.available_plans.find((plan) => plan.tier === planTier)?.display_name ??
+                    planTier
+                  }.`,
+                )
+              }
+            >
+              Apply
+            </button>
           </div>
         </Card>
       </section>
