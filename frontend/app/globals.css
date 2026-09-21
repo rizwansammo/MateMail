@@ -1269,8 +1269,16 @@ body {
 .mm-home .mm-footer-bottom { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--mm-line); display: flex; justify-content: space-between; gap: 20px; color: var(--mm-muted); font-size: 11px; }
 
 .mm-home .mm-application-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
   width: min(860px, calc(100% - 28px));
   max-height: min(90vh, 900px);
+  margin: 0;
+  transform: translate(-50%, -50%);
+  overflow-y: auto;
   border: 1px solid var(--mm-line-strong);
   padding: 0;
   background: var(--mm-surface);
