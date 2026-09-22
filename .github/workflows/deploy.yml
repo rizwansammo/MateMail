@@ -40,6 +40,7 @@ env:
   DEPLOY_DIR: /opt/MateMail
   BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend
   FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend
+  NETAMATE_EMAIL_FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend-netamate-email
 
 jobs:
 
