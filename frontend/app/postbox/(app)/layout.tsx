@@ -31,7 +31,9 @@ import {
   X,
 } from "lucide-react";
 
+import { NetaMateBrand } from "@/components/netamate-brand";
 import { usePostBox } from "@/contexts/postbox-context";
+import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 import { postbox, type Folder } from "@/lib/postbox-api";
 
 /** Folder roles PostBox pins to the top, in the order people expect them. */
@@ -100,7 +102,7 @@ export default function PostBoxAppLayout({
 
   return (
     <div
-      className={`pb flex min-h-screen ${
+      className={`pb flex min-h-screen ${IS_NETAMATE_EMAIL ? "nm-postbox " : ""}${
         preferences.density === "compact" ? "pb-density-compact" : ""
       }`}
     >
@@ -123,16 +125,22 @@ export default function PostBoxAppLayout({
           className="flex h-14 items-center gap-2.5 border-b px-4"
           style={{ borderColor: "var(--pb-border)" }}
         >
-          <Image src="/matemail-logo.png" alt="" width={26} height={19} priority />
-          <div className="min-w-0">
-            <p
-              className="pb-brand text-sm leading-none"
-              style={{ color: "var(--pb-primary)" }}
-            >
-              MateMail
-            </p>
-            <p className="pb-label mt-0.5">PostBox</p>
-          </div>
+          {IS_NETAMATE_EMAIL ? (
+            <NetaMateBrand surface="PostBox" compact preload />
+          ) : (
+            <>
+              <Image src="/matemail-logo.png" alt="" width={26} height={19} priority />
+              <div className="min-w-0">
+                <p
+                  className="pb-brand text-sm leading-none"
+                  style={{ color: "var(--pb-primary)" }}
+                >
+                  MateMail
+                </p>
+                <p className="pb-label mt-0.5">PostBox</p>
+              </div>
+            </>
+          )}
           <button
             type="button"
             className="pb-btn pb-btn-plain ml-auto md:hidden"
@@ -201,7 +209,7 @@ export default function PostBoxAppLayout({
             </>
           )}
 
-          <p className="pb-label mt-4 px-2">MateMail</p>
+          <p className="pb-label mt-4 px-2">{IS_NETAMATE_EMAIL ? "Tools" : "MateMail"}</p>
           <FolderLink
             href="/postbox/contacts"
             icon={Users}
@@ -278,9 +286,13 @@ export default function PostBoxAppLayout({
           >
             <Menu className="h-4 w-4" aria-hidden="true" />
           </button>
-          <p className="pb-brand text-sm" style={{ color: "var(--pb-primary)" }}>
-            MateMail
-          </p>
+          {IS_NETAMATE_EMAIL ? (
+            <NetaMateBrand surface="PostBox" compact />
+          ) : (
+            <p className="pb-brand text-sm" style={{ color: "var(--pb-primary)" }}>
+              MateMail
+            </p>
+          )}
         </header>
 
         <div className="min-h-0 flex-1">{children}</div>
