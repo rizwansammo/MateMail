@@ -7,6 +7,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 from .models import TenantMembership
+from .dedicated import dedicated_tenant_slug
 
 
 class TenantMiddleware:
@@ -89,6 +90,10 @@ class TenantMiddleware:
             if membership:
                 request.tenant = membership.tenant
                 request.tenant_membership = membership
+
+        bound_slug = dedicated_tenant_slug(request)
+        if bound_slug and request.tenant and request.tenant.slug != bound_slug:
+            return JsonResponse({"detail": "This tenant is not available on this host."}, status=403)
 
         return self.get_response(request)
 
