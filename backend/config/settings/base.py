@@ -14,6 +14,28 @@ SECRET_KEY = env("DJANGO_SECRET_KEY")
 DEBUG = env("DJANGO_DEBUG", default=False)
 ALLOWED_HOSTS = list({*env("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1").split(","), "localhost", "127.0.0.1"})
 
+
+def _parse_dedicated_tenant_hosts(raw: str) -> dict[str, str]:
+    bindings = {}
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        host, separator, slug = item.partition("=")
+        host = host.strip().rstrip(".").lower()
+        slug = slug.strip()
+        if not separator or not host or not slug:
+            raise ValueError(
+                "DEDICATED_TENANT_HOSTS entries must use hostname=tenant-slug"
+            )
+        bindings[host] = slug
+    return bindings
+
+
+DEDICATED_TENANT_HOSTS = _parse_dedicated_tenant_hosts(
+    env("DEDICATED_TENANT_HOSTS", default="")
+)
+
 DJANGO_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
