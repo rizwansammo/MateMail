@@ -187,6 +187,18 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: NetaMate Email production build
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: https://mailadmin.netamate.com
+          NEXT_PUBLIC_APP_URL: https://mailadmin.netamate.com
+          NEXT_PUBLIC_WORKSPACE_HOST: mailadmin.netamate.com
+          NEXT_PUBLIC_PLATFORM_HOST: ""
+          NEXT_PUBLIC_POSTBOX_HOST: postbox.netamate.com
+          NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS: ""
+          NEXT_PUBLIC_BRAND_VARIANT: netamate-email
+        run: npm run build
+
   # ── Compose validation ──────────────────────────────────────────────────────
   compose:
     name: Validate production compose
