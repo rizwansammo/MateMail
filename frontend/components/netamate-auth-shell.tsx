@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 
 import { NetaMateBrand } from "@/components/netamate-brand";
@@ -8,6 +8,28 @@ import { NetaMateBrand } from "@/components/netamate-brand";
 type Theme = "light" | "dark";
 
 const STORAGE_KEY = "netamate.email.login.theme";
+const themeListeners = new Set<() => void>();
+
+function readTheme(): Theme {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+const themeStore = {
+  subscribe(onChange: () => void) {
+    window.addEventListener("storage", onChange);
+    themeListeners.add(onChange);
+    return () => {
+      window.removeEventListener("storage", onChange);
+      themeListeners.delete(onChange);
+    };
+  },
+  getSnapshot: readTheme,
+  getServerSnapshot: (): Theme => "light",
+};
 
 export function NetaMateAuthShell({
   surface,
@@ -22,23 +44,19 @@ export function NetaMateAuthShell({
   description: string;
   children: React.ReactNode;
 }) {
-  const [theme, setTheme] = useState<Theme>("light");
-
-  useEffect(() => {
-    try {
-      setTheme(window.localStorage.getItem(STORAGE_KEY) === "dark" ? "dark" : "light");
-    } catch {
-      setTheme("light");
-    }
-  }, []);
+  const theme = useSyncExternalStore(
+    themeStore.subscribe,
+    themeStore.getSnapshot,
+    themeStore.getServerSnapshot,
+  );
 
   function choose(next: Theme) {
-    setTheme(next);
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
       // The selected theme still applies to this tab when storage is blocked.
     }
+    themeListeners.forEach((listener) => listener());
   }
 
   return (
