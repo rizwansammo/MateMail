@@ -13,7 +13,9 @@ import { IS_NETAMATE_EMAIL, NETAMATE_LOGO_SRC } from "@/lib/brand";
 export const metadata: Metadata = IS_NETAMATE_EMAIL
   ? {
       title: {
-        default: "PostBox · NetaMate Email",
+        // The root NetaMate metadata template appends "· NetaMate Email".
+        // Keep this segment to the surface name to avoid a duplicated suffix.
+        default: "PostBox",
         template: "%s · NetaMate Email PostBox",
       },
       description: "Private NetaMate Solutions mailbox access.",
