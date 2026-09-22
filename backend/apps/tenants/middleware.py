@@ -43,6 +43,12 @@ class TenantMiddleware:
         # credential type rather than discovering it from an exception.
         if request.META.get("HTTP_AUTHORIZATION", "").startswith("Bearer mm_"):
             self._try_api_key_auth(request)
+            bound_slug = dedicated_tenant_slug(request)
+            if bound_slug and request.tenant and request.tenant.slug != bound_slug:
+                return JsonResponse(
+                    {"detail": "This tenant is not available on this host."},
+                    status=403,
+                )
             return self.get_response(request)
 
         # Attempt JWT authentication.
