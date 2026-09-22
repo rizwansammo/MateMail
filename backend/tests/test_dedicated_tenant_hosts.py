@@ -104,6 +104,13 @@ class DedicatedTenantHostTest(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+
+    def test_platform_api_is_not_exposed_on_dedicated_host(self):
+        response = APIClient().get(
+            "/api/platform/stats/", HTTP_HOST="mailadmin.netamate.com"
+        )
+        self.assertEqual(response.status_code, 404)
+
     def test_api_key_for_another_tenant_is_blocked_at_middleware(self):
         raw, _ = make_api_key(self.other, self.user)
         client = APIClient()
