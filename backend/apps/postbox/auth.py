@@ -26,6 +26,7 @@ from django.utils import timezone
 from rest_framework import authentication, exceptions
 
 from apps.mailboxes.models import Mailbox, MailboxStatus
+from apps.tenants.dedicated import tenant_matches_request
 from apps.security import ratelimit
 from apps.security.client_ip import get_client_ip
 
@@ -105,6 +106,11 @@ def sign_in(address: str, password: str, *, request=None, remember: bool = False
     """
     client_ip = get_client_ip(request) if request is not None else None
     mailbox = resolve_mailbox(address)
+    if mailbox is not None and request is not None and not tenant_matches_request(request, mailbox.tenant):
+        # Treat a mailbox from another tenant exactly like an unknown address on
+        # a dedicated customer hostname. We still perform the password check
+        # below so the hostname cannot be used as a mailbox-enumeration oracle.
+        mailbox = None
 
     # The password check runs even for an unknown address, so a request for a
     # non-existent mailbox costs the same time as a real one. Skipping it is a
