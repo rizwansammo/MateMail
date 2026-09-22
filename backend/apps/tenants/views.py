@@ -207,9 +207,12 @@ class OnboardingStatusView(APIView):
 
     def get(self, request, pk):
         try:
-            mem = TenantMembership.objects.select_related("tenant").get(
-                tenant_id=pk, user=request.user, status="active"
-            )
+            mem = scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    tenant_id=pk, user=request.user, status="active"
+                ),
+            ).get()
         except TenantMembership.DoesNotExist:
             return Response({"detail": "Not found."}, status=404)
 
@@ -234,9 +237,12 @@ class WorkspaceStatsView(APIView):
 
     def get(self, request, pk):
         try:
-            mem = TenantMembership.objects.select_related("tenant").get(
-                tenant_id=pk, user=request.user, status="active"
-            )
+            mem = scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    tenant_id=pk, user=request.user, status="active"
+                ),
+            ).get()
         except TenantMembership.DoesNotExist:
             return Response({"detail": "Not found."}, status=404)
 
