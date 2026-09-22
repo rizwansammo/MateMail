@@ -1434,3 +1434,338 @@ body {
   }
 }
 
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   NetaMate Email dedicated frontend variant
+   Only rendered by the NetaMate build. Main MateMail never receives these
+   classes, so its existing visual identity remains unchanged.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: NetaMateHemiHead;
+  src: url('/brands/netamate/HemiHead-Bold.otf') format('opentype');
+  font-weight: 700;
+  font-display: swap;
+}
+
+.nm-wordmark {
+  font-family: NetaMateHemiHead, var(--font-geist-sans), sans-serif;
+  letter-spacing: 0.012em;
+  color: inherit;
+}
+
+.nm-surface-label {
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--nm-muted, #64748b);
+}
+
+.nm-logo-tile {
+  background: #ffffff;
+  border: 1px solid var(--nm-border, #dbe3ed);
+  padding: 0.28rem;
+}
+
+.nm-auth {
+  --nm-canvas: #eef3f9;
+  --nm-panel: #ffffff;
+  --nm-panel-2: #f7f9fc;
+  --nm-text: #122033;
+  --nm-muted: #64748b;
+  --nm-subtle: #8a98ab;
+  --nm-border: #d9e1eb;
+  --nm-border-strong: #b9c6d6;
+  --nm-accent: #1769d2;
+  --nm-accent-strong: #0e55b5;
+  --nm-accent-soft: #e9f2ff;
+  --nm-danger: #b42332;
+  --nm-shadow: 0 26px 80px rgb(20 43 73 / 0.18);
+  min-height: 100vh;
+  color: var(--nm-text);
+  background:
+    radial-gradient(circle at 18% 8%, rgb(23 105 210 / 0.13), transparent 30rem),
+    radial-gradient(circle at 88% 90%, rgb(14 165 233 / 0.08), transparent 26rem),
+    linear-gradient(145deg, #f5f8fc 0%, var(--nm-canvas) 58%, #e9eff7 100%);
+}
+
+.nm-auth[data-theme="dark"] {
+  --nm-canvas: #07111f;
+  --nm-panel: #0e1a2a;
+  --nm-panel-2: #122238;
+  --nm-text: #e8eef7;
+  --nm-muted: #9baabd;
+  --nm-subtle: #72839a;
+  --nm-border: #26374d;
+  --nm-border-strong: #3a506b;
+  --nm-accent: #60a5fa;
+  --nm-accent-strong: #7db7ff;
+  --nm-accent-soft: #122b49;
+  --nm-danger: #ff8f9a;
+  --nm-shadow: 0 28px 90px rgb(0 0 0 / 0.5);
+  background:
+    radial-gradient(circle at 18% 8%, rgb(37 99 235 / 0.2), transparent 31rem),
+    radial-gradient(circle at 88% 90%, rgb(14 165 233 / 0.11), transparent 28rem),
+    linear-gradient(145deg, #091321 0%, var(--nm-canvas) 60%, #050b14 100%);
+}
+
+.nm-auth-card {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--nm-panel) 96%, transparent);
+  border: 1px solid var(--nm-border);
+  box-shadow: var(--nm-shadow);
+  backdrop-filter: blur(18px);
+}
+
+.nm-auth-accent {
+  height: 3px;
+  background: linear-gradient(90deg, #0f4da8 0%, #2582e5 52%, #38bdf8 100%);
+}
+
+.nm-auth-divider {
+  height: 1px;
+  background: var(--nm-border);
+}
+
+.nm-auth-eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--nm-accent);
+}
+
+.nm-auth-title {
+  font-size: 1.42rem;
+  line-height: 1.25;
+  font-weight: 760;
+  letter-spacing: -0.025em;
+  color: var(--nm-text);
+}
+
+.nm-auth-description {
+  max-width: 34rem;
+  font-size: 0.79rem;
+  line-height: 1.55;
+  color: var(--nm-muted);
+}
+
+.nm-theme-toggle {
+  border-color: var(--nm-border);
+  background: var(--nm-panel-2);
+}
+
+.nm-theme-button {
+  display: inline-grid;
+  place-items: center;
+  width: 2.15rem;
+  height: 2rem;
+  color: var(--nm-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.nm-theme-button + .nm-theme-button {
+  border-left: 1px solid var(--nm-border);
+}
+
+.nm-theme-button[data-active="true"] {
+  color: var(--nm-text);
+  background: var(--nm-panel);
+}
+
+.nm-field-label {
+  display: block;
+  margin-bottom: 0.38rem;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--nm-muted);
+}
+
+.nm-input {
+  width: 100%;
+  min-height: 2.72rem;
+  border: 1px solid var(--nm-border-strong);
+  background: var(--nm-panel);
+  color: var(--nm-text);
+  padding: 0.65rem 0.75rem 0.65rem 2.15rem;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.nm-input::placeholder {
+  color: var(--nm-subtle);
+}
+
+.nm-input:focus {
+  border-color: var(--nm-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--nm-accent) 18%, transparent);
+}
+
+.nm-field-icon {
+  color: var(--nm-subtle);
+}
+
+.nm-primary-button {
+  display: inline-flex;
+  min-height: 2.72rem;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid #0d58bd;
+  background: linear-gradient(180deg, #1d70d8 0%, #1059bd 100%);
+  color: #ffffff;
+  padding: 0.65rem 1rem;
+  font-size: 0.84rem;
+  font-weight: 750;
+  box-shadow: 0 8px 24px rgb(23 105 210 / 0.18);
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.nm-primary-button:hover:not(:disabled) {
+  filter: brightness(1.07);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgb(23 105 210 / 0.24);
+}
+
+.nm-primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.nm-link-button,
+.nm-link {
+  color: var(--nm-accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.nm-link-button:hover,
+.nm-link:hover {
+  color: var(--nm-accent-strong);
+  text-decoration: underline;
+}
+
+.nm-auth-rule {
+  border-color: var(--nm-border);
+}
+
+.nm-auth-help {
+  color: var(--nm-muted);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.nm-auth-error {
+  border-left: 2px solid var(--nm-danger);
+  background: color-mix(in srgb, var(--nm-danger) 8%, transparent);
+  color: var(--nm-danger);
+  padding: 0.6rem 0.7rem;
+  font-size: 0.75rem;
+}
+
+.nm-auth-check {
+  accent-color: var(--nm-accent);
+}
+
+.ws.nm-mailadmin {
+  --ws-canvas: #f4f7fb;
+  --ws-surface: #ffffff;
+  --ws-surface-2: #f7f9fc;
+  --ws-surface-3: #eef3f8;
+  --ws-border: #dce4ee;
+  --ws-border-strong: #bdc9d8;
+  --ws-text: #142033;
+  --ws-text-muted: #607086;
+  --ws-text-faint: #8b99aa;
+  --ws-primary: #10243d;
+  --ws-primary-fg: #ffffff;
+  --ws-accent: #1769d2;
+  --ws-accent-soft: #e9f2ff;
+}
+
+:root[data-ws-theme="dark"] .ws.nm-mailadmin {
+  --ws-canvas: #08111e;
+  --ws-surface: #0f1a29;
+  --ws-surface-2: #132238;
+  --ws-surface-3: #192a41;
+  --ws-border: #26374d;
+  --ws-border-strong: #3a506b;
+  --ws-text: #e8eef7;
+  --ws-text-muted: #a0aec0;
+  --ws-text-faint: #71839a;
+  --ws-primary: #60a5fa;
+  --ws-primary-fg: #07111f;
+  --ws-accent: #71b2ff;
+  --ws-accent-soft: #102b4a;
+}
+
+.pb.nm-postbox {
+  --pb-bg: #ffffff;
+  --pb-fg: #1f2d40;
+  --pb-surface: #f7f9fc;
+  --pb-surface-2: #eef3f8;
+  --pb-sidebar: #f3f6fa;
+  --pb-selected: #e7f0fc;
+  --pb-border: #dce4ee;
+  --pb-border-strong: #bdc9d8;
+  --pb-primary: #175fae;
+  --pb-primary-fg: #ffffff;
+  --pb-accent: #e8f2ff;
+  --pb-accent-fg: #15579f;
+  --pb-muted: #637388;
+  --pb-subtle: #7d8da0;
+  --pb-ring: #2d7fd6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-pb-theme="light"]) .pb.nm-postbox {
+    --pb-bg: #0d1724;
+    --pb-fg: #e6edf6;
+    --pb-surface: #111d2c;
+    --pb-surface-2: #17263a;
+    --pb-sidebar: #09131f;
+    --pb-selected: #183252;
+    --pb-border: #26374d;
+    --pb-border-strong: #3a506b;
+    --pb-primary: #75b4f7;
+    --pb-primary-fg: #07111f;
+    --pb-accent: #173252;
+    --pb-accent-fg: #a8d2ff;
+    --pb-muted: #9aacbf;
+    --pb-subtle: #7f92a8;
+    --pb-ring: #69aef6;
+  }
+}
+
+:root[data-pb-theme="dark"] .pb.nm-postbox {
+  --pb-bg: #0d1724;
+  --pb-fg: #e6edf6;
+  --pb-surface: #111d2c;
+  --pb-surface-2: #17263a;
+  --pb-sidebar: #09131f;
+  --pb-selected: #183252;
+  --pb-border: #26374d;
+  --pb-border-strong: #3a506b;
+  --pb-primary: #75b4f7;
+  --pb-primary-fg: #07111f;
+  --pb-accent: #173252;
+  --pb-accent-fg: #a8d2ff;
+  --pb-muted: #9aacbf;
+  --pb-subtle: #7f92a8;
+  --pb-ring: #69aef6;
+}
+
+.pb.nm-postbox .pb-compose-cta {
+  background: linear-gradient(180deg, #1d70d8 0%, #1059bd 100%);
+  border-color: #2b79d5;
+  box-shadow: 0 5px 18px rgb(23 105 210 / 0.24);
+}
