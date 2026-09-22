@@ -18,7 +18,9 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { KeyRound, Loader2, Mail } from "lucide-react";
 
+import { NetaMateAuthShell } from "@/components/netamate-auth-shell";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
+import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 export default function PostBoxLoginPage() {
   const router = useRouter();
@@ -52,6 +54,101 @@ export default function PostBoxLoginPage() {
     },
     [email, password, remember, signIn, router],
   );
+
+  if (IS_NETAMATE_EMAIL) {
+    return (
+      <NetaMateAuthShell
+        surface="PostBox"
+        eyebrow="Private mailbox access"
+        title="Sign in to PostBox"
+        description="Open your NetaMate mailbox with your full email address and mailbox password."
+      >
+        <form onSubmit={submit} className="space-y-4" noValidate>
+          <div>
+            <label htmlFor="pb-email" className="nm-field-label">
+              Email address
+            </label>
+            <div className="relative">
+              <Mail
+                className="nm-field-icon pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+                aria-hidden="true"
+              />
+              <input
+                id="pb-email"
+                className="nm-input"
+                type="email"
+                autoComplete="username"
+                autoFocus
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@netamate.com"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="pb-password" className="nm-field-label">
+              Password
+            </label>
+            <div className="relative">
+              <KeyRound
+                className="nm-field-icon pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+                aria-hidden="true"
+              />
+              <input
+                id="pb-password"
+                className="nm-input"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </div>
+          </div>
+
+          <label className="nm-auth-help flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="nm-auth-check"
+              checked={remember}
+              onChange={(event) => setRemember(event.target.checked)}
+            />
+            Keep me signed in on this device
+          </label>
+
+          {error && (
+            <p className="nm-auth-error" role="alert">
+              {error}
+            </p>
+          )}
+
+          <button type="submit" className="nm-primary-button" disabled={busy}>
+            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            {busy ? "Signing in…" : "Continue to PostBox"}
+          </button>
+
+          <div className="nm-auth-rule border-t pt-4">
+            <button
+              type="button"
+              className="nm-link-button"
+              aria-expanded={showHelp}
+              onClick={() => setShowHelp((open) => !open)}
+            >
+              Forgotten your password?
+            </button>
+            {showHelp && (
+              <p className="nm-auth-help mt-2">
+                Mailbox passwords are managed by your NetaMate email administrator.
+                Contact your organization administrator to reset access.
+              </p>
+            )}
+          </div>
+        </form>
+      </NetaMateAuthShell>
+    );
+  }
 
   return (
     <div

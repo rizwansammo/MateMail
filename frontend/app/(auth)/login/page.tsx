@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import { KeyRound, Loader2, Mail } from "lucide-react";
 
 import { BrandMark } from "@/components/brand-mark";
+import { NetaMateAuthShell } from "@/components/netamate-auth-shell";
 import {
   WorkspaceThemeProvider,
   WorkspaceThemeToggle,
 } from "@/components/workspace/theme";
 import { useAuth } from "@/contexts/auth-context";
 import { ApiError } from "@/lib/api";
+import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 export default function LoginPage() {
   return (
@@ -61,6 +63,80 @@ function WorkspaceLogin() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (IS_NETAMATE_EMAIL) {
+    return (
+      <NetaMateAuthShell
+        surface="MailAdmin"
+        eyebrow="Secure organization access"
+        title="Sign in to MailAdmin"
+        description="Administrative access for NetaMate Solutions email, domains, mailboxes and organization settings."
+      >
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+          <div>
+            <label htmlFor="workspace-email" className="nm-field-label">
+              Email address
+            </label>
+            <div className="relative">
+              <Mail
+                className="nm-field-icon pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+                aria-hidden="true"
+              />
+              <input
+                id="workspace-email"
+                type="email"
+                autoComplete="username"
+                autoFocus
+                required
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@netamate.com"
+                className="nm-input"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="workspace-password" className="nm-field-label">
+              Password
+            </label>
+            <div className="relative">
+              <KeyRound
+                className="nm-field-icon pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+                aria-hidden="true"
+              />
+              <input
+                id="workspace-password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className="nm-input"
+              />
+            </div>
+          </div>
+
+          {error && (
+            <p className="nm-auth-error" role="alert">
+              {error}
+            </p>
+          )}
+
+          <button type="submit" disabled={loading} className="nm-primary-button">
+            {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            {loading ? "Signing in…" : "Continue to MailAdmin"}
+          </button>
+
+          <div className="nm-auth-rule border-t pt-4">
+            <Link href="/forgot-password" className="nm-link">
+              Forgotten your password?
+            </Link>
+          </div>
+        </form>
+      </NetaMateAuthShell>
+    );
   }
 
   return (

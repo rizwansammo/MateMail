@@ -20,8 +20,10 @@ import {
   UserPlus,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
+import { NetaMateBrand } from "@/components/netamate-brand";
 import { WorkspaceThemeProvider, WorkspaceThemeToggle } from "@/components/workspace/theme";
 import { useAuth } from "@/contexts/auth-context";
+import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 const nav = [
   { label: "Overview", href: "/app", icon: Activity },
@@ -73,19 +75,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <WorkspaceThemeProvider>
-    <div className="ws flex min-h-screen bg-slate-50 text-slate-950">
+    <div className={`ws flex min-h-screen bg-slate-50 text-slate-950 ${IS_NETAMATE_EMAIL ? "nm-mailadmin" : ""}`}>
       {/* Sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
         {/* Logo */}
         <div className="flex h-14 items-center gap-3 border-b border-slate-200 px-5">
-          <BrandMark size={32} preload />
-          <span className="font-black">MateMail</span>
+          {IS_NETAMATE_EMAIL ? (
+            <NetaMateBrand surface="MailAdmin" compact preload />
+          ) : (
+            <>
+              <BrandMark size={32} preload />
+              <span className="font-black">MateMail</span>
+            </>
+          )}
         </div>
 
         {/* Workspace badge */}
         {tenant && (
           <div className="border-b border-slate-100 px-5 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Workspace</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              {IS_NETAMATE_EMAIL ? "Organization" : "Workspace"}
+            </p>
             <p className="mt-0.5 truncate text-sm font-semibold text-slate-800">
               {tenant.name}
             </p>
@@ -94,6 +104,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-3">
+          {IS_NETAMATE_EMAIL && (
+            <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+              Mail administration
+            </p>
+          )}
           {nav.map(({ label, href, icon: Icon }) => {
             const active = pathname === href || (href !== "/app" && pathname.startsWith(href));
             return (
@@ -119,7 +134,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {user?.full_name || user?.email}
           </p>
           <p className="truncate text-xs text-slate-400">{user?.email}</p>
-          {user?.is_platform_admin && (
+          {user?.is_platform_admin && !IS_NETAMATE_EMAIL && (
             <Link
               href="/admin"
               className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-red-500 hover:text-red-700"
