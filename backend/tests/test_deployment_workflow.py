@@ -216,6 +216,14 @@ class ProductionNetworkTopologyTest(SimpleTestCase):
             "exactly backend and celery-worker may reach the Mail Engine",
         )
 
+    def test_dedicated_tenant_hosts_are_passed_to_backend(self):
+        backend_env = self.compose["x-backend-env"]
+        self.assertIn(
+            "DEDICATED_TENANT_HOSTS",
+            backend_env,
+            "production .env bindings must reach Django; otherwise dedicated host isolation is silently disabled",
+        )
+
     def test_datastores_and_frontend_stay_off_the_link(self):
         for service in ("postgres", "redis", "frontend", "migrate", "celery-beat"):
             self.assertNotIn(
