@@ -16,6 +16,7 @@ from apps.accounts.tokens import make_tokens
 from apps.accounts.views import authenticated_response
 from apps.billing.utils import check_member_limit
 from .models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
+from .dedicated import dedicated_tenant_slug, scope_memberships
 from .permissions import IsTenantAdmin, IsTenantOwner
 from .serializers import (
     MemberInviteSerializer,
@@ -35,9 +36,12 @@ class WorkspaceListView(APIView):
 
     def get(self, request):
         memberships = (
-            TenantMembership.objects
-            .select_related("tenant")
-            .filter(user=request.user, status="active")
+            scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    user=request.user, status="active"
+                ),
+            )
             .order_by("created_at")
         )
         data = [
@@ -69,6 +73,12 @@ class WorkspaceCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        if dedicated_tenant_slug(request):
+            return Response(
+                {"detail": "Workspace creation is not available on this host."},
+                status=404,
+            )
+
         serializer = TenantCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         name = serializer.validated_data["name"]
@@ -120,9 +130,12 @@ class WorkspaceDetailView(APIView):
 
     def _get_tenant(self, request, pk):
         try:
-            mem = TenantMembership.objects.select_related("tenant").get(
-                tenant_id=pk, user=request.user, status="active"
-            )
+            mem = scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    tenant_id=pk, user=request.user, status="active"
+                ),
+            ).get()
             return mem.tenant
         except TenantMembership.DoesNotExist:
             return None
@@ -161,9 +174,12 @@ class WorkspaceSwitchView(APIView):
         tenant_id = serializer.validated_data["tenant_id"]
 
         try:
-            membership = TenantMembership.objects.select_related("tenant").get(
-                tenant_id=tenant_id, user=request.user, status="active"
-            )
+            membership = scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    tenant_id=tenant_id, user=request.user, status="active"
+                ),
+            ).get()
         except TenantMembership.DoesNotExist:
             return Response({"detail": "Workspace not found or access denied."}, status=404)
 
@@ -248,9 +264,12 @@ class WorkspaceMemberListView(APIView):
 
     def _get_my_membership(self, request, pk):
         try:
-            return TenantMembership.objects.select_related("tenant").get(
-                tenant_id=pk, user=request.user, status="active"
-            )
+            return scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    tenant_id=pk, user=request.user, status="active"
+                ),
+            ).get()
         except TenantMembership.DoesNotExist:
             return None
 
@@ -325,7 +344,12 @@ class WorkspaceMemberDetailView(APIView):
 
     def _get_my_membership(self, request, pk):
         try:
-            return TenantMembership.objects.get(tenant_id=pk, user=request.user, status="active")
+            return scope_memberships(
+                request,
+                TenantMembership.objects.filter(
+                    tenant_id=pk, user=request.user, status="active"
+                ),
+            ).get()
         except TenantMembership.DoesNotExist:
             return None
 
