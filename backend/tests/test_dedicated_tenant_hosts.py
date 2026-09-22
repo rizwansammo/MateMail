@@ -7,7 +7,6 @@ from apps.mailboxes.models import MailboxStatus
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
     TEST_PASSWORD,
-    add_member,
     auth_client,
     make_api_key,
     make_domain,
@@ -41,7 +40,6 @@ class DedicatedTenantHostTest(TestCase):
         self.netamate = make_tenant(
             self.user, name="NetaMate Solutions", slug="netamate-solutions"
         )
-        add_member(self.netamate, self.user, "owner") if False else None
 
     def test_login_selects_the_host_bound_tenant(self):
         response = APIClient().post(
