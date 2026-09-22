@@ -17,6 +17,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.tenants.models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
+from apps.tenants.dedicated import dedicated_tenant_slug, scope_memberships, tenant_matches_request
 from .models import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -138,6 +139,9 @@ class SignupView(APIView):
     throttle_classes = [AuthThrottle]
 
     def post(self, request):
+        if dedicated_tenant_slug(request):
+            return Response({"detail": "Signup is not available on this host."}, status=404)
+
         # Counted before validation: a signup flood does not become cheaper by
         # being malformed, and the account this would create is the resource
         # being protected.
@@ -297,8 +301,12 @@ class LoginView(APIView):
             )
 
         membership = (
-            TenantMembership.objects.select_related("tenant")
-            .filter(user=user, status="active")
+            scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    user=user, status="active"
+                ),
+            )
             .order_by("created_at")
             .first()
         )
@@ -343,6 +351,13 @@ class RefreshView(APIView):
 
         try:
             token = RefreshToken(raw)
+            tenant_id = token.get("tenant_id")
+            if tenant_id:
+                tenant = Tenant.objects.filter(pk=tenant_id).first()
+                if not tenant_matches_request(request, tenant):
+                    return clear_refresh_cookie(
+                        Response({"detail": "Session is not valid on this host."}, status=403)
+                    )
             access = str(token.access_token)
             # BLACKLIST_AFTER_ROTATION is on: blacklisting must happen before a
             # replacement is issued, so a stolen token cannot be exchanged twice.
@@ -704,12 +719,18 @@ class TwoFactorVerifyView(APIView):
         )
 
         tenant_id = payload.get("tenant_id")
-        tokens = make_tokens(user, tenant_id=tenant_id)
         membership = (
-            TenantMembership.objects.select_related("tenant")
-            .filter(tenant_id=tenant_id, user=user, status="active")
-            .first()
+            scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    tenant_id=tenant_id, user=user, status="active"
+                ),
+            ).first()
         ) if tenant_id else None
+        if dedicated_tenant_slug(request) and membership is None:
+            return Response({"detail": "This account cannot use this host."}, status=403)
+
+        tokens = make_tokens(user, tenant_id=tenant_id)
 
         return authenticated_response(
             tokens,
