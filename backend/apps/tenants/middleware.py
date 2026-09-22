@@ -30,9 +30,17 @@ class TenantMiddleware:
         request.tenant = None
         request.tenant_membership = None
 
-        # Platform admin and auth routes don't need tenant context
+        # Platform admin is never exposed through a dedicated customer host.
+        # Keep this application-side as well as in nginx so a future proxy
+        # misconfiguration cannot turn a customer hostname into a Platform route.
         path = request.path_info
-        if path.startswith("/api/platform/") or path.startswith("/api/auth/") or path.startswith("/api/health/"):
+        if path.startswith("/api/platform/"):
+            if dedicated_tenant_slug(request):
+                return JsonResponse({"detail": "Not found."}, status=404)
+            return self.get_response(request)
+
+        # Auth and health routes do not need tenant context.
+        if path.startswith("/api/auth/") or path.startswith("/api/health/"):
             return self.get_response(request)
 
         # An API key is not a JWT, and simplejwt cannot be asked politely.
