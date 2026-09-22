@@ -21,6 +21,7 @@ env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend
   FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend
+  NETAMATE_EMAIL_FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend-netamate-email
 
 jobs:
 
@@ -401,6 +402,24 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
+      - name: Build and push NetaMate Email frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://mailadmin.netamate.com
+            NEXT_PUBLIC_APP_URL=https://mailadmin.netamate.com
+            NEXT_PUBLIC_WORKSPACE_HOST=mailadmin.netamate.com
+            NEXT_PUBLIC_PLATFORM_HOST=
+            NEXT_PUBLIC_POSTBOX_HOST=postbox.netamate.com
+            NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS=
+          tags: |
+            ${{ env.NETAMATE_EMAIL_FRONTEND_IMAGE }}:${{ github.sha }}
+            ${{ env.NETAMATE_EMAIL_FRONTEND_IMAGE }}:main
+          cache-from: type=gha,scope=frontend-netamate-email
+          cache-to: type=gha,mode=max,scope=frontend-netamate-email
+
       - name: Deployment instructions
         run: |
           {
@@ -409,6 +428,7 @@ jobs:
             echo '```'
             echo "${{ env.BACKEND_IMAGE }}:${{ github.sha }}"
             echo "${{ env.FRONTEND_IMAGE }}:${{ github.sha }}"
+            echo "${{ env.NETAMATE_EMAIL_FRONTEND_IMAGE }}:${{ github.sha }}"
             echo '```'
             echo ""
             echo "**Not deployed.** Publishing is not deployment."

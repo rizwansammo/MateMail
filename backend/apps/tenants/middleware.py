@@ -7,6 +7,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 from .models import TenantMembership
+from .dedicated import dedicated_tenant_slug
 
 
 class TenantMiddleware:
@@ -29,9 +30,17 @@ class TenantMiddleware:
         request.tenant = None
         request.tenant_membership = None
 
-        # Platform admin and auth routes don't need tenant context
+        # Platform admin is never exposed through a dedicated customer host.
+        # Keep this application-side as well as in nginx so a future proxy
+        # misconfiguration cannot turn a customer hostname into a Platform route.
         path = request.path_info
-        if path.startswith("/api/platform/") or path.startswith("/api/auth/") or path.startswith("/api/health/"):
+        if path.startswith("/api/platform/"):
+            if dedicated_tenant_slug(request):
+                return JsonResponse({"detail": "Not found."}, status=404)
+            return self.get_response(request)
+
+        # Auth and health routes do not need tenant context.
+        if path.startswith("/api/auth/") or path.startswith("/api/health/"):
             return self.get_response(request)
 
         # An API key is not a JWT, and simplejwt cannot be asked politely.
@@ -42,6 +51,12 @@ class TenantMiddleware:
         # credential type rather than discovering it from an exception.
         if request.META.get("HTTP_AUTHORIZATION", "").startswith("Bearer mm_"):
             self._try_api_key_auth(request)
+            bound_slug = dedicated_tenant_slug(request)
+            if bound_slug and request.tenant and request.tenant.slug != bound_slug:
+                return JsonResponse(
+                    {"detail": "This tenant is not available on this host."},
+                    status=403,
+                )
             return self.get_response(request)
 
         # Attempt JWT authentication.
@@ -89,6 +104,10 @@ class TenantMiddleware:
             if membership:
                 request.tenant = membership.tenant
                 request.tenant_membership = membership
+
+        bound_slug = dedicated_tenant_slug(request)
+        if bound_slug and request.tenant and request.tenant.slug != bound_slug:
+            return JsonResponse({"detail": "This tenant is not available on this host."}, status=403)
 
         return self.get_response(request)
 
