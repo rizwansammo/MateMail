@@ -310,6 +310,9 @@ class LoginView(APIView):
             .order_by("created_at")
             .first()
         )
+        if dedicated_tenant_slug(request) and membership is None:
+            return Response({"detail": "This account cannot use this host."}, status=403)
+
         tenant_id = membership.tenant_id if membership else None
 
         if user.two_factor_enabled:
@@ -352,6 +355,10 @@ class RefreshView(APIView):
         try:
             token = RefreshToken(raw)
             tenant_id = token.get("tenant_id")
+            if dedicated_tenant_slug(request) and not tenant_id:
+                return clear_refresh_cookie(
+                    Response({"detail": "Session is not valid on this host."}, status=403)
+                )
             if tenant_id:
                 tenant = Tenant.objects.filter(pk=tenant_id).first()
                 if not tenant_matches_request(request, tenant):
