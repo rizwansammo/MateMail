@@ -567,3 +567,118 @@ class BackwardCompatibilityTest(SignatureTestBase):
 
         self.assertEqual(SignatureKind.TEXT, signature.kind)
         self.assertEqual("Riz\nCBO", signature.text)
+
+
+class RealSignatureRenderingTest(SignatureTestBase):
+    """
+    The signature that exposed this: a table layout with panel backgrounds, a
+    remote logo, links and coloured text.
+    """
+
+    RAW = (
+        '<table cellpadding="0" cellspacing="0" border="0" '
+        'style="border-collapse:collapse;width:100%;max-width:620px;'
+        'background:#f8fafc;border:1px solid #e5e7eb;'
+        'font-family:Arial,Helvetica,sans-serif;">'
+        "<tr><td style=\"padding:18px;\">"
+        '<table style="background:#0A0B0D;width:96px;height:96px;"><tr>'
+        '<td align="center" valign="middle" style="padding:12px;">'
+        '<img src="https://netamate.com/static/img/logo.png" width="72" '
+        'alt="NetaMate Solutions" '
+        'style="display:block;width:72px;height:auto;border:0;">'
+        "</td></tr></table>"
+        '<div style="font-size:16px;font-weight:700;color:#111827;">Rizwan Sammo</div>'
+        '<div style="color:#0B4FE0;letter-spacing:0.8px;text-transform:uppercase;">'
+        "Chief Business Officer</div>"
+        '<a href="mailto:rizwan@netamate.com" style="color:#4b5563;">rizwan@netamate.com</a>'
+        '<a href="https://netamate.com" style="color:#4b5563;">netamate.com</a>'
+        "</td></tr></table>"
+    )
+
+    def test_panel_backgrounds_survive(self):
+        """
+        The defect. `background-color` was allowed and `background` was not, so
+        every signature written the way real signatures are written lost its
+        panel colours — in the SENT MESSAGE as well as the preview.
+        """
+        cleaned = mime.sanitize_signature(self.RAW)
+        self.assertIn("background:#f8fafc", cleaned)
+        self.assertIn("background:#0A0B0D", cleaned)
+
+    def test_the_remote_logo_survives(self):
+        cleaned = mime.sanitize_signature(self.RAW)
+        self.assertIn("https://netamate.com/static/img/logo.png", cleaned)
+        self.assertIn('alt="NetaMate Solutions"', cleaned)
+
+    def test_layout_and_typography_survive(self):
+        cleaned = mime.sanitize_signature(self.RAW)
+        for expected in (
+            "<table", "<td", 'align="center"', 'valign="middle"',
+            "max-width:620px", "letter-spacing", "text-transform",
+            "color:#111827", "font-family:Arial",
+        ):
+            self.assertIn(expected, cleaned, f"{expected} was stripped")
+
+    def test_both_links_survive(self):
+        cleaned = mime.sanitize_signature(self.RAW)
+        self.assertIn("mailto:rizwan@netamate.com", cleaned)
+        self.assertIn("https://netamate.com", cleaned)
+        self.assertIn("noopener", cleaned)
+
+    def test_it_reaches_the_sent_message_intact(self):
+        """Allowing `background` must not have changed the MIME path."""
+        signature = self.make_signature(
+            kind=SignatureKind.HTML,
+            html=mime.sanitize_signature(self.RAW),
+            text=mime.html_to_text(mime.sanitize_signature(self.RAW)),
+        )
+        parsed = self.assemble(signature)
+        html = self.body_of(parsed, "text/html")
+
+        self.assertIn("This is our PostBox email test.", html)
+        self.assertIn("background:#f8fafc", html)
+        self.assertIn("https://netamate.com/static/img/logo.png", html)
+
+        text = self.body_of(parsed, "text/plain")
+        self.assertIn("Rizwan Sammo", text)
+        self.assertNotIn("<table", text)
+
+
+class BackgroundValueSafetyTest(SignatureTestBase):
+    """Allowing the shorthand must not allow what it can carry."""
+
+    def test_a_colour_passes(self):
+        for value in ("#f8fafc", "rgb(248,250,252)", "#0A0B0D", "transparent"):
+            cleaned = mime.sanitize_signature(f'<div style="background:{value}">x</div>')
+            self.assertIn("background:", cleaned, value)
+
+    def test_a_scripted_url_is_rejected(self):
+        cleaned = mime.sanitize_signature(
+            '<div style="background:url(javascript:alert(1))">x</div>'
+        )
+        self.assertNotIn("background", cleaned)
+        self.assertNotIn("javascript", cleaned)
+
+    def test_a_remote_css_image_is_rejected(self):
+        """
+        Deliberately different from an <img>. A CSS background image cannot be
+        turned off by the reader's remote-image control, so it would be a
+        tracking pixel the preference cannot reach.
+        """
+        cleaned = mime.sanitize_signature(
+            '<div style="background:url(https://evil.example/p.png)">x</div>'
+        )
+        self.assertNotIn("evil.example", cleaned)
+
+    def test_expression_and_import_are_rejected(self):
+        for value in ("expression(alert(1))", "url('data:text/html,<script>')"):
+            cleaned = mime.sanitize_signature(f'<div style="background:{value}">x</div>')
+            self.assertNotIn("background", cleaned)
+
+    def test_overlay_css_is_still_rejected_alongside_a_background(self):
+        cleaned = mime.sanitize_signature(
+            '<div style="background:#fff;position:fixed;z-index:9999">x</div>'
+        )
+        self.assertIn("background:#fff", cleaned)
+        self.assertNotIn("position", cleaned)
+        self.assertNotIn("z-index", cleaned)

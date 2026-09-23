@@ -77,7 +77,11 @@ ALLOWED_URL_SCHEMES = {"http", "https", "mailto", "cid", "tel"}
 #: missing `position`, `z-index`, `top`, `left`, `transform` and anything else
 #: that lets content escape its box and overlay the application.
 ALLOWED_CSS = {
-    "background-color", "border", "border-bottom", "border-collapse",
+    # `background` as well as `background-color`: real signatures use the
+    # shorthand, and allowing only the longhand silently flattened every one of
+    # them. Values are filtered below, so a colour passes and `url(https://…)`
+    # or `url(javascript:…)` does not.
+    "background", "background-color", "border", "border-bottom", "border-collapse",
     "border-color", "border-left", "border-radius", "border-right",
     "border-style", "border-top", "border-width", "color", "display",
     "font-family", "font-size", "font-style", "font-weight", "height",

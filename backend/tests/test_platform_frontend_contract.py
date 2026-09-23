@@ -167,3 +167,44 @@ class PlatformFrontendContractTest(SimpleTestCase):
                     f"API path must be rooted: {path}",
                 )
         self.assertRegex(platform_api, r'const P = "/api/platform"')
+
+
+class PostBoxRemoteImageCspTest(SimpleTestCase):
+    """
+    PostBox may load remote HTTPS images; the other consoles may not.
+
+    `img-src 'self' data: blob:` silently broke two things that look unrelated
+    and share one cause: a signature's own logo on the company CDN, and the
+    reader's "display remote images" control — the server sent the images once
+    the reader asked, and the browser refused them with nothing in the UI to
+    explain why.
+
+    Widening this is safe because the SERVER decides whether a remote image is
+    ever sent (`load_remote_images`, off by default). CSP is the mechanism; the
+    preference is the policy. A CSP forbidding what the server never emits adds
+    no protection and here removed a feature.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.middleware = (
+            Path(__file__).resolve().parents[2]
+            / "frontend" / "middleware.ts"
+        ).read_text(encoding="utf-8")
+
+    def test_the_policy_depends_on_the_host(self):
+        self.assertIn("allowRemoteImages", self.middleware)
+        self.assertIn("buildCsp(nonce, isPostBoxHost(hostOf(request)))", self.middleware)
+
+    def test_https_images_are_conditional_not_unconditional(self):
+        """
+        The failure to guard against: someone 'fixes' a broken image by adding
+        `https:` to the shared policy, widening the Workspace and the Platform
+        Console at the same time.
+        """
+        self.assertNotIn("img-src 'self' data: blob: https:", self.middleware)
+        self.assertIn('allowRemoteImages ? " https:" : ""', self.middleware)
+
+    def test_the_base_policy_is_unchanged(self):
+        self.assertIn("img-src 'self' data: blob:", self.middleware)

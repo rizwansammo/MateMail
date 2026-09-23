@@ -524,25 +524,46 @@ export function Compose({
  * API already sanitised, and `image_url` is served by it. The composer never
  * decides what is safe; it only shows what was stored.
  */
+/**
+ * Mark an image that failed to load.
+ *
+ * `error` does not bubble, but it does capture — so one handler on the wrapper
+ * catches every image inside markup we injected and do not otherwise control.
+ * The attribute is what `.pb-sig-canvas img[data-pb-broken]` styles into a
+ * labelled box; CSS alone cannot know a request 404ed.
+ *
+ * Only the attribute is set. Replacing the node would fight React's ownership
+ * of this subtree, and the alt text is already the right thing to show.
+ */
+function markBrokenImage(event: React.SyntheticEvent<HTMLElement>) {
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === "IMG") {
+    target.setAttribute("data-pb-broken", "true");
+  }
+}
+
 function SignaturePreview({ signature }: { signature: Signature }) {
   if (signature.kind === "image") {
     if (!signature.has_image) return null;
     return (
-      // User content from our own API; next/image would try to optimise and
-      // re-host it.
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={signature.image_url}
-        alt={signature.image_alt}
-        style={{ maxWidth: "100%", maxHeight: "140px" }}
-      />
+      <div className="pb-sig-canvas" onErrorCapture={markBrokenImage}>
+        {/* User content from our own API; next/image would try to optimise
+            and re-host it. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={signature.image_url}
+          alt={signature.image_alt}
+          style={{ maxWidth: "100%", maxHeight: "140px" }}
+        />
+      </div>
     );
   }
 
   if (signature.kind === "html") {
     return (
       <div
-        className="text-sm"
+        className="pb-sig-canvas text-sm"
+        onErrorCapture={markBrokenImage}
         dangerouslySetInnerHTML={{ __html: signature.html }}
       />
     );
@@ -550,7 +571,7 @@ function SignaturePreview({ signature }: { signature: Signature }) {
 
   return (
     <pre
-      className="text-sm"
+      className="pb-sig-canvas text-sm"
       style={{ whiteSpace: "pre-wrap", margin: 0, fontFamily: "inherit" }}
     >
       {signature.text}

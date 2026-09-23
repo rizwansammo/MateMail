@@ -817,6 +817,47 @@ body {
 }
 
 .pb-scroll { overflow-y: auto; overscroll-behavior: contain; }
+
+/* ── signature preview canvas ────────────────────────────────────────────────
+   A signature is designed for an email, and email bodies are light. Rendering
+   one directly on PostBox chrome means dark mode decides whether somebody
+   else'''s signature is readable — and a signature that sets color:#111827 on a
+   dark panel is invisible.
+
+   So the preview gets its own ground rather than inheriting the app'''s. This
+   is the same reason a mail client shows message bodies on white: the content
+   brought its own colours and they only make sense against the background they
+   were designed for.
+
+   `color-scheme: light` stops the browser dark-ing form controls and default
+   UA colours inside it, which otherwise reappear in dark mode. */
+.pb-sig-canvas {
+  background: #ffffff;
+  color: #111827;
+  color-scheme: light;
+  padding: 12px;
+  /* A wide signature table scrolls rather than forcing the panel wider. */
+  overflow-x: auto;
+}
+
+/* Only where the signature did not choose its own. */
+.pb-sig-canvas a { color: #0b4fe0; }
+
+/* A remote logo that will not load.
+   Marked by the preview'''s error handler, not by CSS — a stylesheet cannot
+   know an image 404ed. The box keeps the layout'''s shape and shows the alt
+   text, which is a readable placeholder instead of a torn-page icon. */
+.pb-sig-canvas img[data-pb-broken] {
+  min-width: 64px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px dashed #cbd5e1;
+  background: #f1f5f9;
+  color: #64748b;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  font-style: normal;
+}
 .pb-num { font-variant-numeric: tabular-nums; }
 
 @media (prefers-reduced-motion: reduce) {

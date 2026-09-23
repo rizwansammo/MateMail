@@ -38,12 +38,15 @@ import { NextRequest, NextResponse } from "next/server";
 
 const isDev = process.env.NODE_ENV !== "production";
 
-function buildCsp(nonce: string): string {
+function buildCsp(nonce: string, allowRemoteImages = false): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    // `https:` on PostBox only. A mail client has to be able to show a
+    // sender's logo once the reader has asked for it, and a signature's own
+    // logo always. The other consoles render nothing third-party.
+    `img-src 'self' data: blob:${allowRemoteImages ? " https:" : ""}`,
     "font-src 'self' data:",
     // The API is same-origin (each hostname serves both). In development
     // it is a different port, so the dev origin is allowed there only.
@@ -295,7 +298,9 @@ export function middleware(request: NextRequest) {
   // crypto.randomUUID is available in the Edge runtime and is cryptographically
   // random. Base64 keeps the header value compact and CSP-safe.
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
-  const csp = buildCsp(nonce);
+  // Computed before routing, because the policy depends on which surface
+  // this hostname serves.
+  const csp = buildCsp(nonce, isPostBoxHost(hostOf(request)));
 
   // Next.js looks for the nonce on the *request* CSP header to decide what to
   // stamp onto its script tags. Setting it only on the response would produce a
