@@ -22,6 +22,8 @@ Mail Engine are both deployed; what follows is how they are configured.
 | `nginx/portal.matemail.online.conf` | Host-nginx vhost **template** for the MateMail Workspace, and the legacy `app.matemail.online` redirect. Declares the shared upstreams. Not installed by P2. |
 | `nginx/postbox.matemail.online.conf` | Host-nginx vhost **template** for MateMail PostBox. |
 | `nginx/platform.matemail.online.conf` | Host-nginx vhost **template** for the Platform Console. |
+| `nginx/autodiscover.matemail.online.conf` | Host-nginx vhost **template** for the Outlook Autodiscover endpoint. Allow-list of five exact paths; 404 otherwise. |
+| `nginx/*.bootstrap.conf` | HTTP-only vhosts used **only** to obtain each certificate. No TLS directive and no upstream, so they parse on a host with neither. Replaced by the real vhost immediately afterwards — see docs/DEPLOYMENT.md § Certificates and the bootstrap order. |
 
 ---
 
@@ -112,9 +114,34 @@ install -m 0600 /dev/null /opt/MateMail/.env
 docker login ghcr.io -u <github-user>      # paste a read:packages PAT
 
 # 4. Host nginx vhost (template — review before installing).
-sudo cp deploy/nginx/portal.matemail.online.conf /etc/nginx/sites-available/matemail
+#
+#    THREE steps, not one. nginx resolves `ssl_certificate` and the
+#    certbot-provided `options-ssl-nginx.conf` when it PARSES its config,
+#    not when a request arrives — so installing the TLS vhost before certbot
+#    has run makes `nginx -t` fail for the WHOLE server, and on a fresh
+#    host nginx will not start at all. certbot cannot go first either:
+#    HTTP-01 needs something already answering on port 80.
+#
+#    The bootstrap vhost is HTTP-only and exists to break that cycle. Full
+#    reasoning: docs/DEPLOYMENT.md § Certificates and the bootstrap order.
+
+#    4a. Bootstrap vhost — no TLS directives, parses with no certificate.
+sudo cp deploy/nginx/portal.matemail.online.bootstrap.conf \
+        /etc/nginx/sites-available/matemail
 sudo ln -s /etc/nginx/sites-available/matemail /etc/nginx/sites-enabled/
-sudo certbot --nginx -d portal.matemail.online -d matemail.online -d app.matemail.online
+sudo nginx -t && sudo systemctl reload nginx
+
+#    4b. One certificate, all four names. --webroot rather than --nginx: the
+#        nginx plugin rewrites the server block it finds, and 4c replaces it.
+sudo certbot certonly --webroot -w /var/www/html \
+     -d portal.matemail.online -d matemail.online \
+     -d www.matemail.online -d app.matemail.online
+
+#    4c. Overwrite the SAME path with the real vhost. The symlink already
+#        exists; enabling a second file instead would leave two :80 blocks
+#        for one server_name and a conflicting-server-name warning.
+sudo cp deploy/nginx/portal.matemail.online.conf \
+        /etc/nginx/sites-available/matemail
 sudo nginx -t && sudo systemctl reload nginx
 
 # 5. The private Mail Engine link. REQUIRED — backend and celery-worker join it,

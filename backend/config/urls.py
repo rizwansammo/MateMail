@@ -31,6 +31,13 @@ urlpatterns = [
     path("api/integrations/", include("apps.integrations.urls")),
     # Backup jobs — list, trigger, detail
     path("api/backups/", include("apps.backups.urls")),
+
+    # Mail-client discovery. At the ROOT, not under /api/, because
+    # Outlook constructs `/autodiscover/autodiscover.xml` itself and will
+    # not look anywhere else. Last in the list so it can never shadow an
+    # API prefix, and the nginx vhost for autodiscover.matemail.online
+    # allow-lists exactly these paths and proxies nothing else.
+    path("", include("apps.autodiscover.urls")),
 ]
 
 admin.site.site_header = "MateMail Platform Admin"

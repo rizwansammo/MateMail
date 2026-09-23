@@ -32,6 +32,13 @@ SIGNUP_PER_IP = Limit("signup:ip", 3, HOUR)
 #: be used to discover which addresses are registered.
 FORGOT_PASSWORD_PER_EMAIL = Limit("forgot:email", 3, HOUR)
 
+#: Autodiscover requests per client IP. The endpoint is unauthenticated and
+#: public by necessity — Outlook cannot present a credential before it knows
+#: where the server is — so the limit is the only thing between it and a
+#: script walking domain names. Generous enough for a real client, which
+#: asks a handful of times while an account is being added.
+AUTODISCOVER_PER_IP = Limit("autodiscover:ip", 30, QUARTER_HOUR)
+
 #: Ownership verification and DNS health checks, per domain. Both resolve DNS
 #: on our behalf, so this is an outbound-traffic control as much as an abuse one.
 DOMAIN_CHECK_PER_DOMAIN = Limit("domain:check", 10, HOUR)

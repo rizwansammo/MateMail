@@ -105,6 +105,18 @@ export interface MailboxProfile {
   domain: string;
 }
 
+/** Mail-client settings, served by the backend so there is one source. */
+export interface MailClientSettings {
+  username: string;
+  imap: { server: string; port: number; encryption: string };
+  smtp: {
+    server: string;
+    port: number;
+    encryption: string;
+    auth_required: boolean;
+  };
+}
+
 export interface Preferences {
   theme: "light" | "dark" | "system";
   density: "comfortable" | "compact";
@@ -303,7 +315,11 @@ export const postbox = {
   logout: () => request<{ detail: string }>("/auth/logout/", { method: "POST" }),
   logoutAll: () => request<{ detail: string }>("/auth/logout-all/", { method: "POST" }),
   me: () =>
-    request<{ mailbox: MailboxProfile; preferences: Preferences }>("/auth/me/"),
+    request<{
+      mailbox: MailboxProfile;
+      preferences: Preferences;
+      mail_client: MailClientSettings;
+    }>("/auth/me/"),
 
   // folders
   folders: () => request<{ results: Folder[] }>("/folders/"),

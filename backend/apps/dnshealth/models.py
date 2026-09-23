@@ -25,6 +25,18 @@ class DNSRecordCheck(models.Model):
     status = models.CharField(
         max_length=20, choices=DNSCheckStatus.choices, default=DNSCheckStatus.PENDING
     )
+    #: Whether this record counts toward `Domain.dns_health_score`.
+    #:
+    #: False for mail-client discovery records. Autodiscover changes whether
+    #: Outlook fills in its own port numbers; it does not change whether mail
+    #: is delivered. Scoring it would report a perfectly working domain as 80%
+    #: and send somebody hunting a fault that is not there.
+    #:
+    #: Stored rather than inferred from `record_type`, so the rule is a fact
+    #: about the row that a test can assert and a future record type cannot
+    #: silently join the score.
+    is_scored = models.BooleanField(default=True)
+
     last_checked = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

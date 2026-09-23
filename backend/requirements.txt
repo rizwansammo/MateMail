@@ -25,3 +25,11 @@ argon2-cffi==23.1.0
 # attack surface is the gap between what the filter parses and what the browser
 # parses, and only a real HTML parser closes it.
 nh3==0.2.20
+
+# Safe XML parsing for the Autodiscover endpoint. Outlook POSTs XML from
+# the open internet, and `xml.etree` resolves external entities on some
+# configurations — which turns a mail-client setup request into a file-read
+# or an outbound fetch of the attacker's choosing. defusedxml is the same
+# API with those features removed rather than a parser we have to remember
+# to configure correctly.
+defusedxml==0.7.1

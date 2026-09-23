@@ -3078,3 +3078,101 @@ The order matters and is written out in `docs/DEPLOYMENT.md` § *PostBox
 deployment (P11)*. In short: the master password into both `.env` files first,
 then the Dovecot image, then the application, then DNS/nginx/TLS. The Dovecot
 entrypoint refuses to start without the credential, by design.
+
+---
+
+## Mail Client Discovery & Outlook Compatibility
+
+**Built and tested locally. Nothing deployed, no DNS changed.**
+
+### What exists
+
+An Outlook POX Autodiscover compatibility endpoint in
+`backend/apps/autodiscover/`, mounted at the root (`/autodiscover/autodiscover.xml`
+and four case variants, because Outlook does not agree with itself about case),
+to be served from `autodiscover.matemail.online`.
+
+| Behaviour | State |
+|---|---|
+| Returns IMAP `mx.matemail.online:993`, implicit TLS | Built |
+| Returns SMTP `mx.matemail.online:587`, STARTTLS, auth required | Built |
+| Login name is the full address | Built |
+| No Exchange / MAPI / EWS / ActiveSync / POP block | Built |
+| Domain eligibility = ownership VERIFIED + ACTIVE\|WARNING + provisioned | Built |
+| Identical response for a real and an invented local part | Built |
+| defusedxml parsing, 8 KiB body cap, rate limited per IP | Built |
+| Optional `_autodiscover._tcp` SRV shown in the Workspace | Built |
+| Mail client settings section in PostBox | Built |
+| Native `user@organization.matemail.online` domains | **Not implemented — see below** |
+
+### The SPF correction
+
+Customer SPF is now `v=spf1 include:_spf.matemail.online ~all`. It was
+`include:matemail.online`, which made the product's website domain double as
+the provider's SPF authorisation record (DEC-056).
+
+`SPF_INCLUDE_DOMAIN` is its own setting. `MAIL_DOMAIN` is untouched, so DMARC
+reports still reach `dmarc@matemail.online` and MX still points at
+`mx.matemail.online`.
+
+**This is a customer-visible migration.** Every existing customer domain must
+update its SPF record, and until it does the DNS health check will report SPF
+as FAILED. Nothing in this phase notifies anyone — there is no migration email,
+no banner and no grace period that accepts both forms. That is a deliberate
+omission rather than an oversight: accepting both would mean the old
+authorisation keeps working indefinitely, which is the thing being removed.
+Sequencing the customer communication is outstanding work.
+
+### Native organization domains
+
+`user@organization.matemail.online` **does not exist in the codebase.** There
+is no model field, no flag and no concept of a platform-owned domain anywhere
+in `backend/apps/`. Autodiscover therefore treats every domain the same way:
+through the ownership and provisioning gate that already exists.
+
+Nothing was invented for it. When native domains are built, they will need an
+explicit decision about eligibility — a MateMail-owned domain has no customer
+DNS to prove ownership with, so `DomainOwnership.VERIFIED` cannot mean the same
+thing, and that is a design question, not a code change.
+
+### Autodiscover is outside the DNS health score
+
+The score stays four records at 25 each: MX, SPF, DKIM, DMARC. The SRV record
+is checked and stored with `is_scored=False` and shown in a separate **Mail
+Client Discovery** section.
+
+A domain with no SRV record scores 100 and is ACTIVE. Six tests in
+`test_dns_spf_and_discovery.py` pin this from both directions — a missing SRV
+cannot lower the score, and a present one cannot raise it or rescue a domain
+with no MX.
+
+### Tests
+
+| Suite | Result |
+|---|---|
+| `tests.test_autodiscover` | **29 tests, OK** |
+| `tests.test_dns_spf_and_discovery` | **14 tests, OK** |
+| Full Django suite | **1634 tests, OK**, 5 skipped |
+| pytest regression (4 CI files) | **217 passed**, 2 skipped |
+| `manage.py check` / `--deploy` / `makemigrations --check` | clean |
+| Frontend `tsc --noEmit` | clean |
+| Frontend ESLint | 18 errors / 17 warnings — **identical to the baseline at `4307fd0`** |
+| Frontend `next build` | compiled successfully |
+
+### What is NOT proven
+
+- **No Outlook client has been tested.** Not one. `docs/OUTLOOK_ACCEPTANCE.md`
+  has a row per Outlook variant and every row is blank. Automated tests prove
+  the XML is correct; they cannot prove a client requests it or uses it.
+- The endpoint has never served a request outside the test suite.
+- `autodiscover.matemail.online` has no DNS record, no certificate, no vhost.
+- No customer domain has published the SRV record.
+- The SPF change has not reached any customer's DNS.
+
+### Known limitation, recorded rather than fixed
+
+`frontend/app/app/onboarding/page.tsx` still builds its own list of DNS records
+as literals rather than reading `/api/domains/{id}/records/`. The SPF value in
+it was corrected, but MX, DKIM and DMARC are duplicated there and can drift
+from the backend again. Making onboarding read the API is the real fix and was
+out of scope for this phase.

@@ -124,6 +124,23 @@ def provision_domain_task(self, domain_id: str):
     domain.save(update_fields=["mail_engine_provisioned", "mail_engine_error"])
     logger.info("Domain %s provisioned in the Mail Engine", domain.domain)
 
+    # DKIM only becomes publishable after provisioning has adopted the engine's
+    # public key. Refresh DNS health immediately so the UI stops showing the
+    # placeholder value and displays the real record without waiting for the
+    # periodic sweep.
+    try:
+        from apps.dnshealth.tasks import check_domain_dns
+
+        check_domain_dns.delay(str(domain.id))
+    except Exception as exc:
+        # Provisioning itself succeeded; a DNS refresh failure must not roll
+        # that back. The scheduled sweep will reconcile the display later.
+        logger.warning(
+            "Could not queue post-provision DNS refresh for %s: %s",
+            domain.domain,
+            exc,
+        )
+
 
 def _adopt_engine_dkim(domain, *, task=None) -> None:
     """

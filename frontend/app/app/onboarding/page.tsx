@@ -206,7 +206,10 @@ export default function OnboardingPage() {
         {
           type: "TXT",
           host: "@",
-          value: "v=spf1 include:matemail.online ~all",
+          // `_spf.matemail.online`, not the website domain. The provider's
+          // SPF authorisation lives on a host that exists only to list
+          // sending IPs (DEC-056).
+          value: "v=spf1 include:_spf.matemail.online ~all",
           note: "SPF — authorize MateMail to send on your behalf",
         },
         {

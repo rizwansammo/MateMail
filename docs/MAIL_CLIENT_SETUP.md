@@ -73,6 +73,29 @@ Public ports and the reasoning behind them: `docs/NATIVE_MAIL_ENGINE.md`.
 Abuse protection, including how to release a blocked address:
 `docs/SECURITY.md`.
 
-Automatic client configuration (Thunderbird autoconfig, Outlook autodiscover)
-is not implemented. It is a product feature for later, not a prerequisite:
-every client accepts the settings above typed in by hand.
+### Automatic configuration
+
+**Outlook Autodiscover**: implemented, as a compatibility endpoint at
+`autodiscover.matemail.online`. It returns the IMAP and SMTP settings above
+and nothing else — no Exchange, MAPI, EWS or ActiveSync, because MateMail
+does not serve those (DEC-057).
+
+A customer domain opts in with one optional DNS record:
+
+```
+_autodiscover._tcp.<domain>.   SRV   0 0 443 autodiscover.matemail.online.
+```
+
+It is optional in the real sense: mail is delivered, signed and authorised
+exactly the same without it, and it does not count toward the domain's DNS
+health score.
+
+**Some Outlook versions will still need Advanced or manual IMAP setup.**
+Recent builds increasingly route generic IMAP accounts through their own
+setup flow and may not use a third-party Autodiscover response at all. No
+Outlook build is claimed to configure automatically until it has been
+observed doing so — `docs/OUTLOOK_ACCEPTANCE.md` is where that gets
+recorded, and every row of it is currently blank.
+
+**Thunderbird autoconfig** is not implemented. Thunderbird accepts the
+settings above typed in by hand.

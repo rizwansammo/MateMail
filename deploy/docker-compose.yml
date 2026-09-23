@@ -40,7 +40,7 @@ x-backend-env: &backend_env
   # unchanged — that is what lets the frontend middleware tell the two
   # consoles apart, so Django must accept it or every Platform API call is
   # a 400 DisallowedHost.
-  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-portal.matemail.online,postbox.matemail.online,platform.matemail.online,app.matemail.online,matemail.online,localhost,127.0.0.1}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-portal.matemail.online,postbox.matemail.online,platform.matemail.online,autodiscover.matemail.online,app.matemail.online,matemail.online,localhost,127.0.0.1}
   DEDICATED_TENANT_HOSTS: ${DEDICATED_TENANT_HOSTS:-}
   DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:-matemail}
   REDIS_URL: redis://redis:6379/0
@@ -65,6 +65,11 @@ x-backend-env: &backend_env
   NATIVE_ENGINE_API_SECRET: ${NATIVE_ENGINE_API_SECRET:-}
   MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
   MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.online}
+  # The host a customer's SPF includes. Deliberately not MAIL_DOMAIN —
+  # see DEC-056.
+  SPF_INCLUDE_DOMAIN: ${SPF_INCLUDE_DOMAIN:-_spf.matemail.online}
+  # The Autodiscover compatibility host customers aim an SRV record at.
+  AUTODISCOVER_HOST: ${AUTODISCOVER_HOST:-autodiscover.matemail.online}
   DKIM_SELECTOR: ${DKIM_SELECTOR:-mm1}
   # INTERIM (DEC-007r, removed in P4): encrypts the DKIM private keys Django
   # still stores. Required — `manage.py check --deploy` fails without it

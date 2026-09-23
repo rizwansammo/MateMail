@@ -130,6 +130,36 @@ class PostBoxLogoutAllView(APIView):
         )
 
 
+def mail_client_settings(address: str) -> dict:
+    """
+    What to type into Outlook, Apple Mail or Thunderbird.
+
+    Derived from `MAIL_HOSTNAME` rather than written out in the frontend, so
+    there is one answer and it follows the deployment. The ports and
+    encryption are fixed by what the Native Engine actually listens on
+    (DEC-042): IMAP 993 implicit TLS, submission 587 STARTTLS. There is no
+    POP3 and no 465, so neither is offered here — a settings page that lists
+    a port the server does not answer on produces a support ticket.
+
+    The username is the full address every time. MateMail authenticates on
+    the whole address, and a client configured with the local part alone
+    fails with a password error that says nothing about the real cause.
+    """
+    from django.conf import settings as django_settings
+
+    host = django_settings.MAIL_HOSTNAME
+    return {
+        "username": address,
+        "imap": {"server": host, "port": 993, "encryption": "SSL/TLS"},
+        "smtp": {
+            "server": host,
+            "port": 587,
+            "encryption": "STARTTLS",
+            "auth_required": True,
+        },
+    }
+
+
 class PostBoxMeView(APIView):
     """The signed-in mailbox and its preferences. The frontend's boot call."""
 
@@ -143,6 +173,7 @@ class PostBoxMeView(APIView):
         return Response({
             "mailbox": MailboxProfileSerializer(request.mailbox).data,
             "preferences": PreferenceSerializer(preference).data,
+            "mail_client": mail_client_settings(request.mailbox.email),
             "session": {
                 "id": str(request.postbox_session.id),
                 "expires_at": request.postbox_session.expires_at.isoformat(),

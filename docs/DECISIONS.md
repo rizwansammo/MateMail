@@ -2715,3 +2715,130 @@ who still uses it, so removal is a decision made from that log, not from a date.
   declares the shared upstreams; the other two vhosts reuse them by name.
 - DEC-045's hostname is superseded. Its reasoning — two audiences must never
   share a login page — is unchanged and was never about the particular name.
+
+---
+
+## DEC-056 — Customer SPF includes `_spf.matemail.online`, not the product domain
+
+**Status:** Accepted · **Phase:** Mail Client Discovery · **Date:** 2026-09-23
+
+### Decision
+
+A customer's SPF record is:
+
+```
+v=spf1 include:_spf.matemail.online ~all
+```
+
+It was `include:matemail.online`. `SPF_INCLUDE_DOMAIN` is a setting of its own,
+deliberately separate from `MAIL_DOMAIN`, and only the SPF check uses it. DMARC
+reports still go to `dmarc@matemail.online`; MX still points at
+`mx.matemail.online`. Neither moved.
+
+The four names, and what each is for:
+
+| Name | Purpose |
+|------|---------|
+| `matemail.online` | the product website and the platform's own mail domain |
+| `_spf.matemail.online` | the provider's SPF authorisation record, and nothing else |
+| `mail.matemail.online` | MateMail's own transactional sending domain |
+| `mx.matemail.online` | the canonical mail server, for MX and for client settings |
+
+### Why
+
+`include:` means "trust whatever this name says about sending IPs". Pointing it
+at `matemail.online` made the product's website domain carry that meaning as a
+side effect, and the two purposes then constrain each other: every TXT change
+on the apex — a verification token for a SaaS tool, a site-ownership record —
+happens on a name that every customer's mail authorisation depends on. An SPF
+record has a ten-lookup limit and a 255-character string limit, so an apex
+shared with unrelated records is also the one most likely to be edited into
+breaking those.
+
+Separating them means the sending estate can change — a new IP, an IPv6 block,
+a second sending host — by editing one record that exists for that and nothing
+else, with no customer action and no risk to the website's DNS.
+
+`~all` rather than `-all` on the customer record is unchanged and deliberate:
+softfail while a domain is being migrated avoids rejecting the customer's own
+legitimate mail from a system they have not moved yet. The provider record uses
+`-all` because it is exhaustive by construction.
+
+### Consequences
+
+- The DNS health check expects the new value; a customer still publishing the
+  old one shows SPF as FAILED rather than silently passing.
+- Existing customers must update their SPF record. **This is a migration with a
+  window where the old record stops matching**, and nothing in this phase
+  notifies them — see the limitation in `PROJECT_STATUS.md`.
+- `_spf.matemail.online` must exist and list the sending IPs before any
+  customer is told to include it. It does: `v=spf1 ip4:169.58.114.252 -all`.
+
+---
+
+## DEC-057 — One Autodiscover host, reached by SRV, never a per-customer hostname
+
+**Status:** Accepted · **Phase:** Mail Client Discovery · **Date:** 2026-09-23
+
+### Decision
+
+MateMail serves Outlook's POX Autodiscover from one central hostname,
+`autodiscover.matemail.online`. Customers publish:
+
+```
+_autodiscover._tcp.<their-domain>.  SRV  0 0 443 autodiscover.matemail.online.
+```
+
+Customers are **not** asked to point `autodiscover.<their-domain>` at us by
+CNAME, and MateMail does not issue per-customer certificates.
+
+The endpoint returns IMAP and SMTP settings only. No Exchange, MAPI, EWS,
+ActiveSync, OAB or free/busy block is emitted, and POP is not offered at all.
+
+### Why
+
+**Why SRV and not CNAME.** A CNAME from `autodiscover.acme.example` to our host
+does not make our certificate valid for `autodiscover.acme.example` — the
+browser-equivalent check in Outlook sees the name it asked for, not the name it
+landed on. Supporting direct customer hostnames therefore means issuing and
+renewing a certificate per customer domain, plus nginx server blocks per
+customer, plus a failure mode where a customer's mail client setup breaks
+because a certificate nobody was watching expired. The SRV record moves the TLS
+identity to a name we own and certify once. Outlook queries the SRV record as
+part of its documented discovery sequence, so nothing is lost but the CNAME.
+
+**Why no Exchange block.** The POX schema can describe all of it, and it is
+tempting because Outlook's smoothest path is an Exchange account. But MateMail
+is an IMAP/SMTP host. Advertising a protocol we do not serve makes Outlook fail
+part-way through setup — after the user has typed a password — rather than
+cleanly. The honest answer is IMAP and SMTP, and where Outlook will not accept
+that automatically the answer is manual setup, not emulation.
+
+**Why the response cannot reveal a mailbox.** This endpoint is unauthenticated
+and public; it has to be, because a client asking where the server is has no
+account yet. If it answered differently for a real address than an invented
+one, it would be a staff-directory enumeration API. So it consults the domain
+only. `alice@acme.example` and `nobody@acme.example` produce byte-identical
+documents, and the settings are handed out for any address at an eligible
+domain. Authentication happens later, at IMAP, against a password.
+
+**Why eligibility reuses the provisioning gate.** Ownership VERIFIED, status
+ACTIVE or WARNING, and `mail_engine_provisioned`. Inventing a looser rule here
+would mean handing out MateMail settings for a domain somebody typed into a
+trial workspace and never proved they own.
+
+### Consequences
+
+- The SRV record is **optional**. It is checked and displayed, and deliberately
+  excluded from the DNS health score (`DNSRecordCheck.is_scored = False`): a
+  domain without it sends and receives mail perfectly, and scoring it would
+  report a healthy domain as 80%.
+- `autodiscover.matemail.online` needs its own A record and its own
+  certificate, separate from the mail-protocol certificate that Postfix and
+  Dovecot present for `mx.matemail.online`.
+- The nginx vhost for it is an allow-list of five exact paths with a default of
+  404 — not a proxy with some paths denied. A host that exists for one endpoint
+  should not be one forgotten `location` away from serving a console.
+- **Outlook may still require manual setup.** See `docs/OUTLOOK_ACCEPTANCE.md`.
+  No claim of automatic configuration is made for any Outlook build until it
+  has been observed working.

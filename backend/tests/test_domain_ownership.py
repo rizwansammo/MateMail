@@ -320,9 +320,12 @@ class ProvisioningGateTest(TestCase):
 
         with mock.patch(
             "apps.mail_engine.stub_adapter.StubAdapter.ensure_domain"
-        ) as ensure:
+        ) as ensure, mock.patch(
+            "apps.dnshealth.tasks.check_domain_dns.delay"
+        ) as dns_refresh:
             tasks.provision_domain_task(str(self.verified.id))
         ensure.assert_called_once()
+        dns_refresh.assert_called_once_with(str(self.verified.id))
         self.verified.refresh_from_db()
         self.assertTrue(self.verified.mail_engine_provisioned)
 
@@ -381,28 +384,31 @@ class ProvisioningGateTest(TestCase):
 
     # ── the whole journey ───────────────────────────────────────────────────
 
-    def test_end_to_end_verify_then_provision(self):
+    def test_end_to_end_verification_starts_provisioning_automatically(self):
         token = self.unverified.verification_token
 
-        # Refused first.
+        # Refused before ownership is proved.
         self.assertEqual(
             self.client_api.post(f"/api/domains/{self.unverified.id}/provision/").status_code,
             409,
         )
 
-        # Publish the record and verify.
-        with mock.patch("dns.resolver.resolve", return_value=txt_answer(token)):
+        # Publishing the ownership record and verifying is enough to start the
+        # mail service. Customers must not need a second hidden provisioning
+        # step just to get their DKIM record.
+        with mock.patch(
+            "dns.resolver.resolve", return_value=txt_answer(token)
+        ), mock.patch(
+            "apps.mail_engine.tasks.provision_domain_task.delay"
+        ) as prov:
             res = self.client_api.post(
                 f"/api/domains/{self.unverified.id}/verify-ownership/"
             )
+
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.data["verified"])
-
-        # Now provisioning is allowed.
-        with mock.patch("apps.mail_engine.tasks.provision_domain_task.delay") as prov:
-            res = self.client_api.post(f"/api/domains/{self.unverified.id}/provision/")
-        self.assertEqual(res.status_code, 200)
-        prov.assert_called_once()
+        self.assertIn("setup started", res.data["detail"].lower())
+        prov.assert_called_once_with(str(self.unverified.id))
 
 
 @override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS, CACHES=LOCMEM_CACHE)

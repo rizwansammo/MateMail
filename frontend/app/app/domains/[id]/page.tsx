@@ -25,6 +25,10 @@ interface DNSRecord {
   detected_value: string;
   status: "verified" | "pending" | "missing" | "failed";
   last_checked: string | null;
+  // False for mail-client discovery records, which are checked but never
+  // scored. Sent by the API rather than inferred here, so this page cannot
+  // disagree with the backend about what counts as mail health.
+  is_scored: boolean;
 }
 
 const RECORD_STATUS_CONFIG = {
@@ -107,6 +111,7 @@ function RecordRow({ rec }: { rec: DNSRecord }) {
 }
 
 function _recordLabel(rec: DNSRecord): string {
+  if (rec.record_type === "SRV") return "Autodiscover (SRV)";
   if (rec.record_type === "MX") return "Mail Server (MX)";
   if (rec.host.startsWith("_dmarc")) return "DMARC Policy";
   if (rec.host.includes("._domainkey")) return `DKIM (${rec.host.split("._domainkey")[0]})`;
@@ -136,6 +141,10 @@ export default function DomainDetailPage() {
   const [checking, setChecking] = useState(false);
   const [checkMessage, setCheckMessage] = useState("");
   const pollTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // Derived, not stored: the split follows whatever the API last said.
+  const mailRecords = records.filter((rec) => rec.is_scored);
+  const discoveryRecords = records.filter((rec) => !rec.is_scored);
 
   const fetchData = useCallback(async () => {
     const [dRes, rRes] = await Promise.all([
@@ -278,13 +287,38 @@ export default function DomainDetailPage() {
         </div>
       )}
 
-      {/* DNS Records */}
+      {/* DNS Records — the four that decide whether mail works. */}
       {!noRecordsYet && (
         <div className="space-y-3">
           <h2 className="text-sm font-medium text-slate-700">DNS Records</h2>
-          {records.map((rec) => (
+          {mailRecords.map((rec) => (
             <RecordRow key={rec.id} rec={rec} />
           ))}
+        </div>
+      )}
+
+      {/* Mail client discovery — optional, and deliberately kept out of the
+          health score. A domain without this record sends and receives mail
+          normally; all it changes is whether Outlook fills in its own port
+          numbers. Showing it beside the four above would make a healthy
+          domain look 80% complete. */}
+      {discoveryRecords.length > 0 && (
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-sm font-medium text-slate-700">Mail Client Discovery</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Optional. Publishing this record lets Outlook find these settings
+              on its own. Mail delivery, SPF, DKIM and DMARC do not depend on
+              it, and leaving it out does not affect the health score above.
+            </p>
+          </div>
+          {discoveryRecords.map((rec) => (
+            <RecordRow key={rec.id} rec={rec} />
+          ))}
+          <p className="text-xs text-slate-500">
+            Some Outlook versions ignore this and still need Advanced or manual
+            IMAP setup. The settings themselves are in Mail Client Settings.
+          </p>
         </div>
       )}
 

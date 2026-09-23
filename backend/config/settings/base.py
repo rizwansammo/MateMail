@@ -60,6 +60,7 @@ LOCAL_APPS = [
     "apps.tenants",
     "apps.domains",
     "apps.mailboxes",
+    "apps.autodiscover",
     "apps.dnshealth",
     "apps.aliases",
     "apps.forwarding",
@@ -321,6 +322,24 @@ NATIVE_ENGINE_API_SECRET = env("NATIVE_ENGINE_API_SECRET", default="")
 MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.online")
 MAIL_HOSTNAME = env("MAIL_HOSTNAME", default="mx.matemail.online")
 DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
+
+#: The host a customer's SPF record includes to authorise MateMail's
+#: sending IP addresses.
+#:
+#: NOT `MAIL_DOMAIN`. Customer SPF used to say `include:matemail.online`,
+#: which made the product's own website domain double as the provider's SPF
+#: authorisation record — so every customer's mail authorisation depended on
+#: a TXT record on a domain that exists for marketing, and could not be
+#: changed for one purpose without affecting the other. `_spf.matemail.online`
+#: exists only to list sending IPs, which is the one thing an include target
+#: should do (DEC-056).
+SPF_INCLUDE_DOMAIN = env("SPF_INCLUDE_DOMAIN", default="_spf.matemail.online")
+
+#: The hostname serving the Outlook Autodiscover compatibility endpoint.
+#: Customers point an `_autodiscover._tcp` SRV record at it; it is one
+#: central host, never a per-customer hostname, because a per-customer name
+#: would need a per-customer certificate (DEC-057).
+AUTODISCOVER_HOST = env("AUTODISCOVER_HOST", default="autodiscover.matemail.online")
 
 # Frontend URLs
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")

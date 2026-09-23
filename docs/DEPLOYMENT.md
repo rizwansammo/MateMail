@@ -26,6 +26,8 @@ Before deployment, the following DNS records must be set for `matemail.online`:
 | A | app.matemail.online | `<VPS_IP>` | **Legacy** — 308 redirect to the Workspace only |
 | A | platform.matemail.online | `<VPS_IP>` | Platform Console (NetaMate staff) |
 | A | postbox.matemail.online | `<VPS_IP>` | PostBox webmail |
+| A | autodiscover.matemail.online | `<VPS_IP>` | Outlook mail-client discovery |
+| TXT | `_spf` | `v=spf1 ip4:<VPS_IP> -all` | Provider SPF include target (DEC-056) |
 | A | docs.matemail.online | `<VPS_IP>` | Documentation |
 | A | mx.matemail.online | `<VPS_IP>` | Mail reception hostname |
 | A | imap.matemail.online | `<VPS_IP>` | IMAP client config |
@@ -254,16 +256,104 @@ curl https://portal.matemail.online/api/health/mail-engine/
 
 ## TLS Certificate Management
 
-### Option A — Certbot (Nginx)
-```bash
-apt install certbot python3-certbot-nginx
-certbot --nginx -d matemail.online -d portal.matemail.online \
-  -d platform.matemail.online -d postbox.matemail.online \
-  -d app.matemail.online \
-  -d docs.matemail.online \
-  -d imap.matemail.online -d smtp.matemail.online \
-  -d mx.matemail.online
+### Certificates and the bootstrap order
+
+**Read this before installing any vhost on a host that does not already have
+its certificate.** Every MateMail vhost follows the same three-step pattern,
+and the reason is here rather than repeated in each runbook.
+
+nginx resolves `ssl_certificate`, `ssl_certificate_key` and `include
+/etc/letsencrypt/options-ssl-nginx.conf` when it **parses** its
+configuration, not when a request arrives. So enabling a TLS vhost before
+certbot has issued the certificate makes `nginx -t` fail:
+
 ```
+nginx: [emerg] open() "/etc/letsencrypt/options-ssl-nginx.conf" failed
+(2: No such file or directory) in /etc/nginx/sites-enabled/matemail-x:NN
+```
+
+That failure is **server-wide**, not confined to the new site: `nginx -t`
+fails for the whole configuration and a reload attempted anyway refuses to
+apply, so every existing MateMail hostname is stuck on its old config. On a
+fresh server, nginx will not start at all.
+
+Going the other way round does not work either — HTTP-01 validation needs
+something already answering on port 80 for the name. Hence a bootstrap
+vhost, one per hostname, sitting beside each real one:
+
+```
+deploy/nginx/portal.matemail.online.bootstrap.conf
+deploy/nginx/postbox.matemail.online.bootstrap.conf
+deploy/nginx/platform.matemail.online.bootstrap.conf
+deploy/nginx/autodiscover.matemail.online.bootstrap.conf
+```
+
+Each is HTTP-only, serves `/.well-known/acme-challenge/` from
+`/var/www/html`, declares no upstream, and 404s everything else. No TLS
+directive appears in any of them, so they parse on a server with no
+certificates and no running containers.
+
+**The pattern, for any hostname:**
+
+```bash
+# 0. DNS first — certbot proves control by being reachable at the name.
+dig +short <host>
+
+# 1. Bootstrap vhost, so port 80 answers.
+sudo cp deploy/nginx/<host>.bootstrap.conf /etc/nginx/sites-available/<site>
+sudo ln -s /etc/nginx/sites-available/<site> /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# 2. Certificate, through the webroot the bootstrap vhost serves.
+sudo certbot certonly --webroot -w /var/www/html -d <host>
+
+# 3. Overwrite the SAME path with the real vhost, and reload.
+sudo cp deploy/nginx/<host>.conf /etc/nginx/sites-available/<site>
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Three details that matter:
+
+- **`certonly --webroot`, not `--nginx`.** The nginx plugin rewrites the
+  server block it finds. It would edit a file step 3 immediately overwrites,
+  leaving the installed config quietly different from the one in Git.
+- **Overwrite the same path; do not enable a second file.** Two server
+  blocks listening on `:80` for one `server_name` make nginx use whichever
+  it parsed first and emit `[warn] conflicting server name … ignored` — a
+  confusing way to discover months later that renewals are being served by
+  the wrong block.
+- **The real vhost keeps its `/.well-known/acme-challenge/` location.**
+  certbot renews with the same webroot method that first succeeded, so
+  deleting it breaks renewal ninety days later, where it presents as an
+  expired certificate rather than as a configuration edit.
+
+**Verify the challenge path before spending an issuance attempt.** Let's
+Encrypt rate-limits failures, and this costs nothing:
+
+```bash
+sudo mkdir -p /var/www/html/.well-known/acme-challenge
+echo bootstrap-ok | sudo tee /var/www/html/.well-known/acme-challenge/matemail-probe >/dev/null
+curl -sS http://<host>/.well-known/acme-challenge/matemail-probe   # expect: bootstrap-ok
+sudo rm -f /var/www/html/.well-known/acme-challenge/matemail-probe
+```
+
+### Which certificate covers what
+
+| Certificate | Names | Served by |
+|---|---|---|
+| `portal.matemail.online` | portal, apex, www, app (legacy redirect) | Workspace vhost |
+| `postbox.matemail.online` | postbox | PostBox vhost |
+| `platform.matemail.online` | platform | Platform Console vhost |
+| `autodiscover.matemail.online` | autodiscover | Autodiscover vhost |
+| `mx.matemail.online` | mx | **Postfix and Dovecot**, not nginx |
+
+The Workspace's four names go in **one** `certonly` call. Issuing them
+separately produces four certificates where the vhost expects one, and three
+of its server blocks would point at a file whose SANs do not cover them.
+
+`mx.matemail.online` is a separate identity with its own renewal path into
+Postfix and Dovecot (see the Native Engine docs). Nothing in this section
+touches it.
 
 ### Option B — Caddy (Auto-TLS)
 Caddy handles certificate issuance and renewal automatically. Add all hostnames to `Caddyfile`.
@@ -638,20 +728,34 @@ docker network inspect matemail_engine_link \
 
 ### 4 — DNS, nginx and TLS
 
-```bash
-# DNS: A  postbox.matemail.online → <VPS_IP>   (set before certbot runs)
+The three-step bootstrap order and the reasoning behind it are in
+§ *Certificates and the bootstrap order*. Applied here:
 
-sudo cp deploy/nginx/postbox.matemail.online.conf \
+```bash
+# 0. DNS: A  postbox.matemail.online → <VPS_IP>
+dig +short postbox.matemail.online
+
+# 1. HTTP-only bootstrap vhost — no TLS directives, so it parses with no
+#    certificate on disk.
+sudo cp deploy/nginx/postbox.matemail.online.bootstrap.conf \
         /etc/nginx/sites-available/matemail-postbox
 sudo ln -s /etc/nginx/sites-available/matemail-postbox /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo certbot certonly --nginx -d postbox.matemail.online
+sudo nginx -t && sudo systemctl reload nginx
+
+# 2. Certificate.
+sudo certbot certonly --webroot -w /var/www/html -d postbox.matemail.online
+
+# 3. Overwrite the same path with the real vhost. The symlink already
+#    exists and is not recreated.
+sudo cp deploy/nginx/postbox.matemail.online.conf \
+        /etc/nginx/sites-available/matemail-postbox
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-The vhost does not redeclare the `matemail_backend` / `matemail_frontend`
-upstreams — those are declared once in the app vhost, and a second declaration
-stops nginx starting.
+Neither file redeclares the `matemail_backend` / `matemail_frontend`
+upstreams — those are declared once in the Workspace vhost, and a second
+declaration stops nginx starting. The bootstrap vhost declares no upstream at
+all, which is why it parses before the MateMail containers are running.
 
 `postbox.matemail.online` must also be in `DJANGO_ALLOWED_HOSTS`, or every
 request returns 400 with `DisallowedHost` before it reaches a view.
@@ -694,7 +798,13 @@ to serve it, and the new name must resolve before certbot can prove it.
 dig +short portal.matemail.online
 
 # 2. One certificate covering both names, plus the apex.
-sudo certbot certonly --nginx \
+#    --webroot, not --nginx: the nginx plugin would rewrite the currently
+#    installed vhost, which step 3 is about to replace. On this server the
+#    existing app.matemail.online vhost already answers on port 80, so the
+#    challenge is reachable without a bootstrap vhost; on a rebuilt host,
+#    use portal.matemail.online.bootstrap.conf first (see § Certificates and
+#    the bootstrap order).
+sudo certbot certonly --webroot -w /var/www/html \
   -d portal.matemail.online -d matemail.online -d www.matemail.online \
   -d app.matemail.online
 
@@ -755,3 +865,171 @@ sudo awk '$0 ~ /app\.matemail\.online/ {n++} END {print n+0}' \
 When that is durably zero: delete the legacy server block, drop the name from
 the port-80 block and from the certificate, and drop
 `NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS` from the frontend build.
+
+---
+
+## Autodiscover deployment (Mail Client Discovery phase)
+
+Adds no container and no host port. One hostname, one certificate, one nginx
+vhost, and two settings already defaulted in the compose file.
+
+**Nothing here has been done.** `autodiscover.matemail.online` has no DNS
+record, no certificate and no installed vhost.
+
+### Order, and why it is this order
+
+1. **DNS A record** — `autodiscover.matemail.online` → `169.58.114.252`.
+   First, because certbot proves control over the name by being reachable at
+   it.
+2. **Deploy the application** — the endpoint must answer before a certificate
+   for it is worth having, and `autodiscover.matemail.online` must be in
+   `DJANGO_ALLOWED_HOSTS` or every request is a 400 before reaching a view.
+3. **HTTP-only bootstrap vhost**, so port 80 answers for the name.
+4. **Issue the certificate** with `certonly --webroot`.
+5. **Replace the bootstrap vhost with the real one** and reload.
+6. **Only then** tell customers to publish the SRV record.
+
+Steps 3–5 are three steps rather than one because of a genuine
+chicken-and-egg: nginx resolves `ssl_certificate` when it PARSES the
+configuration, not when a request arrives. Installing the final vhost before
+the certificate exists makes `nginx -t` fail —
+
+```
+nginx: [emerg] cannot load certificate
+".../autodiscover.matemail.online/fullchain.pem": BIO_new_file() failed
+(SSL: error:80000002:system library::No such file or directory)
+```
+
+— and that failure is **server-wide**, not confined to the new site. Every
+MateMail hostname stops reloading with it. Going the other way round does not
+work either: HTTP-01 validation needs something already answering on port 80
+for that name, which is exactly what the bootstrap vhost provides.
+
+Step 4 last is the one that matters. An SRV record pointing at a host that does
+not answer is worse than no record: Outlook follows it, fails, and stops
+looking — where with no record it would have fallen through to manual setup
+that works.
+
+```bash
+# ── 1 — DNS, and confirm it resolves before going further ────────────────
+dig +short autodiscover.matemail.online       # expect 169.58.114.252
+
+# ── 2 — application ──────────────────────────────────────────────────────
+#   In /opt/MateMail/.env, add autodiscover.matemail.online to
+#   DJANGO_ALLOWED_HOSTS. SPF_INCLUDE_DOMAIN and AUTODISCOVER_HOST have
+#   correct defaults in docker-compose.yml and need no entry unless you are
+#   overriding them.
+docker compose -f /opt/MateMail/docker-compose.yml up -d backend
+
+# ── 3 — HTTP-only bootstrap vhost ────────────────────────────────────────
+#   No TLS directives at all, so this parses with no certificate on disk.
+sudo cp deploy/nginx/autodiscover.matemail.online.bootstrap.conf \
+        /etc/nginx/sites-available/matemail-autodiscover
+sudo ln -s /etc/nginx/sites-available/matemail-autodiscover \
+           /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+#   Prove the ACME path is reachable BEFORE spending a rate-limited
+#   Let's Encrypt issuance attempt on finding out that it is not.
+sudo mkdir -p /var/www/html/.well-known/acme-challenge
+echo bootstrap-ok | sudo tee /var/www/html/.well-known/acme-challenge/matemail-probe >/dev/null
+curl -sS http://autodiscover.matemail.online/.well-known/acme-challenge/matemail-probe
+#   expect: bootstrap-ok
+sudo rm -f /var/www/html/.well-known/acme-challenge/matemail-probe
+
+# ── 4 — certificate, via the existing webroot ────────────────────────────
+#   --webroot, not --nginx: the nginx plugin rewrites the server block it
+#   finds, which would edit a file step 5 immediately overwrites and leave
+#   the installed config differing from the one in Git.
+sudo certbot certonly --webroot -w /var/www/html \
+     -d autodiscover.matemail.online
+sudo ls -l /etc/letsencrypt/live/autodiscover.matemail.online/fullchain.pem
+
+# ── 5 — the real vhost, over the same path ───────────────────────────────
+#   The symlink already points here, so it is not recreated.
+sudo cp deploy/nginx/autodiscover.matemail.online.conf \
+        /etc/nginx/sites-available/matemail-autodiscover
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Do not leave the bootstrap file enabled alongside the real one. Two server
+blocks listening on `:80` for the same `server_name` make nginx use whichever
+it parsed first and emit a `conflicting server name` warning — a confusing
+way to find out months later that renewals are being served by the wrong
+block. Copying over the same path, as above, avoids this by construction.
+
+The real vhost keeps an `/.well-known/acme-challenge/` location on port 80,
+and it must: certbot renews through the same webroot method that first
+succeeded. Removing that location breaks renewal ninety days later, where it
+presents as an expired certificate rather than as a configuration edit.
+
+Neither vhost redeclares `matemail_backend` — that upstream is declared once,
+in `portal.matemail.online.conf`, and a second declaration stops nginx
+starting.
+
+### Verify
+
+```bash
+cat > /tmp/ad.xml <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/requestschema/2006">
+  <Request>
+    <EMailAddress>someone@a-hosted-domain.example</EMailAddress>
+    <AcceptableResponseSchema>http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a</AcceptableResponseSchema>
+  </Request>
+</Autodiscover>
+XML
+
+# Settings for a hosted domain.
+curl -sS -X POST https://autodiscover.matemail.online/autodiscover/autodiscover.xml \
+     -H 'Content-Type: text/xml' --data @/tmp/ad.xml
+# expect: <Type>IMAP</Type> … <Port>993</Port> … <Type>SMTP</Type> … <Port>587</Port>
+#         and <Encryption>TLS</Encryption> on the SMTP block, NOT <SSL>on</SSL>
+
+# The host serves nothing else. Each of these must be 404.
+for p in / /login /app /postbox /platform /django-admin/ /api/health/ /api/internal/health/; do
+  printf '%-26s %s\n' "$p" \
+    "$(curl -s -o /dev/null -w '%{http_code}' https://autodiscover.matemail.online$p)"
+done
+```
+
+That second loop is the one worth running twice. This vhost is an allow-list
+with a default of 404, and the whole design rests on nothing else being
+reachable on a hostname nobody is watching.
+
+### Telling a customer to publish the SRV record
+
+Only after the checks above pass. In the Workspace, the domain page shows it
+under **Mail Client Discovery**, separate from MX/SPF/DKIM/DMARC and excluded
+from the health score.
+
+```
+_autodiscover._tcp.<customer-domain>.   SRV   0 0 443 autodiscover.matemail.online.
+```
+
+A customer is never asked for `autodiscover.<their-domain>` as a CNAME: our
+certificate would not be valid for their name, so that would need a certificate
+per customer domain (DEC-057).
+
+### Rollback
+
+Three independent steps, in decreasing order of urgency:
+
+1. Tell affected customers to delete the SRV record, or delete it for any
+   domain where MateMail manages DNS. This is what stops clients being sent to
+   a broken endpoint.
+2. `sudo rm /etc/nginx/sites-enabled/matemail-autodiscover && sudo nginx -t &&
+   sudo systemctl reload nginx` — the hostname stops answering. Removing the
+   symlink is enough; leave the certificate in place, so re-enabling later
+   does not need the bootstrap step again.
+3. Redeploy the previous backend image if the endpoint itself is the problem.
+
+No mail flow depends on any of this. Removing all three leaves IMAP, SMTP,
+delivery, SPF, DKIM and DMARC exactly as they were; clients configured by hand
+are unaffected, and clients configured through Autodiscover keep the settings
+they already have.
+
+The SPF change is separate and does **not** roll back with the above: a
+customer who has published `include:_spf.matemail.online` should leave it.
+Reverting `SPF_INCLUDE_DOMAIN` to `matemail.online` would mark every updated
+customer's SPF as failed.

@@ -8,12 +8,13 @@
  * page says so plainly instead of showing a control that would be refused.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
 import {
   postbox,
   type AccountInfo,
+  type MailClientSettings,
   type MailRule,
   type SessionRow,
   type Signature,
@@ -23,6 +24,7 @@ import {
 const SECTIONS = [
   ["general", "General"],
   ["account", "Mailbox & account"],
+  ["clients", "Mail client setup"],
   ["signatures", "Signatures"],
   ["rules", "Filters & rules"],
   ["vacation", "Auto reply"],
@@ -61,6 +63,7 @@ export default function SettingsPage() {
           <div className="min-w-0 flex-1">
             {section === "general" && <GeneralSection />}
             {section === "account" && <AccountSection />}
+            {section === "clients" && <ClientsSection />}
             {section === "signatures" && <SignaturesSection />}
             {section === "rules" && <RulesSection />}
             {section === "vacation" && <VacationSection />}
@@ -188,6 +191,111 @@ function GeneralSection() {
 }
 
 // ── account ─────────────────────────────────────────────────────────────────
+
+/** One value with a copy button — these get typed into another app. */
+function CopyValue({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <code className="text-xs">{value}</code>
+      <button
+        type="button"
+        className="pb-btn pb-btn-plain"
+        aria-label={`Copy ${value}`}
+        onClick={() => {
+          // Clipboard access can be refused (insecure context, denied
+          // permission). The value is on screen either way, so a failure
+          // just means no tick — never an error the reader must dismiss.
+          navigator.clipboard?.writeText(value).then(
+            () => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            },
+            () => undefined,
+          );
+        }}
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+        )}
+      </button>
+    </span>
+  );
+}
+
+/**
+ * Mail client setup.
+ *
+ * The servers come from the API, not from literals here — they are a
+ * property of the deployment, and a page that printed a stale hostname
+ * would send people to configure a client that cannot connect.
+ */
+function ClientsSection() {
+  const [client, setClient] = useState<MailClientSettings | null>(null);
+
+  useEffect(() => {
+    postbox.me().then((data) => setClient(data.mail_client)).catch(() => setClient(null));
+  }, []);
+
+  if (!client) {
+    return (
+      <Panel title="Mail client setup">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+      </Panel>
+    );
+  }
+
+  return (
+    <>
+      <Panel
+        title="Incoming mail (IMAP)"
+        description="Your mail stays on the server, so every device sees the same mailbox."
+      >
+        <Row label="Server"><CopyValue value={client.imap.server} /></Row>
+        <Row label="Port"><CopyValue value={String(client.imap.port)} /></Row>
+        <Row label="Encryption">{client.imap.encryption}</Row>
+        <Row label="Username"><CopyValue value={client.username} /></Row>
+        <Row label="Password">Your mailbox password</Row>
+      </Panel>
+
+      <Panel
+        title="Outgoing mail (SMTP)"
+        description="Authentication is required. A client set to send without signing in will be refused."
+      >
+        <Row label="Server"><CopyValue value={client.smtp.server} /></Row>
+        <Row label="Port"><CopyValue value={String(client.smtp.port)} /></Row>
+        <Row label="Encryption">{client.smtp.encryption}</Row>
+        <Row label="Username"><CopyValue value={client.username} /></Row>
+        <Row label="Password">Your mailbox password</Row>
+      </Panel>
+
+      <Panel title="Outlook">
+        <p className="text-xs pb-muted">
+          MateMail works with Outlook over IMAP and authenticated SMTP using the
+          settings above. Some Outlook versions will not configure an IMAP
+          account on their own and need Advanced or manual setup — choose IMAP
+          rather than letting Outlook pick, then enter the servers and ports
+          exactly as shown.
+        </p>
+        <p className="mt-2 text-xs pb-muted">
+          Your username is the whole address, not the part before the @.
+        </p>
+      </Panel>
+
+      <Panel title="What is not offered">
+        <p className="text-xs pb-muted">
+          POP3 and port 465 are not available, and plain IMAP on 143 is not
+          served at all — a password must never cross a network unencrypted. A
+          client configured for any of those will not connect; that is the
+          setting being wrong rather than the server being down.
+        </p>
+      </Panel>
+    </>
+  );
+}
 
 function AccountSection() {
   const [account, setAccount] = useState<AccountInfo | null>(null);
