@@ -53,12 +53,8 @@ def _expected_records(domain_obj):
             "host": d,
             "expected_value": f"v=spf1 include:{spf} ~all",
             "label": "SPF",
-<<<<<<< HEAD
             "match_contains": f"include:{spf}",
-=======
-            "match_contains": f"include:{md}",
             "record_prefix": "v=spf1",
->>>>>>> 2f178bff09280ba9fefde2ad7ac9635dea5bce79
         },
         {
             "record_type": "TXT",
@@ -94,6 +90,10 @@ def _discovery_records(domain_obj):
     the record is published. `is_scored=False` is what keeps them out of the
     arithmetic, and it is a stored field rather than an implicit consequence
     of which function built the row — so the invariant can be asserted.
+
+    There is no `record_prefix` here: that filter exists to separate one TXT
+    string from the unrelated TXT strings sharing a hostname, and an SRV
+    answer is neither.
     """
     return [
         {
