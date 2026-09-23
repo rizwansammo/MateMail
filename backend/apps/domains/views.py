@@ -261,6 +261,29 @@ class DomainVerifyOwnershipView(APIView):
 
         verified, message = verify_domain_ownership(domain)
 
+        # Ownership verification is the event that unlocks the mail service.
+        # Queue provisioning immediately so DKIM material is generated without
+        # requiring the customer to discover and press a separate retry button.
+        # The task is idempotent and independently re-checks both tenant policy
+        # and ownership at its boundary, so a duplicate queue is safe.
+        if verified and not domain.mail_engine_provisioned:
+            try:
+                from apps.mail_engine.tasks import provision_domain_task
+
+                provision_domain_task.delay(str(domain.id))
+                if message == "Domain ownership verified.":
+                    message = "Domain ownership verified. Mail service setup started."
+            except Exception as exc:
+                logger.error(
+                    "Ownership verified for %s but provisioning could not be queued: %s",
+                    domain.domain,
+                    exc,
+                )
+                message = (
+                    "Domain ownership verified, but mail service setup could not "
+                    "be started automatically. Use Retry provisioning."
+                )
+
         log_event(
             request.tenant,
             LogEventType.DOMAIN_OWNERSHIP_VERIFIED if verified
