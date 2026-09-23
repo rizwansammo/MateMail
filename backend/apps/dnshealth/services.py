@@ -35,6 +35,7 @@ def _expected_records(domain_obj):
             "expected_value": f"v=spf1 include:{md} ~all",
             "label": "SPF",
             "match_contains": f"include:{md}",
+            "record_prefix": "v=spf1",
         },
         {
             "record_type": "TXT",
@@ -42,6 +43,7 @@ def _expected_records(domain_obj):
             "expected_value": f"v=DKIM1; k=rsa; p={pub}" if pub else "v=DKIM1; k=rsa; p=<pending>",
             "label": "DKIM",
             "match_contains": "v=DKIM1",
+            "record_prefix": "v=DKIM1",
         },
         {
             "record_type": "TXT",
@@ -49,6 +51,7 @@ def _expected_records(domain_obj):
             "expected_value": f"v=DMARC1; p=none; rua=mailto:dmarc@{md}",
             "label": "DMARC",
             "match_contains": "v=DMARC1",
+            "record_prefix": "v=DMARC1",
         },
     ]
 
@@ -80,13 +83,22 @@ def _evaluate_mx(detected):
     return DNSCheckStatus.FAILED, "; ".join(detected[:3])
 
 
-def _evaluate_txt(detected, match_contains):
-    for v in detected:
+def _evaluate_txt(detected, match_contains, record_prefix=None):
+    # A hostname can legitimately have many unrelated TXT records (Google site
+    # verification, Microsoft verification, etc.). Only records belonging to
+    # the protocol being checked should influence its result or appear as the
+    # detected value.
+    candidates = detected
+    if record_prefix:
+        prefix = record_prefix.lower()
+        candidates = [v for v in detected if v.lstrip().lower().startswith(prefix)]
+
+    for v in candidates:
         if match_contains and match_contains.lower() in v.lower():
             return DNSCheckStatus.VERIFIED, v
-    if not detected:
+    if not candidates:
         return DNSCheckStatus.MISSING, ""
-    return DNSCheckStatus.FAILED, "; ".join(detected[:2])
+    return DNSCheckStatus.FAILED, "; ".join(candidates[:2])
 
 
 def check_dns_for_domain(domain_obj):
@@ -110,7 +122,11 @@ def check_dns_for_domain(domain_obj):
             status, detected_value = _evaluate_mx(detected)
         else:
             detected = _resolve_txt(host)
-            status, detected_value = _evaluate_txt(detected, rec["match_contains"])
+            status, detected_value = _evaluate_txt(
+                detected,
+                rec["match_contains"],
+                rec.get("record_prefix"),
+            )
 
         DNSRecordCheck.objects.update_or_create(
             domain=domain_obj,
