@@ -14,6 +14,7 @@ import logging
 
 from django.conf import settings
 from django.db import transaction
+from django.http import HttpResponse
 from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -22,6 +23,7 @@ from apps.security import ratelimit
 from apps.security.limits import POSTBOX_PASSWORD_CHANGE
 
 from . import imap, sending, sieve
+from . import signatures as pb_signatures
 from .auth import PostBoxSessionAuthentication, revoke_other_sessions
 from .models import (
     Contact,
@@ -141,6 +143,174 @@ class SignatureListView(MailboxScopedListView):
 class SignatureDetailView(MailboxScopedDetailView):
     model = MailSignature
     serializer_class = SignatureSerializer
+
+
+#: What an image signature may be, by what the bytes actually START with.
+#:
+#: The declared content type is a client-supplied string and is not
+#: evidence of anything — a caller can label an HTML file `image/png`. The
+#: stored type is derived from the magic bytes, so what we later serve with
+#: `Content-Type: image/png` really is a PNG.
+#:
+#: SVG is deliberately absent: it is a document that can carry script and
+#: external references, no mail client renders it reliably, and 'an image'
+#: is not a good enough reason to accept executable markup.
+_IMAGE_SIGNATURES = (
+    (b"\x89PNG\r\n\x1a\n", "image/png", "png"),
+    (b"\xff\xd8\xff", "image/jpeg", "jpg"),
+    (b"GIF87a", "image/gif", "gif"),
+    (b"GIF89a", "image/gif", "gif"),
+)
+
+
+def _sniff_image(payload: bytes) -> tuple[str, str] | None:
+    """(content_type, extension) from the bytes themselves, or None."""
+    for magic, content_type, extension in _IMAGE_SIGNATURES:
+        if payload.startswith(magic):
+            return content_type, extension
+
+    # WebP is RIFF....WEBP — a container, so the marker is not at offset 0.
+    #
+    # Accepted, with a caveat recorded here rather than in a changelog:
+    # Gmail and Apple Mail render inline WebP, but Outlook on Windows does
+    # not, and shows a broken image instead. The settings UI says so at the
+    # point of upload; PNG remains the safe default.
+    if payload[:4] == b"RIFF" and payload[8:12] == b"WEBP":
+        return "image/webp", "webp"
+    return None
+
+
+class SignatureImageView(PostBoxView):
+    """
+    POST an image for a signature; GET it back for the preview and the
+    composer; DELETE to remove it.
+
+    A separate endpoint rather than a base64 field on the signature JSON,
+    because the bytes need checking as bytes — magic number, size, and
+    dimensions — and because every signature list response would otherwise
+    carry the whole image.
+    """
+
+    def _signature(self, pk):
+        return MailSignature.objects.for_mailbox(self.mailbox).filter(pk=pk).first()
+
+    def get(self, request, pk):
+        """
+        Serve the bytes.
+
+        Scoped to the signed-in mailbox, so one mailbox cannot read another's
+        logo by guessing a UUID. `nosniff` and an attachment-safe policy
+        because this returns caller-supplied bytes on the PostBox origin:
+        even having verified the magic number, the browser must not be
+        allowed to reconsider the type.
+        """
+        signature = self._signature(pk)
+        if signature is None or not signature.image_data:
+            return Response({"detail": "Not found."}, status=404)
+
+        response = HttpResponse(
+            bytes(signature.image_data),
+            content_type=signature.image_content_type or "application/octet-stream",
+        )
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        response["Cache-Control"] = "private, max-age=300"
+        return response
+
+    def post(self, request, pk):
+        signature = self._signature(pk)
+        if signature is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        upload = request.FILES.get("image")
+        if upload is None:
+            return Response({"image": ["Choose an image to upload."]}, status=400)
+
+        max_bytes, max_px = pb_signatures.image_limits()
+        if upload.size > max_bytes:
+            return Response(
+                {"image": [f"Keep the image under {max_bytes // 1024} KB — it is sent with every message."]},
+                status=400,
+            )
+
+        payload = upload.read()
+        sniffed = _sniff_image(payload)
+        if sniffed is None:
+            return Response(
+                {"image": ["That is not a PNG, JPEG, GIF or WebP image."]},
+                status=400,
+            )
+        content_type, extension = sniffed
+
+        dimensions = _image_size(payload)
+        if dimensions and max(dimensions) > max_px:
+            return Response(
+                {"image": [f"Keep the image within {max_px}px on its longest side."]},
+                status=400,
+            )
+
+        signature.image_data = payload
+        signature.image_content_type = content_type
+        signature.image_filename = f"signature.{extension}"
+        signature.save(update_fields=[
+            "image_data", "image_content_type", "image_filename", "updated_at",
+        ])
+        logger.info(
+            "PostBox signature image set: mailbox=%s signature=%s type=%s bytes=%d",
+            self.mailbox.pk, signature.pk, content_type, len(payload),
+        )
+        return Response(SignatureSerializer(signature).data)
+
+    def delete(self, request, pk):
+        signature = self._signature(pk)
+        if signature is None:
+            return Response({"detail": "Not found."}, status=404)
+        signature.image_data = b""
+        signature.image_content_type = ""
+        signature.image_filename = ""
+        signature.save(update_fields=[
+            "image_data", "image_content_type", "image_filename", "updated_at",
+        ])
+        return Response(status=204)
+
+
+def _image_size(payload: bytes) -> tuple[int, int] | None:
+    """
+    (width, height) read from the header, or None if it cannot be read.
+
+    Parsed by hand rather than with Pillow: decoding an untrusted image to
+    measure it is how decompression bombs get their chance, and MateMail
+    does not otherwise depend on an image library. Unknown dimensions are
+    allowed through — the byte-size limit is the one that actually protects
+    the mail, and refusing an image because a header is unusual would be a
+    guess dressed up as a rule.
+    """
+    try:
+        if payload.startswith(b"\x89PNG\r\n\x1a\n") and len(payload) >= 24:
+            return (int.from_bytes(payload[16:20], "big"),
+                    int.from_bytes(payload[20:24], "big"))
+
+        if payload[:4] == b"RIFF" and payload[8:12] == b"WEBP" and len(payload) >= 30:
+            if payload[12:16] == b"VP8 ":
+                return (int.from_bytes(payload[26:28], "little") & 0x3FFF,
+                        int.from_bytes(payload[28:30], "little") & 0x3FFF)
+            return None
+
+        if payload.startswith(b"\xff\xd8"):
+            i = 2
+            while i + 9 < len(payload):
+                if payload[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = payload[i + 1]
+                # SOF0..SOF15, excluding the non-frame markers in that range.
+                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                    return (int.from_bytes(payload[i + 7:i + 9], "big"),
+                            int.from_bytes(payload[i + 5:i + 7], "big"))
+                i += 2 + int.from_bytes(payload[i + 2:i + 4], "big")
+    except (IndexError, ValueError):
+        return None
+    return None
 
 
 # ── contacts ────────────────────────────────────────────────────────────────

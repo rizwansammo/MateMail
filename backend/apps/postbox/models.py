@@ -198,6 +198,22 @@ class PostBoxPreference(models.Model):
         return f"Preferences for {self.mailbox_id}"
 
 
+class SignatureKind(models.TextChoices):
+    """
+    What a signature IS, stated rather than guessed.
+
+    Before this field there was one content box and two columns, `html` and
+    `text`, and nothing said which the person had filled in. The UI bound to
+    `text`, so a pasted HTML signature was stored as plain text and appended
+    verbatim to a plain-text body — and the recipient read the markup. The
+    columns were never the problem; the missing declaration was.
+    """
+
+    TEXT = "text", "Plain text"
+    HTML = "html", "HTML"
+    IMAGE = "image", "Image"
+
+
 class MailSignature(models.Model):
     """
     A signature, stored sanitised.
@@ -215,10 +231,34 @@ class MailSignature(models.Model):
     )
 
     name = models.CharField(max_length=100)
+
+    #: Which of the fields below is authoritative. Everything that renders a
+    #: signature branches on this rather than on which column looks non-empty.
+    kind = models.CharField(
+        max_length=8, choices=SignatureKind.choices, default=SignatureKind.TEXT
+    )
+
     html = models.TextField(blank=True, default="")
     #: Kept alongside the HTML so a plain-text alternative never has to be
     #: derived at send time, when getting it wrong means an unreadable message.
+    #: For an HTML signature it is generated from the sanitised HTML on save,
+    #: so nobody has to maintain two copies of the same thing.
     text = models.TextField(blank=True, default="")
+
+    #: An image signature's bytes, in the row rather than on disk.
+    #:
+    #: These are small by construction (see POSTBOX_SIGNATURE_IMAGE_KB) and
+    #: keeping them here means no media root, no per-file permissions, and no
+    #: filesystem path that could ever be reflected to a caller. It also means
+    #: a database backup contains the whole signature, which is the behaviour
+    #: somebody restoring a mailbox expects.
+    image_data = models.BinaryField(blank=True, default=bytes)
+    image_content_type = models.CharField(max_length=64, blank=True, default="")
+    image_filename = models.CharField(max_length=255, blank=True, default="")
+    #: Required for an image signature. A signature that is only an image is
+    #: invisible to a screen reader and to anyone with images turned off,
+    #: which is most corporate mail clients by default.
+    image_alt = models.CharField(max_length=200, blank=True, default="")
 
     use_for_new = models.BooleanField(default=False)
     use_for_replies = models.BooleanField(default=False)

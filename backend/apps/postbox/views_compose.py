@@ -34,8 +34,8 @@ from rest_framework.response import Response
 from apps.security import ratelimit
 from apps.security.limits import POSTBOX_SEND_PER_MAILBOX
 
-from . import imap, mime, sending
-from .models import MailSignature, PostBoxPreference, ScheduledMessage
+from . import imap, mime, sending, signatures
+from .models import PostBoxPreference, ScheduledMessage
 from .views_mail import PostBoxView
 
 logger = logging.getLogger(__name__)
@@ -116,18 +116,18 @@ class ComposeMixin:
         html = data.get("html") or ""
         text = data.get("text") or ""
 
-        signature_id = data.get("signature_id")
-        if signature_id:
-            signature = (
-                MailSignature.objects.for_mailbox(mailbox).filter(pk=signature_id).first()
-            )
-            if signature:
-                # Already sanitised on write; appended rather than merged so
-                # the person's own text is never modified.
-                if signature.html:
-                    html = f"{html}<br><br>{signature.html}" if html else signature.html
-                if signature.text:
-                    text = f"{text}\n\n{signature.text}" if text else signature.text
+        # The signature is applied HERE and nowhere else — see
+        # apps/postbox/signatures.py. The composer renders a preview but
+        # never puts the signature in the body it submits, so there is
+        # nothing to double up, and a draft saved twice gets it once.
+        #
+        # The previous code did `html = signature.html if not html`, and
+        # PostBox's composer only ever sends plain text — so the HTML
+        # alternative became the signature with no message above it.
+        signature = signatures.for_mailbox(mailbox, data.get("signature_id"))
+        text, html, related = signatures.apply(
+            text=text, html=html, signature=signature
+        )
 
         attachments = _decode_attachments(
             data.get("attachments"),
@@ -147,6 +147,7 @@ class ComposeMixin:
             in_reply_to=data.get("in_reply_to") or "",
             references=data.get("references") or [],
             attachments=attachments,
+            related=related,
         )
         return message, identity
 

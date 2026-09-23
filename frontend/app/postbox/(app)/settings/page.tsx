@@ -7,7 +7,7 @@
  * cannot — forwarding, which is an organization-administered setting — the
  * page says so plainly instead of showing a control that would be refused.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
@@ -18,6 +18,7 @@ import {
   type MailRule,
   type SessionRow,
   type Signature,
+  type SignatureKind,
   type Vacation,
 } from "@/lib/postbox-api";
 
@@ -398,13 +399,31 @@ function formatMb(value: number | null): string {
 
 // ── signatures ──────────────────────────────────────────────────────────────
 
+/**
+ * Signatures.
+ *
+ * Three explicit modes rather than one content box. The previous version had a
+ * single textarea bound to `signature.text` under a label mentioning HTML — so
+ * somebody pasted a designed HTML signature, it was stored as plain text, and
+ * the recipient read the markup. The type is now something the person chooses
+ * and can see, and each mode gets the editor it actually needs.
+ *
+ * Nothing here autosaves. An HTML or image signature is edited deliberately and
+ * saved deliberately: a blur-save would push half-finished markup to the server
+ * on every focus change, and the server sanitises on write, so a half-saved
+ * value is a silently altered one.
+ */
 function SignaturesSection() {
   const [items, setItems] = useState<Signature[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    postbox.signatures().then((d) => setItems(d.results)).catch(() => setItems([]));
+    postbox
+      .signatures()
+      .then((d) => setItems(d.results))
+      .catch(() => setItems([]));
   }, []);
 
   useEffect(load, [load]);
@@ -424,9 +443,17 @@ function SignaturesSection() {
 
   const add = async () => {
     setBusy(true);
+    setError(null);
     try {
-      await postbox.createSignature({ name: "New signature", text: "", html: "" });
+      const created = await postbox.createSignature({
+        name: "New signature",
+        kind: "text",
+        text: "",
+      });
       load();
+      // Straight into the editor: a new signature with no content is not
+      // something anyone wants to look at in a list.
+      setEditingId(created.id);
     } catch (caught) {
       setError(describePostBoxError(caught, "That signature could not be created."));
     } finally {
@@ -434,71 +461,49 @@ function SignaturesSection() {
     }
   };
 
+  const remove = async (signature: Signature) => {
+    setError(null);
+    try {
+      await postbox.deleteSignature(signature.id);
+      if (editingId === signature.id) setEditingId(null);
+      load();
+    } catch (caught) {
+      setError(describePostBoxError(caught, "That signature could not be removed."));
+    }
+  };
+
   return (
     <Panel
       title="Signatures"
-      description="Appended when you choose them in the composer. HTML is cleaned when saved."
+      description="Choose one in the composer, or set a default below. HTML is cleaned when saved."
     >
-      {items.map((signature) => (
-        <div
-          key={signature.id}
-          className="mb-3 border p-3"
-          style={{ borderColor: "var(--pb-border)" }}
-        >
-          <div className="mb-2 flex items-center gap-2">
-            <input
-              className="pb-input"
-              aria-label="Signature name"
-              defaultValue={signature.name}
-              onBlur={(e) =>
-                void postbox.updateSignature(signature.id, { name: e.target.value })
-              }
-            />
-            <button
-              type="button"
-              className="pb-btn pb-btn-plain"
-              aria-label={`Delete ${signature.name}`}
-              onClick={async () => {
-                await postbox.deleteSignature(signature.id);
-                load();
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          </div>
-          <textarea
-            className="pb-textarea"
-            rows={4}
-            aria-label={`${signature.name} content`}
-            defaultValue={signature.text}
-            onBlur={(e) =>
-              void postbox.updateSignature(signature.id, { text: e.target.value })
-            }
+      {items.length === 0 && (
+        <p className="mb-3 text-xs pb-muted">
+          No signatures yet.
+        </p>
+      )}
+
+      {items.map((signature) =>
+        editingId === signature.id ? (
+          <SignatureEditor
+            key={signature.id}
+            signature={signature}
+            onClose={() => setEditingId(null)}
+            onSaved={() => {
+              setEditingId(null);
+              load();
+            }}
           />
-          <div className="mt-2 flex flex-wrap gap-4 text-xs">
-            <label className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={signature.use_for_new}
-                onChange={(e) =>
-                  void setDefault(signature.id, { use_for_new: e.target.checked })
-                }
-              />
-              Default for new messages
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={signature.use_for_replies}
-                onChange={(e) =>
-                  void setDefault(signature.id, { use_for_replies: e.target.checked })
-                }
-              />
-              Default for replies
-            </label>
-          </div>
-        </div>
-      ))}
+        ) : (
+          <SignatureRow
+            key={signature.id}
+            signature={signature}
+            onEdit={() => setEditingId(signature.id)}
+            onDelete={() => void remove(signature)}
+            onDefault={setDefault}
+          />
+        ),
+      )}
 
       {error && (
         <p className="mb-2 text-xs" role="alert" style={{ color: "var(--pb-danger)" }}>
@@ -511,6 +516,309 @@ function SignaturesSection() {
         Add signature
       </button>
     </Panel>
+  );
+}
+
+const KIND_LABEL: Record<SignatureKind, string> = {
+  text: "Text",
+  html: "HTML",
+  image: "Image",
+};
+
+function SignatureRow({
+  signature,
+  onEdit,
+  onDelete,
+  onDefault,
+}: {
+  signature: Signature;
+  onEdit: () => void;
+  onDelete: () => void;
+  onDefault: (
+    id: string,
+    patch: Pick<Signature, "use_for_new"> | Pick<Signature, "use_for_replies">,
+  ) => void;
+}) {
+  return (
+    <div className="mb-3 border p-3" style={{ borderColor: "var(--pb-border)" }}>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium">{signature.name}</span>
+        <span
+          className="px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+          style={{ background: "var(--pb-surface-2)", color: "var(--pb-subtle)" }}
+        >
+          {KIND_LABEL[signature.kind]}
+        </span>
+        <div className="ml-auto flex items-center gap-1">
+          <button type="button" className="pb-btn pb-btn-plain" onClick={onEdit}>
+            Edit
+          </button>
+          <button
+            type="button"
+            className="pb-btn pb-btn-plain"
+            aria-label={`Delete ${signature.name}`}
+            onClick={onDelete}
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+
+      <SignaturePreview signature={signature} />
+
+      <div className="mt-2 flex flex-wrap gap-4 text-xs">
+        <label className="flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={signature.use_for_new}
+            onChange={(e) => onDefault(signature.id, { use_for_new: e.target.checked })}
+          />
+          Default for new messages
+        </label>
+        <label className="flex items-center gap-1.5">
+          <input
+            type="checkbox"
+            checked={signature.use_for_replies}
+            onChange={(e) =>
+              onDefault(signature.id, { use_for_replies: e.target.checked })
+            }
+          />
+          Default for replies and forwards
+        </label>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * How a signature will look.
+ *
+ * `dangerouslySetInnerHTML` is used for the HTML mode, and the value is the
+ * SERVER'S sanitised response — never the text in the editor. That distinction
+ * is the whole point: a preview rendered from unsaved input would show
+ * something the recipient will never receive, and would make the browser the
+ * authority on what is safe.
+ */
+function SignaturePreview({ signature }: { signature: Signature }) {
+  if (signature.kind === "image") {
+    return signature.has_image ? (
+      // A signature image is arbitrary user content served from our own API;
+      // next/image would try to optimise and re-host it.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={signature.image_url}
+        alt={signature.image_alt}
+        style={{ maxWidth: "100%", maxHeight: "120px" }}
+      />
+    ) : (
+      <p className="text-xs pb-muted">No image uploaded yet.</p>
+    );
+  }
+
+  if (signature.kind === "html") {
+    return (
+      <div
+        className="text-sm"
+        // Sanitised server-side on write; this is what came back.
+        dangerouslySetInnerHTML={{ __html: signature.html }}
+      />
+    );
+  }
+
+  return (
+    <pre className="text-xs pb-muted" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+      {signature.text || "(empty)"}
+    </pre>
+  );
+}
+
+/** The editor. One form, one explicit Save. */
+function SignatureEditor({
+  signature,
+  onClose,
+  onSaved,
+}: {
+  signature: Signature;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(signature.name);
+  const [kind, setKind] = useState<SignatureKind>(signature.kind);
+  const [text, setText] = useState(signature.text);
+  const [html, setHtml] = useState(signature.html);
+  const [alt, setAlt] = useState(signature.image_alt);
+  const [preview, setPreview] = useState<Signature | null>(signature);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const patch: Partial<Signature> = { name, kind };
+      if (kind === "html") patch.html = html;
+      if (kind === "text") patch.text = text;
+      if (kind === "image") patch.image_alt = alt;
+
+      const saved = await postbox.updateSignature(signature.id, patch);
+      // Echo the SERVER's version back into the editor, so what is shown is
+      // what was stored — including anything the sanitiser removed.
+      setPreview(saved);
+      setHtml(saved.html);
+      setText(saved.text);
+      onSaved();
+    } catch (caught) {
+      setError(describePostBoxError(caught, "That signature could not be saved."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const upload = async (file: File) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await postbox.uploadSignatureImage(signature.id, file);
+      setPreview(saved);
+    } catch (caught) {
+      setError(describePostBoxError(caught, "That image could not be uploaded."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-3 border p-3" style={{ borderColor: "var(--pb-accent)" }}>
+      <Row label="Name" htmlFor={`sig-name-${signature.id}`}>
+        <input
+          id={`sig-name-${signature.id}`}
+          className="pb-input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </Row>
+
+      <Row label="Type" htmlFor={`sig-kind-${signature.id}`}>
+        <select
+          id={`sig-kind-${signature.id}`}
+          className="pb-input"
+          value={kind}
+          onChange={(e) => setKind(e.target.value as SignatureKind)}
+        >
+          <option value="text">Plain text</option>
+          <option value="html">HTML</option>
+          <option value="image">Image</option>
+        </select>
+      </Row>
+
+      {kind === "text" && (
+        <>
+          <Row label="Signature text" htmlFor={`sig-text-${signature.id}`}>
+            <textarea
+              id={`sig-text-${signature.id}`}
+              className="pb-textarea"
+              rows={5}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+          </Row>
+          <p className="mb-3 text-xs pb-muted">
+            Plain text. Anything that looks like markup is sent as those
+            characters — choose HTML above if you want it rendered.
+          </p>
+        </>
+      )}
+
+      {kind === "html" && (
+        <>
+          <Row label="HTML source" htmlFor={`sig-html-${signature.id}`}>
+            <textarea
+              id={`sig-html-${signature.id}`}
+              className="pb-textarea"
+              rows={10}
+              spellCheck={false}
+              style={{ fontFamily: "ui-monospace, monospace", fontSize: "12px" }}
+              value={html}
+              onChange={(e) => setHtml(e.target.value)}
+            />
+          </Row>
+          <p className="mb-3 text-xs pb-muted">
+            Paste a complete signature — a whole HTML document is fine, the
+            wrapper is removed. Scripts, embedded frames and layout CSS that
+            could cover the page are stripped on save. Style blocks do not
+            survive: use inline <code>style=</code> attributes, which is what
+            mail clients support. Web fonts will not load in most clients.
+          </p>
+        </>
+      )}
+
+      {kind === "image" && (
+        <>
+          <Row label="Image" htmlFor={`sig-file-${signature.id}`}>
+            <input
+              id={`sig-file-${signature.id}`}
+              ref={fileInput}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              className="text-xs"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void upload(file);
+              }}
+            />
+          </Row>
+          <Row label="Alt text" htmlFor={`sig-alt-${signature.id}`}>
+            <input
+              id={`sig-alt-${signature.id}`}
+              className="pb-input"
+              value={alt}
+              placeholder="NetaMate Solutions logo"
+              onChange={(e) => setAlt(e.target.value)}
+            />
+          </Row>
+          <p className="mb-3 text-xs pb-muted">
+            PNG, JPEG, GIF or WebP, up to 256&nbsp;KB — it is sent with every
+            message. Alt text is required: it is what a reader sees when images
+            are blocked, which is the default in many workplaces. WebP does not
+            render in Outlook for Windows; PNG is the safe choice.
+          </p>
+        </>
+      )}
+
+      {preview && (
+        <div className="mb-3">
+          <p className="pb-label mb-1">Preview</p>
+          <div className="border p-2" style={{ borderColor: "var(--pb-border)" }}>
+            <SignaturePreview signature={{ ...preview, kind }} />
+          </div>
+          <p className="mt-1 text-xs pb-subtle">
+            Shows what was saved, after cleaning — not what is in the box above.
+          </p>
+        </div>
+      )}
+
+      {error && (
+        <p className="mb-2 text-xs" role="alert" style={{ color: "var(--pb-danger)" }}>
+          {error}
+        </p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className="pb-btn pb-btn-primary"
+          disabled={busy}
+          onClick={() => void save()}
+        >
+          {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+          Save signature
+        </button>
+        <button type="button" className="pb-btn pb-btn-ghost" onClick={onClose}>
+          Done
+        </button>
+      </div>
+    </div>
   );
 }
 

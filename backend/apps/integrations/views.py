@@ -359,6 +359,12 @@ class SignatureListView(APIView):
                     {
                         "id": str(item.id),
                         "name": item.name,
+                        # Exposed so a connected app can say "HTML signature"
+                        # rather than guessing from a content field it is not
+                        # given. The content itself stays here: an integration
+                        # selects a signature by id and the MIME assembly is
+                        # done by MateMail, so there is nothing for it to render.
+                        "kind": item.kind,
                         "use_for_new": item.use_for_new,
                         "use_for_replies": item.use_for_replies,
                     }

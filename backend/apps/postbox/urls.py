@@ -46,6 +46,7 @@ from .views_settings import (
     RuleDetailView,
     RuleListView,
     SignatureDetailView,
+    SignatureImageView,
     SignatureListView,
     VacationView,
 )
@@ -90,6 +91,14 @@ urlpatterns = [
 
     path("signatures/", SignatureListView.as_view(), name="postbox-signatures"),
     path("signatures/<uuid:pk>/", SignatureDetailView.as_view(), name="postbox-signature"),
+    # Bytes in and out for an image signature. Separate from the JSON resource
+    # so the upload can be validated as bytes and the download served with a
+    # real content type, without base64 riding on every list response.
+    path(
+        "signatures/<uuid:pk>/image/",
+        SignatureImageView.as_view(),
+        name="postbox-signature-image",
+    ),
 
     path("contacts/", ContactListView.as_view(), name="postbox-contacts"),
     path("contacts/<uuid:pk>/", ContactDetailView.as_view(), name="postbox-contact"),

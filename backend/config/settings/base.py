@@ -392,6 +392,12 @@ POSTBOX_SMTP_TIMEOUT = env.int("POSTBOX_SMTP_TIMEOUT", default=30)
 POSTBOX_MAX_ATTACHMENT_MB = env.int("POSTBOX_MAX_ATTACHMENT_MB", default=20)
 POSTBOX_MAX_MESSAGE_MB = env.int("POSTBOX_MAX_MESSAGE_MB", default=25)
 
+#: Image-signature limits. Small on purpose: this rides on EVERY message the
+#: mailbox sends, so a 2 MB logo is 2 MB per recipient per email, and several
+#: corporate gateways reject or strip large inline images outright.
+POSTBOX_SIGNATURE_IMAGE_KB = env.int("POSTBOX_SIGNATURE_IMAGE_KB", default=256)
+POSTBOX_SIGNATURE_IMAGE_MAX_PX = env.int("POSTBOX_SIGNATURE_IMAGE_MAX_PX", default=1200)
+
 # Transactional application email, sent through MateMail's own Mail Engine
 # (DEC-013). The default here keeps every environment from falling back to
 # Django's global "webmaster@localhost", which names no product and would be a

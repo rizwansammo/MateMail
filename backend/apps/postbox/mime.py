@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import email
 import email.policy
+import html as html_module
 import email.utils
 import logging
 import mimetypes
@@ -298,6 +299,57 @@ def _filter_inline_styles(html: str) -> str:
     return re.sub(r'style\s*=\s*"([^"]*)"', clean_attribute, html, flags=re.IGNORECASE)
 
 
+#: Tags whose TEXT CONTENT must go with them, not just the tag.
+#:
+#: nh3 removes a disallowed tag but keeps the text inside it, which is right
+#: for <b>bold</b> and catastrophic for <title>. Its default for this is
+#: {"script", "style"}; everything else here is a document-header element
+#: whose content is metadata and must never be read out loud in an email.
+SIGNATURE_DROP_CONTENT = {"script", "style", "title", "head", "noscript"}
+
+#: The document wrapper a pasted signature often arrives in.
+_DOCTYPE = re.compile(r"(?is)<!doctype[^>]*>")
+_HEAD_BLOCK = re.compile(r"(?is)<head\b[^>]*>.*?</head\s*>")
+_BODY_BLOCK = re.compile(r"(?is)<body\b[^>]*>(?P<inner>.*?)</body\s*>")
+_HTML_OPEN = re.compile(r"(?is)</?html\b[^>]*>")
+
+
+def extract_body_fragment(html: str) -> str:
+    """
+    The meaningful part of a pasted HTML document.
+
+    People paste what their designer gave them, which is a whole document:
+    doctype, <head> with <meta>, <title> and <style>, then <body>. None of
+    the wrapper belongs in a signature, and a signature is a FRAGMENT — it is
+    inserted into a message that already has its own document structure.
+
+    <head> is removed whole rather than left to the tag sanitiser, because
+    the sanitiser keeps inner text and <title> would become visible words.
+    Then, if there is a <body>, its contents are the signature; otherwise the
+    input was already a fragment and is returned as-is.
+
+    This is a pre-pass, NOT the security boundary. `sanitize_signature` still
+    runs the allow-list afterwards — a regex that believes it understands
+    HTML is exactly how sanitisers get bypassed, so this one only has to be
+    conservative, never complete.
+    """
+    if not html:
+        return ""
+
+    fragment = _DOCTYPE.sub("", html)
+    fragment = _HEAD_BLOCK.sub("", fragment)
+
+    match = _BODY_BLOCK.search(fragment)
+    if match:
+        fragment = match.group("inner")
+    else:
+        # No <body> pair — drop any stray <html> tags so they cannot survive
+        # as an unknown element.
+        fragment = _HTML_OPEN.sub("", fragment)
+
+    return fragment.strip()
+
+
 def sanitize_signature(html: str) -> str:
     """
     A signature is authored by the mailbox owner, and still sanitised.
@@ -306,9 +358,25 @@ def sanitize_signature(html: str) -> str:
     value round-trips through an API, and this HTML is injected into every
     message the mailbox sends. Remote images are permitted here — the owner
     chose them, and it is their own logo.
+
+    The document wrapper is removed first so <title> cannot arrive as text,
+    then the ordinary allow-list runs. Order matters: extraction is a
+    convenience, the allow-list is the boundary.
     """
-    cleaned, _ = sanitize_html(html or "", load_remote_images=True)
-    return cleaned
+    fragment = extract_body_fragment(html or "")
+    if not fragment:
+        return ""
+
+    cleaned = nh3.clean(
+        fragment,
+        tags=ALLOWED_TAGS,
+        attributes={k: set(v) for k, v in ALLOWED_ATTRIBUTES.items()},
+        url_schemes=ALLOWED_URL_SCHEMES,
+        strip_comments=True,
+        link_rel="noopener noreferrer nofollow",
+        clean_content_tags=SIGNATURE_DROP_CONTENT,
+    )
+    return _filter_inline_styles(cleaned).strip()
 
 
 _UNSAFE_FILENAME = re.compile(r"[\x00-\x1f\x7f/\\:*?\"<>|]")
@@ -383,6 +451,7 @@ def build_message(
     in_reply_to: str = "",
     references: list[str] | None = None,
     attachments: list[tuple[str, str, bytes]] | None = None,
+    related: list[tuple[str, str, bytes]] | None = None,
     message_id: str = "",
 ) -> EmailMessage:
     """
@@ -391,6 +460,22 @@ def build_message(
     `multipart/alternative` when both bodies exist, so a plain-text reader gets
     something readable rather than a wall of markup — and because a message
     with only an HTML part scores worse with every spam filter there is.
+
+    `related` holds inline images as (cid, content_type, payload). They are
+    attached to the HTML PART, producing
+
+        multipart/alternative
+          text/plain
+          multipart/related
+            text/html
+            image/...   Content-ID: <cid>
+
+    which is what makes `<img src="cid:...">` render inline. Attaching them
+    to the message instead would make them ordinary attachments, and the
+    signature would show as a broken image beside a paperclip.
+
+    `html` arrives already sanitised — the caller owns that, because only the
+    caller knows whether it is assembling a body, a signature, or both.
 
     The Message-ID is generated here and kept: the same value is submitted to
     Postfix and appended to Sent, so the copy in Sent is genuinely the message
@@ -425,7 +510,22 @@ def build_message(
     body_text = text or _html_to_text(html)
     message.set_content(body_text)
     if html:
-        message.add_alternative(sanitize_signature(html), subtype="html")
+        message.add_alternative(html, subtype="html")
+
+        for cid, content_type, payload in related or []:
+            maintype, _, subtype = (
+                content_type or "application/octet-stream"
+            ).partition("/")
+            # `add_related` on the HTML part, not on `message`: that is what
+            # creates multipart/related around the HTML rather than adding a
+            # sibling attachment to the alternative.
+            message.get_payload()[-1].add_related(
+                payload,
+                maintype=maintype or "image",
+                subtype=subtype or "png",
+                cid=f"<{cid}>",
+                disposition="inline",
+            )
 
     for filename, content_type, payload in attachments or []:
         maintype, _, subtype = (content_type or "application/octet-stream").partition("/")
@@ -439,6 +539,41 @@ def build_message(
     return message
 
 
+def escape_attribute(value: str) -> str:
+    """Text safe to place inside a double-quoted HTML attribute."""
+    return html_module.escape(value or "", quote=True)
+
+
+def html_to_text(html: str) -> str:
+    """
+    Public name for the HTML-to-text fallback.
+
+    The private `_html_to_text` already existed for the composer; signatures
+    need the same conversion, and reaching across modules for an underscore
+    name is how a helper quietly becomes two slightly different helpers.
+    """
+    return _html_to_text(html)
+
+
+def text_to_html(text: str) -> str:
+    """
+    A plain-text body as an HTML fragment.
+
+    Needed because PostBox's composer is a plain textarea, so the only body
+    it produces is text — while an HTML signature forces the message to have
+    an HTML alternative. Without this the HTML part would contain the
+    signature and nothing else, and a recipient whose client prefers HTML
+    would see a signature with no message above it.
+
+    Escaped first, then newlines become <br>. Escaping second would turn the
+    <br> tags we just inserted into visible text.
+    """
+    if not text:
+        return ""
+    escaped = html_module.escape(text, quote=False)
+    return escaped.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+
+
 def _html_to_text(html: str) -> str:
     """
     A readable plain-text alternative when the composer only produced HTML.
@@ -449,13 +584,24 @@ def _html_to_text(html: str) -> str:
     if not html:
         return ""
     text = re.sub(r"(?is)<(script|style).*?</\1>", "", html)
-    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
-    text = re.sub(r"(?i)</(p|div|tr|li|h[1-6])>", "\n", text)
+    # The newline that follows the tag in the SOURCE is consumed with it.
+    # Without that, `<br>` at the end of a line in a nicely formatted
+    # signature becomes two newlines, and every line of the plain-text
+    # fallback ends up separated by a blank line.
+    text = re.sub(r"(?i)<br\s*/?>[ \t]*\r?\n?", "\n", text)
+    text = re.sub(r"(?i)</(p|div|tr|li|h[1-6])>[ \t]*\r?\n?", "\n", text)
     text = re.sub(r"(?i)<li[^>]*>", "  • ", text)
     text = re.sub(r'(?is)<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', r"\2 <\1>", text)
     text = re.sub(r"(?s)<[^>]+>", "", text)
     text = (text.replace("&nbsp;", " ").replace("&amp;", "&")
             .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"'))
+
+    # Indentation in the SOURCE is formatting for whoever edits the HTML; it
+    # is not part of the message. Left in, every line of a pasted signature
+    # arrives indented and separated by blank lines.
+    lines = [line.strip() for line in text.splitlines()]
+    text = "\n".join(lines)
+
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 

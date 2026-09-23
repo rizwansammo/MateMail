@@ -67,13 +67,42 @@ class PreferenceSerializer(serializers.ModelSerializer):
 
 
 class SignatureSerializer(serializers.ModelSerializer):
+    """
+    A signature, with its kind stated.
+
+    The image bytes are deliberately NOT a field here. They are written by a
+    dedicated upload endpoint that can check magic bytes and dimensions, and
+    read by an endpoint that serves them with a real content type — putting
+    them in this JSON would mean base64 on every list response and no place
+    to validate the file itself.
+    """
+
+    #: What the client needs to render a preview and an <img>, without ever
+    #: receiving the bytes.
+    has_image = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+
     class Meta:
         model = MailSignature
         fields = [
-            "id", "name", "html", "text", "use_for_new", "use_for_replies",
+            "id", "name", "kind", "html", "text",
+            "image_alt", "image_content_type", "has_image", "image_url",
+            "use_for_new", "use_for_replies",
             "created_at", "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = [
+            "id", "image_content_type", "has_image", "image_url",
+            "created_at", "updated_at",
+        ]
+
+    def get_has_image(self, signature) -> bool:
+        return bool(signature.image_data)
+
+    def get_image_url(self, signature) -> str:
+        """Relative, so it follows whichever hostname PostBox is served on."""
+        if not signature.image_data:
+            return ""
+        return f"/api/postbox/signatures/{signature.id}/image/"
 
     def validate_html(self, value: str) -> str:
         """
@@ -83,10 +112,71 @@ class SignatureSerializer(serializers.ModelSerializer):
         value round-trips through an API, and this HTML is injected into every
         message the mailbox sends. Cleaning at the boundary means no later
         reader of this row has to remember to do it.
+
+        This also strips a pasted document wrapper, so <title> and <style>
+        cannot arrive as visible words in somebody's inbox.
         """
         from .mime import sanitize_signature
 
         return sanitize_signature(value or "")
+
+    def validate(self, attrs):
+        """
+        Per-kind rules, and the generated plain-text fallback.
+
+        RESOLVING `kind`, in order:
+
+          1. what the caller sent — including `text` alongside `html`, which
+             is a contradiction and gets the answer the caller asked for;
+          2. non-empty `html` with no `kind` — an API client written before
+             this field existed. Defaulting those to text would throw away
+             HTML the caller explicitly supplied, which is exactly the kind
+             of silent content loss this whole change exists to end;
+          3. the instance's own kind, so a PATCH that only toggles
+             `use_for_new` does not revalidate an HTML signature as text;
+          4. text.
+        """
+        from .mime import html_to_text
+        from .models import SignatureKind
+
+        if attrs.get("kind"):
+            kind = attrs["kind"]
+        elif attrs.get("html"):
+            kind = SignatureKind.HTML
+        else:
+            kind = getattr(self.instance, "kind", SignatureKind.TEXT)
+
+        # Written back, so an inferred kind is persisted rather than being
+        # re-inferred differently by the next reader of the row.
+        attrs["kind"] = kind
+
+        if kind == SignatureKind.HTML:
+            html = attrs.get("html", getattr(self.instance, "html", ""))
+            # Derived, never demanded. Asking somebody to maintain a second
+            # copy of their own signature guarantees the two drift, and the
+            # one that drifts is the one nobody looks at.
+            # Only when the caller did not supply one: an explicit text is
+            # the optional advanced override, and silently replacing it
+            # would make the field a lie.
+            if not attrs.get("text"):
+                attrs["text"] = html_to_text(html)
+
+        elif kind == SignatureKind.IMAGE:
+            alt = attrs.get("image_alt", getattr(self.instance, "image_alt", ""))
+            if not (alt or "").strip():
+                raise serializers.ValidationError({
+                    "image_alt": "Describe the image, so it still reads when images are blocked.",
+                })
+            # An image signature's words ARE its alt text.
+            attrs["text"] = alt
+            attrs["html"] = ""
+
+        else:
+            # Plain text is plain text. Anything in `html` would be a second
+            # source of truth nobody edits.
+            attrs["html"] = ""
+
+        return attrs
 
     @staticmethod
     def _clear_other_defaults(mailbox, instance, validated_data) -> None:

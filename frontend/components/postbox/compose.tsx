@@ -76,6 +76,11 @@ export function Compose({
     )?.id ?? "",
   );
 
+  // Derived, so changing the selector updates the preview with no effect
+  // and no second copy of the signature in state.
+  const selectedSignature =
+    signatures.find((candidate) => candidate.id === signatureId) ?? null;
+
   const [draftUid, setDraftUid] = useState<number | null>(initial.draft_uid ?? null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [scheduleAt, setScheduleAt] = useState("");
@@ -347,6 +352,25 @@ export function Compose({
             }}
           />
 
+          {/*
+            The signature, shown but NOT editable and NOT part of `body`.
+
+            Keeping it outside the textarea is the point: if it were
+            inserted into the body, editing around it would corrupt it,
+            deleting it would not clear the selection, and the backend —
+            which appends the signature itself — would send it twice.
+            What is submitted is the body alone plus a signature id.
+          */}
+          {selectedSignature && (
+            <div className="mt-2" aria-label="Signature preview">
+              <div
+                className="mb-2"
+                style={{ borderTop: "1px solid var(--pb-border)" }}
+              />
+              <SignaturePreview signature={selectedSignature} />
+            </div>
+          )}
+
           {signatures.length > 0 && (
             <div className="mt-2 flex items-center gap-2">
               <label htmlFor="pb-signature" className="pb-label">
@@ -490,6 +514,47 @@ export function Compose({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The selected signature, as the recipient will see it.
+ *
+ * Renders the SERVER's stored value — `signature.html` came back from the
+ * API already sanitised, and `image_url` is served by it. The composer never
+ * decides what is safe; it only shows what was stored.
+ */
+function SignaturePreview({ signature }: { signature: Signature }) {
+  if (signature.kind === "image") {
+    if (!signature.has_image) return null;
+    return (
+      // User content from our own API; next/image would try to optimise and
+      // re-host it.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={signature.image_url}
+        alt={signature.image_alt}
+        style={{ maxWidth: "100%", maxHeight: "140px" }}
+      />
+    );
+  }
+
+  if (signature.kind === "html") {
+    return (
+      <div
+        className="text-sm"
+        dangerouslySetInnerHTML={{ __html: signature.html }}
+      />
+    );
+  }
+
+  return (
+    <pre
+      className="text-sm"
+      style={{ whiteSpace: "pre-wrap", margin: 0, fontFamily: "inherit" }}
+    >
+      {signature.text}
+    </pre>
   );
 }
 

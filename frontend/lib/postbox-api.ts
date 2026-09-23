@@ -201,11 +201,22 @@ export interface Identity {
   kind: string;
 }
 
+/** What a signature is. Stated, not inferred from which field is filled. */
+export type SignatureKind = "text" | "html" | "image";
+
 export interface Signature {
   id: string;
   name: string;
+  kind: SignatureKind;
+  /** HTML mode only. Sanitised server-side; this is what came back. */
   html: string;
+  /** The plain-text alternative. Derived from `html` for HTML signatures. */
   text: string;
+  image_alt: string;
+  image_content_type: string;
+  has_image: boolean;
+  /** Relative URL, so it follows whichever host PostBox is served on. */
+  image_url: string;
   use_for_new: boolean;
   use_for_replies: boolean;
 }
@@ -414,6 +425,45 @@ export const postbox = {
     }),
   deleteSignature: (id: string) =>
     request<void>(`/signatures/${id}/`, { method: "DELETE" }),
+
+  /**
+   * Upload an image signature.
+   *
+   * Not through `request`: that sets `Content-Type: application/json`, and a
+   * multipart body must be allowed to set its own — the boundary is part of
+   * the header and the browser generates it. Setting it by hand produces a
+   * body the server cannot parse.
+   */
+  uploadSignatureImage: async (id: string, file: File): Promise<Signature> => {
+    const form = new FormData();
+    form.append("image", file);
+    const response = await fetch(`${BASE}/signatures/${id}/image/`, {
+      method: "POST",
+      credentials: "same-origin",
+      body: form,
+    });
+    const text = await response.text();
+    let body: unknown = {};
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { detail: text };
+      }
+    }
+    if (!response.ok) {
+      const parsed = body as Record<string, unknown>;
+      const detail =
+        typeof parsed.detail === "string"
+          ? parsed.detail
+          : firstFieldError(parsed) ?? "That image could not be uploaded.";
+      throw new PostBoxError(response.status, detail);
+    }
+    return body as Signature;
+  },
+
+  deleteSignatureImage: (id: string) =>
+    request<void>(`/signatures/${id}/image/`, { method: "DELETE" }),
 
   contacts: (q?: string) => request<{ results: Contact[] }>(`/contacts/${qs({ q })}`),
   createContact: (body: Partial<Contact>) =>
