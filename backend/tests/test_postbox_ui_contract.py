@@ -326,3 +326,153 @@ class NetaMateLayoutTest(SimpleTestCase):
         page = read("app", "postbox", "(app)", "page.tsx")
         self.assertIn("paneRight", page)
         self.assertIn("flex-1 border-b", page)
+
+class ScrollContainmentTest(SimpleTestCase):
+    """
+    The authenticated PostBox shell is viewport-bounded, so a long message
+    scrolls the reader and not the document.
+
+    THE DEFECT
+        The shell was `pb flex min-h-screen`. `min-height: 100vh` is a floor
+        with no ceiling, so a long HTML email made the shell taller, then the
+        body, then the document — and the browser's own scrollbar became the
+        mail reader's. The sidebar and the message list travelled with it
+        because they are children of the thing that grew, and the account
+        controls at the bottom of the sidebar scrolled off the screen.
+
+        The `.pb-scroll` regions inside were already correct. They were simply
+        unreachable: an `overflow: auto` box only becomes a scroll container
+        when an ancestor actually constrains its height, and nothing did.
+
+    WHAT IS PINNED
+        The four boundaries that make the chain definite, and the internal
+        hierarchy that depends on them. Not the markup around any of it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.layout = read("app", "postbox", "(app)", "layout.tsx")
+        cls.page = read("app", "postbox", "(app)", "page.tsx")
+        cls.root = read("app", "layout.tsx")
+
+    # ── 1. the shell ────────────────────────────────────────────────────────
+
+    def test_the_shell_has_a_definite_viewport_height(self):
+        """
+        `h-dvh`, not `min-h-screen`. A minimum lets content grow the shell;
+        only a definite height gives the scroll regions inside something to
+        resolve against.
+
+        `dvh` rather than `vh` because `100vh` on mobile excludes browser
+        chrome — a `100vh` shell is taller than the visible area, and the
+        sidebar footer ends up under the URL bar.
+        """
+        shell = code_only(self.layout).split("className={`pb flex", 1)[1][:200]
+        self.assertIn("h-dvh", shell)
+        self.assertNotIn("min-h-screen", shell)
+
+    def test_the_shell_does_not_leak_overflow_into_the_document(self):
+        shell = code_only(self.layout).split("className={`pb flex", 1)[1][:200]
+        self.assertIn("overflow-hidden", shell)
+        self.assertIn("min-h-0", shell)
+
+    def test_the_fix_is_not_applied_to_the_shared_body(self):
+        """
+        `overflow: hidden` on `body` would fix PostBox and break the public
+        site, Workspace, MailAdmin, the Platform Console and every auth page,
+        which are ordinary documents that must keep scrolling.
+        """
+        body = code_only(self.root).split("<body", 1)[1].split(">", 1)[0]
+        self.assertNotIn("overflow-hidden", body)
+        self.assertIn("min-h-full", body)
+
+    # ── 2-4. the chain below it ─────────────────────────────────────────────
+
+    def test_the_main_column_can_shrink_and_contains_its_route(self):
+        """
+        A flex item defaults to `min-height: auto`, which lets a tall child
+        push past the height it was given — so a bounded shell alone is not
+        enough.
+        """
+        self.assertIn(
+            'className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden"',
+            self.layout,
+        )
+
+    def test_the_route_content_boundary_is_constrained(self):
+        """
+        What every route's `h-full` resolves against, including Contacts and
+        Settings.
+        """
+        self.assertIn(
+            'className="min-h-0 flex-1 overflow-hidden">{children}</div>',
+            self.layout,
+        )
+
+    def test_the_folder_nav_scrolls_rather_than_pushing_the_footer_away(self):
+        """
+        Without `min-h-0` a long folder list grows the nav instead of
+        scrolling it, and the account controls leave the viewport.
+        """
+        self.assertIn(
+            'className="pb-scroll min-h-0 flex-1 px-2 pb-3"', self.layout
+        )
+
+    # ── the mailbox hierarchy the shell now supports ────────────────────────
+
+    def test_the_mailbox_root_fills_its_boundary(self):
+        self.assertIn('className="flex h-full min-h-0 flex-col"', self.page)
+
+    def test_the_list_reader_split_is_constrained_in_both_orientations(self):
+        """
+        `overflow-hidden` so neither pane can force the split taller than its
+        share, and the orientation stays a class swap so a bottom reading pane
+        gets the same containment as a right-hand one.
+        """
+        split = self.page.split("flex min-h-0 flex-1 overflow-hidden", 1)
+        self.assertEqual(2, len(split), "the split boundary lost its containment")
+        self.assertIn('paneRight ? "flex-row" : "flex-col"', split[1][:200])
+
+    def test_the_message_list_is_its_own_scroll_region(self):
+        self.assertIn("pb-scroll min-h-0", self.page)
+
+    def test_the_reader_header_is_fixed_and_the_body_scrolls(self):
+        """
+        Reader header pinned, message body scrolling — the behaviour somebody
+        actually notices when they open a newsletter.
+        """
+        self.assertIn('className="flex h-full min-h-0 flex-col"', self.page)
+        self.assertIn('className="pb-scroll min-h-0 flex-1 px-4 py-4"', self.page)
+        self.assertIn('className="shrink-0 border-b px-4 py-3"', self.page)
+
+    def test_a_long_message_cannot_change_application_geometry(self):
+        """
+        `.pb-message-body` keeps its containment. Combined with the bounded
+        shell, a huge image or a very wide table is absorbed by the reader's
+        own scrolling instead of resizing the app.
+        """
+        css = read("app", "globals.css")
+        body_rule = css.split(".pb-message-body {", 1)[1].split("}", 1)[0]
+        self.assertIn("contain: content", body_rule)
+        self.assertIn("max-width: 100%", body_rule)
+
+    # ── the other routes in the same boundary ───────────────────────────────
+
+    def test_contacts_and_settings_scroll_inside_the_content_area(self):
+        for page in ("contacts", "settings"):
+            source = read("app", "postbox", "(app)", page, "page.tsx")
+            self.assertIn(
+                'className="pb-scroll h-full"', source,
+                f"{page} must scroll within the shell, not the document",
+            )
+
+    def test_the_scroll_utility_still_contains_its_overscroll(self):
+        """
+        `overscroll-behavior: contain` stops a reader scrolled to its end from
+        handing the gesture to whatever is behind it.
+        """
+        css = read("app", "globals.css")
+        rule = css.split(".pb-scroll {", 1)[1].split("}", 1)[0]
+        self.assertIn("overflow-y: auto", rule)
+        self.assertIn("overscroll-behavior: contain", rule)

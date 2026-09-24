@@ -366,7 +366,18 @@ function Mailbox() {
       )}
 
       {/* ── list + reader ──────────────────────────────────────────────── */}
-      <div className={`flex min-h-0 flex-1 ${paneRight ? "flex-row" : "flex-col"}`}>
+      {/*
+        The list/reader split. `overflow-hidden` so neither pane can force this
+        row (or column, with the reading pane at the bottom) taller than the
+        height it was given — the two panes divide a fixed space and scroll
+        inside it. Works for both orientations: `min-h-0` releases the
+        auto-minimum on whichever axis is the main one.
+      */}
+      <div
+        className={`flex min-h-0 flex-1 overflow-hidden ${
+          paneRight ? "flex-row" : "flex-col"
+        }`}
+      >
         <div
           className={`pb-scroll min-h-0 ${
             detail ? "hidden md:block" : "block"

@@ -126,9 +126,26 @@ export default function PostBoxAppLayout({
 
   return (
     <div
-      className={`pb flex min-h-screen ${IS_NETAMATE_EMAIL ? "nm-postbox " : ""}${
-        preferences.density === "compact" ? "pb-density-compact" : ""
-      }`}
+      /*
+        A viewport-sized APPLICATION, not a document that happens to be
+        tall. `min-h-screen` was a minimum with no maximum, so a long
+        message grew the shell, then the body, then the document — and the
+        browser scrollbar became the reader's, carrying the sidebar and the
+        message list down with it.
+
+        `h-dvh` not `h-screen`: `100vh` excludes mobile browser chrome, so
+        a `100vh` shell is taller than the visible area and the sidebar
+        footer hides under the URL bar. `100dvh` tracks it.
+
+        `overflow-hidden` is what stops content escaping into the document.
+        It is here, on the authenticated shell, and deliberately NOT on
+        `body` — which is shared with the public site, Workspace, MailAdmin,
+        the Platform Console and every auth page, all of which must keep
+        scrolling like normal pages.
+      */
+      className={`pb flex h-dvh min-h-0 overflow-hidden ${
+        IS_NETAMATE_EMAIL ? "nm-postbox " : ""
+      }${preferences.density === "compact" ? "pb-density-compact" : ""}`}
     >
       {railOpen && (
         <div
@@ -201,7 +218,13 @@ export default function PostBoxAppLayout({
           </Link>
         </div>
 
-        <nav className="pb-scroll flex-1 px-2 pb-3" aria-label="Folders">
+        {/*
+          `min-h-0` is load-bearing. A flex item's default `min-height` is
+          `auto`, so without it a long folder list makes this taller than
+          its share instead of scrolling — pushing the account footer off
+          the bottom of the sidebar rather than keeping it anchored.
+        */}
+        <nav className="pb-scroll min-h-0 flex-1 px-2 pb-3" aria-label="Folders">
           {PINNED.map(({ role, label, icon: Icon, href }) => {
             // Starred is a saved filter, not a mailbox, so it has an href
             // and no folder row behind it.
@@ -322,7 +345,12 @@ export default function PostBoxAppLayout({
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/*
+        `min-h-0` for the same reason as the nav, and `overflow-hidden` so
+        the route below can never make this column taller than the shell
+        gave it.
+      */}
+      <div className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
         <header
           className="flex h-14 shrink-0 items-center gap-3 border-b px-4 md:hidden"
           style={{ borderColor: "var(--pb-border)", background: "var(--pb-bg)" }}
@@ -344,7 +372,14 @@ export default function PostBoxAppLayout({
           )}
         </header>
 
-        <div className="min-h-0 flex-1">{children}</div>
+        {/*
+          The boundary every route's `h-full` resolves against. Bounded and
+          overflow-hidden, so a page that scrolls does so INSIDE here —
+          which is what makes `pb-scroll h-full` work on Contacts and
+          Settings, and what gives the mailbox's list and reader something
+          definite to divide.
+        */}
+        <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
       </div>
     </div>
   );
