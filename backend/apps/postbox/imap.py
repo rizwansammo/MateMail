@@ -95,6 +95,44 @@ SPECIAL_USE_FOR_CREATE = {
     "Archive": "\\Archive",
 }
 
+#: Fallback when the server supplies no special-use attribute at all.
+#:
+#: Matched against the WHOLE folder name, case-insensitively — never a
+#: prefix or a substring. "Old Sent", "Sent 2025" and "My Archive" are
+#: ordinary folders somebody created, and promoting one to the real Sent
+#: folder would file sent mail into it from then on, silently.
+#:
+#: WHY NOT REPAIR THE MAILBOXES INSTEAD
+#: It is possible. RFC 6154 §5 defines the `/private/specialuse` mailbox
+#: annotation, and a server implementing RFC 5464 METADATA MAY accept
+#: SETMETADATA to set it on an existing folder — so the attributes could be
+#: written onto the folders that lack them.
+#:
+#: Not done here, for three plain reasons: METADATA support on this server
+#: has not been established, it is unnecessary — reading the name solves
+#: the problem — and it would mean writing to every existing customer
+#: mailbox to fix a presentation bug. If a retrofit is wanted later it
+#: should be its own change, with its own capability check.
+#:
+#: `Spam` maps to `junk` because that is the same folder under a different
+#: name, and `Scheduled` is MateMail's own — IMAP has no attribute for it
+#: because scheduled send is not an IMAP concept.
+#: Exactly the folders MateMail itself creates, plus INBOX and the Spam
+#: spelling of Junk. Nothing speculative: `Sent Items` and `Deleted Items`
+#: are Outlook's names and no mailbox here has been observed using them, so
+#: adding them would be widening a heuristic on a guess. If a real mailbox
+#: turns up needing one, add it then, with the mailbox as the evidence.
+CANONICAL_ROLE_NAMES = {
+    "INBOX": "inbox",
+    "SENT": "sent",
+    "DRAFTS": "drafts",
+    "TRASH": "trash",
+    "JUNK": "junk",
+    "SPAM": "junk",
+    "ARCHIVE": "archive",
+    "SCHEDULED": "scheduled",
+}
+
 
 @dataclass
 class FolderInfo:
@@ -193,21 +231,61 @@ class MailboxConnection:
     # ── folders ─────────────────────────────────────────────────────────────
 
     def list_folders(self) -> list[FolderInfo]:
+        """
+        Every folder, with a role resolved in TWO passes.
+
+        The passes are the whole point. Downstream code builds
+        `{f.role: f.name for f in list_folders() if f.role}` — a dict, so
+        for one role the LAST row wins. Resolving row by row therefore let
+        LIST ordering decide which mailbox was Sent:
+
+            (\\Sent) "Enviados"   -> sent     (the server said so)
+            (no flags) "Sent"     -> sent     (a guess from the name)
+
+        and if the guess came second it silently replaced the real one.
+        Sent mail would then be filed into a folder the server never
+        designated, for exactly the mailboxes that had it configured
+        correctly.
+
+        So: read every attribute first, record which roles the SERVER has
+        claimed, and only then let names fill the roles still unclaimed.
+        """
         status, rows = self._imap.list()
         if status != "OK":
             raise MailAccessError("Your folders could not be listed.", f"LIST -> {status}")
 
-        folders: list[FolderInfo] = []
+        parsed_rows: list[tuple[str, list[str], str]] = []
+        claimed: set[str] = set()
+
+        # ── pass 1: what the server actually said ───────────────────────
         for raw in rows or []:
             parsed = _parse_list_line(raw)
             if parsed is None:
                 continue
             name, flags = parsed
-            role = "inbox" if name.upper() == "INBOX" else ""
+            lowered = {f.lower() for f in flags}
+
+            role = ""
             for attribute, mapped in SPECIAL_USE.items():
-                if attribute.lower() in (f.lower() for f in flags):
+                if attribute.lower() in lowered:
                     role = mapped
+                    claimed.add(mapped)
                     break
+
+            parsed_rows.append((name, flags, role))
+
+        # ── pass 2: names fill only what is still unclaimed ─────────────
+        folders: list[FolderInfo] = []
+        for name, flags, role in parsed_rows:
+            if not role:
+                candidate = CANONICAL_ROLE_NAMES.get(name.strip().upper(), "")
+                # `claimed` grows as we go, so two unflagged folders that
+                # map to the same role cannot both take it either — the
+                # first in LIST order wins and the second stays custom.
+                if candidate and candidate not in claimed:
+                    role = candidate
+                    claimed.add(candidate)
+
             folders.append(
                 FolderInfo(
                     name=name,
@@ -217,6 +295,80 @@ class MailboxConnection:
                 )
             )
         return folders
+
+    def _authenticated_capabilities(self) -> frozenset[str]:
+        """
+        CAPABILITY as the server reports it AFTER authentication.
+
+        Not `imaplib`'s `self.capabilities`. That attribute is populated by
+        `_get_capabilities()`, which imaplib calls from `__init__` and from
+        `starttls()` and NOWHERE ELSE — `login()` does not refresh it. So it
+        holds the PRE-authentication list for the lifetime of the
+        connection, and most servers advertise a deliberately smaller set
+        before login. Reading it to decide what the authenticated session
+        supports answers the wrong question, and answers it 'no'.
+
+        Issued once and cached on this connection: it is asked for every
+        folder in `ensure_standard_folders`, and a round trip per folder on
+        every sign-in would be six for an answer that cannot change.
+        """
+        cached = getattr(self, "_capability_cache", None)
+        if cached is not None:
+            return cached
+
+        names: set[str] = set()
+        try:
+            status, data = self._imap.capability()
+            if status == "OK":
+                for chunk in data or []:
+                    text = chunk.decode() if isinstance(chunk, bytes) else str(chunk)
+                    names.update(part.upper() for part in text.split())
+        except Exception as exc:  # noqa: BLE001
+            # An empty set means 'plain CREATE', which is the safe answer:
+            # a folder without its attribute is cosmetic, and failing a
+            # sign-in because CAPABILITY misbehaved would not be.
+            logger.info("PostBox: CAPABILITY failed (%r); assuming no extensions", exc)
+
+        self._capability_cache = frozenset(names)
+        return self._capability_cache
+
+    def _supports_special_use_create(self) -> bool:
+        """Whether the server accepts `CREATE name (USE (\\Sent))`."""
+        return "CREATE-SPECIAL-USE" in self._authenticated_capabilities()
+
+    def _create_folder(self, name: str, attribute: str | None) -> str:
+        """
+        CREATE, with the special-use attribute when the server understands it.
+
+        Falls back to a plain CREATE otherwise — and also if the attributed
+        form is refused, because a mailbox with a Sent folder that lacks an
+        attribute is a cosmetic problem, while a mailbox with no Sent folder is
+        a broken one.
+        """
+        if attribute and self._supports_special_use_create():
+            try:
+                status, _ = self._imap._simple_command(
+                    "CREATE", _quote(name), f"(USE ({attribute}))"
+                )
+                if status == "OK":
+                    return status
+                logger.info(
+                    "PostBox: CREATE %s with %s -> %s; retrying without it",
+                    name, attribute, status,
+                )
+            except Exception as exc:  # noqa: BLE001 - see below
+                # Deliberately broad, and deliberately not silent. imaplib
+                # raises its own error class for a refused command, and the
+                # only sensible response is the plain CREATE below — failing
+                # sign-in because a folder could not be labelled would be a
+                # much worse outcome than an unlabelled folder.
+                logger.info(
+                    "PostBox: CREATE %s with %s raised %r; retrying without it",
+                    name, attribute, exc,
+                )
+
+        status, _ = self._imap.create(_quote(name))
+        return status
 
     def ensure_standard_folders(self) -> list[str]:
         """
@@ -241,7 +393,7 @@ class MailboxConnection:
             if name.upper() in have_names:
                 continue
 
-            status, _ = self._imap.create(_quote(name))
+            status = self._create_folder(name, attribute)
             if status != "OK":
                 # A folder that already exists in a form we did not recognise
                 # is not an error worth failing a sign-in over.

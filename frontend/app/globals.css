@@ -1496,6 +1496,86 @@ body {
   color: inherit;
 }
 
+/* Compose.
+
+   Below `sm` the backdrop is a real dimmed sheet and Compose is the screen.
+   From `sm` up the dimming is removed and clicks pass through to the mailbox
+   behind: a composer is a window you work beside, and blacking out the message
+   you are replying to helps nobody. The panel keeps its own pointer events, so
+   it still receives everything aimed at it. */
+/* Dimmed on mobile, where Compose IS the screen.
+
+   Declared here rather than as an inline style so the media query below can
+   override it. An inline style wins over every stylesheet rule, so the
+   desktop backdrop would have stayed dark no matter what this file said. */
+.pb-compose-backdrop {
+  background: rgb(19 28 39 / 0.45);
+}
+
+@media (min-width: 640px) {
+  .pb-compose-backdrop {
+    background: transparent;
+    pointer-events: none;
+  }
+
+  .pb-compose-shell {
+    pointer-events: auto;
+  }
+}
+
+/* The body editor takes the slack.
+
+   The scroll container is a flex column, so without this the textarea keeps
+   its intrinsic height and the extra space from expanding goes to the gap at
+   the bottom instead of to the thing being typed into. */
+.pb-compose-shell .pb-compose-body {
+  flex: 1 1 auto;
+  min-height: 9rem;
+  resize: none;
+}
+
+/* The NetaMate folder rail.
+
+   216px rather than the 240px the MateMail rail uses. The NetaMate lockup is
+   two short lines instead of a name plus a wide spaced caption, so the rail no
+   longer needs the width — and the message list is the pane that benefits.
+
+   Scoped to `.nm-rail`, applied only when the NetaMate build flag is set, so
+   this is a NetaMate decision and not a silent redesign of MateMail's own
+   PostBox. Below `md` it stays a full-height drawer at its own width. */
+@media (min-width: 768px) {
+  .nm-rail {
+    width: 13.5rem;
+  }
+}
+
+/* The PostBox two-line wordmark.
+
+   Both lines are the brand face; the second is smaller and slightly lighter so
+   it reads as part of the same name rather than a separate label. Line heights
+   are chosen so the pair totals the logo tile height (30px compact, 38px
+   full), which is what makes the mark and the words optically agree without
+   per-instance margin tweaking. */
+.nm-wordmark-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.nm-wordmark-stack .nm-wordmark {
+  line-height: 1.02;
+  margin: 0;
+}
+
+.nm-wordmark-sub {
+  /* Not `nm-surface-label`: that is a spaced uppercase CATEGORY caption, and
+     it made POSTBOX read as a tag stapled under someone else's product
+     name. This is the second line of one wordmark. */
+  opacity: 0.78;
+  letter-spacing: 0.01em;
+  margin-top: 0.06em;
+}
+
 .nm-surface-label {
   font-weight: 800;
   letter-spacing: 0.18em;

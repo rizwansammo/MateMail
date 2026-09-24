@@ -370,7 +370,15 @@ function Mailbox() {
         <div
           className={`pb-scroll min-h-0 ${
             detail ? "hidden md:block" : "block"
-          } ${paneRight ? "w-full md:w-[22rem] md:shrink-0 md:border-r" : "flex-1 border-b"}`}
+          } ${
+            paneRight
+              ? // Steps rather than one width: 22rem truncated subject lines
+                // on a large display while the reader had room to spare, and
+                // a single larger value would crowd a 1280px laptop. The
+                // reader takes whatever is left at every step.
+                "w-full md:w-[24rem] lg:w-[27rem] xl:w-[28rem] md:shrink-0 md:border-r"
+              : "flex-1 border-b"
+          }`}
           style={{ borderColor: "var(--pb-border)" }}
         >
           {loading ? (
@@ -536,10 +544,24 @@ function Reader({
         style={{ borderColor: "var(--pb-border)" }}
       >
         <div className="mb-2 flex items-center gap-1">
-          <button type="button" className="pb-btn pb-btn-plain md:hidden"
-            aria-label="Back to list" onClick={onBack}>
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          </button>
+          {/*
+            Wrapped for the same reason as the sidebar's close button:
+            `md:hidden` on a `.pb-btn` does not work. Tailwind v4 emits
+            utilities into `@layer utilities` and `.pb-btn` is unlayered, so
+            its `display:inline-flex` beats the utility's `display:none` and
+            this back arrow was showing on desktop, where there is no list to
+            go back to.
+          */}
+          <div className="md:hidden">
+            <button
+              type="button"
+              className="pb-btn pb-btn-plain"
+              aria-label="Back to list"
+              onClick={onBack}
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
           <ToolbarButton label="Reply" icon={CornerUpLeft}
             onClick={() => onReply("reply")} />
           <ToolbarButton label="Reply all" icon={CornerUpRight}

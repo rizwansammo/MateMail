@@ -12,7 +12,18 @@
  * exists so a person sees their options rather than guessing.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Clock, Loader2, Paperclip, Send, Trash2, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Paperclip,
+  Send,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import {
   fileToBase64,
@@ -27,6 +38,17 @@ export interface ComposeInitial {
   mode: "new" | "reply" | "reply-all" | "forward" | "draft";
   to?: string[];
   cc?: string[];
+  /**
+   * Present so a composer opened with Bcc already set shows the field.
+   *
+   * Nothing populates it today: Bcc is envelope-only — `build_message` never
+   * writes a Bcc header, precisely so the copy in Sent cannot disclose the
+   * people it exists to hide — so a reopened draft has no Bcc to restore. The
+   * field exists because the visibility rule below reads it, and reading a
+   * property that cannot exist is how a later change to drafts silently fails
+   * to show a recipient.
+   */
+  bcc?: string[];
   subject?: string;
   text?: string;
   html?: string;
@@ -65,8 +87,35 @@ export function Compose({
   const [from, setFrom] = useState(primary);
   const [to, setTo] = useState((initial.to ?? []).join(", "));
   const [cc, setCc] = useState((initial.cc ?? []).join(", "));
-  const [bcc, setBcc] = useState("");
-  const [showCopies, setShowCopies] = useState(Boolean(initial.cc?.length));
+  // From `initial` like `to` and `cc`. It was hard-coded to "" while
+  // `initial.bcc` was read only to decide whether the row was VISIBLE —
+  // so a Bcc that did arrive would open the field and show it empty.
+  const [bcc, setBcc] = useState((initial.bcc ?? []).join(", "));
+  /**
+   * Whether the Cc/Bcc rows are VISIBLE — not whether they exist.
+   *
+   * `cc` and `bcc` live in their own state and are always in the payload,
+   * so collapsing the rows hides them and keeps them. The previous control
+   * could only open: once shown there was no way back, and the two rows
+   * stayed for the rest of the message.
+   *
+   * Opens expanded when a reply or draft already carries either, because a
+   * recipient nobody can see is worse than a slightly taller header.
+   */
+  const [showCopies, setShowCopies] = useState(
+    Boolean(initial.cc?.length || initial.bcc?.length),
+  );
+
+  /**
+   * Compact bottom-right window, or the large centred one.
+   *
+   * Deliberately a class swap on the SAME element tree rather than two
+   * different renders: React keeps the component mounted, so recipients,
+   * subject, body, attachments, the signature choice, the schedule time and
+   * the draft UID all survive the toggle. Rendering a different subtree per
+   * size would remount the form and lose every one of them.
+   */
+  const [expanded, setExpanded] = useState(false);
   const [subject, setSubject] = useState(initial.subject ?? "");
   const [body, setBody] = useState(initial.text ?? "");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -218,14 +267,43 @@ export function Compose({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-stretch justify-center p-0 sm:items-end sm:justify-end sm:p-4"
-      style={{ background: "rgb(19 28 39 / 0.45)" }}
+      className={`pb-compose-backdrop fixed inset-0 z-50 flex items-stretch justify-center p-0 ${
+        expanded
+          ? "sm:items-center sm:justify-center sm:p-6"
+          : "sm:items-end sm:justify-end sm:p-4"
+      }`}
+      /*
+        A NON-MODAL dialog, and the two facts below are the same fact.
+
+        Dimmed on mobile, where Compose genuinely is the screen. From `sm` up
+        `.pb-compose-backdrop` turns transparent and click-through, so the
+        mailbox stays visible and usable behind it — a composer is a window you
+        work beside, and blacking out the mail you are replying to helps
+        nobody. The panel's own shadow and border carry the elevation.
+
+        Which is why there is no `aria-modal`. The page behind really is
+        interactive, and `aria-modal="true"` tells a screen reader to hide the
+        rest of the document from its user — claiming a modality we do not
+        enforce would make PostBox unreachable for exactly the people who
+        cannot see that it is still there.
+
+        `role="dialog"` stays: it is a dialog, it has a name, it is dismissible.
+        It is simply not a modal one.
+      */
       role="dialog"
-      aria-modal="true"
       aria-label="Compose message"
     >
       <div
-        className="pb-panel flex w-full flex-col sm:h-[min(42rem,90vh)] sm:w-[min(40rem,95vw)]"
+        className={`pb-panel pb-compose-shell flex w-full flex-col ${
+          expanded
+            ? // Underscores, not spaces: Tailwind arbitrary values cannot contain
+            // spaces, and `calc` is invalid without them around the operator.
+            // Written as `calc(100vh-3rem)` the class is silently dropped at
+            // build time and expanding resizes nothing — which is exactly what
+            // happened, and what a source-string test would never have caught.
+            "sm:h-[calc(100vh_-_3rem)] sm:w-[calc(100vw_-_3rem)]"
+            : "sm:h-[min(42rem,90vh)] sm:w-[min(40rem,95vw)]"
+        }`}
         style={{ boxShadow: "var(--pb-shadow-lg)" }}
       >
         <div
@@ -241,10 +319,35 @@ export function Compose({
           </p>
           <div className="flex items-center gap-1">
             {savedAt && <span className="text-xs pb-subtle">Draft saved</span>}
+            {/*
+              Hidden below `sm`, where Compose already fills the screen and
+              there is nothing to expand into. Wrapped in a div because
+              `hidden sm:block` on a `.pb-btn` would not apply — Tailwind v4
+              puts utilities in a cascade layer and `.pb-btn` is unlayered,
+              so its `display` wins. Same reason as the sidebar's close
+              button.
+            */}
+            <div className="hidden sm:block">
+              <button
+                type="button"
+                className="pb-btn pb-btn-plain"
+                aria-label={expanded ? "Restore compose" : "Expand compose"}
+                title={expanded ? "Restore down" : "Expand"}
+                aria-pressed={expanded}
+                onClick={() => setExpanded((current) => !current)}
+              >
+                {expanded ? (
+                  <Minimize2 className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
             <button
               type="button"
               className="pb-btn pb-btn-plain"
               aria-label="Close"
+              title="Close"
               onClick={onClose}
             >
               <X className="h-4 w-4" aria-hidden="true" />
@@ -252,7 +355,10 @@ export function Compose({
           </div>
         </div>
 
-        <div className="pb-scroll flex-1 p-3">
+        {/* `flex flex-col` so the body textarea can claim the leftover height
+            when Compose is expanded; `min-h-0` so this pane scrolls instead of
+            pushing the footer actions off the panel. */}
+        <div className="pb-scroll flex min-h-0 flex-1 flex-col p-3">
           <div className="space-y-2">
             <Field label="From" htmlFor="pb-from">
               <select
@@ -286,20 +392,35 @@ export function Compose({
                   placeholder="name@example.com, another@example.com"
                   autoComplete="off"
                 />
-                {!showCopies && (
-                  <button
-                    type="button"
-                    className="pb-btn pb-btn-plain"
-                    onClick={() => setShowCopies(true)}
-                  >
-                    Cc/Bcc
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="pb-btn pb-btn-plain shrink-0"
+                  aria-expanded={showCopies}
+                  aria-controls="pb-copies"
+                  aria-label={
+                    showCopies
+                      ? "Hide Cc and Bcc fields"
+                      : "Show Cc and Bcc fields"
+                  }
+                  onClick={() => setShowCopies((current) => !current)}
+                >
+                  Cc/Bcc
+                  {showCopies ? (
+                    <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                </button>
               </div>
             </Field>
 
+            {/*
+              Hidden, not discarded. `cc` and `bcc` stay in state and in the
+              payload while collapsed, so a value typed and then hidden is
+              still sent — and still saved into the draft.
+            */}
             {showCopies && (
-              <>
+              <div id="pb-copies" className="space-y-2">
                 <Field label="Cc" htmlFor="pb-cc">
                   <input
                     id="pb-cc"
@@ -324,7 +445,7 @@ export function Compose({
                     autoComplete="off"
                   />
                 </Field>
-              </>
+              </div>
             )}
 
             <Field label="Subject" htmlFor="pb-subject">
@@ -343,8 +464,7 @@ export function Compose({
           <textarea
             id="pb-body"
             aria-label="Message"
-            className="pb-textarea mt-3"
-            style={{ minHeight: "14rem", resize: "vertical" }}
+            className="pb-textarea pb-compose-body mt-3"
             value={body}
             onChange={(event) => {
               setBody(event.target.value);

@@ -15,6 +15,7 @@ import {
   Archive,
   Clock,
   FileText,
+  Folder as FolderIcon,
   Inbox,
   Loader2,
   LogOut,
@@ -36,15 +37,37 @@ import { usePostBox } from "@/contexts/postbox-context";
 import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 import { postbox, type Folder } from "@/lib/postbox-api";
 
-/** Folder roles PostBox pins to the top, in the order people expect them. */
-const PINNED: Array<{ role: string; label: string; icon: typeof Inbox }> = [
+/**
+ * The standard folders, in the order they belong.
+ *
+ * Reading order first — Inbox, Starred, Scheduled — then the things you
+ * sent, then storage, then the two bins. Starred and Scheduled used to be
+ * appended after this list, which put them below Trash; they are among the
+ * most-used views and were the hardest to find.
+ *
+ * Every entry has its own icon. They previously shared one because the
+ * folders were falling through to the custom branch, which hardcoded
+ * `Archive` for everything.
+ */
+const PINNED: Array<{
+  role: string;
+  label: string;
+  icon: typeof Inbox;
+  href?: string;
+}> = [
   { role: "inbox", label: "Inbox", icon: Inbox },
-  { role: "drafts", label: "Drafts", icon: FileText },
+  // Not a folder — a filter over INBOX, so it carries its own href.
+  { role: "starred", label: "Starred", icon: Star, href: "/postbox?folder=INBOX&starred=true" },
+  { role: "scheduled", label: "Scheduled", icon: Clock },
   { role: "sent", label: "Sent", icon: Send },
+  { role: "drafts", label: "Drafts", icon: FileText },
   { role: "archive", label: "Archive", icon: Archive },
   { role: "junk", label: "Spam", icon: ShieldAlert },
   { role: "trash", label: "Trash", icon: Trash2 },
 ];
+
+/** Roles the list above already shows, so they cannot also appear below. */
+const PINNED_ROLES = new Set(PINNED.map((entry) => entry.role));
 
 export default function PostBoxAppLayout({
   children,
@@ -89,10 +112,11 @@ export default function PostBoxAppLayout({
   if (!mailbox) return <div className="pb min-h-screen" />;
 
   const byRole = new Map(folders.map((f) => [f.role, f]));
-  const custom = folders.filter(
-    (f) => !f.role && f.name.toUpperCase() !== "SCHEDULED",
-  );
-  const scheduled = folders.find((f) => f.name.toUpperCase() === "SCHEDULED");
+  // Anything the standard list does not claim. The backend now assigns a
+  // role by canonical name when the server offers no special-use attribute,
+  // so Sent/Drafts/Trash/Junk/Archive no longer land here — which is what
+  // made them all render with the same icon.
+  const custom = folders.filter((f) => !PINNED_ROLES.has(f.role));
 
   const themeOptions = [
     { value: "light" as const, Icon: Sun, label: "Light" },
@@ -116,9 +140,12 @@ export default function PostBoxAppLayout({
       )}
 
       <aside
+        // `nm-rail` narrows this to 13.5rem on the NetaMate surface only.
+        // Applied by class rather than by swapping the width utility, so
+        // the MateMail rail is untouched by a NetaMate design decision.
         className={`fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r transition-transform md:static md:translate-x-0 ${
-          railOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+          IS_NETAMATE_EMAIL ? "nm-rail " : ""
+        }${railOpen ? "translate-x-0" : "-translate-x-full"}`}
         style={{ background: "var(--pb-sidebar)", borderColor: "var(--pb-border)" }}
       >
         <div
@@ -141,14 +168,28 @@ export default function PostBoxAppLayout({
               </div>
             </>
           )}
-          <button
-            type="button"
-            className="pb-btn pb-btn-plain ml-auto md:hidden"
-            aria-label="Close folders"
-            onClick={closeRail}
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </button>
+          {/*
+            The mobile drawer's close control, and the wrapper is load-bearing.
+
+            `md:hidden` on the button itself did NOT hide it. Tailwind v4
+            emits utilities inside `@layer utilities`, and `.pb-btn` in
+            globals.css is unlayered — unlayered CSS wins over every layer
+            regardless of specificity or order, so `display:inline-flex`
+            always beat `display:none` and the X appeared on desktop.
+
+            The wrapper has no competing display rule, so the utility applies
+            normally. Keep it.
+          */}
+          <div className="ml-auto md:hidden">
+            <button
+              type="button"
+              className="pb-btn pb-btn-plain"
+              aria-label="Close folders"
+              onClick={closeRail}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
 
         <div className="p-3">
@@ -161,7 +202,21 @@ export default function PostBoxAppLayout({
         </div>
 
         <nav className="pb-scroll flex-1 px-2 pb-3" aria-label="Folders">
-          {PINNED.map(({ role, label, icon: Icon }) => {
+          {PINNED.map(({ role, label, icon: Icon, href }) => {
+            // Starred is a saved filter, not a mailbox, so it has an href
+            // and no folder row behind it.
+            if (href) {
+              return (
+                <FolderLink
+                  key={role}
+                  href={href}
+                  icon={Icon}
+                  label={label}
+                  onNavigate={closeRail}
+                />
+              );
+            }
+
             const folder = byRole.get(role);
             if (!folder) return null;
             return (
@@ -170,28 +225,18 @@ export default function PostBoxAppLayout({
                 href={`/postbox?folder=${encodeURIComponent(folder.name)}`}
                 icon={Icon}
                 label={label}
-                unseen={role === "drafts" ? folder.messages : folder.unseen}
+                // Drafts and Scheduled are counted by total, not unread:
+                // nobody has 'unread drafts', and a zero there reads as
+                // an empty folder when it is not.
+                unseen={
+                  role === "drafts" || role === "scheduled"
+                    ? folder.messages
+                    : folder.unseen
+                }
                 onNavigate={closeRail}
               />
             );
           })}
-
-          <FolderLink
-            href="/postbox?folder=INBOX&starred=true"
-            icon={Star}
-            label="Starred"
-            onNavigate={closeRail}
-          />
-
-          {scheduled && (
-            <FolderLink
-              href={`/postbox?folder=${encodeURIComponent(scheduled.name)}`}
-              icon={Clock}
-              label="Scheduled"
-              unseen={scheduled.messages}
-              onNavigate={closeRail}
-            />
-          )}
 
           {custom.length > 0 && (
             <>
@@ -200,7 +245,11 @@ export default function PostBoxAppLayout({
                 <FolderLink
                   key={folder.name}
                   href={`/postbox?folder=${encodeURIComponent(folder.name)}`}
-                  icon={Archive}
+                  // A folder somebody made is a folder. This was `Archive`,
+                  // which gave every one of them the archive icon — and,
+                  // while the standard folders were landing here too, gave
+                  // Sent, Drafts, Trash and Junk that icon as well.
+                  icon={FolderIcon}
                   label={folder.name}
                   unseen={folder.unseen}
                   onNavigate={closeRail}
