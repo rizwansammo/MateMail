@@ -110,7 +110,7 @@ def _decode_attachments(items, *, limit_mb: int, total_limit_mb: int):
 class ComposeMixin:
     """Shared building of a message from a compose payload."""
 
-    def build(self, data, *, mailbox):
+    def build(self, data, *, mailbox, keep_bcc=False):
         identity = sending.assert_may_send_as(mailbox, data["from_address"])
 
         html = data.get("html") or ""
@@ -148,6 +148,7 @@ class ComposeMixin:
             references=data.get("references") or [],
             attachments=attachments,
             related=related,
+            keep_bcc=keep_bcc,
         )
         return message, identity
 
@@ -301,7 +302,9 @@ class DraftView(PostBoxView, ComposeMixin):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        message, _ = self.build(data, mailbox=self.mailbox)
+        # The draft keeps its Bcc as a header so it reopens whole; it is never
+        # submitted as-is (see mime.build_message).
+        message, _ = self.build(data, mailbox=self.mailbox, keep_bcc=True)
         previous = data.get("draft_uid")
 
         with imap.open_mailbox(self.mailbox.email) as connection:

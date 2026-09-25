@@ -157,6 +157,9 @@ def parse_message(raw: bytes, *, load_remote_images: bool = False) -> ParsedMess
     )
     parsed.to = _addresses(message, "To")
     parsed.cc = _addresses(message, "Cc")
+    # Present only where the stored message carries the header — in practice
+    # PostBox's own drafts. Callers decide whether to expose it.
+    parsed.bcc = _addresses(message, "Bcc")
 
     text_parts: list[str] = []
     html_parts: list[str] = []
@@ -457,6 +460,7 @@ def build_message(
     attachments: list[tuple[str, str, bytes]] | None = None,
     related: list[tuple[str, str, bytes]] | None = None,
     message_id: str = "",
+    keep_bcc: bool = False,
 ) -> EmailMessage:
     """
     An RFC-compliant message.
@@ -494,9 +498,17 @@ def build_message(
     message["To"] = ", ".join(clean_header(a) for a in to)
     if cc:
         message["Cc"] = ", ".join(clean_header(a) for a in cc)
-    # Bcc is deliberately NOT written as a header. It goes in the SMTP envelope
-    # only — a Bcc header would be delivered to every recipient and disclose
-    # exactly the people it exists to hide.
+    # Bcc is deliberately NOT written as a header on anything that is
+    # submitted. It goes in the SMTP envelope only — a Bcc header would be
+    # delivered to every recipient and disclose exactly the people it exists
+    # to hide.
+    #
+    # A saved draft is the one exception (`keep_bcc`). It is never submitted
+    # — sending rebuilds the message from the composer's fields — and the
+    # mailbox's own Drafts copy is the only place its Bcc recipients exist.
+    # Without the header, reopening a draft silently dropped them.
+    if keep_bcc and bcc:
+        message["Bcc"] = ", ".join(clean_header(a) for a in bcc)
     message["Subject"] = clean_header(subject)
     message["Date"] = email.utils.formatdate(localtime=True)
     message["Message-ID"] = message_id or email.utils.make_msgid(

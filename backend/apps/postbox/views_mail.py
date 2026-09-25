@@ -249,8 +249,11 @@ class MessageDetailView(PostBoxView):
             info = connection.select(folder, readonly=True)
             _assert_uid_validity(request, info.uid_validity)
             raw = connection.fetch_raw(uid)
-
-        parsed = mime.parse_message(raw, load_remote_images=show_remote)
+            parsed = mime.parse_message(raw, load_remote_images=show_remote)
+            # Bcc only for this mailbox's own drafts, which store it so they
+            # can be reopened whole. A Bcc header on any other message is not
+            # reported, and nothing is inferred from the envelope.
+            bcc = parsed.bcc if parsed.bcc and _is_drafts(connection, folder) else []
 
         return Response({
             "uid": uid,
@@ -260,6 +263,7 @@ class MessageDetailView(PostBoxView):
             "from": {"name": parsed.from_name, "address": parsed.from_address},
             "to": parsed.to,
             "cc": parsed.cc,
+            "bcc": bcc,
             "reply_to": parsed.reply_to,
             "date": parsed.date,
             "message_id": parsed.message_id,
@@ -335,6 +339,12 @@ class AttachmentView(PostBoxView):
             self.mailbox.pk, content_type, len(payload),
         )
         return response
+
+
+def _is_drafts(connection, folder: str) -> bool:
+    """Whether `folder` is the mailbox's Drafts, resolved by role as DraftView does."""
+    roles = {f.role: f.name for f in connection.list_folders() if f.role}
+    return folder == roles.get("drafts", "Drafts")
 
 
 def _assert_uid_validity(request, actual: int) -> None:
