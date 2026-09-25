@@ -117,6 +117,10 @@ class ParsedMessage:
     to: list[str] = field(default_factory=list)
     cc: list[str] = field(default_factory=list)
     bcc: list[str] = field(default_factory=list)
+    #: A saved draft's chosen signature (DRAFT_SIGNATURE_HEADER), unverified:
+    #: only the message detail for Drafts reads it, and only after checking
+    #: the mailbox owns that signature.
+    draft_signature_id: str = ""
     reply_to: str = ""
     date: str = ""
     message_id: str = ""
@@ -160,6 +164,9 @@ def parse_message(raw: bytes, *, load_remote_images: bool = False) -> ParsedMess
     # Present only where the stored message carries the header — in practice
     # PostBox's own drafts. Callers decide whether to expose it.
     parsed.bcc = _addresses(message, "Bcc")
+    parsed.draft_signature_id = clean_header(
+        str(message.get(DRAFT_SIGNATURE_HEADER, "") or "")
+    )
 
     text_parts: list[str] = []
     html_parts: list[str] = []
@@ -430,6 +437,12 @@ def extract_attachment(raw: bytes, part_id: str) -> tuple[str, str, bytes]:
 
 # ── building ────────────────────────────────────────────────────────────────
 
+#: The signature chosen for a saved draft. Written only on drafts, whose body
+#: is stored WITHOUT the signature so the draft can be reopened and edited
+#: with the same choice; sending rebuilds the message from the composer's
+#: fields, applies the signature once and never carries this header.
+DRAFT_SIGNATURE_HEADER = "X-PostBox-Signature-Id"
+
 _HEADER_INJECTION = re.compile(r"[\r\n]")
 
 
@@ -461,6 +474,7 @@ def build_message(
     related: list[tuple[str, str, bytes]] | None = None,
     message_id: str = "",
     keep_bcc: bool = False,
+    draft_signature_id: str = "",
 ) -> EmailMessage:
     """
     An RFC-compliant message.
@@ -509,6 +523,9 @@ def build_message(
     # Without the header, reopening a draft silently dropped them.
     if keep_bcc and bcc:
         message["Bcc"] = ", ".join(clean_header(a) for a in bcc)
+    # Draft-only metadata, like the Bcc above.
+    if draft_signature_id:
+        message[DRAFT_SIGNATURE_HEADER] = clean_header(draft_signature_id)
     message["Subject"] = clean_header(subject)
     message["Date"] = email.utils.formatdate(localtime=True)
     message["Message-ID"] = message_id or email.utils.make_msgid(

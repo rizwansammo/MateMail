@@ -250,10 +250,20 @@ class MessageDetailView(PostBoxView):
             _assert_uid_validity(request, info.uid_validity)
             raw = connection.fetch_raw(uid)
             parsed = mime.parse_message(raw, load_remote_images=show_remote)
-            # Bcc only for this mailbox's own drafts, which store it so they
-            # can be reopened whole. A Bcc header on any other message is not
-            # reported, and nothing is inferred from the envelope.
-            bcc = parsed.bcc if parsed.bcc and _is_drafts(connection, folder) else []
+            # Bcc and the chosen signature only for this mailbox's own drafts,
+            # which store them so they can be reopened whole. On any other
+            # message neither is reported, and nothing is inferred from the
+            # envelope or the body.
+            drafts = bool(parsed.bcc or parsed.draft_signature_id) and _is_drafts(
+                connection, folder
+            )
+            bcc = parsed.bcc if drafts else []
+
+        signature_id, signature_missing = (
+            _draft_signature(self.mailbox, parsed.draft_signature_id)
+            if drafts
+            else (None, False)
+        )
 
         return Response({
             "uid": uid,
@@ -264,6 +274,10 @@ class MessageDetailView(PostBoxView):
             "to": parsed.to,
             "cc": parsed.cc,
             "bcc": bcc,
+            # A draft's chosen signature, if this mailbox still has it;
+            # `signature_missing` says a chosen one has since gone.
+            "signature_id": signature_id,
+            "signature_missing": signature_missing,
             "reply_to": parsed.reply_to,
             "date": parsed.date,
             "message_id": parsed.message_id,
@@ -339,6 +353,29 @@ class AttachmentView(PostBoxView):
             self.mailbox.pk, content_type, len(payload),
         )
         return response
+
+
+def _draft_signature(mailbox, value: str) -> tuple[str | None, bool]:
+    """
+    (signature_id, missing) from a draft's signature header.
+
+    The header came out of a mailbox the user can write to over IMAP, so it
+    is not trusted: it counts only if it names a signature THIS mailbox owns.
+    Anything else — a deleted signature, another mailbox's, or garbage — is
+    reported as missing, never passed on.
+    """
+    if not value:
+        return None, False
+    import uuid
+
+    from .models import MailSignature
+
+    try:
+        pk = uuid.UUID(value)
+    except ValueError:
+        return None, True
+    owned = MailSignature.objects.for_mailbox(mailbox).filter(pk=pk).exists()
+    return (str(pk), False) if owned else (None, True)
 
 
 def _is_drafts(connection, folder: str) -> bool:

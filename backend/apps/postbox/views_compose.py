@@ -110,24 +110,42 @@ def _decode_attachments(items, *, limit_mb: int, total_limit_mb: int):
 class ComposeMixin:
     """Shared building of a message from a compose payload."""
 
-    def build(self, data, *, mailbox, keep_bcc=False):
+    def build(self, data, *, mailbox, draft=False):
         identity = sending.assert_may_send_as(mailbox, data["from_address"])
 
         html = data.get("html") or ""
         text = data.get("text") or ""
 
-        # The signature is applied HERE and nowhere else — see
-        # apps/postbox/signatures.py. The composer renders a preview but
-        # never puts the signature in the body it submits, so there is
-        # nothing to double up, and a draft saved twice gets it once.
-        #
-        # The previous code did `html = signature.html if not html`, and
-        # PostBox's composer only ever sends plain text — so the HTML
-        # alternative became the signature with no message above it.
-        signature = signatures.for_mailbox(mailbox, data.get("signature_id"))
-        text, html, related = signatures.apply(
-            text=text, html=html, signature=signature
-        )
+        # An explicitly chosen signature that this mailbox no longer has —
+        # deleted elsewhere, or never its own — is refused. Sending without
+        # it would silently change the message somebody chose to send.
+        signature_id = data.get("signature_id")
+        signature = signatures.for_mailbox(mailbox, signature_id)
+        if signature_id and signature is None:
+            raise serializers.ValidationError({
+                "signature_id": [
+                    "That signature is no longer available. Choose another "
+                    "signature, or none."
+                ],
+            })
+
+        if draft:
+            # A draft keeps the body as written and the chosen signature
+            # as metadata, so it can be reopened and edited with the same
+            # choice. The signature is applied only when it is sent.
+            related = []
+        else:
+            # The signature is applied HERE and nowhere else — see
+            # apps/postbox/signatures.py. The composer renders a preview but
+            # never puts the signature in the body it submits, so there is
+            # nothing to double up.
+            #
+            # The previous code did `html = signature.html if not html`, and
+            # PostBox's composer only ever sends plain text — so the HTML
+            # alternative became the signature with no message above it.
+            text, html, related = signatures.apply(
+                text=text, html=html, signature=signature
+            )
 
         attachments = _decode_attachments(
             data.get("attachments"),
@@ -148,7 +166,8 @@ class ComposeMixin:
             references=data.get("references") or [],
             attachments=attachments,
             related=related,
-            keep_bcc=keep_bcc,
+            keep_bcc=draft,
+            draft_signature_id=str(signature.id) if draft and signature else "",
         )
         return message, identity
 
@@ -302,9 +321,9 @@ class DraftView(PostBoxView, ComposeMixin):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # The draft keeps its Bcc as a header so it reopens whole; it is never
-        # submitted as-is (see mime.build_message).
-        message, _ = self.build(data, mailbox=self.mailbox, keep_bcc=True)
+        # The draft keeps its Bcc and its chosen signature as headers so it
+        # reopens whole; it is never submitted as-is (see mime.build_message).
+        message, _ = self.build(data, mailbox=self.mailbox, draft=True)
         previous = data.get("draft_uid")
 
         with imap.open_mailbox(self.mailbox.email) as connection:
