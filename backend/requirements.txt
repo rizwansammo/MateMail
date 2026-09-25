@@ -33,3 +33,9 @@ nh3==0.2.20
 # API with those features removed rather than a parser we have to remember
 # to configure correctly.
 defusedxml==0.7.1
+
+# Native PostBox push (FCM HTTP v1). Google's own auth library exchanges the
+# service-account key for an OAuth access token, so no JWT or OAuth code is
+# written here; it signs with the `cryptography` package above. Not the
+# Firebase Admin SDK - one HTTP call does not justify it.
+google-auth==2.58.1

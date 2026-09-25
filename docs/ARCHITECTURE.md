@@ -254,6 +254,23 @@ PostBox is a third front door, not a section of the Workspace. A Workspace
 login does not open a mailbox and never could — administering a mailbox and
 reading it are different powers (DEC-049).
 
+**New-mail push** (native PostBox apps, DEC-058): the event starts inside the
+engine, after delivery, and never on the mail path.
+
+```
+Dovecot LMTP commits the message
+  → push_notification Lua hook (LMTP only; 1 s, fail-open)
+  → Native API /v1/dovecot/push      (engine network, its own secret)
+  → relay thread → MateMail /api/internal/postbox/push-events/
+                                     (matemail_engine_link, its own secret)
+  → event stored once → Celery → FCM / WNS → PostBox app
+```
+
+The push carries identifiers only (event id, device registration id, folder,
+UIDVALIDITY, UID). The app fetches anything else through its authenticated
+PostBox session. Dovecot joins no new network and holds no MateMail
+credential. See `docs/POSTBOX_REMOTE_PUSH.md`.
+
 ---
 
 ## Security architecture

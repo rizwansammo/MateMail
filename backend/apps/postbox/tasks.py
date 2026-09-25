@@ -189,3 +189,46 @@ def prune_expired_sessions() -> int:
     if deleted:
         logger.info("PostBox: pruned %d expired session(s)", deleted)
     return deleted
+
+
+# ── native push (see apps.postbox.push) ─────────────────────────────────────
+#
+# A push is safe to retry where a send is not: the SAME event_id travels in
+# every attempt and the app drops a repeat. It is still retried only for
+# transient failures, a bounded number of times, and never for a device the
+# provider has declared invalid.
+
+@shared_task(name="postbox.dispatch_push_event")
+def dispatch_push_event(event_id: str) -> str:
+    """Claim one engine event and fan it out to the mailbox's active devices."""
+    from . import push
+
+    return push.dispatch(event_id)
+
+
+@shared_task(name="postbox.send_push", bind=True, max_retries=3)
+def send_push(self, event_id: str, device_id: str) -> str:
+    """Send one event to one device. Retries only a RETRY outcome."""
+    from . import push
+    from .push_providers import PushOutcome
+
+    outcome = push.deliver(event_id, device_id)
+    if outcome.status == PushOutcome.RETRY and self.request.retries < self.max_retries:
+        raise self.retry(countdown=push.retry_delay(self.request.retries, outcome.retry_after))
+    return outcome.code
+
+
+@shared_task(name="postbox.sweep_push_events")
+def sweep_push_events() -> dict:
+    """Re-queue events Celery never received; expire ones too old to announce."""
+    from . import push
+
+    return push.sweep()
+
+
+@shared_task(name="postbox.prune_push_events")
+def prune_push_events() -> int:
+    """Delete push events past their week of retention."""
+    from . import push
+
+    return push.prune()

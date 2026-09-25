@@ -113,6 +113,75 @@ else
     echo "# No API key configured; the administrative API is unusable."         > /etc/dovecot/engine-doveadm.conf
 fi
 
+# PostBox new-mail events (PostBox remote push, server half).
+#
+# After a delivery is saved and committed, dovecot/postbox-push.lua reports the
+# mailbox, folder, UIDVALIDITY and UID to the engine API, which relays them to
+# MateMail. The plugins are loaded for LMTP ONLY: IMAP, doveadm and every other
+# service run without them, so only a delivery can produce an event.
+#
+# The boolean list below ADDS to the global `mail_plugins`; it does not replace
+# it. Measured on 2.4.1 with mail_debug: an LMTP delivery with this file loads
+# quota, notify, push_notification, mail_lua and push_notification_lua. (Note
+# that `doveconf -f protocol=lmtp mail_plugins` prints only the filter's own
+# entries, which looks as if quota was dropped. It was not.)
+#
+# Optional, like the policy hook, and fail-open by construction: without a
+# push secret the hook is not loaded at all and LMTP runs exactly as before.
+# With one, a failure of the hook costs at most the script's one-second
+# request limit; it can never refuse, bounce, defer or duplicate mail. The
+# credential opens exactly one API endpoint and nothing else.
+if [ -n "${NATIVE_DOVECOT_PUSH_SECRET:-}" ]; then
+    # Same reasoning as the other values here: a setting value ends at a '#'
+    # or whitespace, so anything outside this alphabet is refused rather than
+    # escaped. Neither value is ever echoed.
+    case "$NATIVE_DOVECOT_PUSH_SECRET" in
+        *[!A-Za-z0-9._~+=/:@-]*)
+            echo "entrypoint: NATIVE_DOVECOT_PUSH_SECRET contains a character that" >&2
+            echo "            cannot be represented safely in a Dovecot config value." >&2
+            echo "            Allowed: A-Z a-z 0-9 . _ ~ + = / : @ -" >&2
+            exit 78
+            ;;
+    esac
+    PUSH_URL="${NATIVE_PUSH_URL:-http://api:8451/v1/dovecot/push}"
+    case "$PUSH_URL" in
+        http://*[!A-Za-z0-9._~+=/:@-]*|https://*[!A-Za-z0-9._~+=/:@-]*)
+            echo "entrypoint: NATIVE_PUSH_URL contains a character that cannot be" >&2
+            echo "            represented safely in a Dovecot config value." >&2
+            exit 78
+            ;;
+        http://*|https://*)
+            ;;
+        *)
+            echo "entrypoint: NATIVE_PUSH_URL must be an http:// or https:// URL." >&2
+            exit 78
+            ;;
+    esac
+    {
+        echo "# Generated at container start by images/dovecot/entrypoint.sh."
+        echo "# Holds one secret. PostBox new-mail events, for LMTP only."
+        echo "protocol lmtp {"
+        echo "  mail_plugins {"
+        echo "    notify = yes"
+        echo "    push_notification = yes"
+        echo "    mail_lua = yes"
+        echo "    push_notification_lua = yes"
+        echo "  }"
+        echo "}"
+        echo "push_notification postbox {"
+        echo "  push_notification_driver = lua"
+        echo "  lua_file = /etc/dovecot/postbox-push.lua"
+        echo "  lua_settings {"
+        echo "    url = ${PUSH_URL}"
+        echo "    secret = ${NATIVE_DOVECOT_PUSH_SECRET}"
+        echo "  }"
+        echo "}"
+    } > /etc/dovecot/engine-push.conf
+else
+    echo "entrypoint: NATIVE_DOVECOT_PUSH_SECRET unset - PostBox new-mail events are disabled" >&2
+    echo "# No push secret configured; PostBox new-mail events are disabled." > /etc/dovecot/engine-push.conf
+fi
+
 # The PostBox master credential (P11).
 #
 # PostBox authenticates a person with the password they type, then keeps

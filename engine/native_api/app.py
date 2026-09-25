@@ -54,6 +54,7 @@ import db
 import dkim as dkim_lib
 import operations
 import provisioning
+import push
 import validation
 from validation import ValidationError
 
@@ -335,8 +336,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             recorded = provisioning.record_login(conn, username)
         self._send(200, {"recorded": recorded})
 
+    def _handle_push_report(self):
+        """
+        A committed LMTP delivery, reported by Dovecot's push hook, for PostBox.
+
+        Answered as soon as the report is valid and queued: the relay to
+        MateMail runs on its own thread (push.Relay), so Dovecot - and the
+        delivery it is finishing - never waits on MateMail. The hook ignores
+        the answer anyway; mail was saved before it asked.
+        """
+        if not push.dovecot_authorized(self.headers.get("X-Native-Push-Secret", "")):
+            self._send(403, {"error": "unauthorized"})
+            return
+        try:
+            event = push.new_mail_event(self._body())
+        except ValidationError as exc:
+            self._send(400, {"error": exc.message, "field": exc.field})
+            return
+        except Exception as exc:                 # noqa: BLE001
+            self._fail(exc)
+            return
+        self._send(202, {"queued": push.relay.submit(event)})
+
     def do_POST(self):
         route = self._route
+        # PostBox new-mail events carry Dovecot's push credential, and like the
+        # policy route below they are checked before - and never with - the
+        # provisioning secret.
+        if route == "/v1/dovecot/push":
+            self._handle_push_report()
+            return
         # Checked BEFORE the provisioning secret: this route has its own
         # credential and must not be reachable with it, nor reachable with the
         # provisioning secret's authority.
@@ -659,6 +688,16 @@ def main():
     server = ThreadedHTTPServer(("0.0.0.0", LISTEN_PORT), Handler)
     logger.info("MateMail Native Engine API (NE2) listening on 0.0.0.0:%s", LISTEN_PORT)
     logger.info("engine database target %s:%s/%s", DB_HOST, DB_PORT, DB_NAME)
+    # PostBox new-mail events: say once, at start, what is and is not wired,
+    # so a half-configured relay is visible rather than silently dropping.
+    if push.DOVECOT_PUSH_SECRET and not push.relay.enabled:
+        logger.warning(
+            "PostBox push: Dovecot may report deliveries but NATIVE_POSTBOX_PUSH_URL "
+            "or NATIVE_POSTBOX_PUSH_SECRET is unset - events will not reach MateMail"
+        )
+    elif push.relay.enabled:
+        push.relay.start()
+        logger.info("PostBox push relay enabled")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

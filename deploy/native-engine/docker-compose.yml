@@ -239,8 +239,14 @@ services:
       # the entrypoint refuses to start without this, so a half-configured
       # engine cannot come up looking healthy.
       NATIVE_POSTBOX_MASTER_PASSWORD: ${NATIVE_POSTBOX_MASTER_PASSWORD:?required}
+      # PostBox new-mail events. OPTIONAL: empty means the push hook is not
+      # loaded and delivery is unchanged. Opens exactly one API endpoint.
+      NATIVE_DOVECOT_PUSH_SECRET: ${NATIVE_DOVECOT_PUSH_SECRET:-}
     volumes:
       - ./dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro
+      # The hook itself. Holds no secret (those come from the rendered
+      # engine-push.conf), so it is mounted like dovecot.conf, read-only.
+      - ./dovecot/postbox-push.lua:/etc/dovecot/postbox-push.lua:ro
       # Native mail store. mailcow's vmail-vol-1 is NEVER mounted here — that
       # volume holds the live platform sender's mail.
       - native_vmail:/var/vmail
@@ -371,6 +377,12 @@ services:
       NATIVE_DOVEADM_API_KEY: ${NATIVE_DOVEADM_API_KEY:?required}
       NATIVE_DOVEADM_URL: http://dovecot:8080
       NATIVE_DOVECOT_POLICY_SECRET: ${NATIVE_DOVECOT_POLICY_SECRET:?required}
+      # PostBox new-mail events: Dovecot's push credential, and where to relay
+      # (MateMail's private ingest on matemail_engine_link) with its own
+      # separate secret. All OPTIONAL; empty relays nothing.
+      NATIVE_DOVECOT_PUSH_SECRET: ${NATIVE_DOVECOT_PUSH_SECRET:-}
+      NATIVE_POSTBOX_PUSH_URL: ${NATIVE_POSTBOX_PUSH_URL:-}
+      NATIVE_POSTBOX_PUSH_SECRET: ${NATIVE_POSTBOX_PUSH_SECRET:-}
       NATIVE_DB_HOST: db
       NATIVE_DB_NAME: ${NATIVE_DB_NAME:-matemail_engine}
       NATIVE_DB_USER: ${NATIVE_DB_USER:-engine}

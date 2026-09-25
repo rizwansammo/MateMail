@@ -25,6 +25,7 @@ from .views_compose import (
     ScheduledListView,
     SendView,
 )
+from .views_push import DeviceDetailView, DeviceListView
 from .views_mail import (
     AttachmentView,
     FolderDetailView,
@@ -107,6 +108,10 @@ urlpatterns = [
     path("rules/", RuleListView.as_view(), name="postbox-rules"),
     path("rules/<uuid:pk>/", RuleDetailView.as_view(), name="postbox-rule"),
     path("vacation/", VacationView.as_view(), name="postbox-vacation"),
+
+    # ── native push registrations ───────────────────────────────────────────
+    path("devices/", DeviceListView.as_view(), name="postbox-devices"),
+    path("devices/<uuid:device_id>/", DeviceDetailView.as_view(), name="postbox-device"),
 
     # ── security ────────────────────────────────────────────────────────────
     path("security/change-password/", PasswordChangeView.as_view(),

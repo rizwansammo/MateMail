@@ -95,6 +95,27 @@ x-backend-env: &backend_env
   # it fails closed with a message rather than half-working.
   POSTBOX_MASTER_USER: ${POSTBOX_MASTER_USER:-postbox}
   POSTBOX_MASTER_PASSWORD: ${POSTBOX_MASTER_PASSWORD:?required}
+  # ── Native PostBox push (docs/POSTBOX_REMOTE_PUSH.md) ─────────────────────
+  # All OPTIONAL, and mail delivery never depends on any of them. Empty means
+  # devices can still register but no push is sent: without the ingest secret
+  # every engine report is refused; with it and no provider enabled, deliveries
+  # are recorded and nothing leaves. Declared here because Compose passes
+  # through only what this block names.
+  #
+  # The Native Engine relay's credential for /api/internal/postbox/push-events/
+  # (it must equal the engine's NATIVE_POSTBOX_PUSH_SECRET). Not INTERNAL_API_SECRET.
+  POSTBOX_PUSH_INGEST_SECRET: ${POSTBOX_PUSH_INGEST_SECRET:-}
+  # Android (FCM HTTP v1). The credentials file is a service-account JSON
+  # mounted read-only into backend and celery-worker from outside Git, e.g.
+  #   - /opt/MateMail/secrets/postbox-fcm.json:/run/secrets/postbox-fcm.json:ro
+  POSTBOX_FCM_ENABLED: ${POSTBOX_FCM_ENABLED:-False}
+  POSTBOX_FCM_PROJECT_ID: ${POSTBOX_FCM_PROJECT_ID:-}
+  POSTBOX_FCM_CREDENTIALS_FILE: ${POSTBOX_FCM_CREDENTIALS_FILE:-}
+  # Windows (WNS through the Windows App SDK, Microsoft Entra ID credentials).
+  POSTBOX_WNS_ENABLED: ${POSTBOX_WNS_ENABLED:-False}
+  POSTBOX_WNS_TENANT_ID: ${POSTBOX_WNS_TENANT_ID:-}
+  POSTBOX_WNS_CLIENT_ID: ${POSTBOX_WNS_CLIENT_ID:-}
+  POSTBOX_WNS_CLIENT_SECRET: ${POSTBOX_WNS_CLIENT_SECRET:-}
   CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://portal.matemail.online,https://postbox.matemail.online,https://platform.matemail.online,https://matemail.online}
   JWT_ACCESS_TOKEN_LIFETIME_MINUTES: ${JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
   JWT_REFRESH_TOKEN_LIFETIME_DAYS: ${JWT_REFRESH_TOKEN_LIFETIME_DAYS:-7}

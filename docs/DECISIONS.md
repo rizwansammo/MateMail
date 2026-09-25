@@ -2842,3 +2842,110 @@ trial workspace and never proved they own.
 - **Outlook may still require manual setup.** See `docs/OUTLOOK_ACCEPTANCE.md`.
   No claim of automatic configuration is made for any Outlook build until it
   has been observed working.
+
+---
+
+## DEC-058 — PostBox push starts at Dovecot's post-commit hook, and carries identifiers only
+
+**Status:** Accepted · **Phase:** PostBox remote push (server half) · **Date:** 2026-09-26
+
+### Decision
+
+A new-mail push for the native PostBox apps begins inside Dovecot, after the
+delivery has been saved and committed. Dovecot's `push_notification` plugin
+runs a Lua script, loaded for LMTP only, and the script reports the mailbox,
+folder, UIDVALIDITY and UID to the Native Engine API. It makes one POST with
+a one-second limit and ignores the answer.
+
+- **The relay.** The API relays the report to MateMail's internal ingest on
+  its own thread. MateMail stores each event once and fans it out through
+  Celery to FCM (Android) and WNS (Windows).
+- **The payload.** A data-only FCM message or a raw WNS notification. It
+  carries opaque identifiers only: a payload version, the kind, a
+  deterministic event id, the device registration id, the folder, and the
+  UID pair.
+- **Registrations.** One registration per mailbox, installation and
+  provider, owned by the PostBox session that registered it. Revoking the
+  session deletes it.
+- **Providers.** WNS is authenticated with Microsoft Entra ID client
+  credentials (Windows App SDK push), and FCM with HTTP v1 through
+  `google-auth`.
+- **The include.** It is loaded with `!include_try`.
+
+### Why
+
+**Mail first, by construction.** The hook runs after the commit, so nothing it
+does can change the outcome of the delivery. Measured against the pinned
+2.4.1 image:
+
+- an API that is down or that never answers costs about a second;
+- the message is saved and LMTP still answers 250;
+- one warning line is logged.
+
+Everything after the API's 202 is asynchronous: the relay, the ingest,
+Celery and the providers. An outage anywhere there loses a push, never mail.
+
+**Dovecot's own mechanism, not a guess at one.** `push_notification` ships in
+the pinned image and exists for this job. It is handed the UID the commit
+assigned, and it fires only in the protocols it is loaded into, so an IMAP
+APPEND or a `doveadm save` produces nothing. The alternatives:
+
+- **Maildir watcher, log tail, cron scanner, IMAP polling:** rejected as
+  fragile and out of scope.
+- **Postfix content filter:** rejected, because it runs before Dovecot has the
+  message and cannot know the UID.
+- **Sieve `enotify`/`execute`:** rejected, because it runs before the commit
+  and executes programs inside LMTP.
+
+**A relay, not a new network.** Dovecot is the most exposed component in the
+engine. It already calls the API on the engine network for its auth-policy
+hook, so the push report takes the same path with a credential that opens one
+endpoint. Dovecot gains no MateMail credential, no database write access, no
+port and no network. Only the API, already on `matemail_engine_link`, crosses
+to MateMail (the same reasoning as DEC-050).
+
+**Identifiers only.** A push travels through Google's or Microsoft's
+infrastructure. Microsoft's guidance is that notifications "should never
+include confidential, sensitive, or personal data". An identifier-only wake-up
+also keeps the device authoritative over its own notification settings: the
+app fetches through its authenticated session and decides what, if anything,
+to show. `PostBoxPreference.notify_in_app` is a web preference and is not
+reused as a device switch.
+
+**A derived event id.** A UUIDv5 of the mailbox, folder, UIDVALIDITY and UID
+means the same saved message is the same event however many times it is
+reported, relayed or retried. The dedupe works at every hop without shared
+state.
+
+**Session-bound registrations.** Sign-out, "sign out everywhere", a password
+change and expiry stop push through the session they already end, with no
+separate "push enabled" state to keep in step. Revocation also deletes the
+registration, so no dead session's token is kept. One installation can serve
+several mailboxes, one row each.
+
+**Entra ID for WNS.** The legacy Package-SID flow at `login.live.com` is
+UWP-only and, per Microsoft, not compatible with Windows App SDK push.
+
+**`google-auth` for FCM.** It is Google's own service-account-to-OAuth
+exchange, so no JWT code is written here. The Firebase Admin SDK is not
+justified for one HTTP call.
+
+**`!include_try`.** `dovecot.conf` ships with `git pull`, but the entrypoint
+that renders the include ships in the image. With `!include`, deploying the
+config before the image makes Dovecot fatal: IMAP and LMTP down over an
+optional feature. That was measured.
+
+### Consequences
+
+- **New images are needed.** The API and Dovecot images must be rebuilt and
+  deployed before the engine half runs. Every setting is optional, and an
+  unset one means no push.
+- **At-least-once delivery.** The app drops repeats by `event_id`.
+- **Not proven live.** No real FCM or WNS call has been made. Both adapters
+  are verified against the providers' documentation and mocked HTTP.
+- **Losses are accepted, not queued.** Events queued in the API's memory are
+  lost on an API restart, and events older than 30 minutes are not sent. The
+  app's own sync on launch covers both.
+- **Folder accuracy is unmeasured for Sieve.** It does not run on the Native
+  Engine; if it is enabled, `folder` must be re-measured before a client
+  relies on it.

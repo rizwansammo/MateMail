@@ -452,6 +452,53 @@ mailbox, so it is worth being explicit about what it is and is not:
   MateMail backend. Existing PostBox sessions survive: they are rows in
   MateMail's database, not Dovecot state.
 
+### PostBox new-mail events (push hook)
+
+Optional. When enabled, Dovecot reports each committed LMTP delivery (mailbox,
+folder, UIDVALIDITY, UID, and nothing of the message) to the API, and the API
+relays it to MateMail, which sends the remote push. Design, measurements and
+client contract: `docs/POSTBOX_REMOTE_PUSH.md` (DEC-058).
+
+```
+NATIVE_DOVECOT_PUSH_SECRET   Dovecot -> API /v1/dovecot/push. Generate it; it
+                             opens that one endpoint and nothing else.
+NATIVE_POSTBOX_PUSH_URL      where the API relays, e.g.
+                             http://backend:8000/api/internal/postbox/push-events/
+NATIVE_POSTBOX_PUSH_SECRET   the relay's credential; must equal MateMail's
+                             POSTBOX_PUSH_INGEST_SECRET
+```
+
+* **It needs the new images.** The hook's entrypoint rendering is in the
+  Dovecot image and the relay is in the API image. `dovecot/postbox-push.lua`
+  is bind-mounted like `dovecot.conf`, and `deploy.sh`'s configuration hash
+  covers it.
+* **Push off is the old path exactly.** With `NATIVE_DOVECOT_PUSH_SECRET`
+  unset, the entrypoint writes a one-line comment to `engine-push.conf`: no
+  plugin loads and LMTP is unchanged.
+* **Push on is LMTP only.** With the secret set, it renders a 0600 root file
+  that loads `notify`, `push_notification`, `mail_lua` and
+  `push_notification_lua` for **LMTP only**. Quota stays loaded; that was
+  measured with `mail_debug`.
+* **`!include_try`, deliberately.** `dovecot.conf` includes the file this
+  way, so the config reaching the server before the new Dovecot image means
+  no push rather than a Dovecot that will not start. That failure was measured
+  with a plain `!include`.
+* **It cannot hold up mail.** A failing hook costs one warning line and at
+  most about a second per delivery. It cannot refuse, defer, bounce or
+  duplicate mail. The API answers Dovecot at once and relays on its own
+  thread: a bounded queue of 1000, with retries at 2 s and 5 s only when
+  MateMail did not answer.
+
+Check it after a deploy:
+
+```bash
+docker exec matemail-native-dovecot doveconf -n | sed -n '/^push_notification/,/^}/p' | grep -v secret
+docker logs matemail-native-api 2>&1 | grep 'PostBox push'   # "PostBox push relay enabled"
+docker logs matemail-native-dovecot 2>&1 | grep postbox-push  # warnings only on failure
+```
+
+To disable it, unset `NATIVE_DOVECOT_PUSH_SECRET` and `./deploy.sh`.
+
 ### Immutable image digests in production
 
 ```

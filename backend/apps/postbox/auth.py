@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import authentication, exceptions
 
@@ -31,7 +32,7 @@ from apps.security import ratelimit
 from apps.security.client_ip import get_client_ip
 
 from . import imap
-from .models import PostBoxSession
+from .models import PostBoxPushDevice, PostBoxSession
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +269,10 @@ def revoke_other_sessions(mailbox: Mailbox, keep: PostBoxSession | None = None) 
     query = PostBoxSession.objects.filter(mailbox=mailbox, revoked_at__isnull=True)
     if keep is not None:
         query = query.exclude(pk=keep.pk)
-    return query.update(revoked_at=timezone.now())
+    with transaction.atomic():
+        # Their push registrations go with them, as in PostBoxSession.revoke.
+        PostBoxPushDevice.objects.filter(session__in=query).delete()
+        return query.update(revoked_at=timezone.now())
 
 
 def _redact(address: str) -> str:

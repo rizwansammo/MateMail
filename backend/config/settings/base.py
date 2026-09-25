@@ -233,6 +233,18 @@ CELERY_BEAT_SCHEDULE = {
         "task": "postbox.prune_expired_sessions",
         "schedule": crontab(hour="4", minute="10"),
     },
+    # Native push. The sweep is SERVER EVENT RETRY, not mailbox polling: it
+    # re-queues an event the engine reported but Celery never received (a
+    # broker outage at ingest) and expires ones too old to announce. It reads
+    # only the push-event table and never touches IMAP.
+    "postbox-sweep-push-events": {
+        "task": "postbox.sweep_push_events",
+        "schedule": crontab(minute="*"),
+    },
+    "postbox-prune-push-events": {
+        "task": "postbox.prune_push_events",
+        "schedule": crontab(hour="4", minute="20"),
+    },
 }
 
 # DRF
@@ -397,6 +409,27 @@ POSTBOX_MAX_MESSAGE_MB = env.int("POSTBOX_MAX_MESSAGE_MB", default=25)
 #: corporate gateways reject or strip large inline images outright.
 POSTBOX_SIGNATURE_IMAGE_KB = env.int("POSTBOX_SIGNATURE_IMAGE_KB", default=256)
 POSTBOX_SIGNATURE_IMAGE_MAX_PX = env.int("POSTBOX_SIGNATURE_IMAGE_MAX_PX", default=1200)
+
+# ── Native PostBox push (remote new-mail notifications) ──────────────────────
+# See docs/POSTBOX_REMOTE_PUSH.md. Everything here is optional: unset, devices
+# can still register and events are still recorded, but nothing is sent — and
+# mail delivery never depends on any of it.
+#
+# The Native Engine's credential for /api/internal/postbox/push-events/. Its own
+# value: NOT INTERNAL_API_SECRET, so the engine's push relay can report a
+# delivery and do nothing else. Empty refuses every report.
+POSTBOX_PUSH_INGEST_SECRET = env("POSTBOX_PUSH_INGEST_SECRET", default="")
+# Android — FCM HTTP v1. The service-account JSON is a mounted secret file,
+# never an environment value and never in Git.
+POSTBOX_FCM_ENABLED = env.bool("POSTBOX_FCM_ENABLED", default=False)
+POSTBOX_FCM_PROJECT_ID = env("POSTBOX_FCM_PROJECT_ID", default="")
+POSTBOX_FCM_CREDENTIALS_FILE = env("POSTBOX_FCM_CREDENTIALS_FILE", default="")
+# Windows — WNS through the Windows App SDK, authenticated with a Microsoft
+# Entra ID app registration (tenant, application id, client secret).
+POSTBOX_WNS_ENABLED = env.bool("POSTBOX_WNS_ENABLED", default=False)
+POSTBOX_WNS_TENANT_ID = env("POSTBOX_WNS_TENANT_ID", default="")
+POSTBOX_WNS_CLIENT_ID = env("POSTBOX_WNS_CLIENT_ID", default="")
+POSTBOX_WNS_CLIENT_SECRET = env("POSTBOX_WNS_CLIENT_SECRET", default="")
 
 # Transactional application email, sent through MateMail's own Mail Engine
 # (DEC-013). The default here keeps every environment from falling back to

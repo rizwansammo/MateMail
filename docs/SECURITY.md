@@ -1810,3 +1810,92 @@ my password", no plaintext credential storage, and no administrative view of
 anyone else's mail. Someone who has forgotten their password goes to an
 administrator in the Workspace, where the reset is audited — there is no
 unauthenticated path to a mailbox credential.
+
+## PostBox remote push (server half)
+
+Native PostBox apps are woken by FCM (Android) and WNS (Windows) when mail
+arrives. Full design, measurements and the client contract:
+`docs/POSTBOX_REMOTE_PUSH.md`. Decision: DEC-058. Built and tested locally.
+Not deployed, and no provider credential exists.
+
+### Mail does not depend on it
+
+The event starts in Dovecot's `push_notification` Lua hook, which is loaded
+for LMTP only and runs **after** the delivery has committed. It makes one
+POST with a one-second limit, inside `pcall`, and ignores the answer.
+
+- **Failure is harmless.** An absent or stalled API was measured to cost
+  about a second, with the message saved and LMTP answering 250.
+- **Nothing downstream can reach the delivery.** The relay, the ingest,
+  Celery and the providers all run after that answer.
+- **Push off means the old path.** Without `NATIVE_DOVECOT_PUSH_SECRET` no
+  plugin loads at all.
+- **A missing include is harmless.** The include is `!include_try`, because a
+  plain `!include` was measured to make Dovecot fatal when the config reached
+  the server before the image that renders it.
+
+### Three credentials, each opening one door
+
+| Secret | Opens | Held by |
+|---|---|---|
+| `NATIVE_DOVECOT_PUSH_SECRET` | the engine API's `/v1/dovecot/push`, checked before, and never with, the provisioning secret | Dovecot (0600 root-rendered include) and the API |
+| `NATIVE_POSTBOX_PUSH_SECRET` = `POSTBOX_PUSH_INGEST_SECRET` | MateMail's `/api/internal/postbox/push-events/` | the API and MateMail |
+| FCM service-account file, WNS Entra ID client secret | sending to the providers | MateMail backend and celery-worker |
+
+All comparisons use `hmac.compare_digest`, and an unset secret refuses
+everything. None of these is `INTERNAL_API_SECRET`, `NATIVE_API_SECRET` or
+the policy secret. The worst a compromised Dovecot can do with its credential
+is report a fake delivery, which produces a content-free wake-up. Dovecot
+gains no network, no port, no database write access and no MateMail
+credential. Only the API, already on `matemail_engine_link`, crosses to
+MateMail.
+
+### No content, anywhere
+
+- **Reports are identity only.** The Lua script reads only the mailbox,
+  folder, UIDVALIDITY and UID, although Dovecot also hands it the sender,
+  subject and a snippet. The API and the ingest both refuse, rather than
+  trim, any other field.
+- **The event table stores identity only.** It has no content column and is
+  pruned after 7 days.
+- **Pushes carry opaque identifiers.** Never the mailbox address, sender,
+  subject, preview, recipients, attachment names, the session cookie or any
+  token.
+- **Log lines carry ids and short codes only.** Never a token, channel URI,
+  secret or message content; mailboxes are logged by primary key.
+
+### Registrations
+
+- **Scoped like everything else in PostBox.** Registrations belong to the
+  signed-in mailbox and to the session that registered them. Another mailbox's
+  registration is a 404, and at most 20 are kept per mailbox.
+- **The token is write-only.** It is never returned by the API, never logged,
+  never placed in an error and never put in a payload.
+- **Revoking a session deletes its registrations.** That covers sign-out,
+  "sign out everywhere" and a password change, so a dead session's token is
+  not kept. An expired session's registrations are never selected.
+- **Checked at dispatch and again at send.** The session, the registration
+  and the mailbox's eligibility are re-checked before every send, because a
+  retry can run minutes later.
+
+### No server-side request forgery
+
+- **WNS channels are checked by shape, twice.** A channel URI must be HTTPS
+  on `notify.windows.com` or a subdomain, with no userinfo, on port 443. This
+  is checked at registration and again before each send, since that is where
+  a bearer token goes to that host.
+- **Nothing is fetched to validate a registration.**
+- **No redirects.** Neither provider client follows redirects, and the FCM
+  endpoint is fixed.
+- **The relay goes nowhere else.** The engine relay posts only to its
+  configured URL, with redirects refused and no proxy, so no caller can
+  redirect its credential.
+
+### Provider faults never disable devices
+
+A token is disabled only on the provider's own "this registration is dead"
+answer: FCM `UNREGISTERED`/404 or `INVALID_ARGUMENT`/400, and WNS 404/410.
+A credential or project error (FCM 401/403, WNS 401/403) is MateMail's fault,
+would otherwise disable every device at once, and so is recorded and left
+alone. Retries are bounded (3, backing off to at most 15 minutes) and apply to
+transient failures only.

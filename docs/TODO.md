@@ -425,3 +425,39 @@ a prerequisite.
 ⬜ **Microsoft and Zoho real inbox delivery untested.** Protocol interop to both
 is verified (MX resolution, TCP/25, STARTTLS, TLS 1.3), but no
 operator-controlled mailbox exists on either, and NE7 did not invent one.
+
+---
+
+## Found during PostBox remote push, server half (2026-09-26)
+
+✅ **A plain `!include` of the optional push file would have taken Dovecot
+down.** `dovecot.conf` ships with `git pull` and the entrypoint that renders
+`engine-push.conf` ships in the image. Measured with the old image, the result
+is `Fatal: ... No matches`: IMAP and LMTP stop over an optional feature. Fixed
+with `!include_try`, and a test pins it.
+
+✅ **Revoked sessions kept their push tokens.** A revoked session's
+registrations were never selected, but they sat in the table until the session
+was pruned, up to 37 days later. Revocation now deletes them.
+
+⬜ **PostBox-App client integration** (the next task): FCM receiver and WNS
+channel registration, the `installation_id`, and calls to
+`/api/postbox/devices/`. The contract is `docs/POSTBOX_REMOTE_PUSH.md` §12.
+
+⬜ **Provider accounts** (operator): a Firebase project and a service account
+that may send; a Microsoft Entra ID app registration; the Windows App SDK
+PFN → AppId mapping request to Microsoft. None of these exist.
+
+⬜ **Deploy**: new Native API and Dovecot images, the three push secrets, and
+the MateMail release with migration `postbox 0005`. Nothing is deployed.
+
+⬜ **First live push**, to prove each adapter against the real provider. Until
+then, FCM and WNS are verified only against documentation and mocked HTTP.
+
+⬜ **Re-measure `folder` if Sieve is ever enabled** on the Native Engine. Today
+every delivery lands in INBOX, and nothing claims more than the folder Dovecot
+reports.
+
+⬜ **The relay queue is in memory.** Events waiting in the API when it restarts
+are lost; the push is missed and the mail is not. Revisit only if missed pushes
+around deploys turn out to matter.

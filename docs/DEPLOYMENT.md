@@ -783,6 +783,52 @@ step seems to ask for one of those, it is the wrong step.
 
 ---
 
+## PostBox remote push (optional, not yet deployed)
+
+Remote new-mail push for the native PostBox apps. Design and client contract:
+`docs/POSTBOX_REMOTE_PUSH.md` (DEC-058). Every setting is optional, and mail
+delivery depends on none of them. Leave them empty and nothing is sent.
+
+What it adds:
+
+- **Two tables.** Migration `postbox 0005`, additive only, applied like any
+  other migration.
+- **Two endpoints.** `/api/postbox/devices/` is part of the PostBox API and
+  authenticated by the PostBox session. `/api/internal/postbox/push-events/`
+  is internal, and host nginx already denies it at the edge.
+- **Two beat tasks,** plus one new dependency, `google-auth`.
+- **Nothing on the network side.** No new port, container, network or nginx
+  change.
+
+Order, when it is switched on:
+
+1. **MateMail.** Deploy the release that contains it: the backend image
+   carries the code and `google-auth`. In `/opt/MateMail/.env`, generate
+   `POSTBOX_PUSH_INGEST_SECRET`
+   (`python -c "import secrets; print(secrets.token_urlsafe(40))"`). It must
+   not be `INTERNAL_API_SECRET`. Recreate `backend`, `celery-worker` and
+   `celery-beat`.
+2. **Native Engine.** In `/opt/MateMailNative/.env`:
+   - set `NATIVE_POSTBOX_PUSH_URL=http://backend:8000/api/internal/postbox/push-events/`;
+   - set `NATIVE_POSTBOX_PUSH_SECRET` to the same value as the ingest secret;
+   - generate a **separate** `NATIVE_DOVECOT_PUSH_SECRET`.
+
+   Then deploy the new API and Dovecot images with `./deploy.sh` (see
+   `deploy/native-engine/README.md`).
+3. **Providers**, when their accounts exist:
+   - **FCM:** mount the service-account JSON read-only into `backend` and
+     `celery-worker` (the commented example in `deploy/docker-compose.yml`),
+     then set `POSTBOX_FCM_ENABLED=True`, `POSTBOX_FCM_PROJECT_ID` and
+     `POSTBOX_FCM_CREDENTIALS_FILE`.
+   - **WNS:** set `POSTBOX_WNS_ENABLED=True`, `POSTBOX_WNS_TENANT_ID`,
+     `POSTBOX_WNS_CLIENT_ID` and `POSTBOX_WNS_CLIENT_SECRET`.
+
+A step done out of order costs a warning line and no push, never mail. Check
+it with the commands in the engine README. On the MateMail side, the log line
+`PostBox push: event <id> dispatched to <n> device(s)` shows events arriving.
+
+---
+
 ## Workspace hostname migration — app → portal (DEC-055)
 
 The customer console moved from `app.matemail.online` to

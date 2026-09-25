@@ -19,6 +19,8 @@
 *.cf        text eol=lf
 *.php       text eol=lf
 *.ini       text eol=lf
+# Dovecot runs the PostBox push hook from inside LMTP.
+*.lua       text eol=lf
 Dockerfile  text eol=lf
 .env*       text eol=lf
 

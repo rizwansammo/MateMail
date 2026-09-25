@@ -3176,3 +3176,72 @@ as literals rather than reading `/api/domains/{id}/records/`. The SPF value in
 it was corrected, but MX, DKIM and DMARC are duplicated there and can drift
 from the backend again. Making onboarding read the API is the real fix and was
 out of scope for this phase.
+
+---
+
+## PostBox remote push — MateMail server half (2026-09-26)
+
+**Built and tested locally, and measured against the real pinned Dovecot
+image. Not deployed.** No Firebase project, no Entra ID app registration and
+no provider credential exists, so no real push has been sent. The PostBox-App
+client half is not built; its contract is `docs/POSTBOX_REMOTE_PUSH.md` §12.
+Decision: DEC-058.
+
+### What exists
+
+| Area | State |
+|------|-------|
+| Dovecot post-commit hook: `push_notification` + Lua driver, LMTP only, 1 s, fail-open | Built; measured in the pinned 2.4.1 image |
+| Native API `POST /v1/dovecot/push` (own secret) + non-blocking relay to MateMail | Built |
+| MateMail ingest `POST /api/internal/postbox/push-events/` (own secret, strict, stores once) | Built |
+| Device API `GET/POST /api/postbox/devices/`, `DELETE /api/postbox/devices/<id>/` | Built |
+| Session-bound registrations; revocation deletes them | Built |
+| Deterministic event ids, dedupe, Celery dispatch, bounded retries, sweep, 7-day prune | Built |
+| FCM HTTP v1 adapter (`google-auth`), data-only | Built; **mocked HTTP only** |
+| WNS raw adapter (Microsoft Entra ID) | Built; **mocked HTTP only** |
+| PostBox-App FCM receiver / WNS channel | **Not built** (next task) |
+
+### Measured, not assumed
+
+Against the MateMail derivative of `dovecot/dovecot:2.4.1@sha256:1296e0f1…`,
+locally, with synthetic mailboxes:
+
+- **Relay target up.** LMTP 250 in 0.07–0.41 s. The report held exactly
+  mailbox, folder, UIDVALIDITY and UID, and they matched
+  `doveadm mailbox status`. No subject or body marker ever left Dovecot.
+- **Relay target down or stalled.** LMTP 250 at 1.08 s, the message saved, and
+  one warning line.
+- **Not a delivery.** `doveadm save` produced no event.
+- **The production configuration.** `dovecot.conf` with the real entrypoint,
+  push on and push off, starts for imap and lmtp. The rendered include is
+  0600 root, and quota stays loaded for LMTP (`mail_debug`).
+- **Two fixes came from measuring.**
+  - The include is now `!include_try`: with `!include`, the new config on an
+    older image was **fatal**, taking IMAP and LMTP down.
+  - Revocation now deletes a session's registrations. They used to sit
+    unselected, token and all, until the session was pruned.
+
+### Tests
+
+| Suite | Result |
+|-------|--------|
+| `tests.test_postbox_push` (new) | **25 tests, OK** |
+| `tests.test_native_engine_push` (new) | **7 tests, OK** |
+| Full Django suite (`manage.py test`) | **1826 tests, OK**, 5 skipped |
+| pytest-only regression files (the four CI names) | **217 passed**, 2 skipped |
+| `manage.py check` / `check --deploy` (prod) / `makemigrations --check` | clean / clean / no changes |
+
+A local-harness note worth keeping: on Windows the bash-driven tests
+(`test_backup_restore`, `test_deploy_revision_sync`) fail when `bash` resolves
+to WSL's `bash.exe`, which cannot see `/c/...` paths. With Git Bash first on
+`PATH` they pass. CI runs on Linux and is unaffected.
+
+### What is NOT proven
+
+- No push has been sent through FCM or WNS. Both adapters are verified against
+  the providers' documentation and mocked HTTP only.
+- Nothing is deployed. It needs new Native API and Dovecot images, the three
+  push secrets and the MateMail release with migration `postbox 0005`.
+- No PostBox app has received a push. The client half does not exist yet.
+- WNS additionally needs Microsoft's Package Family Name → Azure AppId
+  mapping, which is a manual request.
