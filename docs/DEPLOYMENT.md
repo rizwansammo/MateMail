@@ -816,10 +816,16 @@ Order, when it is switched on:
    Then deploy the new API and Dovecot images with `./deploy.sh` (see
    `deploy/native-engine/README.md`).
 3. **Providers**, when their accounts exist:
-   - **FCM:** mount the service-account JSON read-only into `backend` and
-     `celery-worker` (the commented example in `deploy/docker-compose.yml`),
-     then set `POSTBOX_FCM_ENABLED=True`, `POSTBOX_FCM_PROJECT_ID` and
-     `POSTBOX_FCM_CREDENTIALS_FILE`.
+   - **FCM:** put the service-account JSON at
+     `/opt/MateMail/secrets/postbox-fcm.json`, outside Git and readable by
+     uid 10001 (the image's user). `deploy/docker-compose.yml` mounts it
+     read-only into `backend` and `celery-worker` only, at
+     `/run/secrets/postbox-fcm.json`. Then set `POSTBOX_FCM_ENABLED=True`,
+     `POSTBOX_FCM_PROJECT_ID` and
+     `POSTBOX_FCM_CREDENTIALS_FILE=/run/secrets/postbox-fcm.json`, and recreate
+     `backend` and `celery-worker`. If the file is missing when the stack
+     starts, Docker creates an empty directory in its place: remove it before
+     copying the file in.
    - **WNS:** set `POSTBOX_WNS_ENABLED=True`, `POSTBOX_WNS_TENANT_ID`,
      `POSTBOX_WNS_CLIENT_ID` and `POSTBOX_WNS_CLIENT_SECRET`.
 

@@ -270,6 +270,26 @@ jobs:
           APP_NET = 'matemail_app'
           FORBIDDEN_PORTS = {'8015', '8016', '3015'}   # MateConnect
 
+          # The one exception to "production must not mount source": PostBox's
+          # FCM service-account JSON, kept outside Git and mounted read-only
+          # into the two services that send push (docs/POSTBOX_REMOTE_PUSH.md).
+          # Exactly this mount on exactly these services: another source,
+          # target or service, a writable mount or any other option still
+          # fails. `bind` may carry only create_host_path, which Compose
+          # versions print differently.
+          FCM_MOUNT_SERVICES = {'backend', 'celery-worker'}
+          FCM_MOUNT = {
+              'type': 'bind',
+              'source': '/opt/MateMail/secrets/postbox-fcm.json',
+              'target': '/run/secrets/postbox-fcm.json',
+              'read_only': True,
+          }
+
+          def is_fcm_mount(service, vol):
+              exact = {k: v for k, v in vol.items() if k != 'bind'} == FCM_MOUNT
+              options = set(vol.get('bind') or {}) - {'create_host_path'}
+              return service in FCM_MOUNT_SERVICES and exact and not options
+
           # Networks must be actually isolated, not merely named so. A network
           # called "internal" with driver bridge has full outbound access; only
           # `internal: true` removes the route off the host.
@@ -326,7 +346,7 @@ jobs:
               if 'build' in svc:
                   failures.append("%s declares a build context; production must use GHCR images" % name)
               for vol in svc.get('volumes') or []:
-                  if isinstance(vol, dict) and vol.get('type') == 'bind':
+                  if isinstance(vol, dict) and vol.get('type') == 'bind' and not is_fcm_mount(name, vol):
                       failures.append("%s bind-mounts %s; production must not mount source" % (name, vol.get('source')))
               if str(svc.get('image', '')).endswith(':latest'):
                   failures.append("%s uses :latest; production must pin an exact tag" % name)

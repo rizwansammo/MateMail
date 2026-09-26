@@ -5,7 +5,9 @@
 #
 #   /opt/MateMail/
 #   ├── docker-compose.yml   ← this file
-#   └── .env                 ← secrets and per-host settings, never committed
+#   ├── .env                 ← secrets and per-host settings, never committed
+#   └── secrets/
+#       └── postbox-fcm.json ← PostBox FCM service account, never committed
 #
 # Deploy:
 #   docker compose pull && docker compose up -d
@@ -105,9 +107,11 @@ x-backend-env: &backend_env
   # The Native Engine relay's credential for /api/internal/postbox/push-events/
   # (it must equal the engine's NATIVE_POSTBOX_PUSH_SECRET). Not INTERNAL_API_SECRET.
   POSTBOX_PUSH_INGEST_SECRET: ${POSTBOX_PUSH_INGEST_SECRET:-}
-  # Android (FCM HTTP v1). The credentials file is a service-account JSON
-  # mounted read-only into backend and celery-worker from outside Git, e.g.
-  #   - /opt/MateMail/secrets/postbox-fcm.json:/run/secrets/postbox-fcm.json:ro
+  # Android (FCM HTTP v1). The credentials file is a service-account JSON kept
+  # outside Git at /opt/MateMail/secrets/postbox-fcm.json, readable by uid 10001
+  # (the image's user). Only backend and celery-worker mount it, read-only
+  # (their `volumes:` below), so the path to set is
+  #   POSTBOX_FCM_CREDENTIALS_FILE=/run/secrets/postbox-fcm.json
   POSTBOX_FCM_ENABLED: ${POSTBOX_FCM_ENABLED:-False}
   POSTBOX_FCM_PROJECT_ID: ${POSTBOX_FCM_PROJECT_ID:-}
   POSTBOX_FCM_CREDENTIALS_FILE: ${POSTBOX_FCM_CREDENTIALS_FILE:-}
@@ -178,6 +182,10 @@ services:
     <<: *backend_image
     restart: unless-stopped
     environment: *backend_env
+    # The PostBox FCM credentials (POSTBOX_FCM_* above), read-only. Mounted
+    # here and in celery-worker, and nowhere else.
+    volumes:
+      - /opt/MateMail/secrets/postbox-fcm.json:/run/secrets/postbox-fcm.json:ro
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -213,6 +221,9 @@ services:
     restart: unless-stopped
     command: celery -A config worker --loglevel=info --concurrency=4
     environment: *backend_env
+    # The PostBox FCM credentials, read-only: pushes are sent from here.
+    volumes:
+      - /opt/MateMail/secrets/postbox-fcm.json:/run/secrets/postbox-fcm.json:ro
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
