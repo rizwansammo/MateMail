@@ -28,7 +28,7 @@ from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX, POSTBOX_SEND_PER_MA
 
 from . import imap, mime, sending
 from .auth import PostBoxSessionAuthentication
-from .models import PostBoxPreference
+from .models import PostBoxPreference, RemoteImageSenderTrust
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +250,19 @@ class MessageDetailView(PostBoxView):
             _assert_uid_validity(request, info.uid_validity)
             raw = connection.fetch_raw(uid)
             parsed = mime.parse_message(raw, load_remote_images=show_remote)
+
+            # A per-sender decision survives reloads and devices. Parse once
+            # with remote references blocked so the From address can be read
+            # safely, then reparse only when this mailbox has explicitly
+            # allowed that exact address.
+            if not show_remote and parsed.from_address:
+                sender = parsed.from_address.strip().lower()
+                show_remote = RemoteImageSenderTrust.objects.for_mailbox(
+                    self.mailbox
+                ).filter(sender=sender).exists()
+                if show_remote:
+                    parsed = mime.parse_message(raw, load_remote_images=True)
+
             # Bcc and the chosen signature only for this mailbox's own drafts,
             # which store them so they can be reopened whole. On any other
             # message neither is reported, and nothing is inferred from the
@@ -298,6 +311,35 @@ class MessageDetailView(PostBoxView):
                 for a in parsed.attachments
             ],
         })
+
+
+class MessageRemoteImageTrustView(PostBoxView):
+    """Persist remote-image loading for the exact From address of one message."""
+
+    def post(self, request, folder: str, uid: int):
+        with imap.open_mailbox(self.mailbox.email) as connection:
+            info = connection.select(folder, readonly=True)
+            _assert_uid_validity(request, info.uid_validity)
+            raw = connection.fetch_raw(uid)
+
+        parsed = mime.parse_message(raw, load_remote_images=False)
+        try:
+            sender = serializers.EmailField().run_validation(parsed.from_address)
+        except serializers.ValidationError:
+            return Response(
+                {"detail": "This message has no valid sender address."},
+                status=400,
+            )
+
+        sender = sender.strip().lower()
+        _, created = RemoteImageSenderTrust.objects.get_or_create(
+            mailbox=self.mailbox,
+            sender=sender,
+        )
+        return Response(
+            {"sender": sender, "trusted": True},
+            status=201 if created else 200,
+        )
 
 
 class MessageRawView(PostBoxView):
