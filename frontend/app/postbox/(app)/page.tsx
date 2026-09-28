@@ -233,6 +233,33 @@ function Mailbox() {
     [selected, folder, detail, loadList],
   );
 
+  const trustRemoteSender = useCallback(async () => {
+    if (!detail) return;
+    setDetailLoading(true);
+    try {
+      const trusted = await postbox.trustRemoteImages(
+        detail.folder,
+        detail.uid,
+        detail.uid_validity,
+      );
+      const data = await postbox.message(detail.folder, detail.uid);
+      setDetail(data);
+      setShowRemote(false);
+      setNotice(null);
+      setSuccessNotice(`Images will always display from ${trusted.sender}.`);
+      setSuccessVisible(true);
+    } catch (caught) {
+      setNotice(
+        describePostBoxError(
+          caught,
+          "That sender preference could not be saved.",
+        ),
+      );
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [detail]);
+
   const openReply = useCallback(
     async (mode: "reply" | "reply-all" | "forward") => {
       if (!detail) return;
@@ -508,6 +535,7 @@ function Mailbox() {
                   true,
                 )
               }
+              onTrustRemote={() => void trustRemoteSender()}
               onReply={openReply}
               onAction={(action) => void act(action, [detail.uid])}
             />
@@ -538,6 +566,7 @@ function Reader({
   showRemote,
   onBack,
   onLoadRemote,
+  onTrustRemote,
   onReply,
   onAction,
 }: {
@@ -545,6 +574,7 @@ function Reader({
   showRemote: boolean;
   onBack: () => void;
   onLoadRemote: () => void;
+  onTrustRemote: () => void;
   onReply: (mode: "reply" | "reply-all" | "forward") => void;
   onAction: (action: Parameters<typeof postbox.act>[0]) => void;
 }) {
@@ -619,9 +649,20 @@ function Reader({
             Remote images were blocked. Loading them tells the sender you opened
             this message.
           </span>
-          <button type="button" className="pb-btn pb-btn-ghost" onClick={onLoadRemote}>
-            Display images
-          </button>
+          <div className="flex flex-wrap items-center gap-1">
+            <button type="button" className="pb-btn pb-btn-ghost" onClick={onLoadRemote}>
+              Display images
+            </button>
+            {detail.from.address && (
+              <button
+                type="button"
+                className="pb-btn pb-btn-ghost"
+                onClick={onTrustRemote}
+              >
+                Always display images from {detail.from.address}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
