@@ -202,6 +202,43 @@ class PostBoxPreference(models.Model):
         return f"Preferences for {self.mailbox_id}"
 
 
+class RemoteImageSenderTrust(models.Model):
+    """
+    A mailbox-scoped decision to load remote images from one From address.
+
+    This is deliberately separate from the global `load_remote_images`
+    preference. Clicking "Display images" never writes here; only the explicit
+    "Always display images from ..." action creates a row.
+    """
+
+    mailbox = models.ForeignKey(
+        "mailboxes.Mailbox",
+        on_delete=models.CASCADE,
+        related_name="remote_image_sender_trusts",
+    )
+    sender = models.EmailField(max_length=254)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = MailboxScopedQuerySet.as_manager()
+
+    class Meta:
+        db_table = "postbox_remote_image_sender_trust"
+        ordering = ["sender"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mailbox", "sender"],
+                name="postbox_remote_image_sender_trust_unique",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        self.sender = (self.sender or "").strip().lower()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.sender} for {self.mailbox_id}"
+
+
 class SignatureKind(models.TextChoices):
     """
     What a signature IS, stated rather than guessed.

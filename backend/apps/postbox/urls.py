@@ -34,6 +34,7 @@ from .views_mail import (
     MessageDetailView,
     MessageListView,
     MessageRawView,
+    MessageRemoteImageTrustView,
 )
 from .views_settings import (
     ContactDetailView,
@@ -73,6 +74,8 @@ urlpatterns = [
          AttachmentView.as_view(), name="postbox-attachment"),
     path("messages/<path:folder>/<int:uid>/reply-context/", ReplyContextView.as_view(),
          name="postbox-reply-context"),
+    path("messages/<path:folder>/<int:uid>/remote-images/trust/",
+         MessageRemoteImageTrustView.as_view(), name="postbox-remote-image-trust"),
     path("messages/<path:folder>/<int:uid>/", MessageDetailView.as_view(),
          name="postbox-message"),
 

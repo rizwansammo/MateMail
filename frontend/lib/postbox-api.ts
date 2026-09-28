@@ -356,6 +356,13 @@ export const postbox = {
         remote_images: remoteImages ? "true" : undefined,
       })}`,
     ),
+  trustRemoteImages: (folder: string, uid: number, uidValidity: number) =>
+    request<{ sender: string; trusted: boolean }>(
+      `/messages/${encodeFolder(folder)}/${uid}/remote-images/trust/${qs({
+        uid_validity: uidValidity,
+      })}`,
+      { method: "POST", body: "{}" },
+    ),
   rawUrl: (folder: string, uid: number) =>
     `${BASE}/messages/${encodeFolder(folder)}/${uid}/raw/`,
   attachmentUrl: (folder: string, uid: number, partId: string) =>
