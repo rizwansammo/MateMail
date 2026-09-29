@@ -68,7 +68,6 @@ MUST_BE_EXECUTABLE = {
 MUST_NOT_BE_EXECUTABLE = {
     "deploy/backup/lib/guard.sh":
         "sourced, never executed; install.sh places it 0600 deliberately",
-        "placed by `install -m 750` into the certbot hooks directory",
     "deploy/native-engine/images/dovecot/entrypoint.sh":
         "Dockerfile COPY --chmod=0755",
     "deploy/native-engine/images/postfix/entrypoint.sh":
