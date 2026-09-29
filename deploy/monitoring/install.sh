@@ -66,7 +66,6 @@ cat > "$DEST/collector.env" <<'ENV'
 # Passed to the collector by systemd. Paths only; no secrets live here.
 NATIVE_DIR=/opt/MateMailNative/deploy/native-engine
 MATEMAIL_DIR=/opt/MateMail
-MAILCOW_DIR=/opt/mailcow-dockerized
 BACKUP_ENV=/opt/MateMailBackup/backup.env
 MATEMAIL_HEALTH_URL=http://127.0.0.1:8020/api/internal/health/
 MAIL_HOSTNAME=mx.matemail.online
