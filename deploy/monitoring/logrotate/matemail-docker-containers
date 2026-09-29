@@ -7,7 +7,7 @@
 #
 #   The usual fix is to set log-opts in daemon.json, but that only applies to
 #   newly created containers and needs a Docker daemon restart, which on this
-#   host would disturb 72 containers including Mailcow and several unrelated
+#   host would disturb 72 containers including several unrelated
 #   production applications. logrotate achieves the same bound today and
 #   disturbs nothing.
 #
