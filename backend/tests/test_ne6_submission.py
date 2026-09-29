@@ -1,5 +1,5 @@
 """
-NE6 — MateMail platform outbound moves from Mailcow to the Native Engine.
+NE6 — MateMail platform outbound runs through the Native Engine.
 
 Two kinds of test live here.
 
@@ -535,19 +535,6 @@ def test_the_utility_installs_under_the_engines_own_lock():
     body = DKIM_SCRIPT.read_text(encoding="utf-8")
     assert "dkim_lifecycle_lock" in body
     assert "dkim_lib.activate(" in body, "must use the engine's atomic commit"
-
-
-# ─── rollback material must survive ─────────────────────────────────────────
-
-def test_the_mailcow_rollback_assets_are_retained():
-    """
-    Mailcow stays installed and its gateway configuration stays in the
-    repository. Rollback is reattaching one network alias, and that is only
-    true while these files exist.
-    """
-    for path in (REPO / "deploy" / "engine" / "haproxy.cfg",
-                 REPO / "deploy" / "engine" / "certbot-deploy-hook-mailcow-mx.sh"):
-        assert path.is_file(), f"{path.relative_to(REPO)} is rollback material"
 
 
 def test_no_secret_is_committed_with_the_ne6_changes():
