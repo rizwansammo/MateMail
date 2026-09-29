@@ -179,14 +179,12 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
+          envs: IMAGE_TAG
           timeout: 60s
           command_timeout: 5m
           script: |
@@ -264,12 +262,14 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: IMAGE_TAG
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
           timeout: 60s
           command_timeout: 15m
           script: |
