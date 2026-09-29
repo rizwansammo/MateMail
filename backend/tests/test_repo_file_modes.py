@@ -68,16 +68,11 @@ MUST_BE_EXECUTABLE = {
 MUST_NOT_BE_EXECUTABLE = {
     "deploy/backup/lib/guard.sh":
         "sourced, never executed; install.sh places it 0600 deliberately",
-    "deploy/engine/certbot-deploy-hook-mailcow-mx.sh":
         "placed by `install -m 750` into the certbot hooks directory",
     "deploy/native-engine/images/dovecot/entrypoint.sh":
         "Dockerfile COPY --chmod=0755",
     "deploy/native-engine/images/postfix/entrypoint.sh":
         "Dockerfile COPY --chmod=0755",
-    "scripts/apply-mailcow-config.sh":
-        "documented as `sudo bash scripts/apply-mailcow-config.sh`",
-    "scripts/install-policy-bridge.sh":
-        "documented as `sudo bash scripts/install-policy-bridge.sh`",
 }
 
 
