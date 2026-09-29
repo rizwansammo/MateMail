@@ -4,13 +4,6 @@ Forwarding product logic.
 This resolves *what* a mailbox's forwarding should be. The Mail Engine adapter
 only carries out the resulting instruction.
 
-Before P1 this lived inside `MailcowAdapter.provision_forwarding`, which queried
-`ForwardingRule` directly and implemented `keep_copy` semantics. That put MateMail
-business rules below the adapter boundary: a replacement engine would have had to
-reimplement them, and the rules were untestable without an engine.
-"""
-import logging
-
 from apps.mail_engine.dto import ForwardingSpec
 
 from .models import ForwardingRule, ForwardingStatus
