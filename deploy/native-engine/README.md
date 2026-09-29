@@ -1,13 +1,10 @@
-# MateMail Native Mail Engine — deployment (NE1–NE3)
+# MateMail Native Mail Engine — production deployment
 
-The Native Engine is a MateMail-owned mail stack built directly on Postfix,
-Dovecot and Rspamd. It exists to replace mailcow as the orchestration layer, and
-the Private Beta will run on it.
+The Native Engine is MateMail's production mail stack, built directly on
+Postfix, Dovecot and Rspamd. It owns provisioning, SMTP, IMAP, filtering,
+storage, DKIM, queue/quarantine and operational control.
 
-**mailcow is the LIVE production engine and is untouched by everything here.**
-It holds the only customer-facing mail path and the platform sender's identity,
-and it stays that way until NE8 — which is separately authorised and is not this
-phase.
+The legacy Mailcow engine was retired from MateServer on 2026-09-29.
 
 Architecture and the decisions behind it: `docs/NATIVE_MAIL_ENGINE.md` § NE0,
 and DEC-019.
@@ -346,8 +343,7 @@ worse than reporting the domain and letting an operator rotate deliberately.
 `MAIL_ENGINE_ADAPTER=native` in production (release `37ebb217`, CI 35437334621,
 deploy 35437913166). The Native `api` joins `matemail_engine_link`; nothing else
 on this stack does, so MateMail can reach the control API and cannot reach the
-mail path, the mail store or the engine database. mailcow remains installed as
-the rollback path and the live mail transport.
+mail path, the mail store or the engine database. the Native Engine is the sole production mail transport.
 
 **NE4 COMPLETE** — operations, queue, quarantine, rate limits and mailbox
 storage lifecycle, deployed and runtime-validated 2026-09-19.
@@ -392,7 +388,7 @@ NE3 runtime            VALIDATED (2026-09-18) — schema v2 -> v3 with migration
                        rejected, quota enforced, last_login correct. All
                        synthetic state cleaned; 0 outbound SMTP deliveries.
 adapter methods        18 of 26 implemented; the 8 that refuse all name NE4
-production engine      mailcow, untouched. MAIL_ENGINE_ADAPTER is still "mailcow".
+production engine      Native Engine. MAIL_ENGINE_ADAPTER="native".
 ```
 
 ### Deploying — always use `./deploy.sh`

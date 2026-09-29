@@ -365,8 +365,7 @@ Docker daemon restart that a `daemon.json` change would have required across
 ⬜ **`ALERT_RECEIVER_CONFIGURED = NO`.** Alerts fire, group and are visible in
 Alertmanager over the SSH tunnel, but nothing is delivered off the host. Set
 `ALERT_WEBHOOK_URL` in `/opt/MateMailMonitoring/.env` and re-run `install.sh`.
-The destination must not be served by Native Postfix, Mailcow or MateMail's
-transactional sender. Pre-beta requirement; does not block NE6.
+The destination must not be served by Native Postfix or MateMail's transactional sender. Pre-beta requirement; does not block NE6.
 
 ⬜ **`OFFSITE_BACKUP_CONFIGURED = NO`** (carried from P6, now monitored).
 `BackupOffsiteNotConfigured` fires permanently and by design. Pre-beta
@@ -376,15 +375,6 @@ requirement; does not block NE6.
 
 ## Found during NE6 (2026-09-19)
 
-⬜ **Rotate `MAIL_ENGINE_API_KEY`.** The legacy Mailcow API key in
-`/opt/MateMail/.env` was printed into an engineering session transcript during
-NE6 inspection. It is unused since `MAIL_ENGINE_ADAPTER=native` and is only
-reachable on the private network, so this is low urgency — but it should be
-rotated in Mailcow and the `.env` updated. The related
-`MAIL_ENGINE_API_URL=https://mx.matemail.online:8453` is also now dead
-configuration: that path pointed at the Mailcow gateway, which is no longer
-attached to the link network. Both can be removed outright once the Mailcow
-adapter is retired at NE8.
 
 ⬜ **Stale comment in the Native compose networks block.** It describes the
 engine network as "internal (no egress)". It is not, and must not be — Postfix
@@ -412,11 +402,6 @@ collector read only stdout while Dovecot logs to stderr, and the patterns used
 ✅ **Sender-login restrictions were declared on port 25 where Postfix ignores
 them**, warning on every inbound connection. Moved to submission.
 
-⬜ **`MAIL_ENGINE_API_KEY` rotation** (carried from NE6). Still legacy,
-private-network-only and unused by the Native adapter. NE7 deliberately did not
-rotate it: the Mailcow API path is part of the rollback story until NE8, and
-changing it now would mean testing a rollback path that is meant to stay
-untouched. Rotate at NE8 when Mailcow is removed, or sooner if convenient.
 
 ⬜ **No automatic client configuration** (autoconfig / autodiscover). Manual
 settings are documented in `docs/MAIL_CLIENT_SETUP.md`. A product feature, not

@@ -249,7 +249,7 @@ class ProductionNetworkTopologyTest(SimpleTestCase):
         certificate, and the ways around that are all worse than the routing
         problem they solve.
         """
-        for key in ("MAIL_ENGINE_API_URL", "EMAIL_HOST"):
+        for key in ("NATIVE_ENGINE_API_URL", "EMAIL_HOST"):
             for line in self.raw.splitlines():
                 if line.strip().startswith(f"{key}:"):
                     self.assertNotIn(self.REJECTED_GATEWAY, line)

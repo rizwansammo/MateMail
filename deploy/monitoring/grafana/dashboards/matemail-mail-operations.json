@@ -292,69 +292,6 @@
       }
     },
     {
-      "id": 6,
-      "type": "stat",
-      "title": "Mailcow queue",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "matemail-prom"
-      },
-      "gridPos": {
-        "x": 17,
-        "y": 1,
-        "w": 3,
-        "h": 5
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "matemail_mailcow_queue_total",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "matemail-prom"
-          },
-          "instant": true
-        }
-      ],
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "auto",
-        "justifyMode": "auto"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 50
-              },
-              {
-                "color": "red",
-                "value": 100
-              }
-            ]
-          },
-          "mappings": []
-        },
-        "overrides": []
-      }
-    },
-    {
       "id": 7,
       "type": "stat",
       "title": "Active IMAP sessions",
@@ -458,68 +395,6 @@
             "showPoints": "never",
             "stacking": {
               "mode": "normal"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 10,
-      "type": "timeseries",
-      "title": "Oldest queued message age",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "matemail-prom"
-      },
-      "description": "",
-      "gridPos": {
-        "x": 12,
-        "y": 7,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "matemail_native_queue_oldest_age_seconds",
-          "legendFormat": "native",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "matemail-prom"
-          }
-        },
-        {
-          "refId": "B",
-          "expr": "matemail_mailcow_queue_oldest_age_seconds",
-          "legendFormat": "mailcow",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "matemail-prom"
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "stacking": {
-              "mode": "none"
             }
           }
         },

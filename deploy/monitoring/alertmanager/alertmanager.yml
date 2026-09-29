@@ -2,7 +2,7 @@
 #
 # THE POINT OF THIS FILE
 #   Monitoring that emails you to say the mail system is down is not
-#   monitoring. Native Postfix, Mailcow and MateMail's transactional sender are
+#   monitoring. Native Postfix and MateMail's transactional sender are
 #   all things this stack is watching, so none of them can be the thing that
 #   carries the alert.
 #

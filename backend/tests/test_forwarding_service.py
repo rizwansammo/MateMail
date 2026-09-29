@@ -38,9 +38,9 @@ class AdapterPurityTest(TestCase):
     """The adapter layer must not import or query MateMail product models."""
 
     def test_adapter_modules_do_not_import_product_models(self):
-        from apps.mail_engine import adapter, dto, errors, mailcow_adapter, stub_adapter
+        from apps.mail_engine import adapter, dto, errors, native_adapter, stub_adapter
 
-        for module in (adapter, dto, errors, mailcow_adapter, stub_adapter):
+        for module in (adapter, dto, errors, native_adapter, stub_adapter):
             source = inspect.getsource(module)
             with self.subTest(module=module.__name__):
                 for forbidden in (

@@ -1,15 +1,7 @@
-"""
-Adapter factory — returns the configured MailEngineAdapter singleton.
+"""Mail Engine adapter factory.
 
-Configured via MAIL_ENGINE_ADAPTER in settings:
-  "stub"    → StubAdapter                (default; safe for local dev and CI)
-  "mailcow" → MailcowAdapter             (production)
-  "native"  → NativeMailEngineAdapter    (NE2: implemented and tested, NOT selected)
-
-"native" is selectable but is not production. mailcow remains the live engine
-until NE5 authorises the swap; this entry exists so the adapter can be exercised
-end to end without a settings patch that a future reader would mistake for a
-migration having happened.
+Production uses the MateMail Native Engine. The stub adapter remains available
+for local development and CI where no mail infrastructure exists.
 """
 import threading
 from django.conf import settings
@@ -27,10 +19,7 @@ def get_adapter() -> MailEngineAdapter:
         if _adapter is not None:
             return _adapter
         name = getattr(settings, "MAIL_ENGINE_ADAPTER", "stub").lower().strip()
-        if name == "mailcow":
-            from .mailcow_adapter import MailcowAdapter
-            _adapter = MailcowAdapter()
-        elif name == "native":
+        if name == "native":
             from .native_adapter import NativeMailEngineAdapter
             _adapter = NativeMailEngineAdapter()
         elif name == "stub":
@@ -49,7 +38,7 @@ def get_adapter() -> MailEngineAdapter:
             from django.core.exceptions import ImproperlyConfigured
             raise ImproperlyConfigured(
                 f"MAIL_ENGINE_ADAPTER={name!r} is not a known adapter. "
-                f"Valid values: 'stub', 'mailcow', 'native'."
+                f"Valid values: 'stub', 'native'."
             )
     return _adapter
 

@@ -15,7 +15,7 @@ WHY IT EXISTS AT ALL
 
     Given that, routing ALL provisioning through one authenticated service buys
     a single trust boundary and a single auth model, and keeps
-    `NativeMailEngineAdapter` the same shape as `MailcowAdapter` — which is what
+    `NativeMailEngineAdapter` aligned with the MailEngineAdapter contract — which is what
     makes NE5 an adapter swap rather than a rewrite.
 
     The write model this enforces (NE0.2):

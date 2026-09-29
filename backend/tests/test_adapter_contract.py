@@ -25,7 +25,6 @@ from apps.mail_engine.dto import (
 )
 from apps.mail_engine.errors import EngineUnavailable, MailEngineError, Rejected
 from apps.mail_engine.stub_adapter import StubAdapter
-from tests.fake_engine import build_mailcow_adapter
 
 DOMAIN = "contract.example"
 ADDRESS = f"alice@{DOMAIN}"
@@ -401,61 +400,3 @@ class StubAdapterContractTest(AdapterContractTests, SimpleTestCase):
     def alias_destinations(self, address):
         spec = self.adapter._aliases.get(address)
         return spec.destinations if spec else None
-
-
-class MailcowAdapterContractTest(AdapterContractTests, SimpleTestCase):
-    """The real adapter, driven against an in-memory fake of the engine's API."""
-
-    def setUp(self):
-        self.adapter, self.engine = build_mailcow_adapter()
-
-    def credential_present(self, address) -> bool:
-        return self.engine.mailboxes.get(address, {}).get("_has_password", False)
-
-    def alias_destinations(self, address):
-        row = self.engine.aliases.get(address)
-        return tuple(row["goto"].split(",")) if row else None
-
-    # ── Error mapping — only meaningful against the real adapter ────────────
-
-    def test_transport_failure_maps_to_engine_unavailable(self):
-        self.engine.fail_next_transport = True
-        with self.assertRaises(EngineUnavailable):
-            self.adapter.ensure_domain(domain_spec())
-
-    def test_server_error_maps_to_engine_unavailable(self):
-        self.engine.fail_next_status = 502
-        with self.assertRaises(EngineUnavailable):
-            self.adapter.ensure_domain(domain_spec())
-
-    def test_auth_rejection_maps_to_engine_unavailable(self):
-        """A bad API key is an operator problem, not a customer-actionable one."""
-        self.engine.fail_next_status = 401
-        with self.assertRaises(EngineUnavailable):
-            self.adapter.ensure_domain(domain_spec())
-
-    def test_quota_rejection_maps_to_quota_exceeded(self):
-        from apps.mail_engine.errors import QuotaExceeded
-
-        self.adapter.ensure_domain(domain_spec())
-        self.engine.fail_next_message = "mailbox quota exceeds domain maxquota"
-        with self.assertRaises(QuotaExceeded):
-            self.adapter.ensure_mailbox(mailbox_spec(), "Initial-Passphrase-1")
-
-    def test_unrecognised_rejection_maps_to_rejected(self):
-        self.engine.fail_next_message = "something the adapter has never seen"
-        with self.assertRaises(Rejected):
-            self.adapter.ensure_domain(domain_spec())
-
-    def test_every_mapped_error_is_a_mail_engine_error(self):
-        """Product code can catch MailEngineError and be exhaustive."""
-        for injected in ("already exists", "not found", "quota exceeded", "weird"):
-            with self.subTest(engine_says=injected):
-                self.engine.fail_next_message = injected
-                with self.assertRaises(MailEngineError):
-                    self.adapter.ensure_domain(domain_spec(name="err.example"))
-
-    def test_health_reports_unreachable_instead_of_raising(self):
-        self.engine.fail_all_transport = True
-        health = self.adapter.check_health()
-        self.assertFalse(health.reachable)

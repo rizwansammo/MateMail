@@ -54,7 +54,6 @@ STATE = Path(os.environ.get(
 
 NATIVE_DIR = os.environ.get("NATIVE_DIR", "/opt/MateMailNative/deploy/native-engine")
 MATEMAIL_DIR = os.environ.get("MATEMAIL_DIR", "/opt/MateMail")
-MAILCOW_DIR = os.environ.get("MAILCOW_DIR", "/opt/mailcow-dockerized")
 BACKUP_ENV = os.environ.get("BACKUP_ENV", "/opt/MateMailBackup/backup.env")
 MATEMAIL_HEALTH_URL = os.environ.get(
     "MATEMAIL_HEALTH_URL", "http://127.0.0.1:8020/api/internal/health/")
@@ -475,37 +474,6 @@ def sec_mail_queue():
            "Messages held in the Native quarantine")
     metric("matemail_native_queue_empty", 1 if total == 0 else 0, {},
            "1 when the Native queue is empty, which is normal before NE6")
-
-
-def sec_transitional():
-    """
-    Mailcow still carries Internet mail until NE8. This exists to see that
-    transition safely and is deliberately thin: no product depends on it, and
-    it is deleted with Mailcow.
-    """
-    running = sum(1 for n, c in CONTAINERS.items()
-                  if n.startswith("mailcowdockerized-")
-                  and c.get("State", {}).get("Running"))
-    metric("matemail_mailcow_containers_running", running, {},
-           "Running Mailcow containers (transitional, removed at NE8)")
-    metric("matemail_mailcow_up", 1 if running > 0 else 0, {},
-           "1 when Mailcow is running")
-    bridge = CONTAINERS.get("mailcowdockerized-matemail-policy-bridge-1")
-    if bridge is not None:
-        st = bridge.get("State", {})
-        healthy = (st.get("Health") or {}).get("Status") == "healthy"
-        metric("matemail_p5_bridge_up", 1 if st.get("Running") else 0, {},
-               "1 when the P5 policy bridge container is running")
-        metric("matemail_p5_bridge_healthy", 1 if healthy else 0, {},
-               "1 when the P5 policy bridge reports healthy")
-    else:
-        metric("matemail_p5_bridge_up", 0, {},
-               "1 when the P5 policy bridge container is running")
-        metric("matemail_p5_bridge_healthy", 0, {},
-               "1 when the P5 policy bridge reports healthy")
-    if "mailcowdockerized-postfix-mailcow-1" in CONTAINERS:
-        _queue_metrics("matemail_mailcow", "mailcowdockerized-postfix-mailcow-1",
-                       "Mailcow Postfix")
 
 
 #: Postfix and Dovecot log shapes. Kept as a table so adding a signal is a row,
@@ -1123,7 +1091,7 @@ def main():
     for name, fn in [
         ("native_services", sec_native), ("matemail_services", sec_matemail),
         ("app_health", sec_app_health), ("engine_api", sec_engine_api),
-        ("mail_queue", sec_mail_queue), ("transitional", sec_transitional),
+        ("mail_queue", sec_mail_queue),
         ("log_counters", sec_log_counters), ("scanners", sec_scanners),
         ("dns", sec_dns), ("postgres", sec_postgres), ("redis", sec_redis),
         ("storage", sec_storage), ("backups", sec_backups), ("tls", sec_tls),

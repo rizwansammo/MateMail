@@ -74,7 +74,7 @@ from .dto import (
 
 class MailEngineAdapter(ABC):
     """
-    Implementations: `StubAdapter` (no engine) and `MailcowAdapter` (real engine).
+    Implementations: `StubAdapter` (local development/CI) and `NativeMailEngineAdapter` (production).
 
     Both must satisfy `tests/test_adapter_contract.py`. Add a method here only
     with a corresponding contract test, or the two implementations will drift.

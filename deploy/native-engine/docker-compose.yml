@@ -1,21 +1,12 @@
 # MateMail Native Mail Engine — NE1 foundation.
 #
 # WHAT THIS CONFIGURES
-#   The ten-service Native Engine stack defined in docs/NATIVE_MAIL_ENGINE.md
-#   § NE0.19, deployed as its own Compose project entirely separate from
-#   mailcow and from the MateMail application.
+#   The MateMail Native Engine stack, deployed as its own Compose project.
 #
 # WHY IT IS SHAPED THIS WAY
-#   NE1 is a FOUNDATION, not a working mail server. Every service must start,
-#   stay healthy, persist its state and recover from a restart — and nothing
-#   more. Provisioning is NE2, mail flow is NE3, the adapter switch is NE5.
-#
-#   The single hardest requirement is isolation. mailcow is the LIVE production
-#   engine: it holds the only customer-facing mail path and the platform
-#   sender's identity. Nothing here may touch its networks, its volumes or its
-#   configuration. That is why every network and volume below is new, and why
-#   there is not one reference to a `mailcowdockerized_*` name anywhere in this
-#   file.
+#   Every service owns only the state and network access it needs. The Native
+#   Engine is the sole production mail engine and does not share storage,
+#   database, queue or key material with other applications.
 #
 # WHICH PHASE OWNS IT
 #   NE1. Later phases extend it; they must not weaken the isolation properties
@@ -435,11 +426,7 @@ services:
   # exchange run end to end between Django and Postfix. This container never
   # sees the password and holds no key, so there is nothing in it to steal.
   #
-  # This REPLACES the Mailcow-owned gateway that carried the same traffic
-  # before NE6. Both cannot hold the `mx.matemail.online` alias at once —
-  # Docker would round-robin between them and mail would land in two different
-  # systems at random — so deployment detaches the Mailcow one. Reattaching it
-  # is the rollback, and it is a single `docker network connect`.
+  # Permanent Native-owned private gateway for application SMTP/IMAP access.
   submission-gateway:
     <<: *common
     container_name: matemail-native-submission-gateway

@@ -547,8 +547,7 @@ def test_security_alerts_are_not_made_to_wait():
 def test_the_required_alerts_all_exist():
     """The P7 list, checked by name so none is quietly dropped."""
     required = {
-        "NativeServiceDown", "MateMailServiceDown", "MailcowDown",
-        "P5PolicyBridgeDown", "NativeQueueGrowing", "NativeQueuedMailTooOld",
+        "NativeServiceDown", "MateMailServiceDown", "NativeQueueGrowing", "NativeQueuedMailTooOld",
         "NativeDeferredQueueGrowing", "RedisDown", "PostgresDown",
         "UnboundDown", "RspamdDown", "ClamAVDown", "OlefyDown",
         "BackupStale", "BackupFailed", "DiskSpaceLow", "InodesLow",
@@ -636,7 +635,7 @@ def test_the_three_operator_dashboards_cover_what_p7_asks_for():
     for expr in ("matemail_native_services_healthy", "matemail_app_all_healthy",
                  "matemail_backup_latest_snapshot_age_seconds",
                  "matemail_certificate_days_remaining",
-                 "matemail_dns_ptr_correct", "matemail_mailcow_up",
+                 "matemail_dns_ptr_correct",
                  "matemail_ne6_ready"):
         assert expr in overview, f"overview does not show {expr}"
 

@@ -172,7 +172,7 @@ Full definitions: `deploy/monitoring/prometheus/rules/matemail.rules.yml`.
 `NativeDeferredQueueGrowing`, `NativeQuarantineAbnormal`,
 `AuthenticationFailureSpike`, `ClamAVSignaturesStale`, `DiskSpaceLow`,
 `InodesLow`, `MemoryPressure`, `SwapPressure`, `CertificateExpiringSoon`,
-`CeleryWorkerDown`, `MailcowQueueBacklog`, `NE6ReadinessRegressed`.
+`CeleryWorkerDown`, `NE6ReadinessRegressed`.
 
 ### Permanent, known, deliberate
 
@@ -232,9 +232,6 @@ docker compose exec -T postfix sh -c 'postqueue -j' </dev/null | grep '"hold"'
 # Flush deferred mail (retry now)
 docker compose exec -T postfix postqueue -f </dev/null
 
-# Mailcow, which still carries Internet mail until NE8
-cd /opt/mailcow-dockerized
-docker compose exec -T postfix-mailcow postqueue -p </dev/null
 ```
 
 Before NE6 the Native queue is normally **empty**. Anything persisting there
@@ -348,7 +345,7 @@ goes to 0, and `MonitoringCollectorSectionFailing` fires. A collector that said
 **Log rotation.** P7 found Docker on this host had no `daemon.json` and
 therefore no rotation at all — container logs had reached 45 MB each and
 nothing was going to reclaim them. Fixing it in `daemon.json` would require
-restarting Docker across 72 containers including Mailcow and several unrelated
+restarting Docker across many unrelated production
 production applications, so `/etc/logrotate.d/matemail-docker-containers` bounds
 them instead: daily, 5 rotations, 50 MB cap, `copytruncate` because Docker holds
 the file open.
@@ -442,7 +439,7 @@ marking a series stale, which is what makes
 | Gap | Status |
 |---|---|
 | `OFFSITE_BACKUP_CONFIGURED = NO` | Pre-beta requirement. Local repository is retention, not disaster recovery. |
-| `ALERT_RECEIVER_CONFIGURED = NO` | Pre-beta requirement. Alerts fire and are visible in Alertmanager over the tunnel, but nothing is delivered off the host. Set `ALERT_WEBHOOK_URL` in `/opt/MateMailMonitoring/.env` and re-run `install.sh`. The destination must not be served by Native Postfix, Mailcow or MateMail's transactional sender — those are the things being monitored. |
+| `ALERT_RECEIVER_CONFIGURED = NO` | Pre-beta requirement. Alerts fire and are visible in Alertmanager over the tunnel, but nothing is delivered off the host. Set `ALERT_WEBHOOK_URL` in `/opt/MateMailMonitoring/.env` and re-run `install.sh`. The destination must not be served by Native Postfix or MateMail's transactional sender — those are the things being monitored. |
 
 Neither blocks NE6 technical readiness. Both block Private Beta.
 
