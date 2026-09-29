@@ -300,33 +300,12 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS", default="http://localhost:3000").split(",")
 CORS_ALLOW_CREDENTIALS = True
 
-# Mail engine integration.
-#
-# The URL deliberately has NO default. It used to default to
-# "http://localhost:8080", which is wrong in every environment that matters:
-# MateMail runs in a container, so loopback is the container itself, never the
-# engine. Worse, the plausible-looking default masked the deploy check meant to
-# catch a missing URL — a production deployment that forgot to set it would pass
-# `check --deploy` and then fail on the first customer action.
-#
-# Empty means "not configured", which is exactly what mail_engine.E001 reports.
-MAIL_ENGINE_API_URL = env("MAIL_ENGINE_API_URL", default="")
-MAIL_ENGINE_API_KEY = env("MAIL_ENGINE_API_KEY", default="")
-# "stub" (default) = in-memory adapter, no engine needed (local dev + CI)
-# "mailcow" = the real MateMail Mail Engine (Postfix/Dovecot/Rspamd via mailcow)
+# Mail Engine.
+# "stub" is for local development/CI; production uses the Native Engine.
 MAIL_ENGINE_ADAPTER = env("MAIL_ENGINE_ADAPTER", default="stub")
 
-# ── Native Engine (NE5) ──────────────────────────────────────────────────────
-#
-# Where the Native Engine's private API lives, and the credential for it. Only
-# consulted when MAIL_ENGINE_ADAPTER is "native"; `manage.py check --deploy`
-# refuses that combination if either is missing, so a half-configured switch
-# cannot reach production.
-#
-# The URL is plain HTTP on purpose: this is an INTERNAL Docker network that
-# publishes no ports, and the engine has no certificate until NE0.9's
-# distribution model exists. It is not the public Internet and must not be
-# confused with MAIL_ENGINE_API_URL, which reaches mailcow over TLS.
+# Native Engine control API on the private matemail_engine_link network.
+# Production deployment checks require both values when the adapter is native.
 NATIVE_ENGINE_API_URL = env("NATIVE_ENGINE_API_URL", default="")
 NATIVE_ENGINE_API_SECRET = env("NATIVE_ENGINE_API_SECRET", default="")
 
