@@ -572,38 +572,6 @@ groups:
           summary: "{{ $value }} bans in the last hour on {{ $labels.jail }}"
           description: "A sustained authentication attack. Protection is working; this is informational unless legitimate users are affected."
 
-  # ── Mailcow, transitional until NE8 ─────────────────────────────────────
-  - name: transitional
-    rules:
-      - alert: MailcowDown
-        expr: matemail_mailcow_up == 0
-        for: 5m
-        labels: {severity: critical}
-        annotations:
-          summary: "Mailcow is down"
-          description: "Mailcow still carries Internet and transactional mail until NE8. This alert is removed with it."
-
-      - alert: P5PolicyBridgeDown
-        expr: matemail_p5_bridge_up == 0 or matemail_p5_bridge_healthy == 0
-        for: 5m
-        labels: {severity: critical}
-        annotations:
-          summary: "The P5 policy bridge is down"
-          description: "Mailcow asks this bridge whether a sender may send. Its loss affects submission policy enforcement."
-
-      - alert: MailcowQueueBacklog
-        expr: matemail_mailcow_queue_total > 100
-        for: 30m
-        labels: {severity: warning}
-        annotations:
-          summary: "Mailcow queue holds {{ $value }} messages"
-
-      - alert: MailcowQueuedMailTooOld
-        expr: matemail_mailcow_queue_oldest_age_seconds > 14400
-        for: 15m
-        labels: {severity: warning}
-        annotations:
-          summary: "Mailcow's oldest queued message is over four hours old"
 
   # ── NE6 readiness ───────────────────────────────────────────────────────
   - name: readiness
