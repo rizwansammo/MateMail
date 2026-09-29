@@ -435,11 +435,7 @@ services:
   # exchange run end to end between Django and Postfix. This container never
   # sees the password and holds no key, so there is nothing in it to steal.
   #
-  # This REPLACES the Mailcow-owned gateway that carried the same traffic
-  # before NE6. Both cannot hold the `mx.matemail.online` alias at once —
-  # Docker would round-robin between them and mail would land in two different
-  # systems at random — so deployment detaches the Mailcow one. Reattaching it
-  # is the rollback, and it is a single `docker network connect`.
+  # Permanent Native-owned private gateway for application SMTP/IMAP access.
   submission-gateway:
     <<: *common
     container_name: matemail-native-submission-gateway
