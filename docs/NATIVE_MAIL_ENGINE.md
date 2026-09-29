@@ -576,9 +576,7 @@ claim it will — reputation is built over time and volume.
 
 ---
 
-### NE8 — Remove mailcow
-
-**Goal** — Retire the dependency, last.
+### NE8 — Remove mailcow — COMPLETE 2026-09-29\n\n**Result** — Legacy containers, volumes, network, images, gateway, policy bridge, API credentials and `/opt/mailcow-dockerized` were removed after Native-only runtime verification.
 
 **Preconditions, all of them:**
 
@@ -800,9 +798,7 @@ call, and it should be made explicitly rather than by drift.
 
 ---
 
-## 14. Explicit mailcow decommission gate
-
-**mailcow is a live production dependency. It is not deprecated by this
+## 14. Mailcow decommission record\n\nMailcow was retired on 2026-09-29. The following text records the original gate and migration rationale; it is historical, not current runtime state.\n\n**Historical gate:** mailcow was a live production dependency. It was not deprecated by this
 document.**
 
 It may be removed only at NE8, only when every precondition in §6 is met, and
