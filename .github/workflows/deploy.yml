@@ -179,12 +179,14 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: IMAGE_TAG
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
           timeout: 60s
           command_timeout: 5m
           script: |
@@ -282,6 +284,19 @@ jobs:
             ENV_BACKUP="$DEPLOY_DIR/.env.bak.${STAMP}"
 
             cd "$DEPLOY_DIR"
+
+            # Authenticate this SSH session to private GHCR with the job-scoped
+            # GitHub token. Keep Docker auth in a temporary directory so no
+            # registry credential survives on MateServer after this deployment.
+            DOCKER_CONFIG="$(mktemp -d)"
+            export DOCKER_CONFIG
+            cleanup_registry_auth() {
+              docker logout ghcr.io >/dev/null 2>&1 || true
+              rm -rf "$DOCKER_CONFIG"
+            }
+            trap cleanup_registry_auth EXIT
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+            unset GHCR_TOKEN
 
             # The host holds no repository checkout and needs none: the image is
             # the artifact. Only docker-compose.yml and .env live here, and the
@@ -546,12 +561,14 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: IMAGE_TAG
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
           timeout: 60s
           command_timeout: 10m
           script: |
@@ -565,6 +582,17 @@ jobs:
             }
 
             cd "$DEPLOY_DIR"
+
+            DOCKER_CONFIG="$(mktemp -d)"
+            export DOCKER_CONFIG
+            cleanup_registry_auth() {
+              docker logout ghcr.io >/dev/null 2>&1 || true
+              rm -rf "$DOCKER_CONFIG"
+            }
+            trap cleanup_registry_auth EXIT
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+            unset GHCR_TOKEN
+
             git checkout main
             git pull --ff-only origin main
 
