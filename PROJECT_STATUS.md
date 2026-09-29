@@ -13,7 +13,7 @@
 **Previous phase:** **P4 COMPLETE** (2026-09-12) — Mail Engine live, activated, and delivering  
 &nbsp;&nbsp;&nbsp;&nbsp;P4A design + adapter · P4B private engine install · P4C-A/A2/A3 remediation  
 &nbsp;&nbsp;&nbsp;&nbsp;· P4C-B activation, released as `b8e0fe3b`.  
-&nbsp;&nbsp;&nbsp;&nbsp;Production runs `MAIL_ENGINE_ADAPTER=mailcow` against the private Mail Engine.  
+&nbsp;&nbsp;&nbsp;&nbsp;Production runs `MAIL_ENGINE_ADAPTER=native` against the MateMail Native Engine.  
 &nbsp;&nbsp;&nbsp;&nbsp;**Transactional delivery validation: PASSED** (2026-09-12) — one real message  
 &nbsp;&nbsp;&nbsp;&nbsp;delivered to Gmail Primary Inbox with SPF, DKIM and DMARC all passing.  
 &nbsp;&nbsp;&nbsp;&nbsp;No public mail port is open. No customer domain or mailbox exists.  
@@ -26,7 +26,7 @@
 ## Architecture direction
 
 As of **DEC-011 (2026-09-10)**, MateMail is one integrated business email
-platform. Postfix / Dovecot / Rspamd — orchestrated via mailcow — are MateMail's
+platform. Native Postfix / Dovecot / Rspamd are MateMail's
 **internal Mail Engine**, an implementation detail customers must never see.
 MateMail owns tenancy, permissions, plans, onboarding, provisioning, abuse
 policy, audit, backups, monitoring, webmail and all UI.
@@ -233,7 +233,7 @@ broken audit log. See the Phase 0 section below.
 
 Full detail, entry criteria and exit criteria: *Revised roadmap* below.
 
-### Native Engine Migration (NE0–NE8) — NE0–NE5 complete
+### Native Engine Migration (NE0–NE8) — COMPLETE
 
 A **separate** engineering track that replaces mailcow as the Mail Engine
 orchestrator with a MateMail-native stack on Postfix, Dovecot and Rspamd. It does
@@ -281,8 +281,8 @@ NE7 public mail:               COMPLETE (2026-09-20) - 25/587/993 public.
                                public IMAPS; external client submission
                                reached Gmail Inbox with SPF/DKIM/DMARC pass.
                                110/143/465/995 closed. Mailcow untouched.
-NE8 implementation:            NONE - not started
-mailcow:                       live production dependency, unmodified
+NE8 implementation:            COMPLETE - 2026-09-29
+mailcow:                       RETIRED - no containers, volumes, networks, images or runtime dependency
 ```
 
 **NE5 control-plane switch on MateServer (2026-09-19)**
