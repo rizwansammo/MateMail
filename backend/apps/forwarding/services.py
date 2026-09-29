@@ -1,8 +1,9 @@
-"""
-Forwarding product logic.
+"""Forwarding product logic.
 
-This resolves *what* a mailbox's forwarding should be. The Mail Engine adapter
+This resolves what a mailbox's forwarding should be. The Mail Engine adapter
 only carries out the resulting instruction.
+"""
+import logging
 
 from apps.mail_engine.dto import ForwardingSpec
 
