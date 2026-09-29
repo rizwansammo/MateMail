@@ -98,7 +98,7 @@ _LATER: dict[str, str] = {}
 
 class NativeMailEngineAdapter(MailEngineAdapter):
     def __init__(self, base_url: str = "", secret: str = ""):
-        # No loopback fallback, for the same reason MailcowAdapter has none:
+        # No loopback fallback:
         # loopback is this container, never the engine, so a default would turn
         # a missing setting into a confusing connection error against ourselves.
         base = base_url or getattr(settings, "NATIVE_ENGINE_API_URL", "") or ""
