@@ -5,5 +5,9 @@ import PremiumSettings from "@/components/postbox/premium-settings";
 import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 export default function SettingsPage() {
-  return IS_NETAMATE_EMAIL ? <LegacySettingsPage /> : <PremiumSettings />;
+  return (
+    <div className="pb-scroll h-full">
+      IS_NETAMATE_EMAIL ? <LegacySettingsPage /> : <PremiumSettings />
+    </div>
+  );
 }
