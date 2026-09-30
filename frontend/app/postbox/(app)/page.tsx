@@ -108,7 +108,9 @@ function Mailbox() {
     (value: string) => setQueryState({ key: urlQuery, value }),
     [urlQuery],
   );
-  const [search, setSearch] = useState("");
+  // Avoid an unfiltered IMAP list request before the first debounced
+  // search when the page is opened from a URL that already contains q=.
+  const [search, setSearch] = useState(urlQuery.trim());
 
   // One key for "which list am I looking at". Paging and selection both reset
   // when it changes, and both derive that from the key rather than having an
