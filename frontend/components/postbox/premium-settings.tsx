@@ -33,7 +33,6 @@ import Link from "next/link";
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
 import {
-  formatBytes,
   postbox,
   type AccountInfo,
   type Folder,
