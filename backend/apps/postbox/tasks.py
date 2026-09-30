@@ -130,7 +130,11 @@ def send_scheduled_message(scheduled_id: str) -> str:
     try:
         with imap.open_mailbox(mailbox.email) as connection:
             roles = {f.role: f.name for f in connection.list_folders() if f.role}
-            connection.append(roles.get("sent", "Sent"), raw, flags="\\Seen")
+            connection.append(
+                roles.get("sent", "Sent"),
+                message.as_bytes(),
+                flags="\\Seen",
+            )
             filed = True
             connection.select(row.folder)
             connection.delete_permanently([row.uid])
