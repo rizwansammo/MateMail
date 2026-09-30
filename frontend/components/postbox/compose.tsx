@@ -293,6 +293,7 @@ export function Compose({
     const timer = window.setTimeout(async () => {
       const attachmentRevisionAtStart = attachmentRevision.current;
       const editRevisionAtStart = editRevision.current;
+      if (!IS_NETAMATE_EMAIL) setSaving(true);
       try {
         const saved = await postbox.saveDraft(payload());
         applySavedDraft(
@@ -301,9 +302,9 @@ export function Compose({
           editRevisionAtStart,
         );
       } catch {
-        // Autosave failures are silent by design: an error toast every two
-        // seconds while somebody types is worse than a draft that is a little
-        // behind. An explicit save surfaces the problem.
+        // Autosave stays quiet; manual Save draft surfaces any failure.
+      } finally {
+        if (!IS_NETAMATE_EMAIL) setSaving(false);
       }
     }, 2000);
     return () => window.clearTimeout(timer);
