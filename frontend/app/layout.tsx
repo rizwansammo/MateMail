@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
 import { AuthProvider } from "@/contexts/auth-context";
-import { IS_NETAMATE_EMAIL, NETAMATE_LOGO_SRC } from "@/lib/brand";
+import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,34 +15,33 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = IS_NETAMATE_EMAIL
-  ? {
-      title: {
-        default: "MailAdmin · NetaMate Email",
-        template: "%s · NetaMate Email",
-      },
-      description: "Private email administration for NetaMate Solutions.",
-      metadataBase: new URL(
-        process.env.NEXT_PUBLIC_APP_URL ?? "https://mailadmin.netamate.com",
-      ),
-      icons: {
-        icon: NETAMATE_LOGO_SRC,
-        shortcut: NETAMATE_LOGO_SRC,
-        apple: NETAMATE_LOGO_SRC,
-      },
-      robots: { index: false, follow: false },
-    }
-  : {
-      title: {
-        default: "MateMail — Professional Email Hosting",
-        template: "%s | MateMail",
-      },
-      description:
-        "Host domain-based inboxes, manage DNS health, monitor deliverability, and give your team MateMail PostBox.",
-      metadataBase: new URL(
-        process.env.NEXT_PUBLIC_APP_URL ?? "https://matemail.online",
-      ),
-    };
+export const metadata: Metadata = {
+  title: {
+    default: IS_NETAMATE_EMAIL
+      ? "MailAdmin | MateMail"
+      : "MateMail — Professional Email Hosting",
+    template: "%s | MateMail",
+  },
+  description: IS_NETAMATE_EMAIL
+    ? "Private MateMail administration for NetaMate Solutions."
+    : "Host domain-based inboxes, manage DNS health, monitor deliverability, and give your team MateMail PostBox.",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL ??
+      (IS_NETAMATE_EMAIL
+        ? "https://mailadmin.netamate.com"
+        : "https://matemail.online"),
+  ),
+  ...(IS_NETAMATE_EMAIL
+    ? {
+        icons: {
+          icon: "/icon.png",
+          shortcut: "/icon.png",
+          apple: "/apple-icon.png",
+        },
+        robots: { index: false, follow: false },
+      }
+    : {}),
+};
 
 /**
  * Every route renders per request.
