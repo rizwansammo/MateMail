@@ -476,3 +476,89 @@ class ScrollContainmentTest(SimpleTestCase):
         rule = css.split(".pb-scroll {", 1)[1].split("}", 1)[0]
         self.assertIn("overflow-y: auto", rule)
         self.assertIn("overscroll-behavior: contain", rule)
+
+
+class PremiumReleaseIntegrationTest(SimpleTestCase):
+    """Final integration contracts for the premium PostBox release."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.layout = read("app", "postbox", "(app)", "layout.tsx")
+        cls.page = read("app", "postbox", "(app)", "page.tsx")
+        cls.settings_route = read(
+            "app", "postbox", "(app)", "settings", "page.tsx"
+        )
+        cls.contacts_route = read(
+            "app", "postbox", "(app)", "contacts", "page.tsx"
+        )
+        cls.settings = read("components", "postbox", "premium-settings.tsx")
+        cls.contacts = read("components", "postbox", "premium-contacts.tsx")
+
+    def test_brand_specific_routes_use_real_jsx_conditionals(self):
+        """
+        Missing JSX braces are valid text, so builds can stay green while
+        both brand components accidentally render at runtime.
+        """
+        self.assertIn(
+            "{IS_NETAMATE_EMAIL ? (",
+            self.settings_route,
+            "settings must render exactly one brand variant",
+        )
+        self.assertIn(
+            "{IS_NETAMATE_EMAIL ? <LegacyContactsPage /> : <PremiumContacts />}",
+            self.contacts_route,
+            "contacts must render exactly one brand variant",
+        )
+
+    def test_contacts_send_message_prefills_the_recipient(self):
+        self.assertIn("compose=new&to=", self.contacts)
+        self.assertIn('params.get("to")', self.page)
+        self.assertIn("{ to: [composeRecipient] }", self.page)
+
+    def test_closing_compose_preserves_mailbox_context(self):
+        self.assertIn('next.delete("compose")', self.page)
+        self.assertIn('next.delete("to")', self.page)
+        self.assertIn("new URLSearchParams(params.toString())", self.page)
+        self.assertNotIn(
+            'router.replace(`/postbox?folder=${encodeURIComponent(folder)}`)',
+            self.page,
+        )
+
+    def test_sidebar_starred_is_a_real_cross_folder_view(self):
+        self.assertIn(
+            'href: "/postbox?folder=INBOX&starred=true&scope=all"',
+            self.layout,
+        )
+        self.assertIn(
+            'filteredStarredOnly && searchScope !== "folder"',
+            self.page,
+        )
+        self.assertIn("const isCrossFolderView", self.page)
+        self.assertIn("!isCrossFolderView && rows.length > 0", self.page)
+
+    def test_keyboard_hints_have_working_handlers(self):
+        self.assertIn('event.key.toLowerCase() === "c"', self.layout)
+        self.assertIn('router.push("/postbox?compose=new")', self.layout)
+        self.assertIn('event.key !== "/"', self.layout)
+        self.assertIn("inputRef.current?.focus()", self.layout)
+
+    def test_settings_sections_are_deep_linkable(self):
+        self.assertIn('params.get("section")', self.settings)
+        self.assertIn('/postbox/settings?section=', self.settings)
+        self.assertIn('/postbox/settings?section=account', self.layout)
+        self.assertIn('/postbox/settings?section=appearance', self.layout)
+
+    def test_contacts_search_is_debounced(self):
+        self.assertIn(
+            "setTimeout(() => setSearch(query.trim()), 250)", self.contacts
+        )
+        self.assertIn(
+            "() => postbox.contacts(search || undefined)", self.contacts
+        )
+
+    def test_filtered_reader_closes_when_the_message_leaves_the_filter(self):
+        self.assertIn('(unreadOnly && action === "read")', self.page)
+        self.assertIn(
+            '(filteredStarredOnly && action === "unstar")', self.page
+        )

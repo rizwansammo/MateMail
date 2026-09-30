@@ -7,7 +7,7 @@
  * by the session cookie server-side; this stops somebody seeing a mail client
  * frame full of failed requests before the redirect lands.
  */
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -63,7 +63,7 @@ const PINNED: Array<{
 }> = [
   { role: "inbox", label: "Inbox", icon: Inbox },
   // Not a folder — a filter over INBOX, so it carries its own href.
-  { role: "starred", label: "Starred", icon: Star, href: "/postbox?folder=INBOX&starred=true" },
+  { role: "starred", label: "Starred", icon: Star, href: "/postbox?folder=INBOX&starred=true&scope=all" },
   { role: "scheduled", label: "Scheduled", icon: Clock },
   { role: "sent", label: "Sent", icon: Send },
   { role: "drafts", label: "Drafts", icon: FileText },
@@ -500,6 +500,26 @@ function PremiumPostBoxShell({
     { value: "dark" as const, Icon: Moon, label: "Dark" },
   ];
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        isEditableTarget(event.target)
+      ) {
+        return;
+      }
+      if (event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        router.push("/postbox?compose=new");
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [router]);
+
   return (
     <div className={`pb pb-premium-shell ${
       preferences.density === "compact" ? "pb-density-compact" : ""
@@ -534,7 +554,7 @@ function PremiumPostBoxShell({
 
         <div className="pb-premium-sidebar-footer">
           {storage?.available && storagePercent !== null ? (
-            <Link href="/postbox/settings" className="pb-premium-storage" onClick={closeRail}>
+            <Link href="/postbox/settings?section=account" className="pb-premium-storage" onClick={closeRail}>
               <span className="pb-premium-storage-head">
                 <HardDrive className="h-4 w-4" aria-hidden="true" />
                 Mailbox storage
@@ -547,7 +567,7 @@ function PremiumPostBoxShell({
               </small>
             </Link>
           ) : (
-            <Link href="/postbox/settings" className="pb-premium-storage" onClick={closeRail}>
+            <Link href="/postbox/settings?section=account" className="pb-premium-storage" onClick={closeRail}>
               <span className="pb-premium-storage-head">
                 <HardDrive className="h-4 w-4" aria-hidden="true" />
                 Mailbox settings
@@ -589,7 +609,7 @@ function PremiumPostBoxShell({
 
           <div className="pb-premium-top-actions">
             <Link
-              href="/postbox/settings"
+              href="/postbox/settings?section=appearance"
               className="pb-premium-icon-link"
               aria-label="Appearance and layout"
               title="Appearance and layout"
@@ -607,7 +627,7 @@ function PremiumPostBoxShell({
                   <strong>{mailbox.full_name || mailbox.email}</strong>
                   <span>{mailbox.email}</span>
                 </div>
-                <Link href="/postbox/settings">
+                <Link href="/postbox/settings?section=account">
                   <User className="h-4 w-4" aria-hidden="true" />
                   Account
                 </Link>
@@ -657,6 +677,26 @@ function PremiumSearchForm({
 }) {
   const router = useRouter();
   const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.key !== "/" ||
+        isEditableTarget(event.target)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      inputRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
     <form
@@ -679,6 +719,7 @@ function PremiumSearchForm({
     >
       <Search className="h-[19px] w-[19px]" aria-hidden="true" />
       <input
+        ref={inputRef}
         type="search"
         aria-label="Search mail"
         placeholder="Search your mail"
@@ -704,6 +745,15 @@ function PremiumSearchForm({
         <kbd>/</kbd>
       )}
     </form>
+  );
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(
+    target.closest(
+      'input, textarea, select, [contenteditable="true"], [role="textbox"]',
+    ),
   );
 }
 

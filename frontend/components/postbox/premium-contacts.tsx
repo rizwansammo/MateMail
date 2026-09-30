@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError } from "@/contexts/postbox-context";
@@ -30,14 +30,20 @@ const EMPTY: Partial<Contact> = {
 
 export default function PremiumContacts() {
   const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Partial<Contact> | null>(null);
   const [viewing, setViewing] = useState<Contact | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(query.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
   const data = useAsyncData(
-    () => postbox.contacts(query.trim() || undefined),
-    [query],
+    () => postbox.contacts(search || undefined),
+    [search],
     "Contacts could not be loaded.",
   );
 

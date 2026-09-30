@@ -108,7 +108,9 @@ function Mailbox() {
     (value: string) => setQueryState({ key: urlQuery, value }),
     [urlQuery],
   );
-  const [search, setSearch] = useState("");
+  // Avoid an unfiltered IMAP list request before the first debounced
+  // search when the page is opened from a URL that already contains q=.
+  const [search, setSearch] = useState(urlQuery.trim());
 
   // One key for "which list am I looking at". Paging and selection both reset
   // when it changes, and both derive that from the key rather than having an
@@ -162,7 +164,10 @@ function Mailbox() {
         folder,
         page: pageNumber,
         q: search || undefined,
-        scope: search ? searchScope : "folder",
+        scope:
+          search || (filteredStarredOnly && searchScope !== "folder")
+            ? searchScope
+            : "folder",
         sort: sortMode,
         unread: unreadOnly ? "true" : undefined,
         starred: filteredStarredOnly ? "true" : undefined,
@@ -206,17 +211,30 @@ function Mailbox() {
   );
   const scheduledRows = scheduledData.data?.results ?? [];
 
-  // The composer opened from the rail's link is read from the query string
-  // rather than copied into state, so no effect writes state on mount.
+  // Query-driven compose supports both the sidebar Compose link and
+  // Contacts -> Send message. Keep this declarative so route navigation does
+  // not need an effect that copies URL state into React state.
   const composeRequested = params.get("compose") === "new";
-  const compose = explicitCompose ?? (composeRequested ? { mode: "new" as const } : null);
+  const composeRecipient = params.get("to")?.trim() || "";
+  const compose =
+    explicitCompose ??
+    (composeRequested
+      ? {
+          mode: "new" as const,
+          ...(composeRecipient ? { to: [composeRecipient] } : {}),
+        }
+      : null);
 
   const closeCompose = useCallback(() => {
     setExplicitCompose(null);
     if (composeRequested) {
-      router.replace(`/postbox?folder=${encodeURIComponent(folder)}`);
+      const next = new URLSearchParams(params.toString());
+      next.delete("compose");
+      next.delete("to");
+      const queryString = next.toString();
+      router.replace(queryString ? `/postbox?${queryString}` : "/postbox");
     }
-  }, [composeRequested, folder, router]);
+  }, [composeRequested, params, router]);
 
   const dismissSuccess = useCallback(() => {
     setSuccessVisible(false);
@@ -305,9 +323,19 @@ function Mailbox() {
       try {
         await postbox.act(action, sourceFolder, targets, extra);
         setSelected(new Set());
-        const removesFromCurrentView = IS_NETAMATE_EMAIL || new Set([
-          "archive", "trash", "spam", "not-spam", "move", "restore", "delete",
-        ]).has(action);
+        const removesFromCurrentView =
+          IS_NETAMATE_EMAIL ||
+          new Set([
+            "archive",
+            "trash",
+            "spam",
+            "not-spam",
+            "move",
+            "restore",
+            "delete",
+          ]).has(action) ||
+          (unreadOnly && action === "read") ||
+          (filteredStarredOnly && action === "unstar");
         if (removesFromCurrentView && detail && targets.includes(detail.uid)) {
           setDetail(null);
         }
@@ -327,7 +355,7 @@ function Mailbox() {
     // the current one already reads back as empty. Either way the selection
     // is cleared, which is the whole intent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selected, folder, detail, loadList],
+    [selected, folder, detail, loadList, unreadOnly, filteredStarredOnly],
   );
 
   const trustRemoteSender = useCallback(async () => {
@@ -419,9 +447,10 @@ function Mailbox() {
   );
 
   const rows = page?.results ?? [];
-  const isGlobalSearch = Boolean(search) && searchScope !== "folder";
+  const isCrossFolderView =
+    searchScope !== "folder" && (Boolean(search) || filteredStarredOnly);
   const allSelected =
-    !isGlobalSearch && rows.length > 0 && selected.size === rows.length;
+    !isCrossFolderView && rows.length > 0 && selected.size === rows.length;
   const paneRight = preferences.reading_pane === "right";
   const paneOff = !IS_NETAMATE_EMAIL && preferences.reading_pane === "off";
   const folderIsSpam = /(^|[./_-])(spam|junk)($|[./_-])/i.test(folder);
@@ -444,6 +473,7 @@ function Mailbox() {
     next.delete("starred");
     if (nextFilter === "all") next.delete("filter");
     else next.set("filter", nextFilter);
+    if (!search && nextFilter !== "starred") next.delete("scope");
     next.delete("page");
     setSelected(new Set());
     setDetail(null);
@@ -464,7 +494,7 @@ function Mailbox() {
     <div className="flex h-full min-h-0 flex-col">
       {!IS_NETAMATE_EMAIL && (
         <div className="pb-premium-mail-toolbar">
-          {!isGlobalSearch && (
+          {!isCrossFolderView && (
             <input
               className="pb-premium-select-all"
               type="checkbox"
@@ -563,7 +593,7 @@ function Mailbox() {
                 <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
               </summary>
               <div className="pb-premium-mail-menu">
-                {!isGlobalSearch && (
+                {!isCrossFolderView && (
                   <button
                     type="button"
                     disabled={rows.length === 0}
@@ -787,7 +817,7 @@ function Mailbox() {
                     data-unread={!row.seen}
                     data-selected={detail?.uid === row.uid}
                   >
-                    {!isGlobalSearch && (
+                    {!isCrossFolderView && (
                       <input
                         type="checkbox"
                         aria-label={`Select message from ${row.from.address}`}
