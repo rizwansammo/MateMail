@@ -239,6 +239,43 @@ class RemoteImageSenderTrust(models.Model):
         return f"{self.sender} for {self.mailbox_id}"
 
 
+class MessageMoveProvenance(models.Model):
+    """
+    Where a message lived before PostBox moved it to Trash or Spam.
+
+    IMAP deliberately has no "previous folder" concept, and a MOVE may assign
+    a different UID in the destination folder.  The record is therefore keyed
+    by a stable digest of the RFC 5322 message identity rather than by UID.
+    Dovecot remains the source of truth for the message itself; this row stores
+    only application state IMAP cannot represent.
+    """
+
+    mailbox = models.ForeignKey(
+        "mailboxes.Mailbox",
+        on_delete=models.CASCADE,
+        related_name="postbox_move_provenance",
+    )
+    message_key = models.CharField(max_length=80)
+    original_folder = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = MailboxScopedQuerySet.as_manager()
+
+    class Meta:
+        db_table = "postbox_message_move_provenance"
+        ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mailbox", "message_key"],
+                name="postbox_message_move_provenance_unique",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.message_key} -> {self.original_folder} for {self.mailbox_id}"
+
+
 class SignatureKind(models.TextChoices):
     """
     What a signature IS, stated rather than guessed.
