@@ -75,8 +75,14 @@ function Mailbox() {
 
   const folder = params.get("folder") || "INBOX";
   const starredOnly = params.get("starred") === "true";
+  const urlQuery = params.get("q") || "";
 
-  const [query, setQuery] = useState("");
+  const [queryState, setQueryState] = useState({ key: urlQuery, value: urlQuery });
+  const query = queryState.key === urlQuery ? queryState.value : urlQuery;
+  const setQuery = useCallback(
+    (value: string) => setQueryState({ key: urlQuery, value }),
+    [urlQuery],
+  );
   const [search, setSearch] = useState("");
 
   // One key for "which list am I looking at". Paging and selection both reset
@@ -331,7 +337,7 @@ function Mailbox() {
           </div>
         )}
 
-        <div className="relative ml-auto min-w-0 flex-1 sm:max-w-xs">
+        <div className="pb-legacy-mail-search relative ml-auto min-w-0 flex-1 sm:max-w-xs">
           <Search
             className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
             style={{ color: "var(--pb-subtle)" }}
