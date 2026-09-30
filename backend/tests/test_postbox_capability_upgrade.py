@@ -8,7 +8,7 @@ from rest_framework.test import APIClient
 from apps.domains.models import Domain
 from apps.mailboxes.models import Mailbox, MailboxStatus
 from apps.postbox import imap
-from apps.postbox.models import MessageMoveProvenance, RemoteImageSenderTrust
+from apps.postbox.models import MailRule, MessageMoveProvenance, RemoteImageSenderTrust
 from apps.postbox.views_mail import _message_provenance_key
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
@@ -292,6 +292,90 @@ class PostBoxCapabilityUpgradeTest(TestCase):
             )
 
         self.assertEqual(415, response.status_code)
+
+    def test_custom_folder_rename_updates_rules_and_restore_provenance(self):
+        rule = MailRule.objects.create(
+            mailbox=self.alice,
+            name="Client mail",
+            enabled=True,
+            field=MailRule.Field.FROM,
+            match=MailRule.Match.CONTAINS,
+            value="@client.test",
+            action=MailRule.Action.MOVE,
+            action_folder="Projects",
+        )
+        moved = summary(5, "Trash", message_id="<rename-provenance@example.com>")
+        provenance = MessageMoveProvenance.objects.create(
+            mailbox=self.alice,
+            message_key=_message_provenance_key(moved),
+            original_folder="Projects",
+        )
+
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener, \
+             mock.patch("apps.postbox.views_settings._sync_sieve") as sync:
+            connection = self._connection(opener)
+            connection.list_folders.return_value = [
+                imap.FolderInfo("INBOX", role="inbox"),
+                imap.FolderInfo("Projects"),
+            ]
+
+            response = self.api.patch(
+                "/api/postbox/folders/Projects/",
+                {"name": "Client Work"},
+                format="json",
+            )
+
+        self.assertEqual(200, response.status_code)
+        connection.rename_folder.assert_called_once_with("Projects", "Client Work")
+        rule.refresh_from_db()
+        provenance.refresh_from_db()
+        self.assertEqual("Client Work", rule.action_folder)
+        self.assertEqual("Client Work", provenance.original_folder)
+        sync.assert_called_once_with(self.alice)
+
+    def test_custom_folder_delete_moves_mail_to_inbox_and_disables_rules(self):
+        rule = MailRule.objects.create(
+            mailbox=self.alice,
+            name="Project rule",
+            enabled=True,
+            field=MailRule.Field.SUBJECT,
+            match=MailRule.Match.CONTAINS,
+            value="Project",
+            action=MailRule.Action.MOVE,
+            action_folder="Projects",
+        )
+        moved = summary(8, "Trash", message_id="<delete-provenance@example.com>")
+        provenance = MessageMoveProvenance.objects.create(
+            mailbox=self.alice,
+            message_key=_message_provenance_key(moved),
+            original_folder="Projects",
+        )
+
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener, \
+             mock.patch("apps.postbox.views_settings._sync_sieve") as sync:
+            connection = self._connection(opener)
+            connection.list_folders.return_value = [
+                imap.FolderInfo("INBOX", role="inbox"),
+                imap.FolderInfo("Projects"),
+            ]
+            connection.select.return_value = imap.FolderInfo(
+                name="Projects",
+                uid_validity=7,
+            )
+            connection.search_uids.return_value = [4, 3]
+
+            response = self.api.delete("/api/postbox/folders/Projects/")
+
+        self.assertEqual(204, response.status_code)
+        connection.move.assert_called_once_with([4, 3], "INBOX")
+        connection.delete_folder.assert_called_once_with("Projects")
+        rule.refresh_from_db()
+        provenance.refresh_from_db()
+        self.assertFalse(rule.enabled)
+        self.assertEqual("Projects", rule.action_folder)
+        self.assertEqual("INBOX", provenance.original_folder)
+        sync.assert_called_once_with(self.alice)
+
 
     def test_trusted_remote_image_senders_can_be_listed_and_removed(self):
         RemoteImageSenderTrust.objects.create(
