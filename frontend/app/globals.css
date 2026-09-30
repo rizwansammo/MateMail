@@ -3012,7 +3012,9 @@ body {
   text-align:left;
 }
 .pb-premium-shell .pb-premium-message-body {
-  max-width:850px;
+  width:100%;
+  max-width:none;
+  min-width:0;
   color:var(--pb-fg);
   font-size:16px;
   line-height:1.85;
@@ -3024,11 +3026,23 @@ body {
   white-space:pre-wrap;
 }
 .pb-premium-shell .pb-premium-html-mail {
-  max-width:750px;
-  margin:0 auto;
-  border:1px solid var(--pb-border);
-  border-radius:7px;
-  padding:30px 36px;
+  width:100%;
+  max-width:none;
+  margin:0;
+  border:0;
+  border-radius:0;
+  padding:0;
+}
+.pb-premium-shell .pb-premium-html-mail > div {
+  width:100%;
+  max-width:100%;
+  overflow-x:auto;
+}
+.pb-premium-shell .pb-premium-html-mail img {
+  max-width:100%;
+}
+.pb-premium-shell .pb-premium-html-mail table {
+  max-width:100%;
 }
 .pb-premium-shell .pb-premium-reader-attachments {
   margin-top:34px;
@@ -3401,8 +3415,8 @@ body {
   margin:0;
 }
 .pb-premium-shell .pb-premium-compose-shell .pb-compose-fields label {
-  width:44px;
-  flex:0 0 44px;
+  width:64px;
+  flex:0 0 64px;
   color:var(--pb-muted);
   font-size:12px;
   font-weight:400;
@@ -3725,8 +3739,8 @@ body {
     padding:0 16px;
   }
   .pb-premium-shell .pb-premium-compose-shell .pb-compose-fields label {
-    width:36px;
-    flex-basis:36px;
+    width:64px;
+    flex-basis:64px;
   }
   .pb-premium-shell .pb-premium-compose-shell .pb-compose-body {
     margin:0 16px !important;
