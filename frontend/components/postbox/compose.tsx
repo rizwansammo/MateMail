@@ -20,6 +20,7 @@ import {
   Maximize2,
   Minimize2,
   Paperclip,
+  Save,
   Send,
   Trash2,
   X,
@@ -29,6 +30,7 @@ import {
   fileToBase64,
   formatBytes,
   postbox,
+  type ComposeAttachmentRef,
   type Identity,
   type Signature,
 } from "@/lib/postbox-api";
@@ -56,6 +58,9 @@ export interface ComposeInitial {
   references?: string[];
   from_address?: string;
   draft_uid?: number;
+  signature_id?: string | null;
+  signature_missing?: boolean;
+  existing_attachments?: ComposeAttachmentRef[];
 }
 
 interface PendingAttachment {
@@ -119,10 +124,18 @@ export function Compose({
   const [subject, setSubject] = useState(initial.subject ?? "");
   const [body, setBody] = useState(initial.text ?? "");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<ComposeAttachmentRef[]>(
+    initial.existing_attachments ?? [],
+  );
+  const attachmentRevision = useRef(0);
   const [signatureId, setSignatureId] = useState<string>(
-    signatures.find((s) =>
-      initial.mode === "new" ? s.use_for_new : s.use_for_replies,
-    )?.id ?? "",
+    initial.signature_id ??
+      signatures.find((signature) =>
+        initial.mode === "new"
+          ? signature.use_for_new
+          : signature.use_for_replies,
+      )?.id ??
+      "",
   );
 
   // Derived, so changing the selector updates the preview with no effect
@@ -136,6 +149,7 @@ export function Compose({
   const [showSchedule, setShowSchedule] = useState(false);
 
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dirty = useRef(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -156,9 +170,29 @@ export function Compose({
         content_type,
         data,
       })),
+      existing_attachments: existingAttachments.map(
+        ({ folder, uid, uid_validity, part_id }) => ({
+          folder,
+          uid,
+          uid_validity,
+          part_id,
+        }),
+      ),
       draft_uid: draftUid,
     }),
-    [from, to, cc, bcc, subject, body, signatureId, attachments, draftUid, initial],
+    [
+      from,
+      to,
+      cc,
+      bcc,
+      subject,
+      body,
+      signatureId,
+      attachments,
+      existingAttachments,
+      draftUid,
+      initial,
+    ],
   );
 
   // Debounced autosave. Two seconds is long enough that typing a sentence is
@@ -167,10 +201,10 @@ export function Compose({
   useEffect(() => {
     if (!dirty.current) return;
     const timer = window.setTimeout(async () => {
+      const revision = attachmentRevision.current;
       try {
         const saved = await postbox.saveDraft(payload());
-        setDraftUid(saved.uid || null);
-        setSavedAt(saved.saved_at);
+        applySavedDraft(saved, revision);
       } catch {
         // Autosave failures are silent by design: an error toast every two
         // seconds while somebody types is worse than a draft that is a little
@@ -178,11 +212,61 @@ export function Compose({
       }
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [payload]);
+  }, [applySavedDraft, payload]);
 
   const markDirty = () => {
     dirty.current = true;
   };
+
+  const applySavedDraft = useCallback(
+    (
+      saved: {
+        uid: number;
+        uid_validity: number;
+        saved_at: string;
+        attachments: ComposeAttachmentRef[];
+      },
+      revision: number,
+    ) => {
+      setDraftUid(saved.uid || null);
+      setSavedAt(saved.saved_at);
+      if (attachmentRevision.current === revision) {
+        setExistingAttachments(saved.attachments ?? []);
+        setAttachments([]);
+      }
+      dirty.current = false;
+    },
+    [],
+  );
+
+  const saveDraftNow = useCallback(
+    async (closeAfter = false) => {
+      if (!dirty.current && draftUid) {
+        if (closeAfter) onClose();
+        return true;
+      }
+      if (!dirty.current && !draftUid) {
+        if (closeAfter) onClose();
+        return true;
+      }
+
+      setSaving(true);
+      setError(null);
+      const revision = attachmentRevision.current;
+      try {
+        const saved = await postbox.saveDraft(payload());
+        applySavedDraft(saved, revision);
+        if (closeAfter) onClose();
+        return true;
+      } catch (caught) {
+        setError(describePostBoxError(caught, "Your draft could not be saved."));
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [applySavedDraft, draftUid, onClose, payload],
+  );
 
   const addFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
@@ -201,6 +285,7 @@ export function Compose({
       }
     }
     setAttachments((current) => [...current, ...added]);
+    if (added.length > 0) attachmentRevision.current += 1;
     markDirty();
   }, []);
 
@@ -257,13 +342,17 @@ export function Compose({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
+      if (event.key === "Escape" && !busy && !saving) {
+        void saveDraftNow(true);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onClose]);
+  }, [busy, saveDraftNow, saving]);
 
-  const totalBytes = attachments.reduce((sum, a) => sum + a.size, 0);
+  const totalBytes =
+    attachments.reduce((sum, attachment) => sum + attachment.size, 0) +
+    existingAttachments.reduce((sum, attachment) => sum + attachment.size, 0);
 
   return (
     <div
@@ -294,7 +383,7 @@ export function Compose({
       aria-label="Compose message"
     >
       <div
-        className={`pb-panel pb-compose-shell flex w-full flex-col ${
+        className={`pb-panel pb-compose-shell pb-premium-compose-shell flex w-full flex-col ${
           expanded
             ? // Underscores, not spaces: Tailwind arbitrary values cannot contain
             // spaces, and `calc` is invalid without them around the operator.
@@ -307,7 +396,7 @@ export function Compose({
         style={{ boxShadow: "var(--pb-shadow-lg)" }}
       >
         <div
-          className="flex shrink-0 items-center justify-between border-b px-3 py-2"
+          className="pb-compose-head flex shrink-0 items-center justify-between border-b px-3 py-2"
           style={{ borderColor: "var(--pb-border)", background: "var(--pb-surface-2)" }}
         >
           <p className="text-sm font-semibold">
@@ -315,10 +404,16 @@ export function Compose({
               ? "Forward"
               : initial.mode.startsWith("reply")
                 ? "Reply"
-                : "New message"}
+                : initial.mode === "draft"
+                  ? "Edit draft"
+                  : "New message"}
           </p>
           <div className="flex items-center gap-1">
-            {savedAt && <span className="text-xs pb-subtle">Draft saved</span>}
+            {saving ? (
+              <span className="pb-compose-save-state">Saving draft…</span>
+            ) : savedAt ? (
+              <span className="pb-compose-save-state">Draft saved</span>
+            ) : null}
             {/*
               Hidden below `sm`, where Compose already fills the screen and
               there is nothing to expand into. Wrapped in a div because
@@ -348,7 +443,8 @@ export function Compose({
               className="pb-btn pb-btn-plain"
               aria-label="Close"
               title="Close"
-              onClick={onClose}
+              onClick={() => void saveDraftNow(true)}
+              disabled={saving || busy}
             >
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -358,8 +454,8 @@ export function Compose({
         {/* `flex flex-col` so the body textarea can claim the leftover height
             when Compose is expanded; `min-h-0` so this pane scrolls instead of
             pushing the footer actions off the panel. */}
-        <div className="pb-scroll flex min-h-0 flex-1 flex-col p-3">
-          <div className="space-y-2">
+        <div className="pb-compose-content pb-scroll flex min-h-0 flex-1 flex-col p-3">
+          <div className="pb-compose-fields space-y-2">
             <Field label="From" htmlFor="pb-from">
               <select
                 id="pb-from"
@@ -481,8 +577,15 @@ export function Compose({
             which appends the signature itself — would send it twice.
             What is submitted is the body alone plus a signature id.
           */}
+          {initial.signature_missing && (
+            <p className="pb-compose-warning" role="status">
+              The signature previously selected for this draft no longer exists.
+              Choose another signature or send without one.
+            </p>
+          )}
+
           {selectedSignature && (
-            <div className="mt-2" aria-label="Signature preview">
+            <div className="pb-compose-signature mt-2" aria-label="Signature preview">
               <div
                 className="mb-2"
                 style={{ borderTop: "1px solid var(--pb-border)" }}
@@ -516,39 +619,55 @@ export function Compose({
             </div>
           )}
 
-          {attachments.length > 0 && (
-            <ul className="mt-3 space-y-1">
-              {attachments.map((attachment, index) => (
-                <li
-                  key={`${attachment.filename}-${index}`}
-                  className="flex items-center gap-2 border px-2 py-1 text-xs"
-                  style={{ borderColor: "var(--pb-border)" }}
-                >
-                  <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
-                  <span className="pb-subtle pb-num">{formatBytes(attachment.size)}</span>
-                  <button
-                    type="button"
-                    className="pb-btn pb-btn-plain"
-                    aria-label={`Remove ${attachment.filename}`}
-                    onClick={() =>
-                      setAttachments((current) =>
-                        current.filter((_, i) => i !== index),
-                      )
+          {(existingAttachments.length > 0 || attachments.length > 0) && (
+            <div className="pb-compose-attachments">
+              {[...existingAttachments, ...attachments].map((attachment, index) => {
+                const isExisting = index < existingAttachments.length;
+                return (
+                  <div
+                    key={
+                      isExisting
+                        ? `server-${(attachment as ComposeAttachmentRef).folder}-${(attachment as ComposeAttachmentRef).uid}-${(attachment as ComposeAttachmentRef).part_id}`
+                        : `upload-${attachment.filename}-${index}`
                     }
+                    className="pb-compose-file-pill"
                   >
-                    <X className="h-3 w-3" aria-hidden="true" />
-                  </button>
-                </li>
-              ))}
-              <li className="text-xs pb-subtle pb-num">
+                    <Paperclip className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span>
+                      <strong>{attachment.filename}</strong>
+                      <small>{formatBytes(attachment.size)}</small>
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${attachment.filename}`}
+                      onClick={() => {
+                        attachmentRevision.current += 1;
+                        if (isExisting) {
+                          setExistingAttachments((current) =>
+                            current.filter((_, itemIndex) => itemIndex !== index),
+                          );
+                        } else {
+                          const pendingIndex = index - existingAttachments.length;
+                          setAttachments((current) =>
+                            current.filter((_, itemIndex) => itemIndex !== pendingIndex),
+                          );
+                        }
+                        markDirty();
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
+                );
+              })}
+              <span className="pb-compose-attachment-total">
                 {formatBytes(totalBytes)} total
-              </li>
-            </ul>
+              </span>
+            </div>
           )}
 
           {showSchedule && (
-            <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div className="pb-compose-schedule mt-3 flex flex-wrap items-end gap-2">
               <div>
                 <label htmlFor="pb-schedule" className="pb-label">
                   Send at
@@ -580,13 +699,13 @@ export function Compose({
         </div>
 
         <div
-          className="flex shrink-0 flex-wrap items-center gap-2 border-t px-3 py-2"
+          className="pb-compose-footer flex shrink-0 flex-wrap items-center gap-2 border-t px-3 py-2"
           style={{ borderColor: "var(--pb-border)" }}
         >
           <button
             type="button"
             className="pb-btn pb-btn-primary"
-            disabled={busy}
+            disabled={busy || saving}
             onClick={() => void submit(false)}
           >
             {busy ? (
@@ -617,6 +736,7 @@ export function Compose({
             type="button"
             className="pb-btn pb-btn-ghost"
             aria-pressed={showSchedule}
+            disabled={busy || saving}
             onClick={() => setShowSchedule((open) => !open)}
           >
             <Clock className="h-3.5 w-3.5" aria-hidden="true" />
@@ -625,8 +745,23 @@ export function Compose({
 
           <button
             type="button"
+            className="pb-btn pb-btn-ghost pb-compose-save-draft"
+            disabled={saving || busy}
+            onClick={() => void saveDraftNow(false)}
+          >
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Save className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            Save draft
+          </button>
+
+          <button
+            type="button"
             className="pb-btn pb-btn-plain ml-auto"
             onClick={() => void discard()}
+            disabled={saving || busy}
           >
             <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
             Discard
