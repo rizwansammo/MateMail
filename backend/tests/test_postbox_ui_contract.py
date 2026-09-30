@@ -562,3 +562,14 @@ class PremiumReleaseIntegrationTest(SimpleTestCase):
         self.assertIn(
             '(filteredStarredOnly && action === "unstar")', self.page
         )
+
+
+class PremiumBrandingRegressionTest(SimpleTestCase):
+    def test_premium_postbox_brand_is_self_contained(self):
+        layout = read("app", "postbox", "(app)", "layout.tsx")
+        css = read("app", "globals.css")
+        self.assertIn('className="pb-premium-brand-mark"', layout)
+        self.assertIn('<span className="pb-premium-wordmark">PostBox</span>', layout)
+        self.assertNotIn('pb-premium-brand-dot', layout)
+        self.assertNotIn('>MAIL<', layout)
+        self.assertIn('.pb-premium-brand-mark {', css)

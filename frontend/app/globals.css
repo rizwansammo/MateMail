@@ -1985,9 +1985,10 @@ body {
   gap:9px;
   padding:20px 23px;
 }
-.pb-premium-brand img {
+.pb-premium-brand-mark {
   width:34px;
   height:34px;
+  flex:0 0 34px;
   border-radius:8px;
 }
 .pb-premium-wordmark {
@@ -1996,13 +1997,6 @@ body {
   line-height:1;
   letter-spacing:.15px;
   color:var(--pb-fg);
-}
-.pb-premium-brand-dot {
-  margin-top:8px;
-  margin-left:1px;
-  color:var(--pb-subtle);
-  font-size:12px;
-  letter-spacing:1.4px;
 }
 .pb-premium-compose-wrap { padding:9px 19px 24px; }
 .pb-premium-compose {
@@ -2449,9 +2443,8 @@ body {
 @media (max-width:1000px) {
   .pb-premium-sidebar { width:205px; flex-basis:205px; }
   .pb-premium-brand { padding:20px 18px; gap:7px; }
-  .pb-premium-brand img { width:30px; height:30px; }
+  .pb-premium-brand-mark { width:30px; height:30px; flex-basis:30px; }
   .pb-premium-wordmark { font-size:25px; }
-  .pb-premium-brand-dot { display:none; }
   .pb-premium-topbar { padding:0 24px; gap:15px; }
   .pb-premium-search { width:60%; }
 }
