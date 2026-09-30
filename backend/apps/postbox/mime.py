@@ -183,18 +183,27 @@ def parse_message(raw: bytes, *, load_remote_images: bool = False) -> ParsedMess
         disposition = (part.get_content_disposition() or "").lower()
         filename = part.get_filename()
         content_type = part.get_content_type()
+        content_id = (part.get("Content-ID", "") or "").strip("<>")
 
-        if disposition == "attachment" or (filename and content_type not in
-                                           ("text/plain", "text/html")):
+        # Inline MIME images are often referenced only by Content-ID and carry
+        # no filename. Treat them as message parts we can serve through the
+        # authenticated preview endpoint; otherwise the sanitised HTML keeps
+        # src="cid:..." and a normal browser can only show a broken-image icon.
+        non_body_part = content_type not in ("text/plain", "text/html")
+        if disposition == "attachment" or (
+            non_body_part and (filename or disposition == "inline" or content_id)
+        ):
             parsed.attachments.append(
                 Attachment(
                     part_id=str(index),
-                    filename=safe_filename(decode_header_value(filename or "")
-                                           or f"attachment-{index}"),
+                    filename=safe_filename(
+                        decode_header_value(filename or "")
+                        or f"attachment-{index}"
+                    ),
                     content_type=content_type,
                     size=len(part.get_payload(decode=True) or b""),
-                    inline=disposition == "inline",
-                    content_id=(part.get("Content-ID", "") or "").strip("<>"),
+                    inline=disposition == "inline" or bool(content_id),
+                    content_id=content_id,
                 )
             )
             continue
@@ -268,20 +277,32 @@ def sanitize_html(html: str, *, load_remote_images: bool = False) -> tuple[str, 
 
 
 _REMOTE_SRC = re.compile(
-    r"""(?P<attr>\b(?:src|background|srcset)\s*=\s*)(?P<quote>["'])(?P<url>\s*https?://[^"']*)(?P=quote)""",
+    r"""(?P<attr>\b(?:src|background|srcset)\s*=\s*)(?:(?P<quote>["'])(?P<quoted>\s*(?:https?:)?//[^"']*)(?P=quote)|(?P<bare>\s*(?:https?:)?//[^\s>]+))""",
     re.IGNORECASE,
 )
-_CSS_REMOTE_URL = re.compile(r"url\s*\(\s*['\"]?\s*https?://[^)'\"]+['\"]?\s*\)", re.IGNORECASE)
+_CSS_REMOTE_URL = re.compile(
+    r"url\s*\(\s*['\"]?\s*(?:https?:)?//[^)'\"]+['\"]?\s*\)",
+    re.IGNORECASE,
+)
 
 
 def _strip_remote_references(html: str) -> tuple[str, bool]:
-    """Replace remote references with nothing, and say whether any were found."""
+    """
+    Replace remote references with nothing, and say whether any were found.
+
+    Real marketing mail is not consistent HTML: some generators emit unquoted
+    src attributes and some use scheme-relative //cdn.example URLs. Both are
+    remote requests and must trigger the same privacy banner as https:// URLs.
+    """
     found = False
 
     def drop(match: re.Match) -> str:
         nonlocal found
         found = True
-        return f'{match.group("attr")}{match.group("quote")}{match.group("quote")}'
+        quote = match.group("quote")
+        if quote:
+            return f'{match.group("attr")}{quote}{quote}'
+        return f'{match.group("attr")}""'
 
     html = _REMOTE_SRC.sub(drop, html)
 

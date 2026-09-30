@@ -517,3 +517,26 @@ class PostBoxPublicAssetIndependenceTest(SimpleTestCase):
         self.assertNotIn('src="/postbox-mark.svg"', login)
         self.assertIn('url: "/postbox/favicon?v=3"', layout)
         self.assertNotIn('url: "/postbox-mark.svg"', layout)
+
+
+class PostBoxComposeAndImageRenderingRegressionTest(SimpleTestCase):
+    def test_compose_label_column_cannot_overlap_subject_input(self):
+        css = read("app", "globals.css")
+        self.assertIn(
+            ".pb-premium-compose-shell .pb-compose-fields label {\n  width:64px;\n  flex:0 0 64px;",
+            css,
+        )
+
+    def test_reader_resolves_safe_cid_images_through_preview_endpoint(self):
+        page = read("app", "postbox", "(app)", "page.tsx")
+        self.assertIn("function resolveInlineImageReferences", page)
+        self.assertIn("attachment.content_id", page)
+        self.assertIn("attachment.previewable", page)
+        self.assertIn("postbox.attachmentPreviewUrl", page)
+        self.assertIn("dangerouslySetInnerHTML={{ __html: renderedHtml }}", page)
+
+    def test_external_image_privacy_controls_remain_visible_when_blocked(self):
+        page = read("app", "postbox", "(app)", "page.tsx")
+        self.assertIn("detail.remote_images_blocked && !showRemote", page)
+        self.assertIn(">Display images</button>", page)
+        self.assertIn("Always display images from this sender", page)

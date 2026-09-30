@@ -3401,8 +3401,8 @@ body {
   margin:0;
 }
 .pb-premium-shell .pb-premium-compose-shell .pb-compose-fields label {
-  width:44px;
-  flex:0 0 44px;
+  width:64px;
+  flex:0 0 64px;
   color:var(--pb-muted);
   font-size:12px;
   font-weight:400;
