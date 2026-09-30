@@ -27,6 +27,7 @@ from .views_compose import (
 )
 from .views_push import DeviceDetailView, DeviceListView
 from .views_mail import (
+    AttachmentPreviewView,
     AttachmentView,
     FolderDetailView,
     FolderListView,
@@ -35,6 +36,7 @@ from .views_mail import (
     MessageListView,
     MessageRawView,
     MessageRemoteImageTrustView,
+    RemoteImageTrustedSenderListView,
 )
 from .views_settings import (
     ContactDetailView,
@@ -72,10 +74,15 @@ urlpatterns = [
          name="postbox-message-raw"),
     path("messages/<path:folder>/<int:uid>/attachments/<str:part_id>/",
          AttachmentView.as_view(), name="postbox-attachment"),
+    path("messages/<path:folder>/<int:uid>/attachments/<str:part_id>/preview/",
+         AttachmentPreviewView.as_view(), name="postbox-attachment-preview"),
     path("messages/<path:folder>/<int:uid>/reply-context/", ReplyContextView.as_view(),
          name="postbox-reply-context"),
     path("messages/<path:folder>/<int:uid>/remote-images/trust/",
          MessageRemoteImageTrustView.as_view(), name="postbox-remote-image-trust"),
+    path("remote-images/trusted-senders/",
+         RemoteImageTrustedSenderListView.as_view(),
+         name="postbox-remote-image-trusted-senders"),
     path("messages/<path:folder>/<int:uid>/", MessageDetailView.as_view(),
          name="postbox-message"),
 

@@ -15,7 +15,9 @@ A MESSAGE REFERENCE IS (folder, uidvalidity, uid)
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+from email.utils import parsedate_to_datetime
 
 from django.conf import settings
 from rest_framework import serializers
@@ -28,11 +30,21 @@ from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX, POSTBOX_SEND_PER_MA
 
 from . import imap, mime, sending
 from .auth import PostBoxSessionAuthentication
-from .models import PostBoxPreference, RemoteImageSenderTrust
+from .models import MailRule, MessageMoveProvenance, PostBoxPreference, RemoteImageSenderTrust
 
 logger = logging.getLogger(__name__)
 
 MAX_PAGE_SIZE = 100
+MAX_GLOBAL_SEARCH_MATCHES = 5000
+ATTACHMENT_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
+SAFE_ATTACHMENT_PREVIEW_TYPES = frozenset({
+    "application/pdf",
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "text/plain",
+})
 
 
 class PostBoxView(APIView):
@@ -95,15 +107,74 @@ class FolderListView(PostBoxView):
 
 
 class FolderDetailView(PostBoxView):
+    @staticmethod
+    def _folder(connection, name: str):
+        return next(
+            (
+                item
+                for item in connection.list_folders()
+                if item.name == name and item.selectable
+            ),
+            None,
+        )
+
     def patch(self, request, name: str):
+        from .views_settings import _sync_sieve
+
         new_name = (request.data.get("name") or "").strip()
         with imap.open_mailbox(self.mailbox.email) as connection:
+            folder = self._folder(connection, name)
+            if folder is None:
+                return Response({"detail": "That folder could not be found."}, status=404)
+            if folder.role:
+                return Response(
+                    {"detail": "Standard mail folders cannot be renamed."},
+                    status=400,
+                )
             connection.rename_folder(name, new_name)
+
+        MailRule.objects.for_mailbox(self.mailbox).filter(
+            action=MailRule.Action.MOVE,
+            action_folder=name,
+        ).update(action_folder=new_name)
+        MessageMoveProvenance.objects.for_mailbox(self.mailbox).filter(
+            original_folder=name
+        ).update(original_folder=new_name)
+        _sync_sieve(self.mailbox)
         return Response({"name": new_name})
 
     def delete(self, request, name: str):
+        from .views_settings import _sync_sieve
+
         with imap.open_mailbox(self.mailbox.email) as connection:
+            folder = self._folder(connection, name)
+            if folder is None:
+                return Response({"detail": "That folder could not be found."}, status=404)
+            if folder.role:
+                return Response(
+                    {"detail": "Standard mail folders cannot be deleted."},
+                    status=400,
+                )
+
+            connection.select(name)
+            uids = connection.search_uids(["ALL"])
+            if uids:
+                connection.move(uids, "INBOX")
+
+            # Disable rules before deleting their target so Dovecot never has
+            # an active fileinto rule pointing at a mailbox that no longer
+            # exists.  Preserve the folder name in the rule so the user can
+            # see why it is disabled and retarget it later.
+            MailRule.objects.for_mailbox(self.mailbox).filter(
+                action=MailRule.Action.MOVE,
+                action_folder=name,
+            ).update(enabled=False)
+            MessageMoveProvenance.objects.for_mailbox(self.mailbox).filter(
+                original_folder=name
+            ).update(original_folder="INBOX")
+            _sync_sieve(self.mailbox)
             connection.delete_folder(name)
+
         return Response(status=204)
 
 
@@ -133,12 +204,11 @@ def _summary_payload(summary: imap.MessageSummary) -> dict:
 
 class MessageListView(PostBoxView):
     """
-    A page of messages.
+    A page of messages from one folder or a real cross-folder search.
 
-    Paged over the UID list rather than with an IMAP cursor: the search runs
-    server-side and returns UIDs, which are sliced here and fetched in ONE
-    batched FETCH. That keeps the expensive part (the search) on Dovecot and
-    the cheap part (paging) local, and never loads a mailbox into memory.
+    Normal folder paging stays cheap: SEARCH returns UIDs and only the requested
+    window is fetched. Cross-folder scope searches selectable IMAP folders,
+    merges real summaries, sorts them and paginates the merged result.
     """
 
     def get(self, request):
@@ -155,10 +225,25 @@ class MessageListView(PostBoxView):
             size = preference.messages_per_page
         size = max(1, min(size, MAX_PAGE_SIZE))
 
+        sort = (request.query_params.get("sort") or "newest").strip().lower()
+        if sort not in {"newest", "oldest"}:
+            return Response({"detail": "Sort must be newest or oldest."}, status=400)
+        newest = sort == "newest"
+
+        scope = (request.query_params.get("scope") or "folder").strip().lower()
+        if scope not in {"folder", "all", "all_with_spam_trash"}:
+            return Response(
+                {"detail": "Search scope must be folder, all, or all_with_spam_trash."},
+                status=400,
+            )
+
         criteria = _search_criteria(request.query_params)
-        if criteria != ["ALL"]:
+        has_attachments = _attachment_filter(request.query_params)
+        is_search = criteria != ["ALL"] or scope != "folder" or has_attachments is not None
+        if is_search:
             decision = ratelimit.hit(
-                POSTBOX_SEARCH_PER_MAILBOX.bucket, str(self.mailbox.pk),
+                POSTBOX_SEARCH_PER_MAILBOX.bucket,
+                str(self.mailbox.pk),
                 limit=POSTBOX_SEARCH_PER_MAILBOX.limit,
                 window=POSTBOX_SEARCH_PER_MAILBOX.window,
             )
@@ -171,22 +256,122 @@ class MessageListView(PostBoxView):
                 )
 
         with imap.open_mailbox(self.mailbox.email) as connection:
-            info = connection.select(folder, readonly=True)
-            uids = connection.search_uids(criteria)
-            start = (page - 1) * size
-            window = uids[start:start + size]
-            summaries = connection.fetch_summaries(window)
+            if scope == "folder":
+                info = connection.select(folder, readonly=True)
+                uids = connection.search_uids(criteria, newest=newest)
 
+                if has_attachments is None:
+                    start = (page - 1) * size
+                    window = uids[start:start + size]
+                    summaries = connection.fetch_summaries(window)
+                    total = len(uids)
+                else:
+                    summaries = _fetch_summaries_chunked(connection, uids)
+                    summaries = [
+                        item
+                        for item in summaries
+                        if item.has_attachments is has_attachments
+                    ]
+                    total = len(summaries)
+                    start = (page - 1) * size
+                    summaries = summaries[start:start + size]
+
+                return Response({
+                    "folder": folder,
+                    "scope": scope,
+                    "sort": sort,
+                    "uid_validity": info.uid_validity,
+                    "page": page,
+                    "page_size": size,
+                    "total": total,
+                    "has_next": start + size < total,
+                    "results": [_summary_payload(item) for item in summaries],
+                })
+
+            folders = [
+                item
+                for item in connection.list_folders()
+                if item.selectable
+                and (
+                    scope == "all_with_spam_trash"
+                    or item.role not in {"junk", "trash"}
+                )
+            ]
+
+            collected: list[imap.MessageSummary] = []
+            total_matches = 0
+            for item in folders:
+                connection.select(item.name, readonly=True)
+                uids = connection.search_uids(criteria, newest=newest)
+                total_matches += len(uids)
+                if total_matches > MAX_GLOBAL_SEARCH_MATCHES:
+                    return Response(
+                        {
+                            "detail": (
+                                "That search is too broad. Add a search term or "
+                                "narrow the folder scope and try again."
+                            )
+                        },
+                        status=400,
+                    )
+                summaries = _fetch_summaries_chunked(connection, uids)
+                if has_attachments is not None:
+                    summaries = [
+                        summary
+                        for summary in summaries
+                        if summary.has_attachments is has_attachments
+                    ]
+                collected.extend(summaries)
+
+        collected.sort(key=_global_message_sort_key, reverse=newest)
+        total = len(collected)
+        start = (page - 1) * size
+        window = collected[start:start + size]
         return Response({
             "folder": folder,
-            "uid_validity": info.uid_validity,
+            "scope": scope,
+            "sort": sort,
+            "uid_validity": 0,
             "page": page,
             "page_size": size,
-            "total": len(uids),
-            "has_next": start + size < len(uids),
-            "results": [_summary_payload(s) for s in summaries],
+            "total": total,
+            "has_next": start + size < total,
+            "results": [_summary_payload(item) for item in window],
         })
 
+
+def _fetch_summaries_chunked(
+    connection: imap.MailboxConnection,
+    uids: list[int],
+    chunk_size: int = 500,
+) -> list[imap.MessageSummary]:
+    """Fetch summary metadata in bounded IMAP commands."""
+    results: list[imap.MessageSummary] = []
+    for offset in range(0, len(uids), chunk_size):
+        results.extend(connection.fetch_summaries(uids[offset:offset + chunk_size]))
+    return results
+
+
+def _global_message_sort_key(summary: imap.MessageSummary) -> tuple[float, str, int]:
+    """Sort cross-folder results by message date with deterministic tie-breakers."""
+    timestamp = 0.0
+    if summary.date:
+        try:
+            parsed = parsedate_to_datetime(summary.date)
+            if parsed is not None:
+                timestamp = parsed.timestamp()
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return (timestamp, summary.folder.casefold(), summary.uid)
+
+
+def _attachment_filter(params) -> bool | None:
+    value = (params.get("has_attachments") or "").strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return None
 
 def _search_criteria(params) -> list[str]:
     """
@@ -205,6 +390,11 @@ def _search_criteria(params) -> list[str]:
     text = (params.get("q") or "").strip()
     if text:
         criteria += ["TEXT", text]
+
+    not_text = (params.get("not_q") or "").strip()
+    if not_text:
+        criteria += ["NOT", "TEXT", not_text]
+
     for key, keyword in (("from", "FROM"), ("to", "TO"), ("subject", "SUBJECT")):
         value = (params.get(key) or "").strip()
         if value:
@@ -223,6 +413,15 @@ def _search_criteria(params) -> list[str]:
     before = (params.get("before") or "").strip()
     if before:
         criteria += ["BEFORE", before]
+
+    for key, keyword in (("size_gt", "LARGER"), ("size_lt", "SMALLER")):
+        raw = (params.get(key) or "").strip()
+        if raw:
+            try:
+                value = max(int(raw), 0)
+            except (TypeError, ValueError):
+                continue
+            criteria += [keyword, str(value)]
 
     return criteria or ["ALL"]
 
@@ -307,6 +506,10 @@ class MessageDetailView(PostBoxView):
                     "size": a.size,
                     "inline": a.inline,
                     "content_id": a.content_id,
+                    "previewable": (
+                        a.content_type.lower() in SAFE_ATTACHMENT_PREVIEW_TYPES
+                        and a.size <= ATTACHMENT_PREVIEW_MAX_BYTES
+                    ),
                 }
                 for a in parsed.attachments
             ],
@@ -397,6 +600,96 @@ class AttachmentView(PostBoxView):
         return response
 
 
+
+class AttachmentPreviewView(PostBoxView):
+    """
+    Inline preview for a deliberately small allow-list of inert media types.
+
+    HTML, SVG, XML, office documents and unknown content remain download-only.
+    Even allow-listed bytes are sandboxed and nosniff so they never gain
+    PostBox-origin script privileges.
+    """
+
+    def get(self, request, folder: str, uid: int, part_id: str):
+        from django.http import HttpResponse
+        from urllib.parse import quote
+
+        with imap.open_mailbox(self.mailbox.email) as connection:
+            connection.select(folder, readonly=True)
+            raw = connection.fetch_raw(uid)
+
+        try:
+            filename, content_type, payload = mime.extract_attachment(raw, part_id)
+        except KeyError:
+            return Response(
+                {"detail": "That attachment could not be found."},
+                status=404,
+            )
+
+        content_type = (content_type or "application/octet-stream").lower()
+        if content_type not in SAFE_ATTACHMENT_PREVIEW_TYPES:
+            return Response(
+                {"detail": "This attachment type is download-only for security."},
+                status=415,
+            )
+        if len(payload) > ATTACHMENT_PREVIEW_MAX_BYTES:
+            return Response(
+                {"detail": "This attachment is too large to preview safely."},
+                status=413,
+            )
+
+        response = HttpResponse(payload, content_type=content_type)
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "sandbox; default-src 'none'"
+        response["Cross-Origin-Resource-Policy"] = "same-origin"
+        response["Content-Length"] = str(len(payload))
+        response["Content-Disposition"] = (
+            f"inline; filename=\"{filename}\"; "
+            f"filename*=UTF-8''{quote(filename)}"
+        )
+        return response
+
+
+class RemoteImageTrustedSenderListView(PostBoxView):
+    """List and remove mailbox-scoped remote-image sender decisions."""
+
+    def get(self, request):
+        rows = RemoteImageSenderTrust.objects.for_mailbox(self.mailbox).order_by("sender")
+        return Response({
+            "results": [
+                {
+                    "sender": row.sender,
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ]
+        })
+
+    def delete(self, request):
+        raw = (
+            request.data.get("sender")
+            or request.query_params.get("sender")
+            or ""
+        ).strip()
+        try:
+            sender = serializers.EmailField().run_validation(raw).strip().lower()
+        except serializers.ValidationError:
+            return Response(
+                {"detail": "Choose a valid trusted sender."},
+                status=400,
+            )
+
+        deleted, _ = RemoteImageSenderTrust.objects.for_mailbox(self.mailbox).filter(
+            sender=sender
+        ).delete()
+        if not deleted:
+            return Response(
+                {"detail": "That sender is not trusted."},
+                status=404,
+            )
+        return Response(status=204)
+
+
 def _draft_signature(mailbox, value: str) -> tuple[str | None, bool]:
     """
     (signature_id, missing) from a draft's signature header.
@@ -445,6 +738,62 @@ def _assert_uid_validity(request, actual: int) -> None:
             )
     except (TypeError, ValueError):
         return
+
+
+
+def _message_provenance_key(summary: imap.MessageSummary) -> str:
+    """Stable, privacy-preserving identity for one RFC 5322 message."""
+    if summary.message_id.strip():
+        source = f"mid:{summary.message_id.strip().lower()}"
+    else:
+        source = "|".join([
+            "fallback",
+            summary.from_address.strip().lower(),
+            summary.subject.strip(),
+            summary.date.strip(),
+            str(summary.size),
+        ])
+    return "msg:" + hashlib.sha256(source.encode("utf-8", "replace")).hexdigest()
+
+
+def _record_move_provenance(mailbox, summaries, original_folder: str) -> None:
+    for summary in summaries:
+        MessageMoveProvenance.objects.update_or_create(
+            mailbox=mailbox,
+            message_key=_message_provenance_key(summary),
+            defaults={"original_folder": original_folder},
+        )
+
+
+def _restore_destinations(
+    mailbox,
+    summaries,
+    valid_folders: set[str],
+) -> dict[str, list[int]]:
+    keys = {_message_provenance_key(summary) for summary in summaries}
+    provenance = {
+        row.message_key: row.original_folder
+        for row in MessageMoveProvenance.objects.for_mailbox(mailbox).filter(
+            message_key__in=keys
+        )
+    }
+
+    grouped: dict[str, list[int]] = {}
+    for summary in summaries:
+        key = _message_provenance_key(summary)
+        destination = provenance.get(key) or "INBOX"
+        if destination not in valid_folders:
+            destination = "INBOX"
+        grouped.setdefault(destination, []).append(summary.uid)
+    return grouped
+
+
+def _clear_move_provenance(mailbox, summaries) -> None:
+    keys = [_message_provenance_key(summary) for summary in summaries]
+    if keys:
+        MessageMoveProvenance.objects.for_mailbox(mailbox).filter(
+            message_key__in=keys
+        ).delete()
 
 
 # ── flags and moves ─────────────────────────────────────────────────────────
@@ -498,21 +847,53 @@ class MessageActionView(PostBoxView):
                 connection.mark_flagged(uids, False)
             elif action == "archive":
                 connection.move(uids, roles.get("archive", "Archive"))
-            elif action == "trash":
-                connection.move(uids, roles.get("trash", "Trash"))
-            elif action == "spam":
-                connection.move(uids, roles.get("junk", "Junk"))
-            elif action == "not-spam":
-                connection.move(uids, "INBOX")
-            elif action == "restore":
-                # Restore returns mail to the Inbox. Putting it back where it
-                # came from would need provenance IMAP does not record.
-                connection.move(uids, "INBOX")
+            elif action in {"trash", "spam"}:
+                trash = roles.get("trash", "Trash")
+                junk = roles.get("junk", "Junk")
+                destination = trash if action == "trash" else junk
+                summaries = connection.fetch_summaries(uids)
+                connection.move(uids, destination)
+                if data["folder"] not in {trash, junk}:
+                    _record_move_provenance(
+                        self.mailbox,
+                        summaries,
+                        data["folder"],
+                    )
+            elif action in {"not-spam", "restore"}:
+                summaries = connection.fetch_summaries(uids)
+                valid_folders = {
+                    item.name
+                    for item in connection.list_folders()
+                    if item.selectable
+                }
+                valid_folders.add("INBOX")
+                destinations = _restore_destinations(
+                    self.mailbox,
+                    summaries,
+                    valid_folders,
+                )
+                for destination, destination_uids in destinations.items():
+                    connection.move(destination_uids, destination)
+                _clear_move_provenance(self.mailbox, summaries)
             elif action == "move":
                 destination = (request.data.get("destination") or "").strip()
                 if not destination:
-                    return Response({"detail": "Choose a destination folder."}, status=400)
+                    return Response(
+                        {"detail": "Choose a destination folder."},
+                        status=400,
+                    )
+                summaries = connection.fetch_summaries(uids)
                 connection.move(uids, destination)
+                trash = roles.get("trash", "Trash")
+                junk = roles.get("junk", "Junk")
+                if destination in {trash, junk} and data["folder"] not in {trash, junk}:
+                    _record_move_provenance(
+                        self.mailbox,
+                        summaries,
+                        data["folder"],
+                    )
+                elif data["folder"] in {trash, junk}:
+                    _clear_move_provenance(self.mailbox, summaries)
             elif action == "delete":
                 # Permanent, and only from Trash or Junk. Erasing from an
                 # arbitrary folder would make a mis-click unrecoverable.
@@ -521,7 +902,9 @@ class MessageActionView(PostBoxView):
                         {"detail": "Messages can only be deleted permanently from Trash or Spam."},
                         status=400,
                     )
+                summaries = connection.fetch_summaries(uids)
                 connection.delete_permanently(uids)
+                _clear_move_provenance(self.mailbox, summaries)
 
         logger.info(
             "PostBox %s: mailbox=%s folder=%s count=%d",

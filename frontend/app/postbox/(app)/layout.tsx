@@ -666,8 +666,13 @@ function PremiumSearchForm({
         event.preventDefault();
         const next = new URLSearchParams(paramsText);
         const clean = value.trim();
-        if (clean) next.set("q", clean);
-        else next.delete("q");
+        if (clean) {
+          next.set("q", clean);
+          next.set("scope", "all");
+        } else {
+          next.delete("q");
+          next.delete("scope");
+        }
         next.delete("page");
         router.push(`/postbox?${next.toString()}`);
       }}
@@ -688,6 +693,7 @@ function PremiumSearchForm({
             setValue("");
             const next = new URLSearchParams(paramsText);
             next.delete("q");
+            next.delete("scope");
             next.delete("page");
             router.push(`/postbox?${next.toString()}`);
           }}
