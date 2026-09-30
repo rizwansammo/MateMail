@@ -35,7 +35,6 @@ import {
   type Signature,
 } from "@/lib/postbox-api";
 import { describePostBoxError } from "@/contexts/postbox-context";
-import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 export interface ComposeInitial {
   mode: "new" | "reply" | "reply-all" | "forward" | "draft";
@@ -215,10 +214,7 @@ export function Compose({
     ) => {
       setDraftUid(saved.uid || null);
       setSavedAt(saved.saved_at);
-      if (
-        !IS_NETAMATE_EMAIL &&
-        attachmentRevision.current === attachmentRevisionAtStart
-      ) {
+      if (attachmentRevision.current === attachmentRevisionAtStart) {
         setExistingAttachments(saved.attachments ?? []);
         setAttachments([]);
       }
@@ -293,7 +289,7 @@ export function Compose({
     const timer = window.setTimeout(async () => {
       const attachmentRevisionAtStart = attachmentRevision.current;
       const editRevisionAtStart = editRevision.current;
-      if (!IS_NETAMATE_EMAIL) setSaving(true);
+      setSaving(true);
       try {
         const saved = await postbox.saveDraft(payload());
         applySavedDraft(
@@ -304,7 +300,7 @@ export function Compose({
       } catch {
         // Autosave stays quiet; manual Save draft surfaces any failure.
       } finally {
-        if (!IS_NETAMATE_EMAIL) setSaving(false);
+        setSaving(false);
       }
     }, 2000);
     return () => window.clearTimeout(timer);
@@ -397,8 +393,7 @@ export function Compose({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !busy && !saving) {
-        if (IS_NETAMATE_EMAIL) onClose();
-        else void saveDraftNow(true);
+        void saveDraftNow(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -498,10 +493,7 @@ export function Compose({
               className="pb-btn pb-btn-plain"
               aria-label="Close"
               title="Close"
-              onClick={() => {
-                if (IS_NETAMATE_EMAIL) onClose();
-                else void saveDraftNow(true);
-              }}
+              onClick={() => void saveDraftNow(true)}
               disabled={saving || busy}
             >
               <X className="h-4 w-4" aria-hidden="true" />
@@ -535,30 +527,16 @@ export function Compose({
 
             <Field label="To" htmlFor="pb-to">
               <div className="flex gap-2">
-                {IS_NETAMATE_EMAIL ? (
-                  <input
-                    id="pb-to"
-                    className="pb-input"
-                    value={to}
-                    onChange={(event) => {
-                      setTo(event.target.value);
-                      markDirty();
-                    }}
-                    placeholder="name@example.com, another@example.com"
-                    autoComplete="off"
-                  />
-                ) : (
-                  <RecipientInput
-                    id="pb-to"
-                    label="To"
-                    value={to}
-                    onChange={(value) => {
-                      setTo(value);
-                      markDirty();
-                    }}
-                    placeholder="Name or email address"
-                  />
-                )}
+                <RecipientInput
+                  id="pb-to"
+                  label="To"
+                  value={to}
+                  onChange={(value) => {
+                    setTo(value);
+                    markDirty();
+                  }}
+                  placeholder="Name or email address"
+                />
                 <button
                   type="button"
                   className="pb-btn pb-btn-plain shrink-0"
@@ -589,52 +567,26 @@ export function Compose({
             {showCopies && (
               <div id="pb-copies" className="space-y-2">
                 <Field label="Cc" htmlFor="pb-cc">
-                  {IS_NETAMATE_EMAIL ? (
-                    <input
-                      id="pb-cc"
-                      className="pb-input"
-                      value={cc}
-                      onChange={(event) => {
-                        setCc(event.target.value);
-                        markDirty();
-                      }}
-                      autoComplete="off"
-                    />
-                  ) : (
-                    <RecipientInput
-                      id="pb-cc"
-                      label="Cc"
-                      value={cc}
-                      onChange={(value) => {
-                        setCc(value);
-                        markDirty();
-                      }}
-                    />
-                  )}
+                  <RecipientInput
+                    id="pb-cc"
+                    label="Cc"
+                    value={cc}
+                    onChange={(value) => {
+                      setCc(value);
+                      markDirty();
+                    }}
+                  />
                 </Field>
                 <Field label="Bcc" htmlFor="pb-bcc">
-                  {IS_NETAMATE_EMAIL ? (
-                    <input
-                      id="pb-bcc"
-                      className="pb-input"
-                      value={bcc}
-                      onChange={(event) => {
-                        setBcc(event.target.value);
-                        markDirty();
-                      }}
-                      autoComplete="off"
-                    />
-                  ) : (
-                    <RecipientInput
-                      id="pb-bcc"
-                      label="Bcc"
-                      value={bcc}
-                      onChange={(value) => {
-                        setBcc(value);
-                        markDirty();
-                      }}
-                    />
-                  )}
+                  <RecipientInput
+                    id="pb-bcc"
+                    label="Bcc"
+                    value={bcc}
+                    onChange={(value) => {
+                      setBcc(value);
+                      markDirty();
+                    }}
+                  />
                 </Field>
               </div>
             )}
@@ -714,40 +666,6 @@ export function Compose({
             </div>
           )}
 
-          {IS_NETAMATE_EMAIL ? (
-            attachments.length > 0 && (
-              <ul className="mt-3 space-y-1">
-                {attachments.map((attachment, index) => (
-                  <li
-                    key={attachment.filename + "-" + index}
-                    className="flex items-center gap-2 border px-2 py-1 text-xs"
-                    style={{ borderColor: "var(--pb-border)" }}
-                  >
-                    <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
-                    <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
-                    <span className="pb-subtle pb-num">{formatBytes(attachment.size)}</span>
-                    <button
-                      type="button"
-                      className="pb-btn pb-btn-plain"
-                      aria-label={"Remove " + attachment.filename}
-                      onClick={() => {
-                        attachmentRevision.current += 1;
-                        setAttachments((current) =>
-                          current.filter((_, itemIndex) => itemIndex !== index),
-                        );
-                        markDirty();
-                      }}
-                    >
-                      <X className="h-3 w-3" aria-hidden="true" />
-                    </button>
-                  </li>
-                ))}
-                <li className="text-xs pb-subtle pb-num">
-                  {formatBytes(totalBytes)} total
-                </li>
-              </ul>
-            )
-          ) : (
             (existingAttachments.length > 0 || attachments.length > 0) && (
               <div className="pb-compose-attachments">
                 {[...existingAttachments, ...attachments].map((attachment, index) => {
@@ -832,7 +750,6 @@ export function Compose({
             <p className="mt-3 text-xs" role="alert" style={{ color: "var(--pb-danger)" }}>
               {error}
             </p>
-          )}
         </div>
 
         <div
@@ -883,8 +800,7 @@ export function Compose({
             Schedule
           </button>
 
-          {!IS_NETAMATE_EMAIL && (
-            <button
+                      <button
               type="button"
               className="pb-btn pb-btn-ghost pb-compose-save-draft"
               disabled={saving || busy}
@@ -897,7 +813,7 @@ export function Compose({
               )}
               Save draft
             </button>
-          )}
+
 
           <button
             type="button"
