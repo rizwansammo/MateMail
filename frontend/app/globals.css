@@ -1984,6 +1984,9 @@ body {
   align-items:center;
   gap:9px;
   padding:20px 23px;
+  color:inherit;
+  text-decoration:none;
+  cursor:pointer;
 }
 .pb-premium-brand-mark {
   width:34px;
@@ -3012,7 +3015,9 @@ body {
   text-align:left;
 }
 .pb-premium-shell .pb-premium-message-body {
-  max-width:850px;
+  width:100%;
+  max-width:none;
+  min-width:0;
   color:var(--pb-fg);
   font-size:16px;
   line-height:1.85;
@@ -3024,11 +3029,21 @@ body {
   white-space:pre-wrap;
 }
 .pb-premium-shell .pb-premium-html-mail {
-  max-width:750px;
-  margin:0 auto;
-  border:1px solid var(--pb-border);
-  border-radius:7px;
-  padding:30px 36px;
+  width:100%;
+  max-width:none;
+  margin:0;
+  border:0;
+  border-radius:0;
+  padding:0;
+}
+.pb-premium-shell .pb-premium-html-mail > div {
+  width:100%;
+  max-width:100%;
+  overflow-x:auto;
+}
+.pb-premium-shell .pb-premium-html-mail img,
+.pb-premium-shell .pb-premium-html-mail table {
+  max-width:100%;
 }
 .pb-premium-shell .pb-premium-reader-attachments {
   margin-top:34px;
