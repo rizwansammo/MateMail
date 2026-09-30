@@ -15,7 +15,9 @@ A MESSAGE REFERENCE IS (folder, uidvalidity, uid)
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+from email.utils import parsedate_to_datetime
 
 from django.conf import settings
 from rest_framework import serializers
@@ -28,11 +30,21 @@ from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX, POSTBOX_SEND_PER_MA
 
 from . import imap, mime, sending
 from .auth import PostBoxSessionAuthentication
-from .models import PostBoxPreference, RemoteImageSenderTrust
+from .models import MessageMoveProvenance, PostBoxPreference, RemoteImageSenderTrust
 
 logger = logging.getLogger(__name__)
 
 MAX_PAGE_SIZE = 100
+MAX_GLOBAL_SEARCH_MATCHES = 5000
+ATTACHMENT_PREVIEW_MAX_BYTES = 10 * 1024 * 1024
+SAFE_ATTACHMENT_PREVIEW_TYPES = frozenset({
+    "application/pdf",
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "text/plain",
+})
 
 
 class PostBoxView(APIView):
@@ -133,12 +145,11 @@ def _summary_payload(summary: imap.MessageSummary) -> dict:
 
 class MessageListView(PostBoxView):
     """
-    A page of messages.
+    A page of messages from one folder or a real cross-folder search.
 
-    Paged over the UID list rather than with an IMAP cursor: the search runs
-    server-side and returns UIDs, which are sliced here and fetched in ONE
-    batched FETCH. That keeps the expensive part (the search) on Dovecot and
-    the cheap part (paging) local, and never loads a mailbox into memory.
+    Normal folder paging stays cheap: SEARCH returns UIDs and only the requested
+    window is fetched. Cross-folder scope searches selectable IMAP folders,
+    merges real summaries, sorts them and paginates the merged result.
     """
 
     def get(self, request):
@@ -155,10 +166,25 @@ class MessageListView(PostBoxView):
             size = preference.messages_per_page
         size = max(1, min(size, MAX_PAGE_SIZE))
 
+        sort = (request.query_params.get("sort") or "newest").strip().lower()
+        if sort not in {"newest", "oldest"}:
+            return Response({"detail": "Sort must be newest or oldest."}, status=400)
+        newest = sort == "newest"
+
+        scope = (request.query_params.get("scope") or "folder").strip().lower()
+        if scope not in {"folder", "all", "all_with_spam_trash"}:
+            return Response(
+                {"detail": "Search scope must be folder, all, or all_with_spam_trash."},
+                status=400,
+            )
+
         criteria = _search_criteria(request.query_params)
-        if criteria != ["ALL"]:
+        has_attachments = _attachment_filter(request.query_params)
+        is_search = criteria != ["ALL"] or scope != "folder" or has_attachments is not None
+        if is_search:
             decision = ratelimit.hit(
-                POSTBOX_SEARCH_PER_MAILBOX.bucket, str(self.mailbox.pk),
+                POSTBOX_SEARCH_PER_MAILBOX.bucket,
+                str(self.mailbox.pk),
                 limit=POSTBOX_SEARCH_PER_MAILBOX.limit,
                 window=POSTBOX_SEARCH_PER_MAILBOX.window,
             )
@@ -171,22 +197,122 @@ class MessageListView(PostBoxView):
                 )
 
         with imap.open_mailbox(self.mailbox.email) as connection:
-            info = connection.select(folder, readonly=True)
-            uids = connection.search_uids(criteria)
-            start = (page - 1) * size
-            window = uids[start:start + size]
-            summaries = connection.fetch_summaries(window)
+            if scope == "folder":
+                info = connection.select(folder, readonly=True)
+                uids = connection.search_uids(criteria, newest=newest)
 
+                if has_attachments is None:
+                    start = (page - 1) * size
+                    window = uids[start:start + size]
+                    summaries = connection.fetch_summaries(window)
+                    total = len(uids)
+                else:
+                    summaries = _fetch_summaries_chunked(connection, uids)
+                    summaries = [
+                        item
+                        for item in summaries
+                        if item.has_attachments is has_attachments
+                    ]
+                    total = len(summaries)
+                    start = (page - 1) * size
+                    summaries = summaries[start:start + size]
+
+                return Response({
+                    "folder": folder,
+                    "scope": scope,
+                    "sort": sort,
+                    "uid_validity": info.uid_validity,
+                    "page": page,
+                    "page_size": size,
+                    "total": total,
+                    "has_next": start + size < total,
+                    "results": [_summary_payload(item) for item in summaries],
+                })
+
+            folders = [
+                item
+                for item in connection.list_folders()
+                if item.selectable
+                and (
+                    scope == "all_with_spam_trash"
+                    or item.role not in {"junk", "trash"}
+                )
+            ]
+
+            collected: list[imap.MessageSummary] = []
+            total_matches = 0
+            for item in folders:
+                connection.select(item.name, readonly=True)
+                uids = connection.search_uids(criteria, newest=newest)
+                total_matches += len(uids)
+                if total_matches > MAX_GLOBAL_SEARCH_MATCHES:
+                    return Response(
+                        {
+                            "detail": (
+                                "That search is too broad. Add a search term or "
+                                "narrow the folder scope and try again."
+                            )
+                        },
+                        status=400,
+                    )
+                summaries = _fetch_summaries_chunked(connection, uids)
+                if has_attachments is not None:
+                    summaries = [
+                        summary
+                        for summary in summaries
+                        if summary.has_attachments is has_attachments
+                    ]
+                collected.extend(summaries)
+
+        collected.sort(key=_global_message_sort_key, reverse=newest)
+        total = len(collected)
+        start = (page - 1) * size
+        window = collected[start:start + size]
         return Response({
             "folder": folder,
-            "uid_validity": info.uid_validity,
+            "scope": scope,
+            "sort": sort,
+            "uid_validity": 0,
             "page": page,
             "page_size": size,
-            "total": len(uids),
-            "has_next": start + size < len(uids),
-            "results": [_summary_payload(s) for s in summaries],
+            "total": total,
+            "has_next": start + size < total,
+            "results": [_summary_payload(item) for item in window],
         })
 
+
+def _fetch_summaries_chunked(
+    connection: imap.MailboxConnection,
+    uids: list[int],
+    chunk_size: int = 500,
+) -> list[imap.MessageSummary]:
+    """Fetch summary metadata in bounded IMAP commands."""
+    results: list[imap.MessageSummary] = []
+    for offset in range(0, len(uids), chunk_size):
+        results.extend(connection.fetch_summaries(uids[offset:offset + chunk_size]))
+    return results
+
+
+def _global_message_sort_key(summary: imap.MessageSummary) -> tuple[float, str, int]:
+    """Sort cross-folder results by message date with deterministic tie-breakers."""
+    timestamp = 0.0
+    if summary.date:
+        try:
+            parsed = parsedate_to_datetime(summary.date)
+            if parsed is not None:
+                timestamp = parsed.timestamp()
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return (timestamp, summary.folder.casefold(), summary.uid)
+
+
+def _attachment_filter(params) -> bool | None:
+    value = (params.get("has_attachments") or "").strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return None
 
 def _search_criteria(params) -> list[str]:
     """
