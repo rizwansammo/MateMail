@@ -13,7 +13,7 @@
  * before it was sent. Nothing is cleaned here — a second, weaker sanitiser in
  * the browser would be the one people trusted.
  */
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   CornerUpLeft,
   CornerUpRight,
   Download,
@@ -54,6 +55,7 @@ import {
   type MessageDetail,
   type MessagePage,
   type MessageSummary,
+  type ScheduledRow,
 } from "@/lib/postbox-api";
 
 export default function MailPage() {
@@ -189,7 +191,20 @@ function Mailbox() {
   );
   const identities = directory.data?.[0]?.results ?? [];
   const signatures = directory.data?.[1]?.results ?? [];
-  const mailFolders = directory.data?.[2]?.results ?? [];
+  const mailFolders = useMemo(
+    () => directory.data?.[2]?.results ?? [],
+    [directory.data],
+  );
+
+  const scheduledData = useAsyncData(
+    () =>
+      IS_NETAMATE_EMAIL
+        ? Promise.resolve({ results: [] as ScheduledRow[] })
+        : postbox.scheduled(),
+    [],
+    "",
+  );
+  const scheduledRows = scheduledData.data?.results ?? [];
 
   // The composer opened from the rail's link is read from the query string
   // rather than copied into state, so no effect writes state on mount.
@@ -230,6 +245,37 @@ function Mailbox() {
       setShowRemote(remote);
       try {
         const data = await postbox.message(summary.folder, summary.uid, remote);
+        const role = mailFolders.find((item) => item.name === summary.folder)?.role;
+
+        if (!IS_NETAMATE_EMAIL && role === "drafts") {
+          setDetail(null);
+          setExplicitCompose({
+            mode: "draft",
+            to: data.to,
+            cc: data.cc,
+            bcc: data.bcc ?? [],
+            subject: data.subject,
+            text: data.text,
+            html: data.html,
+            from_address: data.from.address,
+            in_reply_to: data.in_reply_to,
+            references: data.references,
+            draft_uid: data.uid,
+            signature_id: data.signature_id ?? null,
+            signature_missing: data.signature_missing ?? false,
+            existing_attachments: data.attachments.map((attachment) => ({
+              folder: data.folder,
+              uid: data.uid,
+              uid_validity: data.uid_validity,
+              part_id: attachment.part_id,
+              filename: attachment.filename,
+              content_type: attachment.content_type,
+              size: attachment.size,
+            })),
+          });
+          return;
+        }
+
         setDetail(data);
         // Marking read is a separate, explicit call — the list does not mark
         // things seen as it scrolls past them.
@@ -243,7 +289,7 @@ function Mailbox() {
         setDetailLoading(false);
       }
     },
-    [loadList],
+    [loadList, mailFolders],
   );
 
   const act = useCallback(
@@ -325,12 +371,51 @@ function Mailbox() {
           from_address: context.from_address,
           in_reply_to: context.in_reply_to,
           references: context.references,
+          existing_attachments:
+            !IS_NETAMATE_EMAIL && mode === "forward"
+              ? context.attachments
+              : [],
         });
       } catch (caught) {
         setNotice(describePostBoxError(caught, "That reply could not be prepared."));
       }
     },
     [detail],
+  );
+
+  const rescheduleScheduled = useCallback(
+    async (row: ScheduledRow, scheduledAt: string) => {
+      try {
+        await postbox.rescheduleMessage(row.id, scheduledAt);
+        await scheduledData.reload();
+        setNotice(null);
+        setSuccessNotice("Scheduled time updated.");
+        setSuccessVisible(true);
+      } catch (caught) {
+        setNotice(
+          describePostBoxError(caught, "That scheduled message could not be updated."),
+        );
+      }
+    },
+    [scheduledData],
+  );
+
+  const cancelScheduled = useCallback(
+    async (row: ScheduledRow) => {
+      try {
+        await postbox.cancelScheduled(row.id);
+        setDetail(null);
+        await Promise.all([scheduledData.reload(), loadList()]);
+        setNotice(null);
+        setSuccessNotice("Scheduled message moved back to Drafts.");
+        setSuccessVisible(true);
+      } catch (caught) {
+        setNotice(
+          describePostBoxError(caught, "That scheduled message could not be cancelled."),
+        );
+      }
+    },
+    [loadList, scheduledData],
   );
 
   const rows = page?.results ?? [];
@@ -344,6 +429,12 @@ function Mailbox() {
   const activeSummary =
     detail
       ? rows.find(
+          (row) => row.uid === detail.uid && row.folder === detail.folder,
+        ) ?? null
+      : null;
+  const activeScheduled =
+    detail
+      ? scheduledRows.find(
           (row) => row.uid === detail.uid && row.folder === detail.folder,
         ) ?? null
       : null;
@@ -814,6 +905,9 @@ function Mailbox() {
               onTrustRemote={() => void trustRemoteSender()}
               onReply={openReply}
               folders={mailFolders}
+              scheduledRow={activeScheduled}
+              onRescheduleScheduled={rescheduleScheduled}
+              onCancelScheduled={cancelScheduled}
               onMove={(destination) =>
                 void act("move", [detail.uid], { destination }, detail.folder)
               }
@@ -836,6 +930,7 @@ function Mailbox() {
             setSuccessNotice(message);
             setSuccessVisible(true);
             void loadList();
+            void scheduledData.reload();
           }}
         />
       )}
@@ -852,6 +947,9 @@ function Reader({
   onTrustRemote,
   onReply,
   folders,
+  scheduledRow,
+  onRescheduleScheduled,
+  onCancelScheduled,
   onMove,
   onAction,
 }: {
@@ -863,6 +961,9 @@ function Reader({
   onTrustRemote: () => void;
   onReply: (mode: "reply" | "reply-all" | "forward") => void;
   folders: Folder[];
+  scheduledRow: ScheduledRow | null;
+  onRescheduleScheduled: (row: ScheduledRow, scheduledAt: string) => Promise<void>;
+  onCancelScheduled: (row: ScheduledRow) => Promise<void>;
   onMove: (destination: string) => void;
   onAction: (action: Parameters<typeof postbox.act>[0]) => void;
 }) {
@@ -935,6 +1036,14 @@ function Reader({
       </div>
 
       <div className="pb-premium-reader-scroll">
+        {scheduledRow && (
+          <ScheduledMessageBanner
+            key={scheduledRow.id + scheduledRow.scheduled_at}
+            row={scheduledRow}
+            onReschedule={onRescheduleScheduled}
+            onCancel={onCancelScheduled}
+          />
+        )}
         <div className="pb-premium-reader-heading">
           <h1>{detail.subject || "(no subject)"}</h1>
           {summary && (
@@ -1232,6 +1341,100 @@ function LegacyReader({
   );
 }
 
+
+
+function ScheduledMessageBanner({
+  row,
+  onReschedule,
+  onCancel,
+}: {
+  row: ScheduledRow;
+  onReschedule: (row: ScheduledRow, scheduledAt: string) => Promise<void>;
+  onCancel: (row: ScheduledRow) => Promise<void>;
+}) {
+  const [time, setTime] = useState(() => toLocalDateTimeInput(row.scheduled_at));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const pending = row.state === "pending";
+  const failed = row.state === "failed";
+
+  const save = async () => {
+    const parsed = new Date(time);
+    if (!time || Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+      setError("Choose a future date and time.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await onReschedule(row, parsed.toISOString());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    if (!window.confirm("Cancel this scheduled send and move the message back to Drafts?")) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await onCancel(row);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="pb-scheduled-banner" aria-label="Scheduled send">
+      <Clock className="h-5 w-5 shrink-0" aria-hidden="true" />
+      <div className="pb-scheduled-banner-copy">
+        <strong>
+          {failed ? "Scheduled send needs attention" : "Scheduled to send"}
+        </strong>
+        <p>
+          {new Date(row.scheduled_at).toLocaleString()}
+          {row.recipients ? " · " + row.recipients : ""}
+        </p>
+        {row.last_error && <p className="pb-scheduled-error">{row.last_error}</p>}
+        {error && <p className="pb-scheduled-error">{error}</p>}
+      </div>
+      {pending && (
+        <div className="pb-scheduled-controls">
+          <input
+            type="datetime-local"
+            aria-label="New scheduled date and time"
+            value={time}
+            onChange={(event) => setTime(event.target.value)}
+            disabled={busy}
+          />
+          <button type="button" onClick={() => void save()} disabled={busy}>
+            Reschedule
+          </button>
+        </div>
+      )}
+      {(pending || failed) && (
+        <button
+          type="button"
+          className="pb-scheduled-cancel"
+          onClick={() => void cancel()}
+          disabled={busy}
+        >
+          Cancel
+        </button>
+      )}
+    </section>
+  );
+}
+
+function toLocalDateTimeInput(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
 
 function MoveMenu({
   folders,

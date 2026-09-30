@@ -3364,3 +3364,413 @@ body {
     padding:0 7px;
   }
 }
+
+
+/* ── PostBox premium compose + scheduled mail (Phase 3) ──────────────── */
+.pb-premium-shell .pb-premium-compose-shell {
+  width:min(720px,calc(100vw - 32px));
+  height:min(810px,90dvh);
+  max-height:94dvh;
+  border:1px solid var(--pb-border);
+  border-radius:13px;
+  overflow:hidden;
+  background:var(--pb-bg);
+  box-shadow:0 20px 90px rgb(0 0 0 / .16) !important;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-head {
+  min-height:61px;
+  padding:0 22px;
+  border-color:var(--pb-border) !important;
+  background:var(--pb-sidebar) !important;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-head > p {
+  margin:0;
+  color:var(--pb-fg);
+  font-size:16px;
+  font-weight:600;
+}
+.pb-premium-shell .pb-compose-save-state {
+  color:var(--pb-subtle);
+  font-size:12px;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-content {
+  padding:0;
+  background:var(--pb-bg);
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-fields {
+  flex:0 0 auto;
+  padding:0 24px;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-fields > div {
+  min-height:49px;
+  gap:14px;
+  border-bottom:1px solid var(--pb-border);
+  margin:0;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-fields label {
+  width:44px;
+  flex:0 0 44px;
+  color:var(--pb-muted);
+  font-size:12px;
+  font-weight:400;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-fields .pb-input,
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-fields .pb-select {
+  height:48px;
+  border:0;
+  border-radius:0;
+  padding:0;
+  background:transparent;
+  box-shadow:none;
+  color:var(--pb-fg);
+  font-size:14px;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-fields .pb-input:focus,
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-fields .pb-select:focus {
+  outline:0;
+  box-shadow:none;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-fields .pb-btn {
+  min-height:29px;
+  border:0;
+  padding:4px 6px;
+  color:var(--pb-muted);
+  font-size:12px;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-body {
+  width:auto;
+  min-height:170px;
+  flex:1 1 auto;
+  margin:0 24px !important;
+  border:0;
+  border-radius:0;
+  padding:24px 0 18px;
+  background:transparent;
+  color:var(--pb-fg);
+  font-size:14px;
+  line-height:1.8;
+  resize:none;
+  box-shadow:none;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-body:focus {
+  outline:0;
+  box-shadow:none;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-body::placeholder {
+  color:var(--pb-subtle);
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-signature {
+  margin:0 24px !important;
+  max-width:520px;
+}
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-signature + div,
+.pb-premium-shell .pb-premium-compose-shell .pb-compose-warning + div {
+  margin-left:24px;
+  margin-right:24px;
+}
+.pb-premium-shell .pb-compose-warning {
+  margin:9px 24px 0;
+  border:1px solid color-mix(in srgb,var(--pb-warn) 30%,var(--pb-border));
+  border-radius:7px;
+  padding:9px 11px;
+  background:var(--pb-warn-soft);
+  color:var(--pb-warn);
+  font-size:12px;
+  line-height:1.55;
+}
+.pb-premium-shell .pb-premium-compose-shell #pb-signature {
+  height:30px;
+  border:0;
+  background:transparent;
+  color:var(--pb-muted);
+  font-size:12px;
+}
+.pb-premium-shell .pb-compose-attachments {
+  display:flex;
+  max-height:104px;
+  flex-wrap:wrap;
+  gap:8px;
+  overflow-y:auto;
+  border-top:1px solid var(--pb-border);
+  padding:11px 24px;
+}
+.pb-premium-shell .pb-compose-file-pill {
+  display:flex;
+  min-width:0;
+  max-width:100%;
+  align-items:center;
+  gap:7px;
+  border:1px solid var(--pb-border-strong);
+  border-radius:6px;
+  padding:5px 7px 5px 10px;
+  color:var(--pb-fg);
+  font-size:12px;
+}
+.pb-premium-shell .pb-compose-file-pill > svg {
+  color:var(--pb-muted);
+}
+.pb-premium-shell .pb-compose-file-pill > span {
+  display:flex;
+  min-width:0;
+  align-items:baseline;
+  gap:7px;
+}
+.pb-premium-shell .pb-compose-file-pill strong {
+  display:block;
+  max-width:230px;
+  overflow:hidden;
+  font-size:12px;
+  font-weight:500;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.pb-premium-shell .pb-compose-file-pill small {
+  color:var(--pb-muted);
+  font-size:11px;
+  white-space:nowrap;
+}
+.pb-premium-shell .pb-compose-file-pill button {
+  display:inline-flex;
+  width:24px;
+  height:24px;
+  align-items:center;
+  justify-content:center;
+  border:0;
+  border-radius:5px;
+  background:transparent;
+  color:var(--pb-muted);
+}
+.pb-premium-shell .pb-compose-file-pill button:hover {
+  background:var(--pb-surface-2);
+  color:var(--pb-fg);
+}
+.pb-premium-shell .pb-compose-attachment-total {
+  display:inline-flex;
+  align-items:center;
+  color:var(--pb-subtle);
+  font-size:11px;
+}
+.pb-premium-shell .pb-compose-schedule {
+  margin:0 !important;
+  border-top:1px solid var(--pb-border);
+  padding:13px 24px;
+  background:var(--pb-sidebar);
+}
+.pb-premium-shell .pb-compose-schedule .pb-input {
+  min-width:220px;
+  height:36px;
+}
+.pb-premium-shell .pb-compose-footer {
+  min-height:67px;
+  padding:13px 22px !important;
+  border-color:var(--pb-border) !important;
+  background:var(--pb-bg);
+}
+.pb-premium-shell .pb-compose-footer .pb-btn {
+  min-height:38px;
+  border-radius:7px;
+  font-size:12px;
+}
+.pb-premium-shell .pb-compose-footer .pb-btn-primary {
+  padding:9px 17px;
+}
+.pb-premium-shell .pb-compose-save-draft {
+  margin-left:8px;
+}
+.pb-premium-shell .pb-recipient-input-wrap {
+  position:relative;
+  min-width:0;
+  flex:1;
+}
+.pb-premium-shell .pb-recipient-suggestions {
+  position:absolute;
+  top:calc(100% - 2px);
+  left:0;
+  right:0;
+  z-index:80;
+  max-height:245px;
+  overflow-y:auto;
+  border:1px solid var(--pb-border);
+  border-radius:8px;
+  padding:6px;
+  background:var(--pb-surface);
+  box-shadow:0 16px 42px rgb(0 0 0 / .18);
+}
+.pb-premium-shell .pb-recipient-suggestions button {
+  display:flex;
+  width:100%;
+  align-items:center;
+  justify-content:space-between;
+  gap:15px;
+  border:0;
+  border-radius:6px;
+  padding:9px 10px;
+  background:transparent;
+  color:var(--pb-fg);
+  text-align:left;
+}
+.pb-premium-shell .pb-recipient-suggestions button:hover {
+  background:var(--pb-surface-2);
+}
+.pb-premium-shell .pb-recipient-suggestions span {
+  min-width:0;
+}
+.pb-premium-shell .pb-recipient-suggestions strong,
+.pb-premium-shell .pb-recipient-suggestions small {
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.pb-premium-shell .pb-recipient-suggestions strong {
+  font-size:12px;
+  font-weight:600;
+}
+.pb-premium-shell .pb-recipient-suggestions small {
+  margin-top:3px;
+  color:var(--pb-muted);
+  font-size:11px;
+}
+.pb-premium-shell .pb-recipient-suggestions em {
+  flex:0 0 auto;
+  color:var(--pb-subtle);
+  font-size:10px;
+  font-style:normal;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+
+/* Scheduled message controls in the reader. */
+.pb-premium-shell .pb-scheduled-banner {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-bottom:28px;
+  border:1px solid color-mix(in srgb,var(--pb-primary) 18%,var(--pb-border));
+  border-radius:9px;
+  padding:16px 18px;
+  background:var(--pb-accent);
+  color:var(--pb-accent-fg);
+}
+.pb-premium-shell .pb-scheduled-banner > svg {
+  color:var(--pb-primary);
+}
+.pb-premium-shell .pb-scheduled-banner-copy {
+  min-width:210px;
+  flex:1;
+}
+.pb-premium-shell .pb-scheduled-banner-copy strong {
+  font-size:13px;
+  font-weight:600;
+}
+.pb-premium-shell .pb-scheduled-banner-copy p {
+  margin:4px 0 0;
+  font-size:11px;
+  line-height:1.5;
+}
+.pb-premium-shell .pb-scheduled-error {
+  color:var(--pb-danger);
+}
+.pb-premium-shell .pb-scheduled-controls {
+  display:flex;
+  align-items:center;
+  gap:7px;
+}
+.pb-premium-shell .pb-scheduled-controls input {
+  height:34px;
+  border:1px solid var(--pb-border-strong);
+  border-radius:6px;
+  padding:0 8px;
+  background:var(--pb-bg);
+  color:var(--pb-fg);
+  font-size:11px;
+}
+.pb-premium-shell .pb-scheduled-controls button,
+.pb-premium-shell .pb-scheduled-cancel {
+  height:34px;
+  border:1px solid var(--pb-border-strong);
+  border-radius:6px;
+  padding:0 10px;
+  background:var(--pb-bg);
+  color:var(--pb-fg);
+  font-size:11px;
+  font-weight:600;
+}
+.pb-premium-shell .pb-scheduled-controls button:hover,
+.pb-premium-shell .pb-scheduled-cancel:hover {
+  background:var(--pb-surface-2);
+}
+.pb-premium-shell .pb-scheduled-cancel {
+  color:var(--pb-danger);
+}
+
+@media (min-width:640px) {
+  .pb-premium-shell .pb-compose-backdrop {
+    align-items:center !important;
+    justify-content:center !important;
+    padding:22px !important;
+  }
+  .pb-premium-shell .pb-premium-compose-shell {
+    width:min(720px,calc(100vw - 44px)) !important;
+    height:min(810px,calc(100dvh - 44px)) !important;
+  }
+}
+@media (max-width:639px) {
+  .pb-premium-shell .pb-premium-compose-shell {
+    width:100%;
+    height:100dvh;
+    max-height:none;
+    border:0;
+    border-radius:0;
+  }
+  .pb-premium-shell .pb-premium-compose-shell .pb-compose-head {
+    min-height:57px;
+    padding:0 15px;
+  }
+  .pb-premium-shell .pb-premium-compose-shell .pb-compose-fields {
+    padding:0 16px;
+  }
+  .pb-premium-shell .pb-premium-compose-shell .pb-compose-fields label {
+    width:36px;
+    flex-basis:36px;
+  }
+  .pb-premium-shell .pb-premium-compose-shell .pb-compose-body {
+    margin:0 16px !important;
+    padding-top:19px;
+  }
+  .pb-premium-shell .pb-premium-compose-shell .pb-compose-signature {
+    margin-left:16px !important;
+    margin-right:16px !important;
+  }
+  .pb-premium-shell .pb-compose-attachments {
+    padding:10px 16px;
+  }
+  .pb-premium-shell .pb-compose-schedule {
+    padding:12px 16px;
+  }
+  .pb-premium-shell .pb-compose-schedule .pb-input {
+    min-width:0;
+    width:100%;
+  }
+  .pb-premium-shell .pb-compose-footer {
+    min-height:64px;
+    padding:10px 13px !important;
+  }
+  .pb-premium-shell .pb-compose-footer .pb-compose-save-draft {
+    display:none;
+  }
+  .pb-premium-shell .pb-compose-file-pill strong {
+    max-width:180px;
+  }
+  .pb-premium-shell .pb-scheduled-banner {
+    align-items:flex-start;
+  }
+  .pb-premium-shell .pb-scheduled-controls {
+    width:100%;
+  }
+  .pb-premium-shell .pb-scheduled-controls input {
+    min-width:0;
+    flex:1;
+  }
+}

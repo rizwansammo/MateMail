@@ -103,23 +103,15 @@ def send_scheduled_message(scheduled_id: str) -> str:
                 )
             raw = connection.fetch_raw(row.uid)
 
-        import email as email_module
-        import email.policy
-
-        message = email_module.message_from_bytes(raw, policy=email.policy.default)
-
-        recipients = sending.envelope_recipients(
-            _addresses(message, "To"), _addresses(message, "Cc"), []
+        message, from_address, recipients = _scheduled_message_for_delivery(
+            mailbox,
+            raw,
         )
-        if not recipients:
-            raise sending.SendFailed(
-                "The scheduled message had no recipients.", "no envelope recipients"
-            )
-
-        from_address = email_module.utils.parseaddr(message.get("From", ""))[1]
-        sending.assert_may_send_as(mailbox, from_address)
         sending.submit(
-            message, mailbox=mailbox, envelope_from=from_address, recipients=recipients
+            message,
+            mailbox=mailbox,
+            envelope_from=from_address,
+            recipients=recipients,
         )
 
     except Exception as exc:  # noqa: BLE001 - recorded, never swallowed
@@ -138,7 +130,11 @@ def send_scheduled_message(scheduled_id: str) -> str:
     try:
         with imap.open_mailbox(mailbox.email) as connection:
             roles = {f.role: f.name for f in connection.list_folders() if f.role}
-            connection.append(roles.get("sent", "Sent"), raw, flags="\\Seen")
+            connection.append(
+                roles.get("sent", "Sent"),
+                message.as_bytes(),
+                flags="\\Seen",
+            )
             filed = True
             connection.select(row.folder)
             connection.delete_permanently([row.uid])
@@ -159,6 +155,92 @@ def send_scheduled_message(scheduled_id: str) -> str:
     )
     logger.info("PostBox scheduled %s sent for mailbox %s", scheduled_id, mailbox.pk)
     return "sent"
+
+
+
+def _scheduled_message_for_delivery(mailbox, raw: bytes):
+    """
+    Finalise one Scheduled source message.
+
+    New scheduled messages are stored in the same editable format as Drafts:
+    Bcc and signature choice are metadata, and the signature is applied only
+    here. Legacy rows created before this format existed are sent exactly as
+    stored so an already-applied HTML/image signature is never duplicated or
+    reconstructed incorrectly.
+    """
+    import email as email_module
+    import email.policy
+
+    from . import mime, sending, signatures
+
+    parsed = mime.parse_message(raw, load_remote_images=True)
+
+    if not parsed.draft_state:
+        message = email_module.message_from_bytes(raw, policy=email.policy.default)
+        recipients = sending.envelope_recipients(
+            _addresses(message, "To"),
+            _addresses(message, "Cc"),
+            [],
+        )
+        if not recipients:
+            raise sending.SendFailed(
+                "The scheduled message had no recipients.",
+                "legacy scheduled source has no envelope recipients",
+            )
+        from_address = email_module.utils.parseaddr(message.get("From", ""))[1]
+        sending.assert_may_send_as(mailbox, from_address)
+        return message, from_address, recipients
+
+    identity = sending.assert_may_send_as(mailbox, parsed.from_address)
+    signature = signatures.for_mailbox(mailbox, parsed.draft_signature_id or None)
+    if parsed.draft_signature_id and signature is None:
+        raise sending.SendFailed(
+            "The selected signature is no longer available.",
+            (
+                "scheduled source references missing signature "
+                f"{parsed.draft_signature_id}"
+            ),
+        )
+
+    text, html, related = signatures.apply(
+        text=parsed.text,
+        html=parsed.html,
+        signature=signature,
+    )
+
+    attachments = []
+    for attachment in parsed.attachments:
+        try:
+            attachments.append(mime.extract_attachment(raw, attachment.part_id))
+        except KeyError as exc:
+            raise sending.SendFailed(
+                "A scheduled attachment could not be found.",
+                f"missing scheduled attachment part {attachment.part_id}",
+            ) from exc
+
+    recipients = sending.envelope_recipients(parsed.to, parsed.cc, parsed.bcc)
+    if not recipients:
+        raise sending.SendFailed(
+            "The scheduled message had no recipients.",
+            "editable scheduled source has no envelope recipients",
+        )
+
+    message = mime.build_message(
+        from_address=identity.address,
+        from_name=identity.name,
+        to=parsed.to,
+        cc=parsed.cc,
+        bcc=parsed.bcc,
+        subject=parsed.subject,
+        text=text,
+        html=html,
+        in_reply_to=parsed.in_reply_to,
+        references=parsed.references,
+        attachments=attachments,
+        related=related,
+        message_id=parsed.message_id,
+    )
+    return message, identity.address, recipients
 
 
 def _addresses(message, header: str) -> list[str]:

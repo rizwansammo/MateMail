@@ -466,9 +466,9 @@ class MessageDetailView(PostBoxView):
             # which store them so they can be reopened whole. On any other
             # message neither is reported, and nothing is inferred from the
             # envelope or the body.
-            drafts = bool(parsed.bcc or parsed.draft_signature_id) and _is_drafts(
-                connection, folder
-            )
+            drafts = bool(
+                parsed.draft_state or parsed.bcc or parsed.draft_signature_id
+            ) and _is_drafts(connection, folder)
             bcc = parsed.bcc if drafts else []
 
         signature_id, signature_missing = (

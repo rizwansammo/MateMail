@@ -20,6 +20,7 @@ import {
   Maximize2,
   Minimize2,
   Paperclip,
+  Save,
   Send,
   Trash2,
   X,
@@ -29,10 +30,12 @@ import {
   fileToBase64,
   formatBytes,
   postbox,
+  type ComposeAttachmentRef,
   type Identity,
   type Signature,
 } from "@/lib/postbox-api";
 import { describePostBoxError } from "@/contexts/postbox-context";
+import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 export interface ComposeInitial {
   mode: "new" | "reply" | "reply-all" | "forward" | "draft";
@@ -56,6 +59,9 @@ export interface ComposeInitial {
   references?: string[];
   from_address?: string;
   draft_uid?: number;
+  signature_id?: string | null;
+  signature_missing?: boolean;
+  existing_attachments?: ComposeAttachmentRef[];
 }
 
 interface PendingAttachment {
@@ -119,10 +125,19 @@ export function Compose({
   const [subject, setSubject] = useState(initial.subject ?? "");
   const [body, setBody] = useState(initial.text ?? "");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<ComposeAttachmentRef[]>(
+    initial.existing_attachments ?? [],
+  );
+  const attachmentRevision = useRef(0);
+  const editRevision = useRef(0);
   const [signatureId, setSignatureId] = useState<string>(
-    signatures.find((s) =>
-      initial.mode === "new" ? s.use_for_new : s.use_for_replies,
-    )?.id ?? "",
+    initial.signature_id ??
+      signatures.find((signature) =>
+        initial.mode === "new"
+          ? signature.use_for_new
+          : signature.use_for_replies,
+      )?.id ??
+      "",
   );
 
   // Derived, so changing the selector updates the preview with no effect
@@ -136,6 +151,7 @@ export function Compose({
   const [showSchedule, setShowSchedule] = useState(false);
 
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dirty = useRef(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -156,33 +172,145 @@ export function Compose({
         content_type,
         data,
       })),
+      existing_attachments: existingAttachments.map(
+        ({ folder, uid, uid_validity, part_id }) => ({
+          folder,
+          uid,
+          uid_validity,
+          part_id,
+        }),
+      ),
       draft_uid: draftUid,
     }),
-    [from, to, cc, bcc, subject, body, signatureId, attachments, draftUid, initial],
+    [
+      from,
+      to,
+      cc,
+      bcc,
+      subject,
+      body,
+      signatureId,
+      attachments,
+      existingAttachments,
+      draftUid,
+      initial,
+    ],
+  );
+
+  const markDirty = () => {
+    editRevision.current += 1;
+    dirty.current = true;
+  };
+
+  const applySavedDraft = useCallback(
+    (
+      saved: {
+        uid: number;
+        uid_validity: number;
+        saved_at: string;
+        attachments: ComposeAttachmentRef[];
+      },
+      attachmentRevisionAtStart: number,
+      editRevisionAtStart: number,
+    ) => {
+      setDraftUid(saved.uid || null);
+      setSavedAt(saved.saved_at);
+      if (
+        !IS_NETAMATE_EMAIL &&
+        attachmentRevision.current === attachmentRevisionAtStart
+      ) {
+        setExistingAttachments(saved.attachments ?? []);
+        setAttachments([]);
+      }
+      if (editRevision.current === editRevisionAtStart) {
+        dirty.current = false;
+      }
+    },
+    [],
+  );
+
+  const saveDraftNow = useCallback(
+    async (closeAfter = false) => {
+      const hasDraftMaterial = Boolean(
+        to.trim() ||
+          cc.trim() ||
+          bcc.trim() ||
+          subject.trim() ||
+          body.trim() ||
+          attachments.length ||
+          existingAttachments.length,
+      );
+
+      if (!dirty.current && draftUid) {
+        if (closeAfter) onClose();
+        return true;
+      }
+      if (!dirty.current && !draftUid && !hasDraftMaterial) {
+        if (closeAfter) onClose();
+        return true;
+      }
+
+      setSaving(true);
+      setError(null);
+      const attachmentRevisionAtStart = attachmentRevision.current;
+      const editRevisionAtStart = editRevision.current;
+      try {
+        const saved = await postbox.saveDraft(payload());
+        applySavedDraft(
+          saved,
+          attachmentRevisionAtStart,
+          editRevisionAtStart,
+        );
+        if (closeAfter) onClose();
+        return true;
+      } catch (caught) {
+        setError(describePostBoxError(caught, "Your draft could not be saved."));
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [
+      applySavedDraft,
+      attachments.length,
+      bcc,
+      body,
+      cc,
+      draftUid,
+      existingAttachments.length,
+      onClose,
+      payload,
+      subject,
+      to,
+    ],
   );
 
   // Debounced autosave. Two seconds is long enough that typing a sentence is
   // one save rather than twenty, and short enough that a closed tab loses at
   // most a sentence.
   useEffect(() => {
-    if (!dirty.current) return;
+    if (!dirty.current || busy || saving) return;
     const timer = window.setTimeout(async () => {
+      const attachmentRevisionAtStart = attachmentRevision.current;
+      const editRevisionAtStart = editRevision.current;
+      if (!IS_NETAMATE_EMAIL) setSaving(true);
       try {
         const saved = await postbox.saveDraft(payload());
-        setDraftUid(saved.uid || null);
-        setSavedAt(saved.saved_at);
+        applySavedDraft(
+          saved,
+          attachmentRevisionAtStart,
+          editRevisionAtStart,
+        );
       } catch {
-        // Autosave failures are silent by design: an error toast every two
-        // seconds while somebody types is worse than a draft that is a little
-        // behind. An explicit save surfaces the problem.
+        // Autosave stays quiet; manual Save draft surfaces any failure.
+      } finally {
+        if (!IS_NETAMATE_EMAIL) setSaving(false);
       }
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [payload]);
+  }, [applySavedDraft, busy, payload, saving]);
 
-  const markDirty = () => {
-    dirty.current = true;
-  };
+
 
   const addFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
@@ -201,6 +329,7 @@ export function Compose({
       }
     }
     setAttachments((current) => [...current, ...added]);
+    if (added.length > 0) attachmentRevision.current += 1;
     markDirty();
   }, []);
 
@@ -219,6 +348,16 @@ export function Compose({
       if (schedule && !scheduleAt) {
         setError("Choose when to send.");
         return;
+      }
+      if (schedule) {
+        const scheduled = new Date(scheduleAt);
+        if (
+          Number.isNaN(scheduled.getTime()) ||
+          scheduled.getTime() <= Date.now()
+        ) {
+          setError("Choose a future date and time.");
+          return;
+        }
       }
 
       setBusy(true);
@@ -257,13 +396,18 @@ export function Compose({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) onClose();
+      if (event.key === "Escape" && !busy && !saving) {
+        if (IS_NETAMATE_EMAIL) onClose();
+        else void saveDraftNow(true);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onClose]);
+  }, [busy, onClose, saveDraftNow, saving]);
 
-  const totalBytes = attachments.reduce((sum, a) => sum + a.size, 0);
+  const totalBytes =
+    attachments.reduce((sum, attachment) => sum + attachment.size, 0) +
+    existingAttachments.reduce((sum, attachment) => sum + attachment.size, 0);
 
   return (
     <div
@@ -294,7 +438,7 @@ export function Compose({
       aria-label="Compose message"
     >
       <div
-        className={`pb-panel pb-compose-shell flex w-full flex-col ${
+        className={`pb-panel pb-compose-shell pb-premium-compose-shell flex w-full flex-col ${
           expanded
             ? // Underscores, not spaces: Tailwind arbitrary values cannot contain
             // spaces, and `calc` is invalid without them around the operator.
@@ -307,7 +451,7 @@ export function Compose({
         style={{ boxShadow: "var(--pb-shadow-lg)" }}
       >
         <div
-          className="flex shrink-0 items-center justify-between border-b px-3 py-2"
+          className="pb-compose-head flex shrink-0 items-center justify-between border-b px-3 py-2"
           style={{ borderColor: "var(--pb-border)", background: "var(--pb-surface-2)" }}
         >
           <p className="text-sm font-semibold">
@@ -315,10 +459,16 @@ export function Compose({
               ? "Forward"
               : initial.mode.startsWith("reply")
                 ? "Reply"
-                : "New message"}
+                : initial.mode === "draft"
+                  ? "Edit draft"
+                  : "New message"}
           </p>
           <div className="flex items-center gap-1">
-            {savedAt && <span className="text-xs pb-subtle">Draft saved</span>}
+            {saving ? (
+              <span className="pb-compose-save-state">Saving draft…</span>
+            ) : savedAt ? (
+              <span className="pb-compose-save-state">Draft saved</span>
+            ) : null}
             {/*
               Hidden below `sm`, where Compose already fills the screen and
               there is nothing to expand into. Wrapped in a div because
@@ -348,7 +498,11 @@ export function Compose({
               className="pb-btn pb-btn-plain"
               aria-label="Close"
               title="Close"
-              onClick={onClose}
+              onClick={() => {
+                if (IS_NETAMATE_EMAIL) onClose();
+                else void saveDraftNow(true);
+              }}
+              disabled={saving || busy}
             >
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -358,8 +512,8 @@ export function Compose({
         {/* `flex flex-col` so the body textarea can claim the leftover height
             when Compose is expanded; `min-h-0` so this pane scrolls instead of
             pushing the footer actions off the panel. */}
-        <div className="pb-scroll flex min-h-0 flex-1 flex-col p-3">
-          <div className="space-y-2">
+        <div className="pb-compose-content pb-scroll flex min-h-0 flex-1 flex-col p-3">
+          <div className="pb-compose-fields space-y-2">
             <Field label="From" htmlFor="pb-from">
               <select
                 id="pb-from"
@@ -381,17 +535,30 @@ export function Compose({
 
             <Field label="To" htmlFor="pb-to">
               <div className="flex gap-2">
-                <input
-                  id="pb-to"
-                  className="pb-input"
-                  value={to}
-                  onChange={(event) => {
-                    setTo(event.target.value);
-                    markDirty();
-                  }}
-                  placeholder="name@example.com, another@example.com"
-                  autoComplete="off"
-                />
+                {IS_NETAMATE_EMAIL ? (
+                  <input
+                    id="pb-to"
+                    className="pb-input"
+                    value={to}
+                    onChange={(event) => {
+                      setTo(event.target.value);
+                      markDirty();
+                    }}
+                    placeholder="name@example.com, another@example.com"
+                    autoComplete="off"
+                  />
+                ) : (
+                  <RecipientInput
+                    id="pb-to"
+                    label="To"
+                    value={to}
+                    onChange={(value) => {
+                      setTo(value);
+                      markDirty();
+                    }}
+                    placeholder="Name or email address"
+                  />
+                )}
                 <button
                   type="button"
                   className="pb-btn pb-btn-plain shrink-0"
@@ -422,28 +589,52 @@ export function Compose({
             {showCopies && (
               <div id="pb-copies" className="space-y-2">
                 <Field label="Cc" htmlFor="pb-cc">
-                  <input
-                    id="pb-cc"
-                    className="pb-input"
-                    value={cc}
-                    onChange={(event) => {
-                      setCc(event.target.value);
-                      markDirty();
-                    }}
-                    autoComplete="off"
-                  />
+                  {IS_NETAMATE_EMAIL ? (
+                    <input
+                      id="pb-cc"
+                      className="pb-input"
+                      value={cc}
+                      onChange={(event) => {
+                        setCc(event.target.value);
+                        markDirty();
+                      }}
+                      autoComplete="off"
+                    />
+                  ) : (
+                    <RecipientInput
+                      id="pb-cc"
+                      label="Cc"
+                      value={cc}
+                      onChange={(value) => {
+                        setCc(value);
+                        markDirty();
+                      }}
+                    />
+                  )}
                 </Field>
                 <Field label="Bcc" htmlFor="pb-bcc">
-                  <input
-                    id="pb-bcc"
-                    className="pb-input"
-                    value={bcc}
-                    onChange={(event) => {
-                      setBcc(event.target.value);
-                      markDirty();
-                    }}
-                    autoComplete="off"
-                  />
+                  {IS_NETAMATE_EMAIL ? (
+                    <input
+                      id="pb-bcc"
+                      className="pb-input"
+                      value={bcc}
+                      onChange={(event) => {
+                        setBcc(event.target.value);
+                        markDirty();
+                      }}
+                      autoComplete="off"
+                    />
+                  ) : (
+                    <RecipientInput
+                      id="pb-bcc"
+                      label="Bcc"
+                      value={bcc}
+                      onChange={(value) => {
+                        setBcc(value);
+                        markDirty();
+                      }}
+                    />
+                  )}
                 </Field>
               </div>
             )}
@@ -481,8 +672,15 @@ export function Compose({
             which appends the signature itself — would send it twice.
             What is submitted is the body alone plus a signature id.
           */}
+          {initial.signature_missing && (
+            <p className="pb-compose-warning" role="status">
+              The signature previously selected for this draft no longer exists.
+              Choose another signature or send without one.
+            </p>
+          )}
+
           {selectedSignature && (
-            <div className="mt-2" aria-label="Signature preview">
+            <div className="pb-compose-signature mt-2" aria-label="Signature preview">
               <div
                 className="mb-2"
                 style={{ borderTop: "1px solid var(--pb-border)" }}
@@ -516,39 +714,97 @@ export function Compose({
             </div>
           )}
 
-          {attachments.length > 0 && (
-            <ul className="mt-3 space-y-1">
-              {attachments.map((attachment, index) => (
-                <li
-                  key={`${attachment.filename}-${index}`}
-                  className="flex items-center gap-2 border px-2 py-1 text-xs"
-                  style={{ borderColor: "var(--pb-border)" }}
-                >
-                  <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
-                  <span className="pb-subtle pb-num">{formatBytes(attachment.size)}</span>
-                  <button
-                    type="button"
-                    className="pb-btn pb-btn-plain"
-                    aria-label={`Remove ${attachment.filename}`}
-                    onClick={() =>
-                      setAttachments((current) =>
-                        current.filter((_, i) => i !== index),
-                      )
-                    }
+          {IS_NETAMATE_EMAIL ? (
+            attachments.length > 0 && (
+              <ul className="mt-3 space-y-1">
+                {attachments.map((attachment, index) => (
+                  <li
+                    key={attachment.filename + "-" + index}
+                    className="flex items-center gap-2 border px-2 py-1 text-xs"
+                    style={{ borderColor: "var(--pb-border)" }}
                   >
-                    <X className="h-3 w-3" aria-hidden="true" />
-                  </button>
+                    <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
+                    <span className="pb-subtle pb-num">{formatBytes(attachment.size)}</span>
+                    <button
+                      type="button"
+                      className="pb-btn pb-btn-plain"
+                      aria-label={"Remove " + attachment.filename}
+                      onClick={() => {
+                        attachmentRevision.current += 1;
+                        setAttachments((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index),
+                        );
+                        markDirty();
+                      }}
+                    >
+                      <X className="h-3 w-3" aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+                <li className="text-xs pb-subtle pb-num">
+                  {formatBytes(totalBytes)} total
                 </li>
-              ))}
-              <li className="text-xs pb-subtle pb-num">
-                {formatBytes(totalBytes)} total
-              </li>
-            </ul>
+              </ul>
+            )
+          ) : (
+            (existingAttachments.length > 0 || attachments.length > 0) && (
+              <div className="pb-compose-attachments">
+                {[...existingAttachments, ...attachments].map((attachment, index) => {
+                  const isExisting = index < existingAttachments.length;
+                  return (
+                    <div
+                      key={
+                        isExisting
+                          ? "server-" +
+                            (attachment as ComposeAttachmentRef).folder +
+                            "-" +
+                            (attachment as ComposeAttachmentRef).uid +
+                            "-" +
+                            (attachment as ComposeAttachmentRef).part_id
+                          : "upload-" + attachment.filename + "-" + index
+                      }
+                      className="pb-compose-file-pill"
+                    >
+                      <Paperclip className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span>
+                        <strong>{attachment.filename}</strong>
+                        <small>{formatBytes(attachment.size)}</small>
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={"Remove " + attachment.filename}
+                        onClick={() => {
+                          attachmentRevision.current += 1;
+                          if (isExisting) {
+                            setExistingAttachments((current) =>
+                              current.filter((_, itemIndex) => itemIndex !== index),
+                            );
+                          } else {
+                            const pendingIndex = index - existingAttachments.length;
+                            setAttachments((current) =>
+                              current.filter(
+                                (_, itemIndex) => itemIndex !== pendingIndex,
+                              ),
+                            );
+                          }
+                          markDirty();
+                        }}
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
+                  );
+                })}
+                <span className="pb-compose-attachment-total">
+                  {formatBytes(totalBytes)} total
+                </span>
+              </div>
+            )
           )}
 
           {showSchedule && (
-            <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div className="pb-compose-schedule mt-3 flex flex-wrap items-end gap-2">
               <div>
                 <label htmlFor="pb-schedule" className="pb-label">
                   Send at
@@ -564,7 +820,7 @@ export function Compose({
               <button
                 type="button"
                 className="pb-btn pb-btn-primary"
-                disabled={busy}
+                disabled={busy || saving}
                 onClick={() => void submit(true)}
               >
                 Schedule
@@ -580,13 +836,13 @@ export function Compose({
         </div>
 
         <div
-          className="flex shrink-0 flex-wrap items-center gap-2 border-t px-3 py-2"
+          className="pb-compose-footer flex shrink-0 flex-wrap items-center gap-2 border-t px-3 py-2"
           style={{ borderColor: "var(--pb-border)" }}
         >
           <button
             type="button"
             className="pb-btn pb-btn-primary"
-            disabled={busy}
+            disabled={busy || saving}
             onClick={() => void submit(false)}
           >
             {busy ? (
@@ -602,7 +858,10 @@ export function Compose({
             type="file"
             multiple
             className="hidden"
-            onChange={(event) => void addFiles(event.target.files)}
+            onChange={(event) => {
+              void addFiles(event.target.files);
+              event.currentTarget.value = "";
+            }}
           />
           <button
             type="button"
@@ -617,16 +876,34 @@ export function Compose({
             type="button"
             className="pb-btn pb-btn-ghost"
             aria-pressed={showSchedule}
+            disabled={busy || saving}
             onClick={() => setShowSchedule((open) => !open)}
           >
             <Clock className="h-3.5 w-3.5" aria-hidden="true" />
             Schedule
           </button>
 
+          {!IS_NETAMATE_EMAIL && (
+            <button
+              type="button"
+              className="pb-btn pb-btn-ghost pb-compose-save-draft"
+              disabled={saving || busy}
+              onClick={() => void saveDraftNow(false)}
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Save className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              Save draft
+            </button>
+          )}
+
           <button
             type="button"
             className="pb-btn pb-btn-plain ml-auto"
             onClick={() => void discard()}
+            disabled={saving || busy}
           >
             <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
             Discard
@@ -696,6 +973,101 @@ function SignaturePreview({ signature }: { signature: Signature }) {
     >
       {signature.text}
     </pre>
+  );
+}
+
+function RecipientInput({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder = "",
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  const [suggestions, setSuggestions] = useState<
+    Array<{ name: string; email: string; source: string }>
+  >([]);
+  const [focused, setFocused] = useState(false);
+
+  const suffix = value.split(/[,;]/).pop()?.trim() ?? "";
+  useEffect(() => {
+    if (suffix.length < 2) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      postbox
+        .suggest(suffix)
+        .then((result) => {
+          if (!cancelled) setSuggestions(result.results);
+        })
+        .catch(() => {
+          if (!cancelled) setSuggestions([]);
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [suffix]);
+
+  const visible = focused && suffix.length >= 2 && suggestions.length > 0;
+
+  const choose = (email: string) => {
+    const parts = value.split(/[,;]/);
+    parts.pop();
+    const prefix = parts.map((part) => part.trim()).filter(Boolean);
+    onChange([...prefix, email].join(", ") + ", ");
+    setFocused(true);
+  };
+
+  return (
+    <div className="pb-recipient-input-wrap">
+      <input
+        id={id}
+        className="pb-input"
+        value={value}
+        aria-label={label}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-haspopup="listbox"
+        aria-expanded={visible}
+        aria-controls={visible ? id + "-suggestions" : undefined}
+        autoComplete="off"
+        placeholder={placeholder}
+        onFocus={() => setFocused(true)}
+        onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {visible && (
+        <div
+          id={id + "-suggestions"}
+          className="pb-recipient-suggestions"
+          role="listbox"
+          aria-label={label + " suggestions"}
+        >
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.source + "-" + suggestion.email}
+              type="button"
+              role="option"
+              aria-selected="false"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => choose(suggestion.email)}
+            >
+              <span>
+                <strong>{suggestion.name || suggestion.email}</strong>
+                {suggestion.name && <small>{suggestion.email}</small>}
+              </span>
+              <em>{suggestion.source === "contact" ? "Contact" : "Recent"}</em>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

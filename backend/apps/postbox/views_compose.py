@@ -50,6 +50,21 @@ class AttachmentInputSerializer(serializers.Serializer):
     data = serializers.CharField()
 
 
+class ExistingAttachmentSerializer(serializers.Serializer):
+    """
+    A reference to an attachment that already exists in THIS mailbox.
+
+    Used by Forward and by reopened/autosaved drafts. The browser never has to
+    download an original attachment and upload it back just to keep it attached.
+    The server resolves the part from the authenticated mailbox at build time.
+    """
+
+    folder = serializers.CharField(max_length=255)
+    uid = serializers.IntegerField(min_value=1)
+    uid_validity = serializers.IntegerField(min_value=0, required=False, default=0)
+    part_id = serializers.CharField(max_length=80)
+
+
 class ComposeSerializer(serializers.Serializer):
     from_address = serializers.EmailField()
     to = serializers.ListField(child=serializers.EmailField(), allow_empty=True, default=list)
@@ -63,6 +78,11 @@ class ComposeSerializer(serializers.Serializer):
         child=serializers.CharField(), required=False, default=list
     )
     attachments = AttachmentInputSerializer(many=True, required=False, default=list)
+    existing_attachments = ExistingAttachmentSerializer(
+        many=True,
+        required=False,
+        default=list,
+    )
     signature_id = serializers.UUIDField(required=False, allow_null=True)
 
     #: Present for a scheduled send. Absent means send now.
@@ -107,6 +127,99 @@ def _decode_attachments(items, *, limit_mb: int, total_limit_mb: int):
     return decoded
 
 
+def _resolve_existing_attachments(
+    mailbox,
+    items,
+    *,
+    limit_mb: int,
+    total_limit_mb: int,
+):
+    """
+    Resolve attachment refs inside the authenticated mailbox.
+
+    Fetches each source message once even when several parts are forwarded.
+    UIDVALIDITY is checked when the caller supplied it so a stale draft/forward
+    cannot silently attach a different message after a mailbox reset.
+    """
+    if not items:
+        return []
+
+    grouped: dict[tuple[str, int, int], list[str]] = {}
+    for item in items:
+        key = (
+            item["folder"],
+            int(item["uid"]),
+            int(item.get("uid_validity") or 0),
+        )
+        grouped.setdefault(key, []).append(item["part_id"])
+
+    decoded: list[tuple[str, str, bytes]] = []
+    total = 0
+    with imap.open_mailbox(mailbox.email) as connection:
+        for (folder, uid, expected_validity), part_ids in grouped.items():
+            info = connection.select(folder, readonly=True)
+            if expected_validity and info.uid_validity != expected_validity:
+                raise serializers.ValidationError({
+                    "existing_attachments": (
+                        "An original attachment changed before it could be "
+                        "copied. Reopen the message and try again."
+                    )
+                })
+            raw = connection.fetch_raw(uid)
+            for part_id in part_ids:
+                try:
+                    filename, content_type, payload = mime.extract_attachment(
+                        raw,
+                        part_id,
+                    )
+                except KeyError:
+                    raise serializers.ValidationError({
+                        "existing_attachments": (
+                            "An original attachment could not be found. "
+                            "Reopen the message and try again."
+                        )
+                    })
+                if len(payload) > limit_mb * 1024 * 1024:
+                    raise serializers.ValidationError({
+                        "existing_attachments": (
+                            f"'{filename}' is larger than {limit_mb} MB."
+                        )
+                    })
+                total += len(payload)
+                if total > total_limit_mb * 1024 * 1024:
+                    raise serializers.ValidationError({
+                        "existing_attachments": (
+                            f"The message is larger than {total_limit_mb} MB "
+                            "in total."
+                        )
+                    })
+                decoded.append((filename, content_type, payload))
+    return decoded
+
+
+def _attachment_refs_for_saved_message(
+    message,
+    *,
+    folder: str,
+    uid: int,
+    uid_validity: int,
+):
+    """Return refs for every attachment in a newly saved draft."""
+    parsed = mime.parse_message(message.as_bytes(), load_remote_images=False)
+    return [
+        {
+            "folder": folder,
+            "uid": uid,
+            "uid_validity": uid_validity,
+            "part_id": item.part_id,
+            "filename": item.filename,
+            "content_type": item.content_type,
+            "size": item.size,
+        }
+        for item in parsed.attachments
+    ]
+
+
 class ComposeMixin:
     """Shared building of a message from a compose payload."""
 
@@ -147,11 +260,26 @@ class ComposeMixin:
                 text=text, html=html, signature=signature
             )
 
-        attachments = _decode_attachments(
+        uploaded_attachments = _decode_attachments(
             data.get("attachments"),
             limit_mb=settings.POSTBOX_MAX_ATTACHMENT_MB,
             total_limit_mb=settings.POSTBOX_MAX_MESSAGE_MB,
         )
+        existing_attachments = _resolve_existing_attachments(
+            mailbox,
+            data.get("existing_attachments"),
+            limit_mb=settings.POSTBOX_MAX_ATTACHMENT_MB,
+            total_limit_mb=settings.POSTBOX_MAX_MESSAGE_MB,
+        )
+        attachments = [*existing_attachments, *uploaded_attachments]
+        total_attachment_bytes = sum(len(payload) for _, _, payload in attachments)
+        if total_attachment_bytes > settings.POSTBOX_MAX_MESSAGE_MB * 1024 * 1024:
+            raise serializers.ValidationError({
+                "attachments": (
+                    f"The message is larger than "
+                    f"{settings.POSTBOX_MAX_MESSAGE_MB} MB in total."
+                )
+            })
 
         message = mime.build_message(
             from_address=identity.address,
@@ -208,12 +336,21 @@ class SendView(PostBoxView, ComposeMixin):
                 detail="You have sent a lot of mail recently. Please wait a little.",
             )
 
-        message, identity = self.build(data, mailbox=mailbox)
-
         send_at = data.get("send_at")
         if send_at:
-            return self._schedule(message, data, send_at, recipients, mailbox)
+            # Store an EDITABLE source message in Scheduled: Bcc and the
+            # selected signature remain draft metadata, while the signature
+            # itself is not applied yet. The worker finalises it at send time.
+            scheduled_source, _ = self.build(data, mailbox=mailbox, draft=True)
+            return self._schedule(
+                scheduled_source,
+                data,
+                send_at,
+                recipients,
+                mailbox,
+            )
 
+        message, identity = self.build(data, mailbox=mailbox)
         sending.submit(
             message, mailbox=mailbox, envelope_from=identity.address, recipients=recipients
         )
@@ -339,10 +476,16 @@ class DraftView(PostBoxView, ComposeMixin):
                 connection.delete_permanently([int(previous)])
 
         return Response({
-            "folder": "Drafts",
+            "folder": drafts,
             "uid": uid,
             "uid_validity": uid_validity,
             "saved_at": timezone.now().isoformat(),
+            "attachments": _attachment_refs_for_saved_message(
+                message,
+                folder=drafts,
+                uid=uid,
+                uid_validity=uid_validity,
+            ),
         })
 
     def delete(self, request, uid: int):
@@ -369,7 +512,7 @@ class ReplyContextView(PostBoxView):
             return Response({"detail": "Unknown reply mode."}, status=400)
 
         with imap.open_mailbox(self.mailbox.email) as connection:
-            connection.select(folder, readonly=True)
+            info = connection.select(folder, readonly=True)
             raw = connection.fetch_raw(uid)
 
         parsed = mime.parse_message(raw, load_remote_images=False)
@@ -405,8 +548,15 @@ class ReplyContextView(PostBoxView):
             "references": [*parsed.references, parsed.message_id] if parsed.message_id
                           else parsed.references,
             "attachments": [
-                {"part_id": a.part_id, "filename": a.filename,
-                 "content_type": a.content_type, "size": a.size}
+                {
+                    "folder": folder,
+                    "uid": uid,
+                    "uid_validity": info.uid_validity,
+                    "part_id": a.part_id,
+                    "filename": a.filename,
+                    "content_type": a.content_type,
+                    "size": a.size,
+                }
                 for a in parsed.attachments
             ] if mode == "forward" else [],
         })
@@ -422,6 +572,9 @@ class ScheduledListView(PostBoxView):
                 "id": str(row.id),
                 "subject": row.subject,
                 "recipients": row.recipients,
+                "folder": row.folder,
+                "uid": row.uid,
+                "uid_validity": row.uid_validity,
                 "scheduled_at": row.scheduled_at.isoformat(),
                 "state": row.state,
                 "attempts": row.attempts,
@@ -464,17 +617,32 @@ class ScheduledDetailView(PostBoxView):
                 {"detail": "That message can no longer be cancelled."}, status=409
             )
 
-        row.state = ScheduledMessage.State.CANCELLED
-        row.save(update_fields=["state", "updated_at"])
-
-        # The message itself moves back to Drafts, so cancelling returns the
-        # text to the person rather than discarding what they wrote.
+        # Move FIRST, then mark the database row cancelled. If IMAP fails,
+        # the scheduled row remains pending/failed and can still be retried or
+        # cancelled again; reporting success while the message is stranded in
+        # Scheduled would lose the user's only editable copy.
         try:
             with imap.open_mailbox(self.mailbox.email) as connection:
                 roles = {f.role: f.name for f in connection.list_folders() if f.role}
                 connection.select(row.folder)
                 connection.move([row.uid], roles.get("drafts", "Drafts"))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("PostBox: cancelled %s but could not move it: %r", row.id, exc)
+            logger.warning(
+                "PostBox: could not cancel scheduled %s because the message "
+                "could not be returned to Drafts: %r",
+                row.id,
+                exc,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "That scheduled message could not be moved back to "
+                        "Drafts, so it was not cancelled."
+                    )
+                },
+                status=502,
+            )
 
+        row.state = ScheduledMessage.State.CANCELLED
+        row.save(update_fields=["state", "updated_at"])
         return Response({"id": str(row.id), "state": row.state})
