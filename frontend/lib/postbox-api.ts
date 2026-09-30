@@ -178,6 +178,16 @@ export interface AttachmentInfo {
   previewable: boolean;
 }
 
+export interface ComposeAttachmentRef {
+  folder: string;
+  uid: number;
+  uid_validity: number;
+  part_id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+}
+
 export interface MessageDetail {
   uid: number;
   uid_validity: number;
@@ -186,6 +196,9 @@ export interface MessageDetail {
   from: { name: string; address: string };
   to: string[];
   cc: string[];
+  bcc?: string[];
+  signature_id?: string | null;
+  signature_missing?: boolean;
   reply_to: string;
   date: string;
   message_id: string;
@@ -290,6 +303,9 @@ export interface ScheduledRow {
   id: string;
   subject: string;
   recipients: string;
+  folder: string;
+  uid: number;
+  uid_validity: number;
   scheduled_at: string;
   state: string;
   attempts: number;
@@ -309,6 +325,12 @@ export interface ComposePayload {
   references?: string[];
   signature_id?: string | null;
   attachments?: Array<{ filename: string; content_type: string; data: string }>;
+  existing_attachments?: Array<{
+    folder: string;
+    uid: number;
+    uid_validity: number;
+    part_id: string;
+  }>;
   send_at?: string | null;
   draft_uid?: number | null;
 }
@@ -386,6 +408,7 @@ export const postbox = {
       mode: string; subject: string; to: string[]; cc: string[];
       from_address: string; text: string; html: string;
       in_reply_to: string; references: string[];
+      attachments: ComposeAttachmentRef[];
     }>(`/messages/${encodeFolder(folder)}/${uid}/reply-context/${qs({ mode })}`),
 
   act: (
@@ -406,7 +429,13 @@ export const postbox = {
       { method: "POST", body: JSON.stringify(payload) },
     ),
   saveDraft: (payload: ComposePayload) =>
-    request<{ uid: number; uid_validity: number; saved_at: string }>("/drafts/", {
+    request<{
+      folder: string;
+      uid: number;
+      uid_validity: number;
+      saved_at: string;
+      attachments: ComposeAttachmentRef[];
+    }>("/drafts/", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
