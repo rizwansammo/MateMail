@@ -193,15 +193,21 @@ def parse_message(raw: bytes, *, load_remote_images: bool = False) -> ParsedMess
             or bool(filename)
             or content_type not in ("text/plain", "text/html")
         ):
+            content_id = (part.get("Content-ID", "") or "").strip("<>")
             parsed.attachments.append(
                 Attachment(
                     part_id=str(index),
-                    filename=safe_filename(decode_header_value(filename or "")
-                                           or f"attachment-{index}"),
+                    filename=safe_filename(
+                        decode_header_value(filename or "")
+                        or f"attachment-{index}"
+                    ),
                     content_type=content_type,
                     size=len(part.get_payload(decode=True) or b""),
-                    inline=disposition == "inline",
-                    content_id=(part.get("Content-ID", "") or "").strip("<>"),
+                    # Some senders omit Content-Disposition entirely and rely
+                    # only on Content-ID. A CID-bearing non-text part is still
+                    # inline content and must be resolvable by the reader.
+                    inline=disposition == "inline" or bool(content_id),
+                    content_id=content_id,
                 )
             )
             continue
@@ -295,14 +301,16 @@ def _strip_remote_references(html: str) -> tuple[str, bool]:
     def drop(match: re.Match) -> str:
         nonlocal found
         found = True
-        return f'{match.group("attr")}{match.group("quote")}{match.group("quote")}'
+        # Remove the URL-bearing attribute entirely. src="" still renders
+        # a broken-image glyph and may resolve against the current document.
+        return ""
 
     html = _REMOTE_SRC.sub(drop, html)
 
     def drop_unquoted(match: re.Match) -> str:
         nonlocal found
         found = True
-        return f'{match.group("attr")}""'
+        return ""
 
     html = _REMOTE_SRC_UNQUOTED.sub(drop_unquoted, html)
 
