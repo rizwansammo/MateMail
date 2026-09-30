@@ -666,7 +666,7 @@ export function Compose({
             </div>
           )}
 
-            (existingAttachments.length > 0 || attachments.length > 0) && (
+          {(existingAttachments.length > 0 || attachments.length > 0) && (
               <div className="pb-compose-attachments">
                 {[...existingAttachments, ...attachments].map((attachment, index) => {
                   const isExisting = index < existingAttachments.length;
@@ -718,8 +718,7 @@ export function Compose({
                   {formatBytes(totalBytes)} total
                 </span>
               </div>
-            )
-          )}
+            )}
 
           {showSchedule && (
             <div className="pb-compose-schedule mt-3 flex flex-wrap items-end gap-2">
@@ -750,6 +749,7 @@ export function Compose({
             <p className="mt-3 text-xs" role="alert" style={{ color: "var(--pb-danger)" }}>
               {error}
             </p>
+          )}
         </div>
 
         <div
