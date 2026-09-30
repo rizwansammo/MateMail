@@ -2443,9 +2443,8 @@ body {
 @media (max-width:1000px) {
   .pb-premium-sidebar { width:205px; flex-basis:205px; }
   .pb-premium-brand { padding:20px 18px; gap:7px; }
-  .pb-premium-brand img { width:30px; height:30px; }
+  .pb-premium-brand-mark { width:30px; height:30px; flex-basis:30px; }
   .pb-premium-wordmark { font-size:25px; }
-  .pb-premium-brand-dot { display:none; }
   .pb-premium-topbar { padding:0 24px; gap:15px; }
   .pb-premium-search { width:60%; }
 }
