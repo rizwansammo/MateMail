@@ -1034,7 +1034,7 @@ function Reader({
                         )}
                         target="_blank"
                         rel="noopener noreferrer"
-                        aria-label={\`Preview \${attachment.filename}\`}
+                        aria-label={`Preview ${attachment.filename}`}
                         title="Preview"
                       >
                         <Eye className="h-4 w-4" aria-hidden="true" />
@@ -1047,7 +1047,7 @@ function Reader({
                         attachment.part_id,
                       )}
                       download={attachment.filename}
-                      aria-label={\`Download \${attachment.filename}\`}
+                      aria-label={`Download ${attachment.filename}`}
                       title="Download"
                     >
                       <Download className="h-4 w-4" aria-hidden="true" />
