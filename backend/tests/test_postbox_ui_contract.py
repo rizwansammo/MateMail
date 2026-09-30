@@ -581,3 +581,13 @@ class PostBoxTabBrandingRegressionTest(SimpleTestCase):
         self.assertIn('default: "PostBox"', layout)
         self.assertIn('url: "/postbox-mark.svg"', layout)
         self.assertNotIn('default: "MateMail PostBox"', layout)
+
+
+class PostBoxPublicAssetIndependenceTest(SimpleTestCase):
+    def test_login_logo_is_inline_and_favicon_uses_app_route(self):
+        login = read("app", "postbox", "login", "page.tsx")
+        layout = read("app", "postbox", "layout.tsx")
+        self.assertIn('className="pb-premium-login-mark"', login)
+        self.assertNotIn('src="/postbox-mark.svg"', login)
+        self.assertIn('url: "/postbox/favicon?v=3"', layout)
+        self.assertNotIn('url: "/postbox-mark.svg"', layout)
