@@ -711,19 +711,17 @@ def _restore_destinations(
     summaries,
     valid_folders: set[str],
 ) -> dict[str, list[int]]:
-    by_key = {
-        _message_provenance_key(summary): summary
-        for summary in summaries
-    }
+    keys = {_message_provenance_key(summary) for summary in summaries}
     provenance = {
         row.message_key: row.original_folder
         for row in MessageMoveProvenance.objects.for_mailbox(mailbox).filter(
-            message_key__in=by_key.keys()
+            message_key__in=keys
         )
     }
 
     grouped: dict[str, list[int]] = {}
-    for key, summary in by_key.items():
+    for summary in summaries:
+        key = _message_provenance_key(summary)
         destination = provenance.get(key) or "INBOX"
         if destination not in valid_folders:
             destination = "INBOX"
