@@ -8,7 +8,6 @@
  * frame full of failed requests before the redirect lands.
  */
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -116,19 +115,6 @@ export default function PostBoxAppLayout({
   }
 
   if (!mailbox) return <div className="pb min-h-screen" />;
-
-  const byRole = new Map(folders.map((f) => [f.role, f]));
-  // Anything the standard list does not claim. The backend now assigns a
-  // role by canonical name when the server offers no special-use attribute,
-  // so Sent/Drafts/Trash/Junk/Archive no longer land here — which is what
-  // made them all render with the same icon.
-  const custom = folders.filter((f) => !PINNED_ROLES.has(f.role));
-
-  const themeOptions = [
-    { value: "light" as const, Icon: Sun, label: "Light" },
-    { value: "system" as const, Icon: Monitor, label: "System" },
-    { value: "dark" as const, Icon: Moon, label: "Dark" },
-  ];
 
   return (
     <PremiumPostBoxShell
