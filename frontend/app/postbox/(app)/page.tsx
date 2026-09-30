@@ -712,7 +712,7 @@ function Mailbox() {
                       aria-label="Previous page"
                       disabled={page.page <= 1}
                       onClick={() => setPageNumber((n) => n - 1)}>
-                      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                      {!IS_NETAMATE_EMAIL && <ChevronLeft className="h-4 w-4" aria-hidden="true" />}
                       Newer
                     </button>
                     <button type="button" className="pb-btn pb-btn-ghost"
@@ -720,7 +720,7 @@ function Mailbox() {
                       disabled={!page.has_next}
                       onClick={() => setPageNumber((n) => n + 1)}>
                       Older
-                      <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                      {!IS_NETAMATE_EMAIL && <ChevronRight className="h-4 w-4" aria-hidden="true" />}
                     </button>
                   </span>
                 </div>
@@ -1154,7 +1154,11 @@ function MoveMenu({
   onMove: (destination: string) => void;
   disabled?: boolean;
 }) {
-  const destinations = folders.filter((item) => item.name !== currentFolder);
+  const destinations = folders.filter(
+    (item) =>
+      item.name !== currentFolder &&
+      !new Set(["sent", "drafts", "scheduled"]).has(item.role),
+  );
   if (destinations.length === 0) return null;
 
   return (
