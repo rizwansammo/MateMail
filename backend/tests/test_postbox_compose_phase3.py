@@ -238,9 +238,8 @@ class PostBoxComposePhase3Test(TestCase):
             ["client@example.net", "hidden@example.net"],
             submit.call_args.kwargs["recipients"],
         )
-        self.assertEqual(1, submitted.get_content().count("Regards,\nAlice"))
-
         parsed = mime.parse_message(submitted.as_bytes(), load_remote_images=True)
+        self.assertEqual(1, parsed.text.count("Regards,\nAlice"))
         self.assertEqual(["plan.txt"], [a.filename for a in parsed.attachments])
 
         sent_bytes = connection.append.call_args.args[1]
