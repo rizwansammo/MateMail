@@ -1031,8 +1031,11 @@ function RecipientInput({
         className="pb-input"
         value={value}
         aria-label={label}
+        role="combobox"
         aria-autocomplete="list"
+        aria-haspopup="listbox"
         aria-expanded={visible}
+        aria-controls={visible ? id + "-suggestions" : undefined}
         autoComplete="off"
         placeholder={placeholder}
         onFocus={() => setFocused(true)}
@@ -1041,6 +1044,7 @@ function RecipientInput({
       />
       {visible && (
         <div
+          id={id + "-suggestions"}
           className="pb-recipient-suggestions"
           role="listbox"
           aria-label={label + " suggestions"}
@@ -1050,6 +1054,7 @@ function RecipientInput({
               key={suggestion.source + "-" + suggestion.email}
               type="button"
               role="option"
+              aria-selected="false"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => choose(suggestion.email)}
             >
