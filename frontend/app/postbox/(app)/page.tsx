@@ -68,6 +68,54 @@ export default function MailPage() {
 /** Stable, so a derived empty selection does not change identity each render. */
 const EMPTY_SELECTION: Set<number> = new Set();
 
+/**
+ * A browser does not understand RFC 2392 cid: URLs by itself. Map only CIDs
+ * that the server reported as safe, previewable image parts to authenticated
+ * same-origin preview URLs. The message HTML itself was already sanitised by
+ * the backend; this function only resolves its inert inline-image references.
+ */
+function resolveInlineImageReferences(detail: MessageDetail): string {
+  if (!detail.html || !detail.html.toLowerCase().includes("cid:")) {
+    return detail.html;
+  }
+
+  const inlineImages = new Map(
+    detail.attachments
+      .filter(
+        (attachment) =>
+          attachment.content_id &&
+          attachment.previewable &&
+          attachment.content_type.toLowerCase().startsWith("image/"),
+      )
+      .map((attachment) => [
+        attachment.content_id.trim().replace(/^<|>$/g, "").toLowerCase(),
+        postbox.attachmentPreviewUrl(
+          detail.folder,
+          detail.uid,
+          attachment.part_id,
+        ),
+      ]),
+  );
+
+  if (inlineImages.size === 0) return detail.html;
+
+  return detail.html.replace(
+    /(\bsrc\s*=\s*["'])cid:([^"']+)(["'])/gi,
+    (match, prefix: string, rawCid: string, suffix: string) => {
+      let cid = rawCid.trim();
+      try {
+        cid = decodeURIComponent(cid);
+      } catch {
+        // A malformed percent escape is just a CID that will not match.
+      }
+      const url = inlineImages.get(
+        cid.replace(/^<|>$/g, "").toLowerCase(),
+      );
+      return url ? `${prefix}${url}${suffix}` : match;
+    },
+  );
+}
+
 function CentredSpinner() {
   return (
     <div className="flex h-full items-center justify-center">
@@ -931,6 +979,10 @@ function Reader({
 }) {
   const isSpam = /(^|[./_-])(spam|junk)($|[./_-])/i.test(detail.folder);
   const isTrash = /(^|[./_-])trash($|[./_-])/i.test(detail.folder);
+  const renderedHtml = useMemo(
+    () => resolveInlineImageReferences(detail),
+    [detail],
+  );
 
   return (
     <article className="pb-premium-reader flex h-full min-h-0 flex-col">
@@ -1052,9 +1104,9 @@ function Reader({
           </div>
         )}
 
-        <div className={`pb-message-body pb-premium-message-body ${detail.html ? "pb-premium-html-mail" : ""}`}>
-          {detail.html ? (
-            <div dangerouslySetInnerHTML={{ __html: detail.html }} />
+        <div className={`pb-message-body pb-premium-message-body ${renderedHtml ? "pb-premium-html-mail" : ""}`}>
+          {renderedHtml ? (
+            <div dangerouslySetInnerHTML={{ __html: renderedHtml }} />
           ) : (
             <pre className="whitespace-pre-wrap">
               {detail.text || "(This message has no readable content.)"}
