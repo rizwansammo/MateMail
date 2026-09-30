@@ -19,6 +19,8 @@ import {
   Archive,
   ArrowLeft,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   CornerUpLeft,
   CornerUpRight,
   Download,
@@ -26,9 +28,12 @@ import {
   Forward,
   ImageOff,
   Loader2,
+  Mail,
   MailOpen,
+  MoreHorizontal,
   Paperclip,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -38,12 +43,14 @@ import {
 } from "lucide-react";
 
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
+import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
 import {
   formatBytes,
   formatMessageDate,
   postbox,
+  type Folder,
   type MessageDetail,
   type MessagePage,
   type MessageSummary,
@@ -75,6 +82,15 @@ function Mailbox() {
 
   const folder = params.get("folder") || "INBOX";
   const starredOnly = params.get("starred") === "true";
+  const requestedFilter = params.get("filter");
+  const filterMode: "all" | "unread" | "starred" =
+    starredOnly || requestedFilter === "starred"
+      ? "starred"
+      : requestedFilter === "unread"
+        ? "unread"
+        : "all";
+  const unreadOnly = filterMode === "unread";
+  const filteredStarredOnly = filterMode === "starred";
   const urlQuery = params.get("q") || "";
 
   const [queryState, setQueryState] = useState({ key: urlQuery, value: urlQuery });
@@ -88,7 +104,7 @@ function Mailbox() {
   // One key for "which list am I looking at". Paging and selection both reset
   // when it changes, and both derive that from the key rather than having an
   // effect write it — a reset is a consequence of the key, not an event.
-  const listKey = `${folder}|${search}|${starredOnly}`;
+  const listKey = `${folder}|${search}|${filterMode}`;
 
   const [pageState, setPageState] = useState({ key: listKey, page: 1 });
   const pageNumber = pageState.key === listKey ? pageState.page : 1;
@@ -137,9 +153,10 @@ function Mailbox() {
         folder,
         page: pageNumber,
         q: search || undefined,
-        starred: starredOnly ? "true" : undefined,
+        unread: unreadOnly ? "true" : undefined,
+        starred: filteredStarredOnly ? "true" : undefined,
       }),
-    [folder, pageNumber, search, starredOnly],
+    [folder, pageNumber, search, unreadOnly, filteredStarredOnly],
     "Your mail could not be loaded.",
   );
 
@@ -149,12 +166,13 @@ function Mailbox() {
   const loadList = list.reload;
 
   const directory = useAsyncData(
-    () => Promise.all([postbox.identities(), postbox.signatures()]),
+    () => Promise.all([postbox.identities(), postbox.signatures(), postbox.folders()]),
     [],
     "",
   );
   const identities = directory.data?.[0]?.results ?? [];
   const signatures = directory.data?.[1]?.results ?? [];
+  const mailFolders = directory.data?.[2]?.results ?? [];
 
   // The composer opened from the rail's link is read from the query string
   // rather than copied into state, so no effect writes state on mount.
@@ -219,7 +237,12 @@ function Mailbox() {
       try {
         await postbox.act(action, folder, targets, extra);
         setSelected(new Set());
-        if (detail && targets.includes(detail.uid)) setDetail(null);
+        const removesFromCurrentView = IS_NETAMATE_EMAIL || new Set([
+          "archive", "trash", "spam", "not-spam", "move", "restore", "delete",
+        ]).has(action);
+        if (removesFromCurrentView && detail && targets.includes(detail.uid)) {
+          setDetail(null);
+        }
         await loadList();
         setNotice(null);
       } catch (caught) {
@@ -291,12 +314,132 @@ function Mailbox() {
   const rows = page?.results ?? [];
   const allSelected = rows.length > 0 && selected.size === rows.length;
   const paneRight = preferences.reading_pane === "right";
+  const paneOff = !IS_NETAMATE_EMAIL && preferences.reading_pane === "off";
+  const folderIsSpam = /(^|[./_-])(spam|junk)($|[./_-])/i.test(folder);
+  const folderIsTrash = /(^|[./_-])trash($|[./_-])/i.test(folder);
+  const activeSummary =
+    detail ? rows.find((row) => row.uid === detail.uid) ?? null : null;
+
+  const applyFilter = (nextFilter: "all" | "unread" | "starred") => {
+    const next = new URLSearchParams(params.toString());
+    next.delete("starred");
+    if (nextFilter === "all") next.delete("filter");
+    else next.set("filter", nextFilter);
+    next.delete("page");
+    setSelected(new Set());
+    setDetail(null);
+    router.push(`/postbox?${next.toString()}`);
+  };
+
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {!IS_NETAMATE_EMAIL && (
+        <div className="pb-premium-mail-toolbar">
+          <input
+            className="pb-premium-select-all"
+            type="checkbox"
+            aria-label="Select all visible messages"
+            checked={allSelected}
+            onChange={(event) =>
+              setSelected(
+                event.target.checked ? new Set(rows.map((row) => row.uid)) : new Set(),
+              )
+            }
+          />
+
+          {selected.size > 0 ? (
+            <div className="pb-premium-selection-actions">
+              <span>{selected.size} selected</span>
+              <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
+                onClick={() => void act("read")} />
+              <ToolbarButton label="Mark unread" icon={Mail} busy={busy}
+                onClick={() => void act("unread")} />
+              <ToolbarButton label="Star" icon={Star} busy={busy}
+                onClick={() => void act("star")} />
+              <ToolbarButton label="Archive" icon={Archive} busy={busy}
+                onClick={() => void act("archive")} />
+              <MoveMenu
+                folders={mailFolders}
+                currentFolder={folder}
+                disabled={busy}
+                onMove={(destination) => void act("move", undefined, { destination })}
+              />
+              {folderIsSpam ? (
+                <ToolbarButton label="Not spam" icon={ShieldCheck} busy={busy}
+                  onClick={() => void act("not-spam")} />
+              ) : (
+                <ToolbarButton label="Spam" icon={ShieldAlert} busy={busy}
+                  onClick={() => void act("spam")} />
+              )}
+              {folderIsTrash ? (
+                <ToolbarButton label="Restore" icon={RotateCcw} busy={busy}
+                  onClick={() => void act("restore")} />
+              ) : (
+                <ToolbarButton label="Trash" icon={Trash2} busy={busy}
+                  onClick={() => void act("trash")} />
+              )}
+              <button
+                type="button"
+                className="pb-premium-icon-button"
+                aria-label="Clear selection"
+                title="Clear selection"
+                onClick={() => setSelected(new Set())}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          ) : (
+            <div className="pb-premium-mail-tabs" role="tablist" aria-label="Mailbox filter">
+              {(["all", "unread", "starred"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="tab"
+                  aria-selected={filterMode === mode}
+                  data-active={filterMode === mode ? "true" : "false"}
+                  onClick={() => applyFilter(mode)}
+                >
+                  {mode === "all" ? "All mail" : mode === "unread" ? "Unread" : "Starred"}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="pb-premium-mail-toolbar-actions">
+            <span className="pb-premium-sort-label">Newest first</span>
+            <button
+              type="button"
+              className="pb-premium-icon-button"
+              aria-label="Refresh mailbox"
+              title="Refresh mailbox"
+              disabled={loading}
+              onClick={() => void loadList()}
+            >
+              <RefreshCw className={`h-[18px] w-[18px] ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
+            </button>
+            <details className="pb-premium-mail-more">
+              <summary className="pb-premium-icon-button" aria-label="Mailbox actions" title="Mailbox actions">
+                <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
+              </summary>
+              <div className="pb-premium-mail-menu">
+                <button
+                  type="button"
+                  disabled={rows.length === 0}
+                  onClick={() => void act("read", rows.map((row) => row.uid))}
+                >
+                  Mark visible messages as read
+                </button>
+                <a href="/postbox/settings">Change reading layout</a>
+              </div>
+            </details>
+          </div>
+        </div>
+      )}
+
       {/* ── toolbar ────────────────────────────────────────────────────── */}
       <div
-        className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2"
+        className="pb-mail-legacy-toolbar flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2"
         style={{ borderColor: "var(--pb-border)", background: "var(--pb-bg)" }}
       >
         <input
@@ -407,21 +550,19 @@ function Mailbox() {
         auto-minimum on whichever axis is the main one.
       */}
       <div
-        className={`flex min-h-0 flex-1 overflow-hidden ${
+        className={`pb-mail-layout flex min-h-0 flex-1 overflow-hidden ${
           paneRight ? "flex-row" : "flex-col"
-        }`}
+        } ${paneOff ? "pb-layout-full" : paneRight ? "pb-layout-right" : "pb-layout-bottom"}`}
       >
         <div
-          className={`pb-scroll min-h-0 ${
-            detail ? "hidden md:block" : "block"
+          className={`pb-mail-list-pane pb-scroll min-h-0 ${
+            detail ? (paneOff ? "hidden" : "hidden md:block") : "block"
           } ${
-            paneRight
-              ? // Steps rather than one width: 22rem truncated subject lines
-                // on a large display while the reader had room to spare, and
-                // a single larger value would crowd a 1280px laptop. The
-                // reader takes whatever is left at every step.
-                "w-full md:w-[24rem] lg:w-[27rem] xl:w-[28rem] md:shrink-0 md:border-r"
-              : "flex-1 border-b"
+            paneOff
+              ? "w-full flex-1"
+              : paneRight
+                ? "w-full md:w-[24rem] lg:w-[27rem] xl:w-[28rem] md:shrink-0 md:border-r"
+                : "flex-1 border-b"
           }`}
           style={{ borderColor: "var(--pb-border)" }}
         >
@@ -441,61 +582,123 @@ function Mailbox() {
           ) : (
             <>
               {rows.map((row) => (
-                <button
-                  key={`${row.uid_validity}-${row.uid}`}
-                  type="button"
-                  className="pb-row"
-                  data-unread={!row.seen}
-                  data-selected={detail?.uid === row.uid}
-                  onClick={() => void openMessage(row)}
-                >
-                  <input
-                    type="checkbox"
-                    aria-label={`Select message from ${row.from.address}`}
-                    checked={selected.has(row.uid)}
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => {
-                      const next = new Set(selected);
-                      if (event.target.checked) next.add(row.uid);
-                      else next.delete(row.uid);
-                      setSelected(next);
-                    }}
-                  />
-                  <span
-                    role="img"
-                    aria-label={row.flagged ? "Starred" : "Not starred"}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void act(row.flagged ? "unstar" : "star", [row.uid]);
-                    }}
+                IS_NETAMATE_EMAIL ? (
+                  <button
+                    key={`${row.uid_validity}-${row.uid}`}
+                    type="button"
+                    className="pb-row"
+                    data-unread={!row.seen}
+                    data-selected={detail?.uid === row.uid}
+                    onClick={() => void openMessage(row)}
                   >
-                    <Star
-                      className="h-3.5 w-3.5"
-                      style={{
-                        color: row.flagged ? "var(--pb-warn)" : "var(--pb-subtle)",
-                        fill: row.flagged ? "currentColor" : "none",
+                    <input
+                      type="checkbox"
+                      aria-label={`Select message from ${row.from.address}`}
+                      checked={selected.has(row.uid)}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        const next = new Set(selected);
+                        if (event.target.checked) next.add(row.uid);
+                        else next.delete(row.uid);
+                        setSelected(next);
                       }}
-                      aria-hidden="true"
                     />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="pb-row-from block truncate">
-                      {row.from.name || row.from.address || "(unknown sender)"}
+                    <span
+                      role="img"
+                      aria-label={row.flagged ? "Starred" : "Not starred"}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void act(row.flagged ? "unstar" : "star", [row.uid]);
+                      }}
+                    >
+                      <Star
+                        className="h-3.5 w-3.5"
+                        style={{
+                          color: row.flagged ? "var(--pb-warn)" : "var(--pb-subtle)",
+                          fill: row.flagged ? "currentColor" : "none",
+                        }}
+                        aria-hidden="true"
+                      />
                     </span>
-                    <span className="pb-row-subject block truncate">
-                      {row.subject || "(no subject)"}
+                    <span className="min-w-0">
+                      <span className="pb-row-from block truncate">
+                        {row.from.name || row.from.address || "(unknown sender)"}
+                      </span>
+                      <span className="pb-row-subject block truncate">
+                        {row.subject || "(no subject)"}
+                      </span>
                     </span>
-                  </span>
-                  <span className="flex shrink-0 flex-col items-end gap-1">
-                    <span className="text-xs pb-subtle whitespace-nowrap">
-                      {formatMessageDate(row.date)}
+                    <span className="flex shrink-0 flex-col items-end gap-1">
+                      <span className="text-xs pb-subtle whitespace-nowrap">
+                        {formatMessageDate(row.date)}
+                      </span>
+                      {row.has_attachments && (
+                        <Paperclip className="h-3 w-3" style={{ color: "var(--pb-subtle)" }}
+                          aria-label="Has attachments" />
+                      )}
                     </span>
-                    {row.has_attachments && (
-                      <Paperclip className="h-3 w-3" style={{ color: "var(--pb-subtle)" }}
-                        aria-label="Has attachments" />
-                    )}
-                  </span>
-                </button>
+                  </button>
+                ) : (
+                  <div
+                    key={`${row.uid_validity}-${row.uid}`}
+                    className="pb-row pb-premium-message-row"
+                    data-unread={!row.seen}
+                    data-selected={detail?.uid === row.uid}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select message from ${row.from.address}`}
+                      checked={selected.has(row.uid)}
+                      onChange={(event) => {
+                        const next = new Set(selected);
+                        if (event.target.checked) next.add(row.uid);
+                        else next.delete(row.uid);
+                        setSelected(next);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="pb-premium-row-star"
+                      aria-label={row.flagged ? "Unstar message" : "Star message"}
+                      onClick={() => void act(row.flagged ? "unstar" : "star", [row.uid])}
+                    >
+                      <Star
+                        className="h-[17px] w-[17px]"
+                        style={{
+                          color: row.flagged ? "var(--pb-warn)" : "var(--pb-subtle)",
+                          fill: row.flagged ? "currentColor" : "none",
+                        }}
+                        aria-hidden="true"
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      className="pb-premium-message-open"
+                      onClick={() => void openMessage(row)}
+                    >
+                      {!IS_NETAMATE_EMAIL && (
+                        <span className="pb-premium-row-avatar" aria-hidden="true">
+                          {senderInitials(row.from.name || row.from.address)}
+                        </span>
+                      )}
+                      <span className="pb-row-from">
+                        {row.from.name || row.from.address || "(unknown sender)"}
+                      </span>
+                      <span className="pb-premium-row-copy">
+                        <span className="pb-row-subject">
+                          {row.subject || "(no subject)"}
+                        </span>
+                      </span>
+                      <span className="pb-premium-row-indicators">
+                        {row.has_attachments && (
+                          <Paperclip className="h-3.5 w-3.5" aria-label="Has attachments" />
+                        )}
+                      </span>
+                      <time>{formatMessageDate(row.date)}</time>
+                      {!row.seen && <span className="pb-premium-unread-dot" aria-hidden="true" />}
+                    </button>
+                  </div>
+                )
               ))}
 
               {page && page.total > page.page_size && (
@@ -506,14 +709,18 @@ function Mailbox() {
                   </span>
                   <span className="flex gap-1">
                     <button type="button" className="pb-btn pb-btn-ghost"
+                      aria-label="Previous page"
                       disabled={page.page <= 1}
                       onClick={() => setPageNumber((n) => n - 1)}>
+                      {!IS_NETAMATE_EMAIL && <ChevronLeft className="h-4 w-4" aria-hidden="true" />}
                       Newer
                     </button>
                     <button type="button" className="pb-btn pb-btn-ghost"
+                      aria-label="Next page"
                       disabled={!page.has_next}
                       onClick={() => setPageNumber((n) => n + 1)}>
                       Older
+                      {!IS_NETAMATE_EMAIL && <ChevronRight className="h-4 w-4" aria-hidden="true" />}
                     </button>
                   </span>
                 </div>
@@ -522,7 +729,9 @@ function Mailbox() {
           )}
         </div>
 
-        <div className={`pb-scroll min-h-0 flex-1 ${detail ? "block" : "hidden md:block"}`}>
+        <div className={`pb-mail-reader-pane pb-scroll min-h-0 flex-1 ${
+          detail ? "block" : paneOff ? "hidden" : "hidden md:block"
+        }`}>
           {detailLoading ? (
             <CentredSpinner />
           ) : !detail ? (
@@ -533,6 +742,7 @@ function Mailbox() {
           ) : (
             <Reader
               detail={detail}
+              summary={activeSummary}
               showRemote={showRemote}
               onBack={() => setDetail(null)}
               onLoadRemote={() =>
@@ -543,6 +753,8 @@ function Mailbox() {
               }
               onTrustRemote={() => void trustRemoteSender()}
               onReply={openReply}
+              folders={mailFolders}
+              onMove={(destination) => void act("move", [detail.uid], { destination })}
               onAction={(action) => void act(action, [detail.uid])}
             />
           )}
@@ -568,6 +780,217 @@ function Mailbox() {
 }
 
 function Reader({
+  detail,
+  summary,
+  showRemote,
+  onBack,
+  onLoadRemote,
+  onTrustRemote,
+  onReply,
+  folders,
+  onMove,
+  onAction,
+}: {
+  detail: MessageDetail;
+  summary: MessageSummary | null;
+  showRemote: boolean;
+  onBack: () => void;
+  onLoadRemote: () => void;
+  onTrustRemote: () => void;
+  onReply: (mode: "reply" | "reply-all" | "forward") => void;
+  folders: Folder[];
+  onMove: (destination: string) => void;
+  onAction: (action: Parameters<typeof postbox.act>[0]) => void;
+}) {
+  if (IS_NETAMATE_EMAIL) {
+    return (
+      <LegacyReader
+        detail={detail}
+        showRemote={showRemote}
+        onBack={onBack}
+        onLoadRemote={onLoadRemote}
+        onTrustRemote={onTrustRemote}
+        onReply={onReply}
+        onAction={onAction}
+      />
+    );
+  }
+
+  const isSpam = /(^|[./_-])(spam|junk)($|[./_-])/i.test(detail.folder);
+  const isTrash = /(^|[./_-])trash($|[./_-])/i.test(detail.folder);
+
+  return (
+    <article className="pb-premium-reader flex h-full min-h-0 flex-col">
+      <div className="pb-premium-reader-toolbar">
+        <div className="md:hidden">
+          <button
+            type="button"
+            className="pb-btn pb-btn-plain"
+            aria-label="Back to mailbox"
+            onClick={onBack}
+          >
+            <ArrowLeft className="h-[19px] w-[19px]" aria-hidden="true" />
+          </button>
+        </div>
+        <span className="pb-premium-toolbar-divider md:hidden" aria-hidden="true" />
+        <ToolbarButton label="Archive" icon={Archive} onClick={() => onAction("archive")} />
+        <ToolbarButton
+          label={isTrash ? "Permanently delete" : "Move to Trash"}
+          icon={Trash2}
+          onClick={() => {
+            if (!isTrash || window.confirm("Permanently delete this message? This cannot be undone.")) {
+              onAction(isTrash ? "delete" : "trash");
+            }
+          }}
+        />
+        <ToolbarButton
+          label={isSpam ? "Not spam" : "Mark as spam"}
+          icon={isSpam ? ShieldCheck : ShieldAlert}
+          onClick={() => onAction(isSpam ? "not-spam" : "spam")}
+        />
+        <ToolbarButton label="Mark unread" icon={Mail} onClick={() => onAction("unread")} />
+        <MoveMenu
+          folders={folders}
+          currentFolder={detail.folder}
+          onMove={onMove}
+        />
+        {isTrash && (
+          <ToolbarButton label="Restore" icon={RotateCcw} onClick={() => onAction("restore")} />
+        )}
+        <span className="flex-1" />
+        <a
+          className="pb-btn pb-btn-plain"
+          href={postbox.rawUrl(detail.folder, detail.uid)}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Download original message"
+        >
+          <Download className="h-4 w-4" aria-hidden="true" />
+          <span className="hidden lg:inline">Original</span>
+        </a>
+      </div>
+
+      <div className="pb-premium-reader-scroll">
+        <div className="pb-premium-reader-heading">
+          <h1>{detail.subject || "(no subject)"}</h1>
+          {summary && (
+            <button
+              type="button"
+              className="pb-premium-reader-star"
+              aria-label={summary.flagged ? "Unstar message" : "Star message"}
+              onClick={() => onAction(summary.flagged ? "unstar" : "star")}
+            >
+              <Star
+                className="h-[21px] w-[21px]"
+                fill={summary.flagged ? "currentColor" : "none"}
+                aria-hidden="true"
+              />
+            </button>
+          )}
+        </div>
+
+        <div className="pb-premium-reader-sender">
+          <span className="pb-premium-reader-avatar" aria-hidden="true">
+            {senderInitials(detail.from.name || detail.from.address)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div>
+              <strong>{detail.from.name || detail.from.address}</strong>
+              {detail.from.address && (
+                <span className="pb-premium-sender-email">&lt;{detail.from.address}&gt;</span>
+              )}
+            </div>
+            <details>
+              <summary>To {detail.to.join(", ") || "—"}</summary>
+              <div className="pb-premium-message-metadata">
+                <p>From: {detail.from.name || detail.from.address} &lt;{detail.from.address}&gt;</p>
+                <p>To: {detail.to.join(", ") || "—"}</p>
+                {detail.cc.length > 0 && <p>Cc: {detail.cc.join(", ")}</p>}
+                <p>Date: {formatMessageDate(detail.date)}</p>
+              </div>
+            </details>
+          </div>
+          <time>{formatMessageDate(detail.date)}</time>
+        </div>
+
+        {detail.remote_images_blocked && !showRemote && (
+          <div className="pb-premium-privacy-banner">
+            <ImageOff className="h-[18px] w-[18px]" aria-hidden="true" />
+            <div>
+              <strong>External images are hidden</strong>
+              <p>To protect your privacy, images from this sender are blocked.</p>
+              <div className="pb-premium-privacy-actions">
+                <button type="button" onClick={onLoadRemote}>Display images</button>
+                {detail.from.address && (
+                  <button type="button" onClick={onTrustRemote}>
+                    Always display images from this sender
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className={`pb-message-body pb-premium-message-body ${detail.html ? "pb-premium-html-mail" : ""}`}>
+          {detail.html ? (
+            <div dangerouslySetInnerHTML={{ __html: detail.html }} />
+          ) : (
+            <pre className="whitespace-pre-wrap">
+              {detail.text || "(This message has no readable content.)"}
+            </pre>
+          )}
+        </div>
+
+        {detail.attachments.length > 0 && (
+          <section className="pb-premium-reader-attachments">
+            <h3>
+              <Paperclip className="h-4 w-4" aria-hidden="true" />
+              {detail.attachments.length} attachment{detail.attachments.length === 1 ? "" : "s"}
+            </h3>
+            <div className="pb-premium-attachment-grid">
+              {detail.attachments.map((attachment) => (
+                <a
+                  key={attachment.part_id}
+                  className="pb-premium-attachment-card"
+                  href={postbox.attachmentUrl(detail.folder, detail.uid, attachment.part_id)}
+                  download={attachment.filename}
+                >
+                  <span className="pb-premium-file-icon">
+                    <Paperclip className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <strong>{attachment.filename}</strong>
+                    <small>{attachment.content_type || "Attachment"} · {formatBytes(attachment.size)}</small>
+                  </span>
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {!isSpam && !isTrash && (
+          <div className="pb-premium-reply-actions">
+            <button type="button" className="pb-btn pb-btn-ghost" onClick={() => onReply("reply")}>
+              <CornerUpLeft className="h-4 w-4" aria-hidden="true" />
+              Reply
+            </button>
+            <button type="button" className="pb-btn pb-btn-ghost" onClick={() => onReply("reply-all")}>
+              <CornerUpRight className="h-4 w-4" aria-hidden="true" />
+              Reply all
+            </button>
+            <button type="button" className="pb-btn pb-btn-ghost" onClick={() => onReply("forward")}>
+              <Forward className="h-4 w-4" aria-hidden="true" />
+              Forward
+            </button>
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function LegacyReader({
   detail,
   showRemote,
   onBack,
@@ -717,6 +1140,67 @@ function Reader({
       </div>
     </article>
   );
+}
+
+
+function MoveMenu({
+  folders,
+  currentFolder,
+  onMove,
+  disabled = false,
+}: {
+  folders: Folder[];
+  currentFolder: string;
+  onMove: (destination: string) => void;
+  disabled?: boolean;
+}) {
+  const destinations = folders.filter(
+    (item) =>
+      item.name !== currentFolder &&
+      !new Set(["sent", "drafts", "scheduled"]).has(item.role),
+  );
+  if (destinations.length === 0) return null;
+
+  return (
+    <details className="pb-premium-move-menu">
+      <summary
+        className="pb-btn pb-btn-plain"
+        aria-label="Move to folder"
+        title="Move to folder"
+        aria-disabled={disabled}
+        onClick={(event) => {
+          if (disabled) event.preventDefault();
+        }}
+      >
+        <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+        <span className="hidden sm:inline">Move</span>
+      </summary>
+      <div className="pb-premium-move-panel">
+        <p>Move to folder</p>
+        {destinations.map((item) => (
+          <button
+            key={item.name}
+            type="button"
+            onClick={(event) => {
+              const details = event.currentTarget.closest("details");
+              if (details) details.open = false;
+              onMove(item.name);
+            }}
+          >
+            {item.name}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function senderInitials(value: string): string {
+  const clean = value.replace(/[<>]/g, " ").trim();
+  const parts = clean.includes("@")
+    ? clean.split("@")[0].split(/[._\s-]+/)
+    : clean.split(/\s+/);
+  return parts.filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "M";
 }
 
 function ToolbarButton({
