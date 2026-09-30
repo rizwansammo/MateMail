@@ -13,7 +13,7 @@
  * before it was sent. Nothing is cleaned here — a second, weaker sanitiser in
  * the browser would be the one people trusted.
  */
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   CornerUpLeft,
   CornerUpRight,
   Download,
@@ -190,7 +191,10 @@ function Mailbox() {
   );
   const identities = directory.data?.[0]?.results ?? [];
   const signatures = directory.data?.[1]?.results ?? [];
-  const mailFolders = directory.data?.[2]?.results ?? [];
+  const mailFolders = useMemo(
+    () => directory.data?.[2]?.results ?? [],
+    [directory.data],
+  );
 
   const scheduledData = useAsyncData(
     () =>
