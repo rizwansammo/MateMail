@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
@@ -75,10 +76,24 @@ const DESCRIPTIONS: Record<Area, string> = {
   clients: "Use the live IMAP and SMTP settings with another mail app.",
 };
 
+function isSettingsArea(value: string | null): value is Area {
+  return AREAS.some(([key]) => key === value);
+}
+
 export default function PremiumSettings() {
-  const [area, setArea] = useState<Area>("appearance");
+  const router = useRouter();
+  const params = useSearchParams();
+  const requestedArea = params.get("section");
+  const area: Area = isSettingsArea(requestedArea) ? requestedArea : "appearance";
   const current = AREAS.find(([key]) => key === area)!;
   const Icon = current[2];
+
+  const selectArea = useCallback(
+    (next: Area) => {
+      router.replace(`/postbox/settings?section=${encodeURIComponent(next)}`);
+    },
+    [router],
+  );
 
   return (
     <div className="pb-premium-settings">
@@ -95,7 +110,7 @@ export default function PremiumSettings() {
               type="button"
               className={area === key ? "active" : ""}
               aria-current={area === key ? "page" : undefined}
-              onClick={() => setArea(key)}
+              onClick={() => selectArea(key)}
             >
               <AreaIcon className="h-[17px] w-[17px]" aria-hidden="true" />
               <span>{label}</span>
@@ -119,7 +134,7 @@ export default function PremiumSettings() {
           {area === "appearance" && <AppearanceSection />}
           {area === "mail" && <MailPreferencesSection />}
           {area === "account" && <AccountSection />}
-          {area === "identities" && <IdentitiesSection onOpenMail={() => setArea("mail")} />}
+          {area === "identities" && <IdentitiesSection onOpenMail={() => selectArea("mail")} />}
           {area === "signatures" && <SignaturesSection />}
           {area === "rules" && <RulesSection />}
           {area === "vacation" && <VacationSection />}
