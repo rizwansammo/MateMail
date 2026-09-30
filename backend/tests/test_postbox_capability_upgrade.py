@@ -9,6 +9,7 @@ from apps.domains.models import Domain
 from apps.mailboxes.models import Mailbox, MailboxStatus
 from apps.postbox import imap
 from apps.postbox.models import MessageMoveProvenance, RemoteImageSenderTrust
+from apps.postbox.views_mail import _message_provenance_key
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
     disable_throttling,
@@ -230,18 +231,15 @@ class PostBoxCapabilityUpgradeTest(TestCase):
         )
 
     def test_restore_falls_back_to_inbox_when_original_folder_is_gone(self):
+        moved = summary(5, "Trash", message_id="<restore-gone@example.com>")
         MessageMoveProvenance.objects.create(
             mailbox=self.alice,
-            message_key=(
-                "msg:"
-                "b53c624766e96be1d28e68f8fce99fe13bc84d31e8de6a67f4447fef5bc5d864"
-            ),
+            message_key=_message_provenance_key(moved),
             original_folder="Deleted Project",
         )
-        moved = summary(5, "Trash", message_id="<different@example.com>")
 
-        # A missing/mismatched provenance record is intentionally equivalent
-        # to legacy mail that predates this feature: restore safely to INBOX.
+        # If the recorded folder was deleted after the message entered Trash,
+        # restore safely falls back to INBOX.
         with mock.patch("apps.postbox.imap.open_mailbox") as opener:
             connection = self._connection(opener)
             connection.select.return_value = imap.FolderInfo(
