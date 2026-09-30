@@ -78,15 +78,17 @@ class ResponsiveDisplayTest(SimpleTestCase):
                 f"wrap the button instead: {found}",
             )
 
-    def test_the_sidebar_close_button_is_wrapped(self):
+    def test_the_premium_sidebar_uses_its_overlay_close_control(self):
         source = read("app", "postbox", "(app)", "layout.tsx")
-        self.assertIn('<div className="ml-auto md:hidden">', source)
+        self.assertIn('className="pb-premium-overlay"', source)
         self.assertIn('aria-label="Close folders"', source)
+        self.assertNotIn('className="pb-btn pb-btn-plain md:hidden"', source)
 
     def test_the_reader_back_button_is_wrapped(self):
         source = read("app", "postbox", "(app)", "page.tsx")
-        self.assertIn('<div className="md:hidden">', source)
-        self.assertIn('aria-label="Back to list"', source)
+        reader = source.split('className="pb-premium-reader-toolbar"', 1)[1][:700]
+        self.assertIn('<div className="md:hidden">', reader)
+        self.assertIn('aria-label="Back to mailbox"', reader)
 
 
 class FolderPresentationTest(SimpleTestCase):
@@ -137,8 +139,9 @@ class FolderPresentationTest(SimpleTestCase):
         The root cause of the identical icons: every custom folder was drawn
         with `Archive`, and the standard folders were falling into that branch.
         """
-        self.assertIn("icon={FolderIcon}", self.source)
-        self.assertNotIn("icon={Archive}", self.source)
+        custom_block = self.source.split("custom.map((folder)", 1)[1].split("</Link>", 1)[0]
+        self.assertIn("<FolderIcon", custom_block)
+        self.assertNotIn("<Archive", custom_block)
 
     def test_a_standard_folder_cannot_also_appear_under_folders(self):
         """
@@ -147,7 +150,10 @@ class FolderPresentationTest(SimpleTestCase):
         the name fallback started assigning roles.
         """
         self.assertIn("PINNED_ROLES", self.source)
-        self.assertIn("folders.filter((f) => !PINNED_ROLES.has(f.role))", self.source)
+        self.assertIn(
+            "folders.filter((folder) => !PINNED_ROLES.has(folder.role))",
+            self.source,
+        )
 
 
 class ComposeContractTest(SimpleTestCase):
