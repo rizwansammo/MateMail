@@ -78,15 +78,17 @@ class ResponsiveDisplayTest(SimpleTestCase):
                 f"wrap the button instead: {found}",
             )
 
-    def test_the_sidebar_close_button_is_wrapped(self):
+    def test_the_premium_sidebar_uses_its_overlay_close_control(self):
         source = read("app", "postbox", "(app)", "layout.tsx")
-        self.assertIn('<div className="ml-auto md:hidden">', source)
+        self.assertIn('className="pb-premium-overlay"', source)
         self.assertIn('aria-label="Close folders"', source)
+        self.assertNotIn('className="pb-btn pb-btn-plain md:hidden"', source)
 
     def test_the_reader_back_button_is_wrapped(self):
         source = read("app", "postbox", "(app)", "page.tsx")
-        self.assertIn('<div className="md:hidden">', source)
-        self.assertIn('aria-label="Back to list"', source)
+        reader = source.split('className="pb-premium-reader-toolbar"', 1)[1][:700]
+        self.assertIn('<div className="md:hidden">', reader)
+        self.assertIn('aria-label="Back to mailbox"', reader)
 
 
 class FolderPresentationTest(SimpleTestCase):
@@ -137,8 +139,9 @@ class FolderPresentationTest(SimpleTestCase):
         The root cause of the identical icons: every custom folder was drawn
         with `Archive`, and the standard folders were falling into that branch.
         """
-        self.assertIn("icon={FolderIcon}", self.source)
-        self.assertNotIn("icon={Archive}", self.source)
+        custom_block = self.source.split("custom.map((folder)", 1)[1].split("</Link>", 1)[0]
+        self.assertIn("<FolderIcon", custom_block)
+        self.assertNotIn("<Archive", custom_block)
 
     def test_a_standard_folder_cannot_also_appear_under_folders(self):
         """
@@ -147,7 +150,10 @@ class FolderPresentationTest(SimpleTestCase):
         the name fallback started assigning roles.
         """
         self.assertIn("PINNED_ROLES", self.source)
-        self.assertIn("folders.filter((f) => !PINNED_ROLES.has(f.role))", self.source)
+        self.assertIn(
+            "folders.filter((folder) => !PINNED_ROLES.has(folder.role))",
+            self.source,
+        )
 
 
 class ComposeContractTest(SimpleTestCase):
@@ -304,18 +310,16 @@ class NetaMateBrandTest(SimpleTestCase):
 
 
 class NetaMateLayoutTest(SimpleTestCase):
-    def test_the_narrow_rail_is_netamate_only(self):
+    def test_netamate_uses_the_same_premium_shell(self):
         """
-        A NetaMate width decision must not silently reshape MateMail's own
-        PostBox, which keeps `w-60`.
+        Branding may differ, but the authenticated PostBox shell must not.
+        A brand-specific legacy shell is how NetaMate silently missed the
+        premium release while running the exact same source SHA.
         """
         layout = read("app", "postbox", "(app)", "layout.tsx")
-        self.assertIn('IS_NETAMATE_EMAIL ? "nm-rail " : ""', layout)
-        self.assertIn("w-60", layout)
-
-        css = read("app", "globals.css")
-        self.assertIn(".nm-rail", css)
-        self.assertIn("width: 13.5rem", css)
+        self.assertIn("<PremiumPostBoxShell", layout)
+        self.assertNotIn("if (!IS_NETAMATE_EMAIL)", layout)
+        self.assertNotIn("nm-rail", layout)
 
     def test_the_message_list_widens_with_the_viewport(self):
         page = read("app", "postbox", "(app)", "page.tsx")
@@ -328,26 +332,7 @@ class NetaMateLayoutTest(SimpleTestCase):
         self.assertIn("flex-1 border-b", page)
 
 class ScrollContainmentTest(SimpleTestCase):
-    """
-    The authenticated PostBox shell is viewport-bounded, so a long message
-    scrolls the reader and not the document.
-
-    THE DEFECT
-        The shell was `pb flex min-h-screen`. `min-height: 100vh` is a floor
-        with no ceiling, so a long HTML email made the shell taller, then the
-        body, then the document — and the browser's own scrollbar became the
-        mail reader's. The sidebar and the message list travelled with it
-        because they are children of the thing that grew, and the account
-        controls at the bottom of the sidebar scrolled off the screen.
-
-        The `.pb-scroll` regions inside were already correct. They were simply
-        unreachable: an `overflow: auto` box only becomes a scroll container
-        when an ancestor actually constrains its height, and nothing did.
-
-    WHAT IS PINNED
-        The four boundaries that make the chain definite, and the internal
-        hierarchy that depends on them. Not the markup around any of it.
-    """
+    """The shared premium PostBox shell keeps scrolling inside the app."""
 
     @classmethod
     def setUpClass(cls):
@@ -355,81 +340,28 @@ class ScrollContainmentTest(SimpleTestCase):
         cls.layout = read("app", "postbox", "(app)", "layout.tsx")
         cls.page = read("app", "postbox", "(app)", "page.tsx")
         cls.root = read("app", "layout.tsx")
+        cls.css = read("app", "globals.css")
 
-    # ── 1. the shell ────────────────────────────────────────────────────────
-
-    def test_the_shell_has_a_definite_viewport_height(self):
-        """
-        `h-dvh`, not `min-h-screen`. A minimum lets content grow the shell;
-        only a definite height gives the scroll regions inside something to
-        resolve against.
-
-        `dvh` rather than `vh` because `100vh` on mobile excludes browser
-        chrome — a `100vh` shell is taller than the visible area, and the
-        sidebar footer ends up under the URL bar.
-        """
-        shell = code_only(self.layout).split("className={`pb flex", 1)[1][:200]
-        self.assertIn("h-dvh", shell)
-        self.assertNotIn("min-h-screen", shell)
-
-    def test_the_shell_does_not_leak_overflow_into_the_document(self):
-        shell = code_only(self.layout).split("className={`pb flex", 1)[1][:200]
-        self.assertIn("overflow-hidden", shell)
-        self.assertIn("min-h-0", shell)
+    def test_the_shared_shell_is_viewport_bounded(self):
+        rule = self.css.split(".pb-premium-shell {", 1)[1].split("}", 1)[0]
+        self.assertIn("height:100dvh", rule)
+        self.assertIn("min-height:0", rule)
+        self.assertIn("overflow:hidden", rule)
 
     def test_the_fix_is_not_applied_to_the_shared_body(self):
-        """
-        `overflow: hidden` on `body` would fix PostBox and break the public
-        site, Workspace, MailAdmin, the Platform Console and every auth page,
-        which are ordinary documents that must keep scrolling.
-        """
         body = code_only(self.root).split("<body", 1)[1].split(">", 1)[0]
         self.assertNotIn("overflow-hidden", body)
         self.assertIn("min-h-full", body)
 
-    # ── 2-4. the chain below it ─────────────────────────────────────────────
-
-    def test_the_main_column_can_shrink_and_contains_its_route(self):
-        """
-        A flex item defaults to `min-height: auto`, which lets a tall child
-        push past the height it was given — so a bounded shell alone is not
-        enough.
-        """
-        self.assertIn(
-            'className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden"',
-            self.layout,
-        )
-
-    def test_the_route_content_boundary_is_constrained(self):
-        """
-        What every route's `h-full` resolves against, including Contacts and
-        Settings.
-        """
-        self.assertIn(
-            'className="min-h-0 flex-1 overflow-hidden">{children}</div>',
-            self.layout,
-        )
-
-    def test_the_folder_nav_scrolls_rather_than_pushing_the_footer_away(self):
-        """
-        Without `min-h-0` a long folder list grows the nav instead of
-        scrolling it, and the account controls leave the viewport.
-        """
-        self.assertIn(
-            'className="pb-scroll min-h-0 flex-1 px-2 pb-3"', self.layout
-        )
-
-    # ── the mailbox hierarchy the shell now supports ────────────────────────
+    def test_the_premium_sidebar_navigation_scrolls_internally(self):
+        rule = self.css.split(".pb-premium-nav {", 1)[1].split("}", 1)[0]
+        self.assertIn("min-height:0", rule)
+        self.assertIn("overflow-y:auto", rule)
 
     def test_the_mailbox_root_fills_its_boundary(self):
         self.assertIn('className="flex h-full min-h-0 flex-col"', self.page)
 
     def test_the_list_reader_split_is_constrained_in_both_orientations(self):
-        """
-        `overflow-hidden` so neither pane can force the split taller than its
-        share, and the orientation stays a class swap so a bottom reading pane
-        gets the same containment as a right-hand one.
-        """
         split = self.page.split("flex min-h-0 flex-1 overflow-hidden", 1)
         self.assertEqual(2, len(split), "the split boundary lost its containment")
         self.assertIn('paneRight ? "flex-row" : "flex-col"', split[1][:200])
@@ -437,43 +369,13 @@ class ScrollContainmentTest(SimpleTestCase):
     def test_the_message_list_is_its_own_scroll_region(self):
         self.assertIn("pb-scroll min-h-0", self.page)
 
-    def test_the_reader_header_is_fixed_and_the_body_scrolls(self):
-        """
-        Reader header pinned, message body scrolling — the behaviour somebody
-        actually notices when they open a newsletter.
-        """
-        self.assertIn('className="flex h-full min-h-0 flex-col"', self.page)
-        self.assertIn('className="pb-scroll min-h-0 flex-1 px-4 py-4"', self.page)
-        self.assertIn('className="shrink-0 border-b px-4 py-3"', self.page)
-
-    def test_a_long_message_cannot_change_application_geometry(self):
-        """
-        `.pb-message-body` keeps its containment. Combined with the bounded
-        shell, a huge image or a very wide table is absorbed by the reader's
-        own scrolling instead of resizing the app.
-        """
-        css = read("app", "globals.css")
-        body_rule = css.split(".pb-message-body {", 1)[1].split("}", 1)[0]
-        self.assertIn("contain: content", body_rule)
-        self.assertIn("max-width: 100%", body_rule)
-
-    # ── the other routes in the same boundary ───────────────────────────────
-
     def test_contacts_and_settings_scroll_inside_the_content_area(self):
         for page in ("contacts", "settings"):
             source = read("app", "postbox", "(app)", page, "page.tsx")
-            self.assertIn(
-                'className="pb-scroll h-full"', source,
-                f"{page} must scroll within the shell, not the document",
-            )
+            self.assertIn('className="pb-scroll h-full"', source)
 
     def test_the_scroll_utility_still_contains_its_overscroll(self):
-        """
-        `overscroll-behavior: contain` stops a reader scrolled to its end from
-        handing the gesture to whatever is behind it.
-        """
-        css = read("app", "globals.css")
-        rule = css.split(".pb-scroll {", 1)[1].split("}", 1)[0]
+        rule = self.css.split(".pb-scroll {", 1)[1].split("}", 1)[0]
         self.assertIn("overflow-y: auto", rule)
         self.assertIn("overscroll-behavior: contain", rule)
 
@@ -495,21 +397,14 @@ class PremiumReleaseIntegrationTest(SimpleTestCase):
         cls.settings = read("components", "postbox", "premium-settings.tsx")
         cls.contacts = read("components", "postbox", "premium-contacts.tsx")
 
-    def test_brand_specific_routes_use_real_jsx_conditionals(self):
-        """
-        Missing JSX braces are valid text, so builds can stay green while
-        both brand components accidentally render at runtime.
-        """
-        self.assertIn(
-            "{IS_NETAMATE_EMAIL ? (",
-            self.settings_route,
-            "settings must render exactly one brand variant",
-        )
-        self.assertIn(
-            "{IS_NETAMATE_EMAIL ? <LegacyContactsPage /> : <PremiumContacts />}",
-            self.contacts_route,
-            "contacts must render exactly one brand variant",
-        )
+    def test_feature_routes_are_brand_agnostic(self):
+        """Settings and Contacts must use the same premium components everywhere."""
+        self.assertIn("<PremiumSettings />", self.settings_route)
+        self.assertIn("<PremiumContacts />", self.contacts_route)
+        self.assertNotIn("IS_NETAMATE_EMAIL", self.settings_route)
+        self.assertNotIn("IS_NETAMATE_EMAIL", self.contacts_route)
+        self.assertNotIn("LegacySettingsPage", self.settings_route)
+        self.assertNotIn("LegacyContactsPage", self.contacts_route)
 
     def test_contacts_send_message_prefills_the_recipient(self):
         self.assertIn("compose=new&to=", self.contacts)
@@ -562,6 +457,32 @@ class PremiumReleaseIntegrationTest(SimpleTestCase):
         self.assertIn(
             '(filteredStarredOnly && action === "unstar")', self.page
         )
+
+
+class NetaMateFeatureParityRegressionTest(SimpleTestCase):
+    """
+    NetaMate is a branding variant, not a product fork.
+    Feature/layout code must never branch on the brand flag.
+    """
+
+    def test_mailbox_and_compose_have_no_brand_feature_gates(self):
+        for path in (
+            ("app", "postbox", "(app)", "page.tsx"),
+            ("components", "postbox", "compose.tsx"),
+        ):
+            source = read(*path)
+            self.assertNotIn(
+                "IS_NETAMATE_EMAIL",
+                source,
+                f"{'/'.join(path)} must stay brand-agnostic",
+            )
+            self.assertNotIn("LegacyReader", source)
+
+    def test_settings_and_contacts_never_fall_back_to_legacy_components(self):
+        settings = read("app", "postbox", "(app)", "settings", "page.tsx")
+        contacts = read("app", "postbox", "(app)", "contacts", "page.tsx")
+        self.assertNotIn("LegacySettingsPage", settings)
+        self.assertNotIn("LegacyContactsPage", contacts)
 
 
 class PremiumBrandingRegressionTest(SimpleTestCase):
