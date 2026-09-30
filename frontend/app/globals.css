@@ -1984,6 +1984,9 @@ body {
   align-items:center;
   gap:9px;
   padding:20px 23px;
+  color:inherit;
+  text-decoration:none;
+  cursor:pointer;
 }
 .pb-premium-brand-mark {
   width:34px;
