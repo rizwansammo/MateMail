@@ -687,7 +687,7 @@ function SignatureEditor({
 }: {
   signature: Signature | null;
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: () => void;
 }) {
   const isNew = signature === null;
   const [name, setName] = useState(signature?.name ?? "");
@@ -725,7 +725,7 @@ function SignatureEditor({
       if (kind === "image" && image) {
         await postbox.uploadSignatureImage(saved.id, image);
       }
-      await onSaved();
+      onSaved();
     } catch (caught) {
       setError(describePostBoxError(caught, "That signature could not be saved."));
     } finally {
