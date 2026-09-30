@@ -517,3 +517,53 @@ class PostBoxPublicAssetIndependenceTest(SimpleTestCase):
         self.assertNotIn('src="/postbox-mark.svg"', login)
         self.assertIn('url: "/postbox/favicon?v=3"', layout)
         self.assertNotIn('url: "/postbox-mark.svg"', layout)
+
+
+class PostBoxSeriousRenderingUiRegressionTest(SimpleTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.compose = read("components", "postbox", "compose.tsx")
+        cls.page = read("app", "postbox", "(app)", "page.tsx")
+        cls.layout = read("app", "postbox", "(app)", "layout.tsx")
+        cls.css = read("app", "globals.css")
+
+    def test_compose_labels_cannot_overlap_subject_input(self):
+        block = self.css.split(
+            ".pb-premium-shell .pb-premium-compose-shell .pb-compose-fields label {",
+            1,
+        )[1].split("}", 1)[0]
+        self.assertIn("width:64px", block)
+        self.assertIn("flex:0 0 64px", block)
+        self.assertNotIn("width:44px", block)
+
+    def test_html_mail_is_not_wrapped_in_a_postbox_centered_card(self):
+        block = self.css.split(
+            ".pb-premium-shell .pb-premium-html-mail {",
+            1,
+        )[1].split("}", 1)[0]
+        self.assertIn("width:100%", block)
+        self.assertIn("max-width:none", block)
+        self.assertIn("margin:0", block)
+        self.assertIn("border:0", block)
+        self.assertIn("padding:0", block)
+        self.assertNotIn("margin:0 auto", block)
+        self.assertNotIn("max-width:750px", block)
+
+    def test_cid_images_are_resolved_through_safe_preview_urls(self):
+        self.assertIn("function resolveInlineCidImages", self.page)
+        self.assertIn("attachment.content_id", self.page)
+        self.assertIn("postbox.attachmentPreviewUrl(", self.page)
+        self.assertIn("const renderedHtml = resolveInlineCidImages(detail);", self.page)
+        self.assertIn("const visibleAttachments = detail.attachments.filter(", self.page)
+
+    def test_same_folder_navigation_can_explicitly_close_reader(self):
+        self.assertIn('"postbox:return-to-list"', self.layout)
+        self.assertIn('"postbox:return-to-list"', self.page)
+        self.assertIn('href="/postbox?folder=INBOX"', self.layout)
+        self.assertIn('aria-label="PostBox Inbox"', self.layout)
+
+    def test_postbox_brand_is_a_real_link_to_inbox(self):
+        brand = self.layout.split('aria-label="PostBox Inbox"', 1)[0][-500:]
+        self.assertIn("<Link", brand)
+        self.assertIn('href="/postbox?folder=INBOX"', brand)
