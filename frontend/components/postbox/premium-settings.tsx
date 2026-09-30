@@ -1121,7 +1121,7 @@ function VacationForm({
   onSaved,
 }: {
   initial: Vacation;
-  onSaved: () => Promise<void>;
+  onSaved: () => void;
 }) {
   const [form, setForm] = useState<Vacation>(initial);
   const [busy, setBusy] = useState(false);
@@ -1144,7 +1144,7 @@ function VacationForm({
       });
       setForm(result);
       setSaved(true);
-      await onSaved();
+      onSaved();
     } catch (caught) {
       setError(describePostBoxError(caught, "The automatic reply could not be saved."));
     } finally {
