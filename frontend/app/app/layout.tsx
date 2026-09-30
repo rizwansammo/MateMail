@@ -20,7 +20,6 @@ import {
   UserPlus,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
-import { NetaMateBrand } from "@/components/netamate-brand";
 import { WorkspaceThemeProvider, WorkspaceThemeToggle } from "@/components/workspace/theme";
 import { useAuth } from "@/contexts/auth-context";
 import { IS_NETAMATE_EMAIL } from "@/lib/brand";
@@ -75,19 +74,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <WorkspaceThemeProvider>
-    <div className={`ws flex min-h-screen bg-slate-50 text-slate-950 ${IS_NETAMATE_EMAIL ? "nm-mailadmin" : ""}`}>
+    <div className="ws flex min-h-screen bg-slate-50 text-slate-950">
       {/* Sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
         {/* Logo */}
         <div className="flex h-14 items-center gap-3 border-b border-slate-200 px-5">
-          {IS_NETAMATE_EMAIL ? (
-            <NetaMateBrand surface="MailAdmin" compact preload />
-          ) : (
-            <>
-              <BrandMark size={32} preload />
-              <span className="font-black">MateMail</span>
-            </>
-          )}
+          <BrandMark size={32} preload />
+          <span className="font-black">MateMail</span>
         </div>
 
         {/* Workspace badge */}
