@@ -103,6 +103,22 @@ class DeployWorkflowTest(SimpleTestCase):
         self.assertEqual(deploy["environment"]["name"], "production")
 
 
+    def test_netamate_frontend_always_follows_the_main_deploy(self):
+        job = self.wf["jobs"]["deploy-netamate-email"]
+        self.assertEqual(job["needs"], "deploy")
+
+        deploy_step = next(
+            step for step in job["steps"]
+            if step.get("name") == "Deploy NetaMate Email frontend"
+        )
+        self.assertEqual(deploy_step["env"]["IMAGE_TAG"], "${{ inputs.image_tag }}")
+
+        # The dedicated frontend must run the exact same release SHA as the
+        # main deployment. No second tag/input is allowed to create drift.
+        script = deploy_step["with"]["script"]
+        self.assertIn("MATEMAIL_NETAMATE_FRONTEND_IMAGE=${IMAGE}:${IMAGE_TAG}", script)
+        self.assertNotIn("NETAMATE_IMAGE_TAG", self.raw)
+
 class CiWorkflowTest(SimpleTestCase):
     def setUp(self):
         self.raw = CI.read_text(encoding="utf-8")
@@ -118,6 +134,15 @@ class CiWorkflowTest(SimpleTestCase):
 
     def test_publish_never_runs_for_a_pull_request(self):
         self.assertIn("github.event_name != 'pull_request'", self.raw)
+
+    def test_netamate_frontend_is_published_from_the_same_commit_sha(self):
+        step = next(
+            step for step in self.wf["jobs"]["publish"]["steps"]
+            if step.get("name") == "Build and push NetaMate Email frontend"
+        )
+        tags = (step.get("with") or {}).get("tags", "")
+        self.assertIn("NETAMATE_EMAIL_FRONTEND_IMAGE", tags)
+        self.assertIn("github.sha", tags)
 
     def test_no_latest_tag_is_published(self):
         """

@@ -276,45 +276,50 @@ class ComposeContractTest(SimpleTestCase):
         self.assertIn("scheduleAt", self.source)
 
 
-class NetaMateBrandTest(SimpleTestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.source = read("components", "netamate-brand.tsx")
+class DedicatedBrandParityTest(SimpleTestCase):
+    """
+    Dedicated NetaMate hostnames are access boundaries, not a separate visual
+    product. Branding must stay MateMail/PostBox so a dedicated tenant cannot
+    silently drift into its own frontend identity again.
+    """
 
-    def test_postbox_uses_a_two_line_wordmark(self):
-        postbox = self.source.split('surface === "PostBox"', 1)[1].split(") : (", 1)[0]
-        # Two lines, in order, inside the PostBox branch.
-        self.assertIn("NetaMate", postbox)
-        self.assertIn("PostBox", postbox)
-        self.assertLess(postbox.index("NetaMate"), postbox.index("PostBox"))
+    def test_authenticated_postbox_has_no_dedicated_brand_branch(self):
+        layout = read("app", "postbox", "(app)", "layout.tsx")
+        self.assertIn('<span className="pb-premium-wordmark">PostBox</span>', layout)
+        self.assertNotIn("NetaMateBrand", layout)
+        self.assertNotIn("IS_NETAMATE_EMAIL", layout)
+        self.assertNotIn("nm-postbox", layout)
 
-        # Both carry the brand face; the second is the smaller sub-line.
-        self.assertIn("nm-wordmark-stack", postbox)
-        self.assertIn("nm-wordmark-sub", postbox)
-        self.assertEqual(2, postbox.count("<p"), "expected exactly two lines")
+    def test_postbox_login_is_shared_by_every_host(self):
+        login = read("app", "postbox", "login", "page.tsx")
+        self.assertIn('className="pb pb-premium-login"', login)
+        self.assertIn('<span className="pb-premium-wordmark">PostBox</span>', login)
+        self.assertNotIn("NetaMateAuthShell", login)
+        self.assertNotIn("IS_NETAMATE_EMAIL", login)
 
-    def test_postbox_does_not_use_the_category_caption(self):
-        """
-        `nm-surface-label` is a spaced uppercase caption. On PostBox it made
-        the product name read as a tag stapled under a different product.
-        """
-        postbox = self.source.split('surface === "PostBox"', 1)[1].split(") : (", 1)[0]
-        self.assertNotIn("nm-surface-label", postbox)
+    def test_mailadmin_uses_the_standard_matemail_mark_and_theme(self):
+        layout = read("app", "app", "layout.tsx")
+        self.assertIn("<BrandMark size={32} preload />", layout)
+        self.assertIn(">MateMail</span>", layout)
+        self.assertNotIn("NetaMateBrand", layout)
+        self.assertNotIn("nm-mailadmin", layout)
 
-    def test_mailadmin_branding_is_unchanged(self):
-        mailadmin = self.source.split(") : (", 1)[1]
-        self.assertIn("NetaMate Email", mailadmin)
-        self.assertIn("nm-surface-label", mailadmin)
-        self.assertIn("{surface}", mailadmin)
+    def test_dedicated_tab_branding_is_matemail(self):
+        root = read("app", "layout.tsx")
+        postbox = read("app", "postbox", "layout.tsx")
+        self.assertIn('"MailAdmin | MateMail"', root)
+        self.assertNotIn("NetaMate Email", root)
+        self.assertNotIn("NETAMATE_LOGO_SRC", root)
+        self.assertIn('url: "/postbox/favicon?v=3"', postbox)
+        self.assertNotIn("NetaMate Email", postbox)
+        self.assertNotIn("NETAMATE_LOGO_SRC", postbox)
 
 
 class NetaMateLayoutTest(SimpleTestCase):
     def test_netamate_uses_the_same_premium_shell(self):
         """
-        Branding may differ, but the authenticated PostBox shell must not.
-        A brand-specific legacy shell is how NetaMate silently missed the
-        premium release while running the exact same source SHA.
+        Dedicated hostnames use the exact same authenticated PostBox shell.
+        Only tenant access policy and host routing may differ.
         """
         layout = read("app", "postbox", "(app)", "layout.tsx")
         self.assertIn("<PremiumPostBoxShell", layout)
