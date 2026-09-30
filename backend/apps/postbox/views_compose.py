@@ -617,17 +617,32 @@ class ScheduledDetailView(PostBoxView):
                 {"detail": "That message can no longer be cancelled."}, status=409
             )
 
-        row.state = ScheduledMessage.State.CANCELLED
-        row.save(update_fields=["state", "updated_at"])
-
-        # The message itself moves back to Drafts, so cancelling returns the
-        # text to the person rather than discarding what they wrote.
+        # Move FIRST, then mark the database row cancelled. If IMAP fails,
+        # the scheduled row remains pending/failed and can still be retried or
+        # cancelled again; reporting success while the message is stranded in
+        # Scheduled would lose the user's only editable copy.
         try:
             with imap.open_mailbox(self.mailbox.email) as connection:
                 roles = {f.role: f.name for f in connection.list_folders() if f.role}
                 connection.select(row.folder)
                 connection.move([row.uid], roles.get("drafts", "Drafts"))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("PostBox: cancelled %s but could not move it: %r", row.id, exc)
+            logger.warning(
+                "PostBox: could not cancel scheduled %s because the message "
+                "could not be returned to Drafts: %r",
+                row.id,
+                exc,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "That scheduled message could not be moved back to "
+                        "Drafts, so it was not cancelled."
+                    )
+                },
+                status=502,
+            )
 
+        row.state = ScheduledMessage.State.CANCELLED
+        row.save(update_fields=["state", "updated_at"])
         return Response({"id": str(row.id), "state": row.state})
