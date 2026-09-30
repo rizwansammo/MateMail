@@ -192,6 +192,16 @@ function Mailbox() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
 
+  useEffect(() => {
+    const returnToList = () => {
+      setDetail(null);
+      setShowRemote(false);
+    };
+    window.addEventListener("postbox:return-to-list", returnToList);
+    return () =>
+      window.removeEventListener("postbox:return-to-list", returnToList);
+  }, []);
+
   const [explicitCompose, setExplicitCompose] = useState<ComposeInitial | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
@@ -983,6 +993,10 @@ function Reader({
     () => resolveInlineImageReferences(detail),
     [detail],
   );
+  const visibleAttachments = useMemo(
+    () => detail.attachments.filter((attachment) => !attachment.inline),
+    [detail.attachments],
+  );
 
   return (
     <article className="pb-premium-reader flex h-full min-h-0 flex-col">
@@ -1114,14 +1128,14 @@ function Reader({
           )}
         </div>
 
-        {detail.attachments.length > 0 && (
+        {visibleAttachments.length > 0 && (
           <section className="pb-premium-reader-attachments">
             <h3>
               <Paperclip className="h-4 w-4" aria-hidden="true" />
-              {detail.attachments.length} attachment{detail.attachments.length === 1 ? "" : "s"}
+              {visibleAttachments.length} attachment{visibleAttachments.length === 1 ? "" : "s"}
             </h3>
             <div className="pb-premium-attachment-grid">
-              {detail.attachments.map((attachment) => (
+              {visibleAttachments.map((attachment) => (
                 <div
                   key={attachment.part_id}
                   className="pb-premium-attachment-card"
