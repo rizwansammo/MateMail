@@ -215,7 +215,10 @@ export function Compose({
     ) => {
       setDraftUid(saved.uid || null);
       setSavedAt(saved.saved_at);
-      if (attachmentRevision.current === attachmentRevisionAtStart) {
+      if (
+        !IS_NETAMATE_EMAIL &&
+        attachmentRevision.current === attachmentRevisionAtStart
+      ) {
         setExistingAttachments(saved.attachments ?? []);
         setAttachments([]);
       }
