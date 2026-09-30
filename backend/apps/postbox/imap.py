@@ -484,13 +484,19 @@ class MailboxConnection:
 
     # ── listing ─────────────────────────────────────────────────────────────
 
-    def search_uids(self, criteria: list[str] | None = None) -> list[int]:
+    def search_uids(
+        self,
+        criteria: list[str] | None = None,
+        *,
+        newest: bool = True,
+    ) -> list[int]:
         """
-        UIDs matching a search, newest first.
+        UIDs matching a search in the requested mailbox order.
 
-        Newest-first ordering is done here rather than with SORT because SORT
-        is an extension and this ordering is just the UID order reversed for
-        every folder PostBox shows.
+        UID order is used rather than IMAP SORT because SORT is optional while
+        UID ordering is guaranteed inside one folder.  Ascending gives the
+        oldest mailbox order and descending the newest mailbox order without
+        requiring an extension.
         """
         args = criteria or ["ALL"]
         status, data = self._imap.uid("SEARCH", None, *args)
@@ -498,7 +504,7 @@ class MailboxConnection:
             raise MailAccessError("That search could not be completed.", f"SEARCH -> {data}")
         if not data or not data[0]:
             return []
-        return sorted((int(uid) for uid in data[0].split()), reverse=True)
+        return sorted((int(uid) for uid in data[0].split()), reverse=newest)
 
     def fetch_summaries(self, uids: list[int]) -> list[MessageSummary]:
         """
