@@ -35,6 +35,7 @@ import {
   type Signature,
 } from "@/lib/postbox-api";
 import { describePostBoxError } from "@/contexts/postbox-context";
+import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 export interface ComposeInitial {
   mode: "new" | "reply" | "reply-all" | "forward" | "draft";
@@ -195,25 +196,6 @@ export function Compose({
     ],
   );
 
-  // Debounced autosave. Two seconds is long enough that typing a sentence is
-  // one save rather than twenty, and short enough that a closed tab loses at
-  // most a sentence.
-  useEffect(() => {
-    if (!dirty.current || busy || saving) return;
-    const timer = window.setTimeout(async () => {
-      const revision = attachmentRevision.current;
-      try {
-        const saved = await postbox.saveDraft(payload());
-        applySavedDraft(saved, revision);
-      } catch {
-        // Autosave failures are silent by design: an error toast every two
-        // seconds while somebody types is worse than a draft that is a little
-        // behind. An explicit save surfaces the problem.
-      }
-    }, 2000);
-    return () => window.clearTimeout(timer);
-  }, [applySavedDraft, busy, payload, saving]);
-
   const markDirty = () => {
     dirty.current = true;
   };
@@ -289,6 +271,27 @@ export function Compose({
       to,
     ],
   );
+
+  // Debounced autosave. Two seconds is long enough that typing a sentence is
+  // one save rather than twenty, and short enough that a closed tab loses at
+  // most a sentence.
+  useEffect(() => {
+    if (!dirty.current || busy || saving) return;
+    const timer = window.setTimeout(async () => {
+      const revision = attachmentRevision.current;
+      try {
+        const saved = await postbox.saveDraft(payload());
+        applySavedDraft(saved, revision);
+      } catch {
+        // Autosave failures are silent by design: an error toast every two
+        // seconds while somebody types is worse than a draft that is a little
+        // behind. An explicit save surfaces the problem.
+      }
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [applySavedDraft, busy, payload, saving]);
+
+
 
   const addFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
@@ -375,12 +378,13 @@ export function Compose({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !busy && !saving) {
-        void saveDraftNow(true);
+        if (IS_NETAMATE_EMAIL) onClose();
+        else void saveDraftNow(true);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [busy, saveDraftNow, saving]);
+  }, [busy, onClose, saveDraftNow, saving]);
 
   const totalBytes =
     attachments.reduce((sum, attachment) => sum + attachment.size, 0) +
@@ -475,7 +479,10 @@ export function Compose({
               className="pb-btn pb-btn-plain"
               aria-label="Close"
               title="Close"
-              onClick={() => void saveDraftNow(true)}
+              onClick={() => {
+                if (IS_NETAMATE_EMAIL) onClose();
+                else void saveDraftNow(true);
+              }}
               disabled={saving || busy}
             >
               <X className="h-4 w-4" aria-hidden="true" />
@@ -509,16 +516,30 @@ export function Compose({
 
             <Field label="To" htmlFor="pb-to">
               <div className="flex gap-2">
-                <RecipientInput
-                  id="pb-to"
-                  label="To"
-                  value={to}
-                  onChange={(value) => {
-                    setTo(value);
-                    markDirty();
-                  }}
-                  placeholder="Name or email address"
-                />
+                {IS_NETAMATE_EMAIL ? (
+                  <input
+                    id="pb-to"
+                    className="pb-input"
+                    value={to}
+                    onChange={(event) => {
+                      setTo(event.target.value);
+                      markDirty();
+                    }}
+                    placeholder="name@example.com, another@example.com"
+                    autoComplete="off"
+                  />
+                ) : (
+                  <RecipientInput
+                    id="pb-to"
+                    label="To"
+                    value={to}
+                    onChange={(value) => {
+                      setTo(value);
+                      markDirty();
+                    }}
+                    placeholder="Name or email address"
+                  />
+                )}
                 <button
                   type="button"
                   className="pb-btn pb-btn-plain shrink-0"
@@ -549,26 +570,52 @@ export function Compose({
             {showCopies && (
               <div id="pb-copies" className="space-y-2">
                 <Field label="Cc" htmlFor="pb-cc">
-                  <RecipientInput
-                    id="pb-cc"
-                    label="Cc"
-                    value={cc}
-                    onChange={(value) => {
-                      setCc(value);
-                      markDirty();
-                    }}
-                  />
+                  {IS_NETAMATE_EMAIL ? (
+                    <input
+                      id="pb-cc"
+                      className="pb-input"
+                      value={cc}
+                      onChange={(event) => {
+                        setCc(event.target.value);
+                        markDirty();
+                      }}
+                      autoComplete="off"
+                    />
+                  ) : (
+                    <RecipientInput
+                      id="pb-cc"
+                      label="Cc"
+                      value={cc}
+                      onChange={(value) => {
+                        setCc(value);
+                        markDirty();
+                      }}
+                    />
+                  )}
                 </Field>
                 <Field label="Bcc" htmlFor="pb-bcc">
-                  <RecipientInput
-                    id="pb-bcc"
-                    label="Bcc"
-                    value={bcc}
-                    onChange={(value) => {
-                      setBcc(value);
-                      markDirty();
-                    }}
-                  />
+                  {IS_NETAMATE_EMAIL ? (
+                    <input
+                      id="pb-bcc"
+                      className="pb-input"
+                      value={bcc}
+                      onChange={(event) => {
+                        setBcc(event.target.value);
+                        markDirty();
+                      }}
+                      autoComplete="off"
+                    />
+                  ) : (
+                    <RecipientInput
+                      id="pb-bcc"
+                      label="Bcc"
+                      value={bcc}
+                      onChange={(value) => {
+                        setBcc(value);
+                        markDirty();
+                      }}
+                    />
+                  )}
                 </Field>
               </div>
             )}
@@ -648,51 +695,93 @@ export function Compose({
             </div>
           )}
 
-          {(existingAttachments.length > 0 || attachments.length > 0) && (
-            <div className="pb-compose-attachments">
-              {[...existingAttachments, ...attachments].map((attachment, index) => {
-                const isExisting = index < existingAttachments.length;
-                return (
-                  <div
-                    key={
-                      isExisting
-                        ? `server-${(attachment as ComposeAttachmentRef).folder}-${(attachment as ComposeAttachmentRef).uid}-${(attachment as ComposeAttachmentRef).part_id}`
-                        : `upload-${attachment.filename}-${index}`
-                    }
-                    className="pb-compose-file-pill"
+          {IS_NETAMATE_EMAIL ? (
+            attachments.length > 0 && (
+              <ul className="mt-3 space-y-1">
+                {attachments.map((attachment, index) => (
+                  <li
+                    key={attachment.filename + "-" + index}
+                    className="flex items-center gap-2 border px-2 py-1 text-xs"
+                    style={{ borderColor: "var(--pb-border)" }}
                   >
-                    <Paperclip className="h-4 w-4 shrink-0" aria-hidden="true" />
-                    <span>
-                      <strong>{attachment.filename}</strong>
-                      <small>{formatBytes(attachment.size)}</small>
-                    </span>
+                    <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
+                    <span className="pb-subtle pb-num">{formatBytes(attachment.size)}</span>
                     <button
                       type="button"
-                      aria-label={`Remove ${attachment.filename}`}
+                      className="pb-btn pb-btn-plain"
+                      aria-label={"Remove " + attachment.filename}
                       onClick={() => {
                         attachmentRevision.current += 1;
-                        if (isExisting) {
-                          setExistingAttachments((current) =>
-                            current.filter((_, itemIndex) => itemIndex !== index),
-                          );
-                        } else {
-                          const pendingIndex = index - existingAttachments.length;
-                          setAttachments((current) =>
-                            current.filter((_, itemIndex) => itemIndex !== pendingIndex),
-                          );
-                        }
+                        setAttachments((current) =>
+                          current.filter((_, itemIndex) => itemIndex !== index),
+                        );
                         markDirty();
                       }}
                     >
-                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                      <X className="h-3 w-3" aria-hidden="true" />
                     </button>
-                  </div>
-                );
-              })}
-              <span className="pb-compose-attachment-total">
-                {formatBytes(totalBytes)} total
-              </span>
-            </div>
+                  </li>
+                ))}
+                <li className="text-xs pb-subtle pb-num">
+                  {formatBytes(totalBytes)} total
+                </li>
+              </ul>
+            )
+          ) : (
+            (existingAttachments.length > 0 || attachments.length > 0) && (
+              <div className="pb-compose-attachments">
+                {[...existingAttachments, ...attachments].map((attachment, index) => {
+                  const isExisting = index < existingAttachments.length;
+                  return (
+                    <div
+                      key={
+                        isExisting
+                          ? "server-" +
+                            (attachment as ComposeAttachmentRef).folder +
+                            "-" +
+                            (attachment as ComposeAttachmentRef).uid +
+                            "-" +
+                            (attachment as ComposeAttachmentRef).part_id
+                          : "upload-" + attachment.filename + "-" + index
+                      }
+                      className="pb-compose-file-pill"
+                    >
+                      <Paperclip className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span>
+                        <strong>{attachment.filename}</strong>
+                        <small>{formatBytes(attachment.size)}</small>
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={"Remove " + attachment.filename}
+                        onClick={() => {
+                          attachmentRevision.current += 1;
+                          if (isExisting) {
+                            setExistingAttachments((current) =>
+                              current.filter((_, itemIndex) => itemIndex !== index),
+                            );
+                          } else {
+                            const pendingIndex = index - existingAttachments.length;
+                            setAttachments((current) =>
+                              current.filter(
+                                (_, itemIndex) => itemIndex !== pendingIndex,
+                              ),
+                            );
+                          }
+                          markDirty();
+                        }}
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
+                  );
+                })}
+                <span className="pb-compose-attachment-total">
+                  {formatBytes(totalBytes)} total
+                </span>
+              </div>
+            )
           )}
 
           {showSchedule && (
@@ -712,7 +801,7 @@ export function Compose({
               <button
                 type="button"
                 className="pb-btn pb-btn-primary"
-                disabled={busy}
+                disabled={busy || saving}
                 onClick={() => void submit(true)}
               >
                 Schedule
@@ -775,19 +864,21 @@ export function Compose({
             Schedule
           </button>
 
-          <button
-            type="button"
-            className="pb-btn pb-btn-ghost pb-compose-save-draft"
-            disabled={saving || busy}
-            onClick={() => void saveDraftNow(false)}
-          >
-            {saving ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : (
-              <Save className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            Save draft
-          </button>
+          {!IS_NETAMATE_EMAIL && (
+            <button
+              type="button"
+              className="pb-btn pb-btn-ghost pb-compose-save-draft"
+              disabled={saving || busy}
+              onClick={() => void saveDraftNow(false)}
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Save className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              Save draft
+            </button>
+          )}
 
           <button
             type="button"
