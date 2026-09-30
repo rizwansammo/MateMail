@@ -199,7 +199,7 @@ export function Compose({
   // one save rather than twenty, and short enough that a closed tab loses at
   // most a sentence.
   useEffect(() => {
-    if (!dirty.current) return;
+    if (!dirty.current || busy || saving) return;
     const timer = window.setTimeout(async () => {
       const revision = attachmentRevision.current;
       try {
@@ -212,7 +212,7 @@ export function Compose({
       }
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [applySavedDraft, payload]);
+  }, [applySavedDraft, busy, payload, saving]);
 
   const markDirty = () => {
     dirty.current = true;
@@ -241,11 +241,21 @@ export function Compose({
 
   const saveDraftNow = useCallback(
     async (closeAfter = false) => {
+      const hasDraftMaterial = Boolean(
+        to.trim() ||
+          cc.trim() ||
+          bcc.trim() ||
+          subject.trim() ||
+          body.trim() ||
+          attachments.length ||
+          existingAttachments.length,
+      );
+
       if (!dirty.current && draftUid) {
         if (closeAfter) onClose();
         return true;
       }
-      if (!dirty.current && !draftUid) {
+      if (!dirty.current && !draftUid && !hasDraftMaterial) {
         if (closeAfter) onClose();
         return true;
       }
@@ -265,7 +275,19 @@ export function Compose({
         setSaving(false);
       }
     },
-    [applySavedDraft, draftUid, onClose, payload],
+    [
+      applySavedDraft,
+      attachments.length,
+      bcc,
+      body,
+      cc,
+      draftUid,
+      existingAttachments.length,
+      onClose,
+      payload,
+      subject,
+      to,
+    ],
   );
 
   const addFiles = useCallback(async (files: FileList | null) => {
@@ -304,6 +326,16 @@ export function Compose({
       if (schedule && !scheduleAt) {
         setError("Choose when to send.");
         return;
+      }
+      if (schedule) {
+        const scheduled = new Date(scheduleAt);
+        if (
+          Number.isNaN(scheduled.getTime()) ||
+          scheduled.getTime() <= Date.now()
+        ) {
+          setError("Choose a future date and time.");
+          return;
+        }
       }
 
       setBusy(true);
