@@ -129,6 +129,7 @@ export function Compose({
     initial.existing_attachments ?? [],
   );
   const attachmentRevision = useRef(0);
+  const editRevision = useRef(0);
   const [signatureId, setSignatureId] = useState<string>(
     initial.signature_id ??
       signatures.find((signature) =>
@@ -197,6 +198,7 @@ export function Compose({
   );
 
   const markDirty = () => {
+    editRevision.current += 1;
     dirty.current = true;
   };
 
@@ -208,15 +210,18 @@ export function Compose({
         saved_at: string;
         attachments: ComposeAttachmentRef[];
       },
-      revision: number,
+      attachmentRevisionAtStart: number,
+      editRevisionAtStart: number,
     ) => {
       setDraftUid(saved.uid || null);
       setSavedAt(saved.saved_at);
-      if (attachmentRevision.current === revision) {
+      if (attachmentRevision.current === attachmentRevisionAtStart) {
         setExistingAttachments(saved.attachments ?? []);
         setAttachments([]);
       }
-      dirty.current = false;
+      if (editRevision.current === editRevisionAtStart) {
+        dirty.current = false;
+      }
     },
     [],
   );
@@ -244,10 +249,15 @@ export function Compose({
 
       setSaving(true);
       setError(null);
-      const revision = attachmentRevision.current;
+      const attachmentRevisionAtStart = attachmentRevision.current;
+      const editRevisionAtStart = editRevision.current;
       try {
         const saved = await postbox.saveDraft(payload());
-        applySavedDraft(saved, revision);
+        applySavedDraft(
+          saved,
+          attachmentRevisionAtStart,
+          editRevisionAtStart,
+        );
         if (closeAfter) onClose();
         return true;
       } catch (caught) {
@@ -278,10 +288,15 @@ export function Compose({
   useEffect(() => {
     if (!dirty.current || busy || saving) return;
     const timer = window.setTimeout(async () => {
-      const revision = attachmentRevision.current;
+      const attachmentRevisionAtStart = attachmentRevision.current;
+      const editRevisionAtStart = editRevision.current;
       try {
         const saved = await postbox.saveDraft(payload());
-        applySavedDraft(saved, revision);
+        applySavedDraft(
+          saved,
+          attachmentRevisionAtStart,
+          editRevisionAtStart,
+        );
       } catch {
         // Autosave failures are silent by design: an error toast every two
         // seconds while somebody types is worse than a draft that is a little
