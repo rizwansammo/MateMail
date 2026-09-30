@@ -681,6 +681,64 @@ def _assert_uid_validity(request, actual: int) -> None:
         return
 
 
+
+def _message_provenance_key(summary: imap.MessageSummary) -> str:
+    """Stable, privacy-preserving identity for one RFC 5322 message."""
+    if summary.message_id.strip():
+        source = f"mid:{summary.message_id.strip().lower()}"
+    else:
+        source = "|".join([
+            "fallback",
+            summary.from_address.strip().lower(),
+            summary.subject.strip(),
+            summary.date.strip(),
+            str(summary.size),
+        ])
+    return "msg:" + hashlib.sha256(source.encode("utf-8", "replace")).hexdigest()
+
+
+def _record_move_provenance(mailbox, summaries, original_folder: str) -> None:
+    for summary in summaries:
+        MessageMoveProvenance.objects.update_or_create(
+            mailbox=mailbox,
+            message_key=_message_provenance_key(summary),
+            defaults={"original_folder": original_folder},
+        )
+
+
+def _restore_destinations(
+    mailbox,
+    summaries,
+    valid_folders: set[str],
+) -> dict[str, list[int]]:
+    by_key = {
+        _message_provenance_key(summary): summary
+        for summary in summaries
+    }
+    provenance = {
+        row.message_key: row.original_folder
+        for row in MessageMoveProvenance.objects.for_mailbox(mailbox).filter(
+            message_key__in=by_key.keys()
+        )
+    }
+
+    grouped: dict[str, list[int]] = {}
+    for key, summary in by_key.items():
+        destination = provenance.get(key) or "INBOX"
+        if destination not in valid_folders:
+            destination = "INBOX"
+        grouped.setdefault(destination, []).append(summary.uid)
+    return grouped
+
+
+def _clear_move_provenance(mailbox, summaries) -> None:
+    keys = [_message_provenance_key(summary) for summary in summaries]
+    if keys:
+        MessageMoveProvenance.objects.for_mailbox(mailbox).filter(
+            message_key__in=keys
+        ).delete()
+
+
 # ── flags and moves ─────────────────────────────────────────────────────────
 
 class BulkActionSerializer(serializers.Serializer):
@@ -732,21 +790,53 @@ class MessageActionView(PostBoxView):
                 connection.mark_flagged(uids, False)
             elif action == "archive":
                 connection.move(uids, roles.get("archive", "Archive"))
-            elif action == "trash":
-                connection.move(uids, roles.get("trash", "Trash"))
-            elif action == "spam":
-                connection.move(uids, roles.get("junk", "Junk"))
-            elif action == "not-spam":
-                connection.move(uids, "INBOX")
-            elif action == "restore":
-                # Restore returns mail to the Inbox. Putting it back where it
-                # came from would need provenance IMAP does not record.
-                connection.move(uids, "INBOX")
+            elif action in {"trash", "spam"}:
+                trash = roles.get("trash", "Trash")
+                junk = roles.get("junk", "Junk")
+                destination = trash if action == "trash" else junk
+                summaries = connection.fetch_summaries(uids)
+                connection.move(uids, destination)
+                if data["folder"] not in {trash, junk}:
+                    _record_move_provenance(
+                        self.mailbox,
+                        summaries,
+                        data["folder"],
+                    )
+            elif action in {"not-spam", "restore"}:
+                summaries = connection.fetch_summaries(uids)
+                valid_folders = {
+                    item.name
+                    for item in connection.list_folders()
+                    if item.selectable
+                }
+                valid_folders.add("INBOX")
+                destinations = _restore_destinations(
+                    self.mailbox,
+                    summaries,
+                    valid_folders,
+                )
+                for destination, destination_uids in destinations.items():
+                    connection.move(destination_uids, destination)
+                _clear_move_provenance(self.mailbox, summaries)
             elif action == "move":
                 destination = (request.data.get("destination") or "").strip()
                 if not destination:
-                    return Response({"detail": "Choose a destination folder."}, status=400)
+                    return Response(
+                        {"detail": "Choose a destination folder."},
+                        status=400,
+                    )
+                summaries = connection.fetch_summaries(uids)
                 connection.move(uids, destination)
+                trash = roles.get("trash", "Trash")
+                junk = roles.get("junk", "Junk")
+                if destination in {trash, junk} and data["folder"] not in {trash, junk}:
+                    _record_move_provenance(
+                        self.mailbox,
+                        summaries,
+                        data["folder"],
+                    )
+                elif data["folder"] in {trash, junk}:
+                    _clear_move_provenance(self.mailbox, summaries)
             elif action == "delete":
                 # Permanent, and only from Trash or Junk. Erasing from an
                 # arbitrary folder would make a mis-click unrecoverable.
@@ -755,7 +845,9 @@ class MessageActionView(PostBoxView):
                         {"detail": "Messages can only be deleted permanently from Trash or Spam."},
                         status=400,
                     )
+                summaries = connection.fetch_summaries(uids)
                 connection.delete_permanently(uids)
+                _clear_move_provenance(self.mailbox, summaries)
 
         logger.info(
             "PostBox %s: mailbox=%s folder=%s count=%d",
