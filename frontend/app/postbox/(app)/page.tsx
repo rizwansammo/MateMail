@@ -92,6 +92,13 @@ function Mailbox() {
   const unreadOnly = filterMode === "unread";
   const filteredStarredOnly = filterMode === "starred";
   const urlQuery = params.get("q") || "";
+  const searchScope =
+    params.get("scope") === "all_with_spam_trash"
+      ? "all_with_spam_trash"
+      : params.get("scope") === "all"
+        ? "all"
+        : "folder";
+  const sortMode = params.get("sort") === "oldest" ? "oldest" : "newest";
 
   const [queryState, setQueryState] = useState({ key: urlQuery, value: urlQuery });
   const query = queryState.key === urlQuery ? queryState.value : urlQuery;
@@ -104,7 +111,7 @@ function Mailbox() {
   // One key for "which list am I looking at". Paging and selection both reset
   // when it changes, and both derive that from the key rather than having an
   // effect write it — a reset is a consequence of the key, not an event.
-  const listKey = `${folder}|${search}|${filterMode}`;
+  const listKey = `${folder}|${search}|${filterMode}|${searchScope}|${sortMode}`;
 
   const [pageState, setPageState] = useState({ key: listKey, page: 1 });
   const pageNumber = pageState.key === listKey ? pageState.page : 1;
@@ -153,10 +160,20 @@ function Mailbox() {
         folder,
         page: pageNumber,
         q: search || undefined,
+        scope: search ? searchScope : "folder",
+        sort: sortMode,
         unread: unreadOnly ? "true" : undefined,
         starred: filteredStarredOnly ? "true" : undefined,
       }),
-    [folder, pageNumber, search, unreadOnly, filteredStarredOnly],
+    [
+      folder,
+      pageNumber,
+      search,
+      searchScope,
+      sortMode,
+      unreadOnly,
+      filteredStarredOnly,
+    ],
     "Your mail could not be loaded.",
   );
 
@@ -230,12 +247,17 @@ function Mailbox() {
   );
 
   const act = useCallback(
-    async (action: Parameters<typeof postbox.act>[0], uids?: number[], extra = {}) => {
+    async (
+      action: Parameters<typeof postbox.act>[0],
+      uids?: number[],
+      extra = {},
+      sourceFolder = folder,
+    ) => {
       const targets = uids ?? Array.from(selected);
       if (targets.length === 0) return;
       setBusy(true);
       try {
-        await postbox.act(action, folder, targets, extra);
+        await postbox.act(action, sourceFolder, targets, extra);
         setSelected(new Set());
         const removesFromCurrentView = IS_NETAMATE_EMAIL || new Set([
           "archive", "trash", "spam", "not-spam", "move", "restore", "delete",
@@ -312,13 +334,19 @@ function Mailbox() {
   );
 
   const rows = page?.results ?? [];
-  const allSelected = rows.length > 0 && selected.size === rows.length;
+  const isGlobalSearch = Boolean(search) && searchScope !== "folder";
+  const allSelected =
+    !isGlobalSearch && rows.length > 0 && selected.size === rows.length;
   const paneRight = preferences.reading_pane === "right";
   const paneOff = !IS_NETAMATE_EMAIL && preferences.reading_pane === "off";
   const folderIsSpam = /(^|[./_-])(spam|junk)($|[./_-])/i.test(folder);
   const folderIsTrash = /(^|[./_-])trash($|[./_-])/i.test(folder);
   const activeSummary =
-    detail ? rows.find((row) => row.uid === detail.uid) ?? null : null;
+    detail
+      ? rows.find(
+          (row) => row.uid === detail.uid && row.folder === detail.folder,
+        ) ?? null
+      : null;
 
   const applyFilter = (nextFilter: "all" | "unread" | "starred") => {
     const next = new URLSearchParams(params.toString());
@@ -331,22 +359,33 @@ function Mailbox() {
     router.push(`/postbox?${next.toString()}`);
   };
 
+  const applySort = (nextSort: "newest" | "oldest") => {
+    const next = new URLSearchParams(params.toString());
+    if (nextSort === "newest") next.delete("sort");
+    else next.set("sort", nextSort);
+    next.delete("page");
+    setSelected(new Set());
+    setDetail(null);
+    router.push(`/postbox?${next.toString()}`);
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {!IS_NETAMATE_EMAIL && (
         <div className="pb-premium-mail-toolbar">
-          <input
-            className="pb-premium-select-all"
-            type="checkbox"
-            aria-label="Select all visible messages"
-            checked={allSelected}
-            onChange={(event) =>
-              setSelected(
-                event.target.checked ? new Set(rows.map((row) => row.uid)) : new Set(),
-              )
-            }
-          />
+          {!isGlobalSearch && (
+            <input
+              className="pb-premium-select-all"
+              type="checkbox"
+              aria-label="Select all visible messages"
+              checked={allSelected}
+              onChange={(event) =>
+                setSelected(
+                  event.target.checked ? new Set(rows.map((row) => row.uid)) : new Set(),
+                )
+              }
+            />
+          )}
 
           {selected.size > 0 ? (
             <div className="pb-premium-selection-actions">
@@ -407,7 +446,17 @@ function Mailbox() {
           )}
 
           <div className="pb-premium-mail-toolbar-actions">
-            <span className="pb-premium-sort-label">Newest first</span>
+            <select
+              className="pb-premium-sort-select"
+              aria-label="Message order"
+              value={sortMode}
+              onChange={(event) =>
+                applySort(event.target.value === "oldest" ? "oldest" : "newest")
+              }
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
             <button
               type="button"
               className="pb-premium-icon-button"
@@ -423,13 +472,15 @@ function Mailbox() {
                 <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
               </summary>
               <div className="pb-premium-mail-menu">
-                <button
-                  type="button"
-                  disabled={rows.length === 0}
-                  onClick={() => void act("read", rows.map((row) => row.uid))}
-                >
-                  Mark visible messages as read
-                </button>
+                {!isGlobalSearch && (
+                  <button
+                    type="button"
+                    disabled={rows.length === 0}
+                    onClick={() => void act("read", rows.map((row) => row.uid))}
+                  >
+                    Mark visible messages as read
+                  </button>
+                )}
                 <a href="/postbox/settings">Change reading layout</a>
               </div>
             </details>
@@ -645,22 +696,31 @@ function Mailbox() {
                     data-unread={!row.seen}
                     data-selected={detail?.uid === row.uid}
                   >
-                    <input
-                      type="checkbox"
-                      aria-label={`Select message from ${row.from.address}`}
-                      checked={selected.has(row.uid)}
-                      onChange={(event) => {
-                        const next = new Set(selected);
-                        if (event.target.checked) next.add(row.uid);
-                        else next.delete(row.uid);
-                        setSelected(next);
-                      }}
-                    />
+                    {!isGlobalSearch && (
+                      <input
+                        type="checkbox"
+                        aria-label={`Select message from ${row.from.address}`}
+                        checked={selected.has(row.uid)}
+                        onChange={(event) => {
+                          const next = new Set(selected);
+                          if (event.target.checked) next.add(row.uid);
+                          else next.delete(row.uid);
+                          setSelected(next);
+                        }}
+                      />
+                    )}
                     <button
                       type="button"
                       className="pb-premium-row-star"
                       aria-label={row.flagged ? "Unstar message" : "Star message"}
-                      onClick={() => void act(row.flagged ? "unstar" : "star", [row.uid])}
+                      onClick={() =>
+                        void act(
+                          row.flagged ? "unstar" : "star",
+                          [row.uid],
+                          {},
+                          row.folder,
+                        )
+                      }
                     >
                       <Star
                         className="h-[17px] w-[17px]"
@@ -754,8 +814,12 @@ function Mailbox() {
               onTrustRemote={() => void trustRemoteSender()}
               onReply={openReply}
               folders={mailFolders}
-              onMove={(destination) => void act("move", [detail.uid], { destination })}
-              onAction={(action) => void act(action, [detail.uid])}
+              onMove={(destination) =>
+                void act("move", [detail.uid], { destination }, detail.folder)
+              }
+              onAction={(action) =>
+                void act(action, [detail.uid], {}, detail.folder)
+              }
             />
           )}
         </div>
@@ -949,11 +1013,9 @@ function Reader({
             </h3>
             <div className="pb-premium-attachment-grid">
               {detail.attachments.map((attachment) => (
-                <a
+                <div
                   key={attachment.part_id}
                   className="pb-premium-attachment-card"
-                  href={postbox.attachmentUrl(detail.folder, detail.uid, attachment.part_id)}
-                  download={attachment.filename}
                 >
                   <span className="pb-premium-file-icon">
                     <Paperclip className="h-5 w-5" aria-hidden="true" />
@@ -962,8 +1024,36 @@ function Reader({
                     <strong>{attachment.filename}</strong>
                     <small>{attachment.content_type || "Attachment"} · {formatBytes(attachment.size)}</small>
                   </span>
-                  <Download className="h-4 w-4" aria-hidden="true" />
-                </a>
+                  <span className="pb-premium-attachment-actions">
+                    {attachment.previewable && (
+                      <a
+                        href={postbox.attachmentPreviewUrl(
+                          detail.folder,
+                          detail.uid,
+                          attachment.part_id,
+                        )}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={\`Preview \${attachment.filename}\`}
+                        title="Preview"
+                      >
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                      </a>
+                    )}
+                    <a
+                      href={postbox.attachmentUrl(
+                        detail.folder,
+                        detail.uid,
+                        attachment.part_id,
+                      )}
+                      download={attachment.filename}
+                      aria-label={\`Download \${attachment.filename}\`}
+                      title="Download"
+                    >
+                      <Download className="h-4 w-4" aria-hidden="true" />
+                    </a>
+                  </span>
+                </div>
               ))}
             </div>
           </section>
