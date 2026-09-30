@@ -637,12 +637,26 @@ function PremiumPostBoxShell({
 }
 
 function PremiumSearch() {
-  const router = useRouter();
   const params = useSearchParams();
   const urlQuery = params.get("q") || "";
-  const [value, setValue] = useState(urlQuery);
+  return (
+    <PremiumSearchForm
+      key={urlQuery}
+      initialValue={urlQuery}
+      paramsText={params.toString()}
+    />
+  );
+}
 
-  useEffect(() => setValue(urlQuery), [urlQuery]);
+function PremiumSearchForm({
+  initialValue,
+  paramsText,
+}: {
+  initialValue: string;
+  paramsText: string;
+}) {
+  const router = useRouter();
+  const [value, setValue] = useState(initialValue);
 
   return (
     <form
@@ -650,7 +664,7 @@ function PremiumSearch() {
       role="search"
       onSubmit={(event) => {
         event.preventDefault();
-        const next = new URLSearchParams(params.toString());
+        const next = new URLSearchParams(paramsText);
         const clean = value.trim();
         if (clean) next.set("q", clean);
         else next.delete("q");
@@ -672,7 +686,7 @@ function PremiumSearch() {
           aria-label="Clear search"
           onClick={() => {
             setValue("");
-            const next = new URLSearchParams(params.toString());
+            const next = new URLSearchParams(paramsText);
             next.delete("q");
             next.delete("page");
             router.push(`/postbox?${next.toString()}`);
