@@ -248,6 +248,31 @@ class PostBoxComposePhase3Test(TestCase):
         self.assertIsNone(sent[mime.DRAFT_STATE_HEADER])
         connection.delete_permanently.assert_called_once_with([41])
 
+    def test_cancel_keeps_scheduled_state_when_move_to_drafts_fails(self):
+        row = ScheduledMessage.objects.create(
+            mailbox=self.mailbox,
+            folder="Scheduled",
+            uid_validity=9,
+            uid=41,
+            subject="Later",
+            recipients="client@example.net",
+            scheduled_at=timezone.now() + timedelta(hours=1),
+        )
+
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.move.side_effect = imap.MailAccessError(
+                "That message could not be moved.",
+                "MOVE failed",
+            )
+
+            response = self.api.delete(f"/api/postbox/scheduled/{row.id}/")
+
+        self.assertEqual(502, response.status_code)
+        row.refresh_from_db()
+        self.assertEqual(ScheduledMessage.State.PENDING, row.state)
+
+
     def test_cancelled_new_schedule_can_return_to_drafts_without_losing_metadata(self):
         raw = mime.build_message(
             from_address=self.mailbox.email,
