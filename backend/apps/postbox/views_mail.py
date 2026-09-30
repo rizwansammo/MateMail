@@ -541,6 +541,96 @@ class AttachmentView(PostBoxView):
         return response
 
 
+
+class AttachmentPreviewView(PostBoxView):
+    """
+    Inline preview for a deliberately small allow-list of inert media types.
+
+    HTML, SVG, XML, office documents and unknown content remain download-only.
+    Even allow-listed bytes are sandboxed and nosniff so they never gain
+    PostBox-origin script privileges.
+    """
+
+    def get(self, request, folder: str, uid: int, part_id: str):
+        from django.http import HttpResponse
+        from urllib.parse import quote
+
+        with imap.open_mailbox(self.mailbox.email) as connection:
+            connection.select(folder, readonly=True)
+            raw = connection.fetch_raw(uid)
+
+        try:
+            filename, content_type, payload = mime.extract_attachment(raw, part_id)
+        except KeyError:
+            return Response(
+                {"detail": "That attachment could not be found."},
+                status=404,
+            )
+
+        content_type = (content_type or "application/octet-stream").lower()
+        if content_type not in SAFE_ATTACHMENT_PREVIEW_TYPES:
+            return Response(
+                {"detail": "This attachment type is download-only for security."},
+                status=415,
+            )
+        if len(payload) > ATTACHMENT_PREVIEW_MAX_BYTES:
+            return Response(
+                {"detail": "This attachment is too large to preview safely."},
+                status=413,
+            )
+
+        response = HttpResponse(payload, content_type=content_type)
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "sandbox; default-src 'none'"
+        response["Cross-Origin-Resource-Policy"] = "same-origin"
+        response["Content-Length"] = str(len(payload))
+        response["Content-Disposition"] = (
+            f"inline; filename=\"{filename}\"; "
+            f"filename*=UTF-8''{quote(filename)}"
+        )
+        return response
+
+
+class RemoteImageTrustedSenderListView(PostBoxView):
+    """List and remove mailbox-scoped remote-image sender decisions."""
+
+    def get(self, request):
+        rows = RemoteImageSenderTrust.objects.for_mailbox(self.mailbox).order_by("sender")
+        return Response({
+            "results": [
+                {
+                    "sender": row.sender,
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ]
+        })
+
+    def delete(self, request):
+        raw = (
+            request.data.get("sender")
+            or request.query_params.get("sender")
+            or ""
+        ).strip()
+        try:
+            sender = serializers.EmailField().run_validation(raw).strip().lower()
+        except serializers.ValidationError:
+            return Response(
+                {"detail": "Choose a valid trusted sender."},
+                status=400,
+            )
+
+        deleted, _ = RemoteImageSenderTrust.objects.for_mailbox(self.mailbox).filter(
+            sender=sender
+        ).delete()
+        if not deleted:
+            return Response(
+                {"detail": "That sender is not trusted."},
+                status=404,
+            )
+        return Response(status=204)
+
+
 def _draft_signature(mailbox, value: str) -> tuple[str | None, bool]:
     """
     (signature_id, missing) from a draft's signature header.
