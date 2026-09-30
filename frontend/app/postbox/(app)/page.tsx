@@ -77,7 +77,12 @@ function Mailbox() {
   const starredOnly = params.get("starred") === "true";
   const urlQuery = params.get("q") || "";
 
-  const [query, setQuery] = useState(urlQuery);
+  const [queryState, setQueryState] = useState({ key: urlQuery, value: urlQuery });
+  const query = queryState.key === urlQuery ? queryState.value : urlQuery;
+  const setQuery = useCallback(
+    (value: string) => setQueryState({ key: urlQuery, value }),
+    [urlQuery],
+  );
   const [search, setSearch] = useState("");
 
   // One key for "which list am I looking at". Paging and selection both reset
@@ -119,8 +124,6 @@ function Mailbox() {
   const [successVisible, setSuccessVisible] = useState(false);
   const successToastRef = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => setQuery(urlQuery), [urlQuery]);
 
   // Debounce the search box so typing does not run an IMAP SEARCH per keystroke.
   useEffect(() => {
