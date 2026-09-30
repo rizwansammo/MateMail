@@ -50,6 +50,7 @@ import {
   formatBytes,
   formatMessageDate,
   postbox,
+  type Folder,
   type MessageDetail,
   type MessagePage,
   type MessageSummary,
@@ -332,7 +333,7 @@ function Mailbox() {
 
 
   return (
-    <div className={`flex h-full min-h-0 flex-col ${!IS_NETAMATE_EMAIL ? "pb-premium-mailbox" : ""}`}>
+    <div className="flex h-full min-h-0 flex-col">
       {!IS_NETAMATE_EMAIL && (
         <div className="pb-premium-mail-toolbar">
           <input
@@ -549,7 +550,7 @@ function Mailbox() {
       */}
       <div
         className={`pb-mail-layout flex min-h-0 flex-1 overflow-hidden ${
-          paneRight || paneOff ? "flex-row" : "flex-col"
+          paneRight ? "flex-row" : "flex-col"
         } ${paneOff ? "pb-layout-full" : paneRight ? "pb-layout-right" : "pb-layout-bottom"}`}
       >
         <div
@@ -738,7 +739,7 @@ function Reader({
   onLoadRemote: () => void;
   onTrustRemote: () => void;
   onReply: (mode: "reply" | "reply-all" | "forward") => void;
-  folders: import("@/lib/postbox-api").Folder[];
+  folders: Folder[];
   onMove: (destination: string) => void;
   onAction: (action: Parameters<typeof postbox.act>[0]) => void;
 }) {
@@ -922,7 +923,7 @@ function MoveMenu({
   onMove,
   disabled = false,
 }: {
-  folders: import("@/lib/postbox-api").Folder[];
+  folders: Folder[];
   currentFolder: string;
   onMove: (destination: string) => void;
   disabled?: boolean;
