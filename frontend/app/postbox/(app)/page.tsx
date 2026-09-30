@@ -581,7 +581,7 @@ function Mailbox() {
           ) : (
             <>
               {rows.map((row) => (
-                {IS_NETAMATE_EMAIL ? (
+                IS_NETAMATE_EMAIL ? (
                   <button
                     key={`${row.uid_validity}-${row.uid}`}
                     type="button"
@@ -697,7 +697,7 @@ function Mailbox() {
                       {!row.seen && <span className="pb-premium-unread-dot" aria-hidden="true" />}
                     </button>
                   </div>
-                )}
+                )
               ))}
 
               {page && page.total > page.page_size && (
@@ -1193,7 +1193,7 @@ function MoveMenu({
 function senderInitials(value: string): string {
   const clean = value.replace(/[<>]/g, " ").trim();
   const parts = clean.includes("@")
-    ? clean.split("@")[0].split(/[._\-\s]+/)
+    ? clean.split("@")[0].split(/[._\s-]+/)
     : clean.split(/\s+/);
   return parts.filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "M";
 }
