@@ -122,6 +122,7 @@ class RemoteImageSenderTrustTest(TestCase):
         detail = self._detail(self._raw())
         self.assertTrue(detail["remote_images_blocked"])
         self.assertNotIn(REMOTE_URL, detail["html"])
+        self.assertNotIn('src=""', detail["html"])
 
     def test_display_images_is_only_for_the_current_request(self):
         shown = self._detail(self._raw(), "?remote_images=true")
