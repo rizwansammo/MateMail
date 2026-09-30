@@ -477,16 +477,15 @@ export function Compose({
 
             <Field label="To" htmlFor="pb-to">
               <div className="flex gap-2">
-                <input
+                <RecipientInput
                   id="pb-to"
-                  className="pb-input"
+                  label="To"
                   value={to}
-                  onChange={(event) => {
-                    setTo(event.target.value);
+                  onChange={(value) => {
+                    setTo(value);
                     markDirty();
                   }}
-                  placeholder="name@example.com, another@example.com"
-                  autoComplete="off"
+                  placeholder="Name or email address"
                 />
                 <button
                   type="button"
@@ -518,27 +517,25 @@ export function Compose({
             {showCopies && (
               <div id="pb-copies" className="space-y-2">
                 <Field label="Cc" htmlFor="pb-cc">
-                  <input
+                  <RecipientInput
                     id="pb-cc"
-                    className="pb-input"
+                    label="Cc"
                     value={cc}
-                    onChange={(event) => {
-                      setCc(event.target.value);
+                    onChange={(value) => {
+                      setCc(value);
                       markDirty();
                     }}
-                    autoComplete="off"
                   />
                 </Field>
                 <Field label="Bcc" htmlFor="pb-bcc">
-                  <input
+                  <RecipientInput
                     id="pb-bcc"
-                    className="pb-input"
+                    label="Bcc"
                     value={bcc}
-                    onChange={(event) => {
-                      setBcc(event.target.value);
+                    onChange={(value) => {
+                      setBcc(value);
                       markDirty();
                     }}
-                    autoComplete="off"
                   />
                 </Field>
               </div>
@@ -721,7 +718,10 @@ export function Compose({
             type="file"
             multiple
             className="hidden"
-            onChange={(event) => void addFiles(event.target.files)}
+            onChange={(event) => {
+              void addFiles(event.target.files);
+              event.currentTarget.value = "";
+            }}
           />
           <button
             type="button"
@@ -831,6 +831,96 @@ function SignaturePreview({ signature }: { signature: Signature }) {
     >
       {signature.text}
     </pre>
+  );
+}
+
+function RecipientInput({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder = "",
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  const [suggestions, setSuggestions] = useState<
+    Array<{ name: string; email: string; source: string }>
+  >([]);
+  const [focused, setFocused] = useState(false);
+
+  const suffix = value.split(/[,;]/).pop()?.trim() ?? "";
+  useEffect(() => {
+    if (suffix.length < 2) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      postbox
+        .suggest(suffix)
+        .then((result) => {
+          if (!cancelled) setSuggestions(result.results);
+        })
+        .catch(() => {
+          if (!cancelled) setSuggestions([]);
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [suffix]);
+
+  const visible = focused && suffix.length >= 2 && suggestions.length > 0;
+
+  const choose = (email: string) => {
+    const parts = value.split(/[,;]/);
+    parts.pop();
+    const prefix = parts.map((part) => part.trim()).filter(Boolean);
+    onChange([...prefix, email].join(", ") + ", ");
+    setFocused(true);
+  };
+
+  return (
+    <div className="pb-recipient-input-wrap">
+      <input
+        id={id}
+        className="pb-input"
+        value={value}
+        aria-label={label}
+        aria-autocomplete="list"
+        aria-expanded={visible}
+        autoComplete="off"
+        placeholder={placeholder}
+        onFocus={() => setFocused(true)}
+        onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {visible && (
+        <div
+          className="pb-recipient-suggestions"
+          role="listbox"
+          aria-label={label + " suggestions"}
+        >
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.source + "-" + suggestion.email}
+              type="button"
+              role="option"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => choose(suggestion.email)}
+            >
+              <span>
+                <strong>{suggestion.name || suggestion.email}</strong>
+                {suggestion.name && <small>{suggestion.email}</small>}
+              </span>
+              <em>{suggestion.source === "contact" ? "Contact" : "Recent"}</em>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
