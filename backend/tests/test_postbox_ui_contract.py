@@ -579,7 +579,7 @@ class PostBoxTabBrandingRegressionTest(SimpleTestCase):
     def test_standard_postbox_owns_its_tab_title_and_favicon(self):
         layout = read("app", "postbox", "layout.tsx")
         self.assertIn('default: "PostBox"', layout)
-        self.assertIn('url: "/postbox-mark.svg"', layout)
+        self.assertIn('url: "/postbox/favicon?v=3"', layout)
         self.assertNotIn('default: "MateMail PostBox"', layout)
 
 
