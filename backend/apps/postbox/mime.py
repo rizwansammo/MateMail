@@ -184,8 +184,15 @@ def parse_message(raw: bytes, *, load_remote_images: bool = False) -> ParsedMess
         filename = part.get_filename()
         content_type = part.get_content_type()
 
-        if disposition == "attachment" or (filename and content_type not in
-                                           ("text/plain", "text/html")):
+        # Only text/plain and text/html without a filename are body parts.
+        # Inline CID images commonly have Content-ID + inline disposition but
+        # NO filename; treating only named parts as attachments made those
+        # images disappear from the message model and left broken cid: URLs.
+        if (
+            disposition == "attachment"
+            or bool(filename)
+            or content_type not in ("text/plain", "text/html")
+        ):
             parsed.attachments.append(
                 Attachment(
                     part_id=str(index),
@@ -268,10 +275,17 @@ def sanitize_html(html: str, *, load_remote_images: bool = False) -> tuple[str, 
 
 
 _REMOTE_SRC = re.compile(
-    r"""(?P<attr>\b(?:src|background|srcset)\s*=\s*)(?P<quote>["'])(?P<url>\s*https?://[^"']*)(?P=quote)""",
+    r"""(?P<attr>\b(?:src|background|srcset)\s*=\s*)(?P<quote>["'])(?P<url>\s*(?:https?:)?//[^"']*)(?P=quote)""",
     re.IGNORECASE,
 )
-_CSS_REMOTE_URL = re.compile(r"url\s*\(\s*['\"]?\s*https?://[^)'\"]+['\"]?\s*\)", re.IGNORECASE)
+_REMOTE_SRC_UNQUOTED = re.compile(
+    r"""(?P<attr>\b(?:src|background|srcset)\s*=\s*)(?P<url>(?:https?:)?//[^\s>]+)""",
+    re.IGNORECASE,
+)
+_CSS_REMOTE_URL = re.compile(
+    r"url\s*\(\s*['\"]?\s*(?:https?:)?//[^)'\"]+['\"]?\s*\)",
+    re.IGNORECASE,
+)
 
 
 def _strip_remote_references(html: str) -> tuple[str, bool]:
@@ -284,6 +298,13 @@ def _strip_remote_references(html: str) -> tuple[str, bool]:
         return f'{match.group("attr")}{match.group("quote")}{match.group("quote")}'
 
     html = _REMOTE_SRC.sub(drop, html)
+
+    def drop_unquoted(match: re.Match) -> str:
+        nonlocal found
+        found = True
+        return f'{match.group("attr")}""'
+
+    html = _REMOTE_SRC_UNQUOTED.sub(drop_unquoted, html)
 
     if _CSS_REMOTE_URL.search(html):
         found = True
