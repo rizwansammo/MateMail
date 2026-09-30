@@ -121,6 +121,8 @@ class ParsedMessage:
     #: only the message detail for Drafts reads it, and only after checking
     #: the mailbox owns that signature.
     draft_signature_id: str = ""
+    #: True for PostBox-created editable draft/scheduled source messages.
+    draft_state: bool = False
     reply_to: str = ""
     date: str = ""
     message_id: str = ""
@@ -166,6 +168,9 @@ def parse_message(raw: bytes, *, load_remote_images: bool = False) -> ParsedMess
     parsed.bcc = _addresses(message, "Bcc")
     parsed.draft_signature_id = clean_header(
         str(message.get(DRAFT_SIGNATURE_HEADER, "") or "")
+    )
+    parsed.draft_state = (
+        clean_header(str(message.get(DRAFT_STATE_HEADER, "") or "")) == "1"
     )
 
     text_parts: list[str] = []
@@ -442,6 +447,7 @@ def extract_attachment(raw: bytes, part_id: str) -> tuple[str, str, bytes]:
 #: with the same choice; sending rebuilds the message from the composer's
 #: fields, applies the signature once and never carries this header.
 DRAFT_SIGNATURE_HEADER = "X-PostBox-Signature-Id"
+DRAFT_STATE_HEADER = "X-PostBox-Draft-State"
 
 _HEADER_INJECTION = re.compile(r"[\r\n]")
 
@@ -523,7 +529,11 @@ def build_message(
     # Without the header, reopening a draft silently dropped them.
     if keep_bcc and bcc:
         message["Bcc"] = ", ".join(clean_header(a) for a in bcc)
-    # Draft-only metadata, like the Bcc above.
+    # Draft-only metadata. The explicit state marker is written even when
+    # there is no Bcc and no signature, so Scheduled send can distinguish the
+    # new editable source format from legacy already-finalised messages.
+    if keep_bcc:
+        message[DRAFT_STATE_HEADER] = "1"
     if draft_signature_id:
         message[DRAFT_SIGNATURE_HEADER] = clean_header(draft_signature_id)
     message["Subject"] = clean_header(subject)
