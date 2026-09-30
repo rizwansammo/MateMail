@@ -336,12 +336,21 @@ class SendView(PostBoxView, ComposeMixin):
                 detail="You have sent a lot of mail recently. Please wait a little.",
             )
 
-        message, identity = self.build(data, mailbox=mailbox)
-
         send_at = data.get("send_at")
         if send_at:
-            return self._schedule(message, data, send_at, recipients, mailbox)
+            # Store an EDITABLE source message in Scheduled: Bcc and the
+            # selected signature remain draft metadata, while the signature
+            # itself is not applied yet. The worker finalises it at send time.
+            scheduled_source, _ = self.build(data, mailbox=mailbox, draft=True)
+            return self._schedule(
+                scheduled_source,
+                data,
+                send_at,
+                recipients,
+                mailbox,
+            )
 
+        message, identity = self.build(data, mailbox=mailbox)
         sending.submit(
             message, mailbox=mailbox, envelope_from=identity.address, recipients=recipients
         )
