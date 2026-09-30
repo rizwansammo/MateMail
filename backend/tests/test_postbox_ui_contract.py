@@ -573,3 +573,11 @@ class PremiumBrandingRegressionTest(SimpleTestCase):
         self.assertNotIn('pb-premium-brand-dot', layout)
         self.assertNotIn('>MAIL<', layout)
         self.assertIn('.pb-premium-brand-mark {', css)
+
+
+class PostBoxTabBrandingRegressionTest(SimpleTestCase):
+    def test_standard_postbox_owns_its_tab_title_and_favicon(self):
+        layout = read("app", "postbox", "layout.tsx")
+        self.assertIn('default: "PostBox"', layout)
+        self.assertIn('url: "/postbox-mark.svg"', layout)
+        self.assertNotIn('default: "MateMail PostBox"', layout)
