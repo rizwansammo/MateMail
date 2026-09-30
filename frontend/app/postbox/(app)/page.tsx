@@ -144,6 +144,16 @@ function Mailbox() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
 
+  useEffect(() => {
+    const returnToList = () => {
+      setDetail(null);
+      setShowRemote(false);
+    };
+    window.addEventListener("postbox:return-to-list", returnToList);
+    return () =>
+      window.removeEventListener("postbox:return-to-list", returnToList);
+  }, []);
+
   const [explicitCompose, setExplicitCompose] = useState<ComposeInitial | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
@@ -900,6 +910,37 @@ function Mailbox() {
   );
 }
 
+function resolveInlineCidImages(detail: MessageDetail): string {
+  if (!detail.html || !/cid:/i.test(detail.html)) return detail.html;
+
+  const byCid = new Map<string, string>();
+  for (const attachment of detail.attachments) {
+    if (
+      attachment.inline &&
+      attachment.content_id &&
+      attachment.previewable &&
+      attachment.content_type.toLowerCase().startsWith("image/")
+    ) {
+      byCid.set(
+        attachment.content_id.trim().toLowerCase(),
+        postbox.attachmentPreviewUrl(
+          detail.folder,
+          detail.uid,
+          attachment.part_id,
+        ),
+      );
+    }
+  }
+
+  if (byCid.size === 0) return detail.html;
+
+  return detail.html.replace(
+    /cid:([^"'()\s>]+)/gi,
+    (original, contentId: string) =>
+      byCid.get(contentId.trim().toLowerCase()) ?? original,
+  );
+}
+
 function Reader({
   detail,
   summary,
@@ -931,6 +972,7 @@ function Reader({
 }) {
   const isSpam = /(^|[./_-])(spam|junk)($|[./_-])/i.test(detail.folder);
   const isTrash = /(^|[./_-])trash($|[./_-])/i.test(detail.folder);
+  const renderedHtml = resolveInlineCidImages(detail);
 
   return (
     <article className="pb-premium-reader flex h-full min-h-0 flex-col">
@@ -1052,9 +1094,9 @@ function Reader({
           </div>
         )}
 
-        <div className={`pb-message-body pb-premium-message-body ${detail.html ? "pb-premium-html-mail" : ""}`}>
-          {detail.html ? (
-            <div dangerouslySetInnerHTML={{ __html: detail.html }} />
+        <div className={`pb-message-body pb-premium-message-body ${renderedHtml ? "pb-premium-html-mail" : ""}`}>
+          {renderedHtml ? (
+            <div dangerouslySetInnerHTML={{ __html: renderedHtml }} />
           ) : (
             <pre className="whitespace-pre-wrap">
               {detail.text || "(This message has no readable content.)"}
