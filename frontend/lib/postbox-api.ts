@@ -158,6 +158,8 @@ export interface MessageSummary {
 
 export interface MessagePage {
   folder: string;
+  scope?: "folder" | "all" | "all_with_spam_trash";
+  sort?: "newest" | "oldest";
   uid_validity: number;
   page: number;
   page_size: number;
@@ -173,6 +175,7 @@ export interface AttachmentInfo {
   size: number;
   inline: boolean;
   content_id: string;
+  previewable: boolean;
 }
 
 export interface MessageDetail {
@@ -363,10 +366,21 @@ export const postbox = {
       })}`,
       { method: "POST", body: "{}" },
     ),
+  trustedRemoteImageSenders: () =>
+    request<{ results: Array<{ sender: string; created_at: string }> }>(
+      "/remote-images/trusted-senders/",
+    ),
+  removeTrustedRemoteImageSender: (sender: string) =>
+    request<void>("/remote-images/trusted-senders/", {
+      method: "DELETE",
+      body: JSON.stringify({ sender }),
+    }),
   rawUrl: (folder: string, uid: number) =>
     `${BASE}/messages/${encodeFolder(folder)}/${uid}/raw/`,
   attachmentUrl: (folder: string, uid: number, partId: string) =>
     `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/`,
+  attachmentPreviewUrl: (folder: string, uid: number, partId: string) =>
+    `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/preview/`,
   replyContext: (folder: string, uid: number, mode: string) =>
     request<{
       mode: string; subject: string; to: string[]; cc: string[];
