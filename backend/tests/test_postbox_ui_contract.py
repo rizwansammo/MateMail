@@ -556,3 +556,9 @@ class PremiumReleaseIntegrationTest(SimpleTestCase):
         self.assertIn(
             "() => postbox.contacts(search || undefined)", self.contacts
         )
+
+    def test_filtered_reader_closes_when_the_message_leaves_the_filter(self):
+        self.assertIn('(unreadOnly && action === "read")', self.page)
+        self.assertIn(
+            '(filteredStarredOnly && action === "unstar")', self.page
+        )
