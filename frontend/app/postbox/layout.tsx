@@ -37,8 +37,20 @@ export const metadata: Metadata = IS_NETAMATE_EMAIL
       description:
         "Business email, beautifully organised. MateMail PostBox by NetaMate Solutions.",
       icons: {
-        icon: [{ url: "/postbox-mark.svg", type: "image/svg+xml" }],
-        shortcut: [{ url: "/postbox-mark.svg", type: "image/svg+xml" }],
+        icon: [
+          {
+            url: "/postbox/favicon?v=3",
+            type: "image/svg+xml",
+            sizes: "any",
+          },
+        ],
+        shortcut: [
+          {
+            url: "/postbox/favicon?v=3",
+            type: "image/svg+xml",
+            sizes: "any",
+          },
+        ],
       },
       // A mailbox is not a landing page.
       robots: { index: false, follow: false },
