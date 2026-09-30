@@ -28,11 +28,18 @@ export const metadata: Metadata = IS_NETAMATE_EMAIL
     }
   : {
       title: {
-        default: "MateMail PostBox",
-        template: "%s · MateMail PostBox",
+        // The root MateMail metadata template appends " | MateMail".
+        // Keep this segment to the surface name so the browser tab reads
+        // "PostBox | MateMail" rather than duplicating the product name.
+        default: "PostBox",
+        template: "%s · PostBox",
       },
       description:
         "Business email, beautifully organised. MateMail PostBox by NetaMate Solutions.",
+      icons: {
+        icon: [{ url: "/postbox-mark.svg", type: "image/svg+xml" }],
+        shortcut: [{ url: "/postbox-mark.svg", type: "image/svg+xml" }],
+      },
       // A mailbox is not a landing page.
       robots: { index: false, follow: false },
     };
