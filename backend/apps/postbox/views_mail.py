@@ -331,6 +331,11 @@ def _search_criteria(params) -> list[str]:
     text = (params.get("q") or "").strip()
     if text:
         criteria += ["TEXT", text]
+
+    not_text = (params.get("not_q") or "").strip()
+    if not_text:
+        criteria += ["NOT", "TEXT", not_text]
+
     for key, keyword in (("from", "FROM"), ("to", "TO"), ("subject", "SUBJECT")):
         value = (params.get(key) or "").strip()
         if value:
@@ -349,6 +354,15 @@ def _search_criteria(params) -> list[str]:
     before = (params.get("before") or "").strip()
     if before:
         criteria += ["BEFORE", before]
+
+    for key, keyword in (("size_gt", "LARGER"), ("size_lt", "SMALLER")):
+        raw = (params.get(key) or "").strip()
+        if raw:
+            try:
+                value = max(int(raw), 0)
+            except (TypeError, ValueError):
+                continue
+            criteria += [keyword, str(value)]
 
     return criteria or ["ALL"]
 
@@ -433,6 +447,10 @@ class MessageDetailView(PostBoxView):
                     "size": a.size,
                     "inline": a.inline,
                     "content_id": a.content_id,
+                    "previewable": (
+                        a.content_type.lower() in SAFE_ATTACHMENT_PREVIEW_TYPES
+                        and a.size <= ATTACHMENT_PREVIEW_MAX_BYTES
+                    ),
                 }
                 for a in parsed.attachments
             ],
