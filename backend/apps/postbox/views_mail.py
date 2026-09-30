@@ -30,7 +30,7 @@ from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX, POSTBOX_SEND_PER_MA
 
 from . import imap, mime, sending
 from .auth import PostBoxSessionAuthentication
-from .models import MessageMoveProvenance, PostBoxPreference, RemoteImageSenderTrust
+from .models import MailRule, MessageMoveProvenance, PostBoxPreference, RemoteImageSenderTrust
 
 logger = logging.getLogger(__name__)
 
@@ -107,15 +107,74 @@ class FolderListView(PostBoxView):
 
 
 class FolderDetailView(PostBoxView):
+    @staticmethod
+    def _folder(connection, name: str):
+        return next(
+            (
+                item
+                for item in connection.list_folders()
+                if item.name == name and item.selectable
+            ),
+            None,
+        )
+
     def patch(self, request, name: str):
+        from .views_settings import _sync_sieve
+
         new_name = (request.data.get("name") or "").strip()
         with imap.open_mailbox(self.mailbox.email) as connection:
+            folder = self._folder(connection, name)
+            if folder is None:
+                return Response({"detail": "That folder could not be found."}, status=404)
+            if folder.role:
+                return Response(
+                    {"detail": "Standard mail folders cannot be renamed."},
+                    status=400,
+                )
             connection.rename_folder(name, new_name)
+
+        MailRule.objects.for_mailbox(self.mailbox).filter(
+            action=MailRule.Action.MOVE,
+            action_folder=name,
+        ).update(action_folder=new_name)
+        MessageMoveProvenance.objects.for_mailbox(self.mailbox).filter(
+            original_folder=name
+        ).update(original_folder=new_name)
+        _sync_sieve(self.mailbox)
         return Response({"name": new_name})
 
     def delete(self, request, name: str):
+        from .views_settings import _sync_sieve
+
         with imap.open_mailbox(self.mailbox.email) as connection:
+            folder = self._folder(connection, name)
+            if folder is None:
+                return Response({"detail": "That folder could not be found."}, status=404)
+            if folder.role:
+                return Response(
+                    {"detail": "Standard mail folders cannot be deleted."},
+                    status=400,
+                )
+
+            connection.select(name)
+            uids = connection.search_uids(["ALL"])
+            if uids:
+                connection.move(uids, "INBOX")
+
+            # Disable rules before deleting their target so Dovecot never has
+            # an active fileinto rule pointing at a mailbox that no longer
+            # exists.  Preserve the folder name in the rule so the user can
+            # see why it is disabled and retarget it later.
+            MailRule.objects.for_mailbox(self.mailbox).filter(
+                action=MailRule.Action.MOVE,
+                action_folder=name,
+            ).update(enabled=False)
+            MessageMoveProvenance.objects.for_mailbox(self.mailbox).filter(
+                original_folder=name
+            ).update(original_folder="INBOX")
+            _sync_sieve(self.mailbox)
             connection.delete_folder(name)
+
         return Response(status=204)
 
 
