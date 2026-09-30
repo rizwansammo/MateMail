@@ -323,9 +323,19 @@ function Mailbox() {
       try {
         await postbox.act(action, sourceFolder, targets, extra);
         setSelected(new Set());
-        const removesFromCurrentView = IS_NETAMATE_EMAIL || new Set([
-          "archive", "trash", "spam", "not-spam", "move", "restore", "delete",
-        ]).has(action);
+        const removesFromCurrentView =
+          IS_NETAMATE_EMAIL ||
+          new Set([
+            "archive",
+            "trash",
+            "spam",
+            "not-spam",
+            "move",
+            "restore",
+            "delete",
+          ]).has(action) ||
+          (unreadOnly && action === "read") ||
+          (filteredStarredOnly && action === "unstar");
         if (removesFromCurrentView && detail && targets.includes(detail.uid)) {
           setDetail(null);
         }
@@ -345,7 +355,7 @@ function Mailbox() {
     // the current one already reads back as empty. Either way the selection
     // is cleared, which is the whole intent.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selected, folder, detail, loadList],
+    [selected, folder, detail, loadList, unreadOnly, filteredStarredOnly],
   );
 
   const trustRemoteSender = useCallback(async () => {
