@@ -151,140 +151,101 @@ export default function PostBoxLoginPage() {
   }
 
   return (
-    <div
-      className="pb flex min-h-screen flex-col"
-      style={{ background: "var(--pb-surface)" }}
-    >
-      <main className="flex flex-1 items-center justify-center px-4 py-10">
-        <div className="w-full max-w-sm">
-          <div className="mb-6 flex items-center gap-3">
-            <Image
-              src="/matemail-logo.png"
-              alt=""
-              width={34}
-              height={25}
-              priority
-            />
-            <div>
-              <p
-                className="pb-brand text-base leading-none"
-                style={{ color: "var(--pb-primary)" }}
-              >
-                MateMail
-              </p>
-              <p className="pb-label mt-1">PostBox</p>
-            </div>
-          </div>
-
-          <div className="pb-panel p-6" style={{ boxShadow: "var(--pb-shadow-lg)" }}>
-            <h1 className="text-base font-semibold">Sign in to your mailbox</h1>
-            <p className="mb-5 mt-1 text-xs pb-muted">
-              Use your full email address and mailbox password.
-            </p>
-
-            <form onSubmit={submit} className="space-y-3" noValidate>
-              <div>
-                <label htmlFor="pb-email" className="pb-label">
-                  Email address
-                </label>
-                <div className="relative mt-1">
-                  <Mail
-                    className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
-                    style={{ color: "var(--pb-subtle)" }}
-                    aria-hidden="true"
-                  />
-                  <input
-                    id="pb-email"
-                    className="pb-input"
-                    style={{ paddingLeft: "1.9rem" }}
-                    type="email"
-                    autoComplete="username"
-                    autoFocus
-                    required
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    placeholder="you@yourcompany.com"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="pb-password" className="pb-label">
-                  Password
-                </label>
-                <div className="relative mt-1">
-                  <KeyRound
-                    className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
-                    style={{ color: "var(--pb-subtle)" }}
-                    aria-hidden="true"
-                  />
-                  <input
-                    id="pb-password"
-                    className="pb-input"
-                    style={{ paddingLeft: "1.9rem" }}
-                    type="password"
-                    autoComplete="current-password"
-                    required
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                  />
-                </div>
-              </div>
-
-              <label className="flex items-center gap-2 text-xs pb-muted">
-                <input
-                  type="checkbox"
-                  checked={remember}
-                  onChange={(event) => setRemember(event.target.checked)}
-                />
-                Keep me signed in on this device
-              </label>
-
-              {error && (
-                <p
-                  className="text-xs"
-                  role="alert"
-                  style={{ color: "var(--pb-danger)" }}
-                >
-                  {error}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                className="pb-btn pb-btn-primary w-full"
-                disabled={busy}
-              >
-                {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-                Sign in
-              </button>
-            </form>
-
-            <div className="mt-4 border-t pt-3" style={{ borderColor: "var(--pb-border)" }}>
-              <button
-                type="button"
-                className="text-xs font-medium"
-                style={{ color: "var(--pb-accent-fg)" }}
-                aria-expanded={showHelp}
-                onClick={() => setShowHelp((open) => !open)}
-              >
-                Forgotten your password?
-              </button>
-              {showHelp && (
-                <p className="mt-2 text-xs pb-muted">
-                  Mailbox passwords are reset by your organization&rsquo;s MateMail
-                  administrator. MateMail cannot email you a reset link, because
-                  it would go to the mailbox you are trying to open.
-                </p>
-              )}
-            </div>
-          </div>
-
-          <p className="mt-4 text-center text-xs pb-subtle">
-            MateMail PostBox · NetaMate Solutions
-          </p>
+    <div className="pb pb-premium-login">
+      <header className="pb-premium-login-top">
+        <div className="pb-premium-login-brand">
+          <Image src="/postbox-mark.svg" alt="" width={39} height={39} priority />
+          <span className="pb-premium-wordmark">PostBox</span>
         </div>
+      </header>
+
+      <main className="pb-premium-login-main">
+        <section className="pb-premium-login-card" aria-labelledby="postbox-login-title">
+          <span className="pb-premium-login-emblem">
+            <Mail className="h-[26px] w-[26px]" aria-hidden="true" />
+          </span>
+          <h1 id="postbox-login-title">Welcome back.</h1>
+          <p>Sign in to your PostBox mailbox.</p>
+
+          <form onSubmit={submit} className="pb-premium-login-form" noValidate>
+            <div className="pb-premium-field">
+              <label htmlFor="pb-email">Email address</label>
+              <div className="pb-premium-field-wrap">
+                <Mail className="h-4 w-4" aria-hidden="true" />
+                <input
+                  id="pb-email"
+                  type="email"
+                  autoComplete="username"
+                  autoFocus
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@yourcompany.com"
+                />
+              </div>
+            </div>
+
+            <div className="pb-premium-field">
+              <label htmlFor="pb-password">Password</label>
+              <div className="pb-premium-field-wrap">
+                <KeyRound className="h-4 w-4" aria-hidden="true" />
+                <input
+                  id="pb-password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <label className="pb-premium-remember">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(event) => setRemember(event.target.checked)}
+              />
+              Remember me on this device
+            </label>
+
+            {error && (
+              <p className="pb-premium-login-error" role="alert">
+                {error}
+              </p>
+            )}
+
+            <button type="submit" className="pb-premium-login-submit" disabled={busy}>
+              {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+              {busy ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
+
+          <div className="pb-premium-login-help">
+            <button
+              type="button"
+              aria-expanded={showHelp}
+              onClick={() => setShowHelp((open) => !open)}
+            >
+              Forgotten your password?
+            </button>
+            {showHelp && (
+              <p>
+                Mailbox passwords are managed by your organization&rsquo;s MateMail
+                administrator. Contact your organization administrator to reset access.
+              </p>
+            )}
+          </div>
+        </section>
       </main>
+
+      <footer className="pb-premium-login-footer">
+        <span>PostBox by MateMail</span>
+        <span>
+          <Mail className="h-3.5 w-3.5" aria-hidden="true" />
+          A focused space for your work.
+        </span>
+      </footer>
     </div>
   );
 }
