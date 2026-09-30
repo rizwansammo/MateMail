@@ -165,12 +165,13 @@ function Mailbox() {
   const loadList = list.reload;
 
   const directory = useAsyncData(
-    () => Promise.all([postbox.identities(), postbox.signatures()]),
+    () => Promise.all([postbox.identities(), postbox.signatures(), postbox.folders()]),
     [],
     "",
   );
   const identities = directory.data?.[0]?.results ?? [];
   const signatures = directory.data?.[1]?.results ?? [];
+  const mailFolders = directory.data?.[2]?.results ?? [];
 
   // The composer opened from the rail's link is read from the query string
   // rather than copied into state, so no effect writes state on mount.
@@ -312,6 +313,9 @@ function Mailbox() {
   const rows = page?.results ?? [];
   const allSelected = rows.length > 0 && selected.size === rows.length;
   const paneRight = preferences.reading_pane === "right";
+  const paneOff = preferences.reading_pane === "off";
+  const folderIsSpam = /(^|[./_-])(spam|junk)($|[./_-])/i.test(folder);
+  const folderIsTrash = /(^|[./_-])trash($|[./_-])/i.test(folder);
   const activeSummary =
     detail ? rows.find((row) => row.uid === detail.uid) ?? null : null;
 
@@ -326,30 +330,80 @@ function Mailbox() {
     router.push(`/postbox?${next.toString()}`);
   };
 
-  const folderLabel = folder === "INBOX"
-    ? "Inbox"
-    : folder.replace(/(^|[./_-])([a-z])/g, (_, prefix: string, letter: string) =>
-        `${prefix === "." || prefix === "/" || prefix === "_" || prefix === "-" ? " " : prefix}${letter.toUpperCase()}`,
-      );
 
   return (
     <div className={`flex h-full min-h-0 flex-col ${!IS_NETAMATE_EMAIL ? "pb-premium-mailbox" : ""}`}>
       {!IS_NETAMATE_EMAIL && (
         <div className="pb-premium-mail-toolbar">
-          <div className="pb-premium-mail-tabs" role="tablist" aria-label="Mailbox filter">
-            {(["all", "unread", "starred"] as const).map((mode) => (
+          <input
+            className="pb-premium-select-all"
+            type="checkbox"
+            aria-label="Select all visible messages"
+            checked={allSelected}
+            onChange={(event) =>
+              setSelected(
+                event.target.checked ? new Set(rows.map((row) => row.uid)) : new Set(),
+              )
+            }
+          />
+
+          {selected.size > 0 ? (
+            <div className="pb-premium-selection-actions">
+              <span>{selected.size} selected</span>
+              <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
+                onClick={() => void act("read")} />
+              <ToolbarButton label="Mark unread" icon={Mail} busy={busy}
+                onClick={() => void act("unread")} />
+              <ToolbarButton label="Star" icon={Star} busy={busy}
+                onClick={() => void act("star")} />
+              <ToolbarButton label="Archive" icon={Archive} busy={busy}
+                onClick={() => void act("archive")} />
+              <MoveMenu
+                folders={mailFolders}
+                currentFolder={folder}
+                disabled={busy}
+                onMove={(destination) => void act("move", undefined, { destination })}
+              />
+              {folderIsSpam ? (
+                <ToolbarButton label="Not spam" icon={ShieldCheck} busy={busy}
+                  onClick={() => void act("not-spam")} />
+              ) : (
+                <ToolbarButton label="Spam" icon={ShieldAlert} busy={busy}
+                  onClick={() => void act("spam")} />
+              )}
+              {folderIsTrash ? (
+                <ToolbarButton label="Restore" icon={RotateCcw} busy={busy}
+                  onClick={() => void act("restore")} />
+              ) : (
+                <ToolbarButton label="Trash" icon={Trash2} busy={busy}
+                  onClick={() => void act("trash")} />
+              )}
               <button
-                key={mode}
                 type="button"
-                role="tab"
-                aria-selected={filterMode === mode}
-                data-active={filterMode === mode ? "true" : "false"}
-                onClick={() => applyFilter(mode)}
+                className="pb-premium-icon-button"
+                aria-label="Clear selection"
+                title="Clear selection"
+                onClick={() => setSelected(new Set())}
               >
-                {mode === "all" ? "All mail" : mode === "unread" ? "Unread" : "Starred"}
+                <X className="h-4 w-4" aria-hidden="true" />
               </button>
-            ))}
-          </div>
+            </div>
+          ) : (
+            <div className="pb-premium-mail-tabs" role="tablist" aria-label="Mailbox filter">
+              {(["all", "unread", "starred"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="tab"
+                  aria-selected={filterMode === mode}
+                  data-active={filterMode === mode ? "true" : "false"}
+                  onClick={() => applyFilter(mode)}
+                >
+                  {mode === "all" ? "All mail" : mode === "unread" ? "Unread" : "Starred"}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="pb-premium-mail-toolbar-actions">
             <span className="pb-premium-sort-label">Newest first</span>
@@ -380,7 +434,6 @@ function Mailbox() {
             </details>
           </div>
         </div>
-      )}
 
       {/* ── toolbar ────────────────────────────────────────────────────── */}
       <div
@@ -496,20 +549,18 @@ function Mailbox() {
       */}
       <div
         className={`pb-mail-layout flex min-h-0 flex-1 overflow-hidden ${
-          paneRight ? "flex-row" : "flex-col"
-        }`}
+          paneRight || paneOff ? "flex-row" : "flex-col"
+        } ${paneOff ? "pb-layout-full" : paneRight ? "pb-layout-right" : "pb-layout-bottom"}`}
       >
         <div
           className={`pb-mail-list-pane pb-scroll min-h-0 ${
-            detail ? "hidden md:block" : "block"
+            detail ? (paneOff ? "hidden" : "hidden md:block") : "block"
           } ${
-            paneRight
-              ? // Steps rather than one width: 22rem truncated subject lines
-                // on a large display while the reader had room to spare, and
-                // a single larger value would crowd a 1280px laptop. The
-                // reader takes whatever is left at every step.
-                "w-full md:w-[24rem] lg:w-[27rem] xl:w-[28rem] md:shrink-0 md:border-r"
-              : "flex-1 border-b"
+            paneOff
+              ? "w-full flex-1"
+              : paneRight
+                ? "w-full md:w-[24rem] lg:w-[27rem] xl:w-[28rem] md:shrink-0 md:border-r"
+                : "flex-1 border-b"
           }`}
           style={{ borderColor: "var(--pb-border)" }}
         >
@@ -618,7 +669,9 @@ function Mailbox() {
           )}
         </div>
 
-        <div className={`pb-mail-reader-pane pb-scroll min-h-0 flex-1 ${detail ? "block" : "hidden md:block"}`}>
+        <div className={`pb-mail-reader-pane pb-scroll min-h-0 flex-1 ${
+          detail ? "block" : paneOff ? "hidden" : "hidden md:block"
+        }`}>
           {detailLoading ? (
             <CentredSpinner />
           ) : !detail ? (
@@ -640,6 +693,8 @@ function Mailbox() {
               }
               onTrustRemote={() => void trustRemoteSender()}
               onReply={openReply}
+              folders={mailFolders}
+              onMove={(destination) => void act("move", [detail.uid], { destination })}
               onAction={(action) => void act(action, [detail.uid])}
             />
           )}
@@ -672,6 +727,8 @@ function Reader({
   onLoadRemote,
   onTrustRemote,
   onReply,
+  folders,
+  onMove,
   onAction,
 }: {
   detail: MessageDetail;
@@ -681,6 +738,8 @@ function Reader({
   onLoadRemote: () => void;
   onTrustRemote: () => void;
   onReply: (mode: "reply" | "reply-all" | "forward") => void;
+  folders: import("@/lib/postbox-api").Folder[];
+  onMove: (destination: string) => void;
   onAction: (action: Parameters<typeof postbox.act>[0]) => void;
 }) {
   const isSpam = /(^|[./_-])(spam|junk)($|[./_-])/i.test(detail.folder);
@@ -704,7 +763,11 @@ function Reader({
         <ToolbarButton
           label={isTrash ? "Permanently delete" : "Move to Trash"}
           icon={Trash2}
-          onClick={() => onAction(isTrash ? "delete" : "trash")}
+          onClick={() => {
+            if (!isTrash || window.confirm("Permanently delete this message? This cannot be undone.")) {
+              onAction(isTrash ? "delete" : "trash");
+            }
+          }}
         />
         <ToolbarButton
           label={isSpam ? "Not spam" : "Mark as spam"}
@@ -712,6 +775,11 @@ function Reader({
           onClick={() => onAction(isSpam ? "not-spam" : "spam")}
         />
         <ToolbarButton label="Mark unread" icon={Mail} onClick={() => onAction("unread")} />
+        <MoveMenu
+          folders={folders}
+          currentFolder={detail.folder}
+          onMove={onMove}
+        />
         {isTrash && (
           <ToolbarButton label="Restore" icon={RotateCcw} onClick={() => onAction("restore")} />
         )}
@@ -845,6 +913,54 @@ function Reader({
         )}
       </div>
     </article>
+  );
+}
+
+function MoveMenu({
+  folders,
+  currentFolder,
+  onMove,
+  disabled = false,
+}: {
+  folders: import("@/lib/postbox-api").Folder[];
+  currentFolder: string;
+  onMove: (destination: string) => void;
+  disabled?: boolean;
+}) {
+  const destinations = folders.filter((item) => item.name !== currentFolder);
+  if (destinations.length === 0) return null;
+
+  return (
+    <details className="pb-premium-move-menu">
+      <summary
+        className="pb-btn pb-btn-plain"
+        aria-label="Move to folder"
+        title="Move to folder"
+        aria-disabled={disabled}
+        onClick={(event) => {
+          if (disabled) event.preventDefault();
+        }}
+      >
+        <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+        <span className="hidden sm:inline">Move</span>
+      </summary>
+      <div className="pb-premium-move-panel">
+        <p>Move to folder</p>
+        {destinations.map((item) => (
+          <button
+            key={item.name}
+            type="button"
+            onClick={(event) => {
+              const details = event.currentTarget.closest("details");
+              if (details) details.open = false;
+              onMove(item.name);
+            }}
+          >
+            {item.name}
+          </button>
+        ))}
+      </div>
+    </details>
   );
 }
 
