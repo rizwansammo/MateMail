@@ -11,8 +11,11 @@ contain a slash — `Projects/2026` is one folder, not two path segments.
 from django.urls import path
 
 from .views_auth import (
+    PostBoxAccountListView,
+    PostBoxAccountSwitchView,
     PostBoxLoginView,
     PostBoxLogoutAllView,
+    PostBoxLogoutDeviceView,
     PostBoxLogoutView,
     PostBoxMeView,
     PostBoxSessionListView,
@@ -58,7 +61,10 @@ from .views_settings import (
 urlpatterns = [
     # ── authentication ──────────────────────────────────────────────────────
     path("auth/login/", PostBoxLoginView.as_view(), name="postbox-login"),
+    path("auth/accounts/", PostBoxAccountListView.as_view(), name="postbox-accounts"),
+    path("auth/switch/", PostBoxAccountSwitchView.as_view(), name="postbox-switch-account"),
     path("auth/logout/", PostBoxLogoutView.as_view(), name="postbox-logout"),
+    path("auth/logout-device/", PostBoxLogoutDeviceView.as_view(), name="postbox-logout-device"),
     path("auth/logout-all/", PostBoxLogoutAllView.as_view(), name="postbox-logout-all"),
     path("auth/me/", PostBoxMeView.as_view(), name="postbox-me"),
 
