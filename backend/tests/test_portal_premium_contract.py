@@ -100,7 +100,8 @@ class PremiumPortalTruthfulnessContractTest(SimpleTestCase):
         backups = read("app", "app", "backups", "page.tsx")
         self.assertIn("Per-organization backup export is not implemented yet", backups)
         self.assertNotIn('method: "POST"', backups)
-        self.assertNotIn("Start backup", backups)
+        self.assertNotIn("startBackup", backups)
+        self.assertNotIn("createBackup", backups)
         self.assertIn("not proof that a recoverable tenant archive exists", backups)
 
     def test_security_does_not_fake_session_inventory(self):
