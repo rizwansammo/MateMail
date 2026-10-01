@@ -33,6 +33,8 @@ from tests.factories import (
 
 LOGIN = "/api/postbox/auth/login/"
 ME = "/api/postbox/auth/me/"
+ACCOUNTS = "/api/postbox/auth/accounts/"
+SWITCH = "/api/postbox/auth/switch/"
 
 LOCMEM_CACHE = {
     "default": {
@@ -152,6 +154,117 @@ class PostBoxAuthenticationTest(TestCase):
         # keeps the cookie off every other matemail.online host.
         self.assertTrue(postbox_auth.SESSION_COOKIE_NAME.startswith("__Host-"))
         self.assertEqual("", cookie["domain"])
+
+    def test_retained_account_cookie_is_httponly_host_scoped_and_strict(self):
+        client = self.login_as(self.alice)
+        session = PostBoxSession.objects.get(mailbox=self.alice)
+        cookie = client.cookies[postbox_auth.saved_account_cookie_name(session.id)]
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual("Strict", cookie["samesite"])
+        self.assertTrue(cookie.key.startswith("__Host-"))
+        self.assertEqual("", cookie["domain"])
+
+    def test_two_authenticated_accounts_can_switch_without_reusing_a_password(self):
+        client = APIClient()
+        with mock.patch("apps.postbox.auth.imap.authenticate", return_value=True), \
+             mock.patch("apps.postbox.imap.open_mailbox"):
+            first = client.post(
+                LOGIN,
+                {"email": self.alice.email, "password": "alice-pass", "remember": True},
+                format="json",
+            )
+            second = client.post(
+                LOGIN,
+                {"email": self.bob.email, "password": "bob-pass", "remember": True},
+                format="json",
+            )
+        self.assertEqual(200, first.status_code)
+        self.assertEqual(200, second.status_code)
+
+        listed = client.get(ACCOUNTS)
+        self.assertEqual(200, listed.status_code)
+        self.assertEqual(
+            {self.alice.email, self.bob.email},
+            {row["mailbox"]["email"] for row in listed.data["results"]},
+        )
+        self.assertEqual(
+            self.bob.email,
+            next(row for row in listed.data["results"] if row["current"])["mailbox"]["email"],
+        )
+
+        alice_session_id = next(
+            row["session_id"]
+            for row in listed.data["results"]
+            if row["mailbox"]["email"] == self.alice.email
+        )
+        switched = client.post(SWITCH, {"session_id": alice_session_id}, format="json")
+        self.assertEqual(200, switched.status_code)
+        self.assertEqual(self.alice.email, client.get(ME).data["mailbox"]["email"])
+
+    def test_switch_requires_the_browser_to_hold_that_sessions_http_only_cookie(self):
+        client = self.login_as(self.alice)
+        _, foreign_session = PostBoxSession.issue(self.bob, remembered=True)
+
+        response = client.post(
+            SWITCH,
+            {"session_id": str(foreign_session.id)},
+            format="json",
+        )
+        self.assertEqual(401, response.status_code)
+        self.assertEqual(self.alice.email, client.get(ME).data["mailbox"]["email"])
+
+    def test_sign_out_removes_only_the_current_account_from_this_device(self):
+        client = APIClient()
+        with mock.patch("apps.postbox.auth.imap.authenticate", return_value=True), \
+             mock.patch("apps.postbox.imap.open_mailbox"):
+            client.post(
+                LOGIN,
+                {"email": self.alice.email, "password": "a", "remember": True},
+                format="json",
+            )
+            client.post(
+                LOGIN,
+                {"email": self.bob.email, "password": "b", "remember": True},
+                format="json",
+            )
+
+        bob_session = PostBoxSession.objects.filter(mailbox=self.bob).latest("created_at")
+        client.post("/api/postbox/auth/logout/")
+        self.assertNotIn(
+            postbox_auth.saved_account_cookie_name(bob_session.id),
+            [name for name, cookie in client.cookies.items() if cookie.value],
+        )
+
+        remaining = client.get(ACCOUNTS)
+        self.assertEqual(
+            [self.alice.email],
+            [row["mailbox"]["email"] for row in remaining.data["results"]],
+        )
+
+    def test_sign_out_all_on_this_device_revokes_each_retained_session(self):
+        client = APIClient()
+        with mock.patch("apps.postbox.auth.imap.authenticate", return_value=True), \
+             mock.patch("apps.postbox.imap.open_mailbox"):
+            client.post(
+                LOGIN,
+                {"email": self.alice.email, "password": "a", "remember": True},
+                format="json",
+            )
+            client.post(
+                LOGIN,
+                {"email": self.bob.email, "password": "b", "remember": True},
+                format="json",
+            )
+
+        response = client.post("/api/postbox/auth/logout-device/")
+        self.assertEqual(200, response.status_code)
+        self.assertFalse(
+            PostBoxSession.objects.filter(
+                mailbox__in=[self.alice, self.bob],
+                revoked_at__isnull=True,
+            ).exists()
+        )
+        self.assertEqual([], client.get(ACCOUNTS).data["results"])
 
     def test_no_authentication_secret_is_stored_in_the_session_row(self):
         client = self.login_as(self.alice)
