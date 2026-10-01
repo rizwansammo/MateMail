@@ -70,7 +70,7 @@ function initials(name: string, email: string) {
 
 export default function TeamPage() {
   const router = useRouter();
-  const { tenant, user } = useAuth();
+  const { tenant, user, logout } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [myRole, setMyRole] = useState<Member["role"] | "">("");
@@ -243,7 +243,8 @@ export default function TeamPage() {
         setConfirmRemove("");
         setMessageTone("success");
         if (member.email === user?.email) {
-          router.push("/workspaces");
+          await logout();
+          router.push("/login");
           return;
         }
         setMessage("Member removed from the workspace.");
@@ -316,7 +317,7 @@ export default function TeamPage() {
         <PortalCard
           className="portal-form-card"
           title="Invite someone to your workspace"
-          subtitle="Portal access is separate from having a mailbox. Invitations expire after 7 days."
+          subtitle="Only email addresses on a verified domain registered to this organization can be invited. Invitations expire after 7 days."
         >
           <form onSubmit={sendInvite}>
             {inviteError && (
