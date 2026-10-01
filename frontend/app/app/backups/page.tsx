@@ -133,7 +133,7 @@ export default function BackupsPage() {
 
       <div className="portal-metrics-grid">
         <PortalMetric label="Recorded jobs" value={jobs.length} detail="Latest tenant backup requests" icon={<DatabaseBackup className="h-4 w-4" />} />
-        <PortalMetric label="Completed" value={completed} detail="Jobs that report a completed archive" icon={<CheckCircle2 className="h-4 w-4" />} />
+        <PortalMetric label="Completed" value={completed} detail="Historical records marked completed" icon={<CheckCircle2 className="h-4 w-4" />} />
         <PortalMetric label="Failed" value={failed} detail="Requests that did not create a tenant archive" icon={<XCircle className="h-4 w-4" />} />
         <PortalMetric label="In progress" value={active} detail="Pending or running job records" icon={<RefreshCw className="h-4 w-4" />} />
       </div>
@@ -203,7 +203,7 @@ export default function BackupsPage() {
                   <th>Duration</th>
                   <th>Created</th>
                   <th>Completed</th>
-                  <th>Storage location</th>
+                  <th>Recorded location</th>
                 </tr>
               </thead>
               <tbody>
@@ -240,7 +240,7 @@ export default function BackupsPage() {
       <div className="mt-4">
         <PortalNotice tone="info">
           <DatabaseBackup className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Existing failed tenant-backup requests remain visible so operators and workspace admins can see that no archive was created. Platform disaster-recovery backups are a separate system.</span>
+          <span>Backup job rows are history, not proof that a recoverable tenant archive exists. Older completed rows may predate the current honest-failure behavior. Platform disaster-recovery backups are a separate system.</span>
         </PortalNotice>
       </div>
     </div>
