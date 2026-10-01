@@ -100,7 +100,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [workspaceMeta, setWorkspaceMeta] = useState<{ plan?: string; my_role?: string } | null>(null);
+  const [workspaceMeta, setWorkspaceMeta] = useState<{ id?: string; plan?: string; my_role?: string } | null>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -114,14 +114,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [isLoading, isAuthenticated, pathname, router]);
 
   useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
-    if (!tenant?.id) {
-      setWorkspaceMeta(null);
-      return;
-    }
+    if (!tenant?.id) return;
     let cancelled = false;
     apiRequest(`/api/workspaces/${tenant.id}/`)
       .then((res) => (res.ok ? res.json() : null))
@@ -161,6 +154,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     router.push("/login");
   }
 
+  const shellMeta = workspaceMeta?.id === tenant?.id ? workspaceMeta : null;
   const workspaceName = tenant?.name || "MateMail";
   const workspaceInitials = initials(workspaceName);
   const accountName = user?.full_name || user?.email || "Account";
@@ -226,7 +220,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <span className="portal-workspace-monogram">{workspaceInitials}</span>
               <span className="portal-workspace-copy">
                 <strong>{workspaceName}</strong>
-                <small>{workspaceMeta?.plan ? displayPlan(workspaceMeta.plan) + " workspace" : "Organization workspace"}</small>
+                <small>{shellMeta?.plan ? displayPlan(workspaceMeta.plan) + " workspace" : "Organization workspace"}</small>
               </span>
             </div>
           )}
@@ -259,7 +253,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="portal-plan-mini">
                 <div className="portal-plan-mini-top">
                   <Sparkles className="h-3.5 w-3.5 text-[var(--portal-primary)]" />
-                  <strong>{workspaceMeta?.plan ? displayPlan(workspaceMeta.plan) : "Workspace"}</strong>
+                  <strong>{shellMeta?.plan ? displayPlan(workspaceMeta.plan) : "Workspace"}</strong>
                   <span>{tenant.status === "active" ? "Active" : displayPlan(tenant.status)}</span>
                 </div>
               </div>
@@ -270,7 +264,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <span className="portal-avatar">{initials(accountName)}</span>
                 <span className="portal-account-copy">
                   <strong>{accountName}</strong>
-                  <small>{roleLabel(workspaceMeta?.my_role || tenant?.role)}</small>
+                  <small>{roleLabel(shellMeta?.my_role || tenant?.role)}</small>
                 </span>
                 <ChevronDown className="h-3.5 w-3.5 text-[var(--portal-faint)]" />
               </summary>
