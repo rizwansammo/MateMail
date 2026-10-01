@@ -169,6 +169,22 @@ class InviteBoundSignupTest(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("sent to", response.data["email"].lower())
 
+    def test_registered_domain_cannot_create_a_second_organization(self):
+        before = Tenant.objects.count()
+        response = APIClient().post(
+            "/api/auth/signup/",
+            {
+                "email": "another@acme.test",
+                "password": TEST_PASSWORD,
+                "full_name": "Another Person",
+                "workspace_name": "Wrong Fork",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("already registered", response.data["email"].lower())
+        self.assertEqual(Tenant.objects.count(), before)
+
     def test_normal_signup_still_creates_exactly_one_new_organization(self):
         before = Tenant.objects.count()
         response = APIClient().post(
