@@ -1,9 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Inbox, CheckCircle2, AlertCircle, Plus, RefreshCw, ChevronRight } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  AlertCircle,
+  CheckCircle2,
+  HardDrive,
+  Mail,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+} from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 import { api, ApiError, apiRequest } from "@/lib/api";
+import {
+  PortalButton,
+  PortalCard,
+  PortalEmptyState,
+  PortalNotice,
+  PortalPageHeading,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface Domain {
   id: string;
@@ -21,6 +41,11 @@ interface BillingData {
   } | null;
 }
 
+interface WorkspaceStats {
+  my_role: string;
+  tenant_status: string;
+}
+
 interface Mailbox {
   id: string;
   email: string;
@@ -30,25 +55,44 @@ interface Mailbox {
   domain_name: string;
   status: "active" | "disabled" | "suspended";
   quota_mb: number;
+  storage_used_mb: number;
   mail_service_ready: boolean;
   mail_service_message: string;
   last_login: string | null;
   created_at: string;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  active:    "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  disabled:  "bg-slate-100  text-slate-500   ring-slate-400/20",
-  suspended: "bg-red-50     text-red-700     ring-red-600/20",
-};
+function initials(value: string) {
+  const parts = value.split(/[\s@._-]+/).filter(Boolean).slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase()).join("") || "MB";
+}
+
+function formatStorage(mb: number) {
+  if (mb >= 1024) {
+    const gb = mb / 1024;
+    return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
+  }
+  return `${mb} MB`;
+}
+
+function errorText(value: unknown) {
+  if (!value) return "";
+  if (Array.isArray(value)) return value.map(String).join(" ");
+  return String(value);
+}
 
 export default function MailboxesPage() {
+  const router = useRouter();
+  const { user, tenant } = useAuth();
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
+  const [myRole, setMyRole] = useState("");
+  const [workspaceStatus, setWorkspaceStatus] = useState(tenant?.status || "");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
 
-  // Add form state
   const [localPart, setLocalPart] = useState("");
   const [domainId, setDomainId] = useState("");
   const [fullName, setFullName] = useState("");
@@ -57,46 +101,89 @@ export default function MailboxesPage() {
   const [quotaDefaultMb, setQuotaDefaultMb] = useState(1024);
   const [quotaMaxMb, setQuotaMaxMb] = useState(1024);
   const [planName, setPlanName] = useState("");
-  const [addErrors, setAddErrors] = useState<Record<string, string | string[]>>({});
+  const [addErrors, setAddErrors] = useState<Record<string, unknown>>({});
   const [adding, setAdding] = useState(false);
 
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
-      const [mbRes, dmRes, billingRes] = await Promise.all([
+      const requests = [
         apiRequest("/api/mailboxes/"),
         apiRequest("/api/domains/"),
         apiRequest("/api/billing/"),
-      ]);
-      if (mbRes.ok) setMailboxes(await mbRes.json());
-      if (dmRes.ok) {
-        const d = await dmRes.json();
-        setDomains(d);
-        if (d.length > 0 && !domainId) setDomainId(d[0].id);
+      ] as const;
+      const [mailboxResponse, domainResponse, billingResponse] = await Promise.all(requests);
+
+      if (mailboxResponse.ok) {
+        setMailboxes(await mailboxResponse.json());
+      } else {
+        const data = await mailboxResponse.json().catch(() => null);
+        setLoadError(data?.detail ?? "Mailboxes could not be loaded.");
       }
-      if (billingRes.ok) {
-        const billing = (await billingRes.json()) as BillingData;
+
+      if (domainResponse.ok) {
+        const allDomains = (await domainResponse.json()) as Domain[];
+        const verifiedDomains = allDomains.filter((domain) => domain.ownership_verified);
+        setDomains(verifiedDomains);
+        setDomainId((current) =>
+          verifiedDomains.some((domain) => domain.id === current)
+            ? current
+            : verifiedDomains[0]?.id || ""
+        );
+      }
+
+      if (billingResponse.ok) {
+        const billing = (await billingResponse.json()) as BillingData;
         const plan = billing.subscription?.plan;
         if (plan) {
           const defaultMb = Number(plan.default_storage_per_mailbox_mb) || 1024;
           const maxMb = Number(plan.max_storage_per_mailbox_mb) || defaultMb;
           setQuotaDefaultMb(defaultMb);
           setQuotaMaxMb(maxMb);
-          setQuotaMb(Math.min(defaultMb, maxMb));
+          setQuotaMb((current) => Math.min(current || defaultMb, maxMb));
           setPlanName(plan.display_name);
         }
       }
+    } catch {
+      setLoadError("Mailboxes could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    fetchAll();
+    if (tenant?.id) {
+      apiRequest(`/api/workspaces/${tenant.id}/stats/`)
+        .then(async (response) => response.ok ? response.json() : null)
+        .then((data) => {
+          if (data?.my_role) setMyRole(data.my_role);
+          if (data?.tenant_status) setWorkspaceStatus(data.tenant_status);
+        })
+        .catch(() => {});
+    }
+  }, [fetchAll, tenant?.id]);
 
-  const selectedDomain = domains.find((d) => d.id === domainId);
+  const filteredMailboxes = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return mailboxes;
+    return mailboxes.filter((mailbox) =>
+      mailbox.email.toLowerCase().includes(needle) ||
+      mailbox.full_name.toLowerCase().includes(needle) ||
+      mailbox.status.toLowerCase().includes(needle)
+    );
+  }, [mailboxes, query]);
 
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
+  const canAdmin = myRole === "owner" || myRole === "admin";
+  const canCreate =
+    canAdmin &&
+    !!user?.email_verified &&
+    workspaceStatus === "active" &&
+    domains.length > 0;
+
+  async function handleAdd(event: React.FormEvent) {
+    event.preventDefault();
     setAddErrors({});
     setAdding(true);
     try {
@@ -107,16 +194,19 @@ export default function MailboxesPage() {
         quota_mb: quotaMb,
         password,
       });
-      setLocalPart(""); setFullName(""); setPassword(""); setQuotaMb(quotaDefaultMb);
+      setLocalPart("");
+      setFullName("");
+      setPassword("");
+      setQuotaMb(quotaDefaultMb);
       setAddOpen(false);
       await fetchAll();
-    } catch (err) {
-      if (err instanceof ApiError) {
+    } catch (caught) {
+      if (caught instanceof ApiError) {
         try {
-          const body = JSON.parse(err.message);
-          setAddErrors(typeof body === "object" && body !== null ? body : { detail: err.message });
+          const body = JSON.parse(caught.message);
+          setAddErrors(typeof body === "object" && body !== null ? body : { detail: caught.message });
         } catch {
-          setAddErrors({ detail: err.message || "Failed to create mailbox." });
+          setAddErrors({ detail: caught.message || "Failed to create mailbox." });
         }
       } else {
         setAddErrors({ detail: "Failed to create mailbox. Please try again." });
@@ -126,210 +216,281 @@ export default function MailboxesPage() {
     }
   }
 
-  function errorText(value: string | string[] | undefined) {
-    if (!value) return "";
-    return Array.isArray(value) ? value.join(" ") : value;
-  }
-
-  function formatStorage(mb: number) {
-    if (mb >= 1024 && mb % 1024 === 0) return `${mb / 1024} GB`;
-    return `${mb} MB`;
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Mailboxes</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Email accounts for this workspace.</p>
+    <div className="portal-page">
+      <PortalPageHeading
+        title="Mailboxes"
+        description="Manage your team’s email identities, access and storage."
+        actions={
+          <PortalButton
+            type="button"
+            disabled={!canCreate}
+            onClick={() => {
+              setAddOpen(true);
+              setAddErrors({});
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            Create mailbox
+          </PortalButton>
+        }
+      />
+
+      {!user?.email_verified && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span><strong>Email verification required.</strong> Verify your account before provisioning mailboxes.</span>
+          </PortalNotice>
         </div>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
-        >
-          <Plus className="h-4 w-4" />
-          Add mailbox
-        </button>
-      </div>
+      )}
 
-      {/* Add mailbox form */}
+      {user?.email_verified && workspaceStatus !== "active" && (
+        <div className="mb-5">
+          <PortalNotice tone="info">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span><strong>Workspace approval is still pending or unavailable.</strong> Mailbox provisioning remains blocked by backend policy.</span>
+          </PortalNotice>
+        </div>
+      )}
+
+      {!loading && domains.length === 0 && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <strong>A verified domain is required.</strong>{" "}
+              <Link href="/app/domains" className="auth-text-button">Review domains</Link>
+            </span>
+          </PortalNotice>
+        </div>
+      )}
+
       {addOpen && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
-          <p className="text-sm font-medium text-slate-800">New mailbox</p>
+        <PortalCard
+          className="portal-form-card"
+          title="Create a mailbox"
+          subtitle="Set up a dedicated email identity. The password is sent to the Mail Engine and is never stored by MateMail."
+        >
+          <form onSubmit={handleAdd}>
+            {addErrors.detail && (
+              <div className="mb-4">
+                <PortalNotice tone="danger">{errorText(addErrors.detail)}</PortalNotice>
+              </div>
+            )}
 
-          {addErrors.detail && (
-            <p className="text-sm text-red-600">{addErrors.detail}</p>
-          )}
+            <div className="portal-form-grid">
+              <div className="portal-field full">
+                <label>Email address</label>
+                <div className="portal-address-composer">
+                  <input
+                    type="text"
+                    required
+                    pattern="[a-zA-Z0-9._+-]+"
+                    value={localPart}
+                    onChange={(event) => setLocalPart(event.target.value)}
+                    placeholder="amelia"
+                  />
+                  <span>@</span>
+                  <select value={domainId} onChange={(event) => setDomainId(event.target.value)} required>
+                    {domains.map((domain) => (
+                      <option key={domain.id} value={domain.id}>{domain.domain}</option>
+                    ))}
+                  </select>
+                </div>
+                {addErrors.local_part && <div className="portal-field-error">{errorText(addErrors.local_part)}</div>}
+                {addErrors.domain_id && <div className="portal-field-error">{errorText(addErrors.domain_id)}</div>}
+              </div>
 
-          <form onSubmit={handleAdd} className="space-y-4">
-            {/* Email address */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">Email address</label>
-              <div className="flex">
+              <div className="portal-field">
+                <label>Display name</label>
                 <input
                   type="text"
-                  placeholder="you"
-                  value={localPart}
-                  onChange={(e) => setLocalPart(e.target.value)}
-                  className="min-w-0 flex-1 rounded-l-md border border-r-0 border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                  required
+                  value={fullName}
+                  onChange={(event) => setFullName(event.target.value)}
+                  placeholder="Amelia Chen"
                 />
-                <span className="flex items-center rounded-r-md border border-slate-300 bg-slate-50 px-3 text-sm text-slate-500">
-                  @
-                </span>
-                <select
-                  value={domainId}
-                  onChange={(e) => setDomainId(e.target.value)}
-                  className="ml-1 rounded-md border border-slate-300 px-2 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                >
-                  {domains.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.domain}
-                      {d.ownership_verified === false ? " (ownership not verified)" : ""}
-                    </option>
-                  ))}
-                </select>
+                {addErrors.full_name && <div className="portal-field-error">{errorText(addErrors.full_name)}</div>}
               </div>
-              {addErrors.local_part && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.local_part)}</p>}
-              {addErrors.domain_id && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.domain_id)}</p>}
+
+              <div className="portal-field">
+                <label>Temporary password</label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={10}
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="At least 10 characters"
+                />
+                <div className="portal-field-hint">The backend validates the password and sends it directly to the Mail Engine.</div>
+                {addErrors.password && <div className="portal-field-error">{errorText(addErrors.password)}</div>}
+              </div>
+
+              <div className="portal-field full">
+                <label>
+                  Storage quota — {formatStorage(quotaMb)}
+                  {planName ? ` · ${planName} maximum ${formatStorage(quotaMaxMb)}` : ""}
+                </label>
+                <input
+                  type="range"
+                  min={Math.min(1024, quotaMaxMb)}
+                  max={quotaMaxMb}
+                  step={1024}
+                  value={Math.min(quotaMb, quotaMaxMb)}
+                  onChange={(event) => setQuotaMb(Number(event.target.value))}
+                />
+                <div className="portal-field-hint">
+                  The backend enforces the plan ceiling; the requested value cannot exceed the subscription limit.
+                </div>
+                {addErrors.quota_mb && <div className="portal-field-error">{errorText(addErrors.quota_mb)}</div>}
+              </div>
             </div>
 
-            {/* Display name */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">Display name</label>
-              <input
-                type="text"
-                placeholder="Jane Smith"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
-              {addErrors.full_name && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.full_name)}</p>}
-            </div>
-
-            {/* Password */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">Password</label>
-              <input
-                type="password"
-                placeholder="Min 10 characters"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
-              {addErrors.password && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.password)}</p>}
-            </div>
-
-            {/* Quota */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">
-                Quota — {formatStorage(quotaMb)}
-                {planName ? ` · ${planName} max ${formatStorage(quotaMaxMb)}` : ""}
-              </label>
-              <input
-                type="range"
-                min={Math.min(1024, quotaMaxMb)}
-                max={quotaMaxMb}
-                step={1024}
-                value={Math.min(quotaMb, quotaMaxMb)}
-                onChange={(e) => setQuotaMb(Number(e.target.value))}
-                className="w-full"
-              />
-              {addErrors.quota_mb && <p className="mt-1 text-xs text-red-600">{errorText(addErrors.quota_mb)}</p>}
-            </div>
-
-            <div className="flex gap-3 pt-1">
-              <button
+            <div className="portal-detail-actions">
+              <PortalButton
                 type="submit"
-                disabled={adding || !localPart.trim() || !fullName.trim() || password.length < 10 || !domainId}
-                className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+                disabled={
+                  adding ||
+                  !localPart.trim() ||
+                  !fullName.trim() ||
+                  password.length < 10 ||
+                  !domainId
+                }
               >
                 {adding ? "Creating…" : "Create mailbox"}
-              </button>
-              <button
+              </PortalButton>
+              <PortalButton
                 type="button"
-                onClick={() => { setAddOpen(false); setAddErrors({}); }}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                variant="secondary"
+                disabled={adding}
+                onClick={() => {
+                  setAddOpen(false);
+                  setAddErrors({});
+                  setPassword("");
+                }}
               >
                 Cancel
-              </button>
+              </PortalButton>
             </div>
           </form>
+        </PortalCard>
+      )}
+
+      {loadError && (
+        <div className="mb-5">
+          <PortalNotice tone="danger">{loadError}</PortalNotice>
         </div>
       )}
 
-      {/* No domains warning */}
-      {!loading && domains.length === 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          You need to add a domain before creating mailboxes.{" "}
-          <Link href="/app/domains" className="font-medium underline">Add a domain →</Link>
-        </div>
-      )}
-
-      {/* Mailbox list */}
-      {loading ? (
-        <div className="py-16 text-center text-sm text-slate-400">Loading mailboxes…</div>
-      ) : mailboxes.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 py-16 text-center">
-          <Inbox className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-500">No mailboxes yet.</p>
-          {domains.length > 0 && (
-            <button
-              onClick={() => setAddOpen(true)}
-              className="mt-3 text-sm font-medium text-cyan-600 hover:text-cyan-700"
-            >
-              Create your first mailbox →
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-          {mailboxes.map((mb) => (
-            <Link
-              key={mb.id}
-              href={`/app/mailboxes/${mb.id}`}
-              className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-colors"
-            >
-              <Inbox className="h-5 w-5 shrink-0 text-slate-400" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-900">{mb.email}</p>
-                <p className="truncate text-xs text-slate-400">{mb.full_name} · {Math.round(mb.quota_mb / 1024)} GB quota</p>
-              </div>
-
-              {mb.mail_service_ready ? (
-                <span title="Mail service active" className="text-emerald-500">
-                  <CheckCircle2 className="h-4 w-4" />
-                </span>
-              ) : (
-                <span
-                  title={mb.mail_service_message || "Mail service setup in progress"}
-                  className="text-amber-400"
-                >
-                  <AlertCircle className="h-4 w-4" />
-                </span>
-              )}
-
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[mb.status] ?? STATUS_STYLES.active}`}>
-                {mb.status}
-              </span>
-              <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
-            </Link>
-          ))}
-        </div>
-      )}
-
-      {/* Refresh */}
-      {!loading && mailboxes.length > 0 && (
-        <div className="text-right">
+      <PortalCard className="portal-management-card" bodyClassName="!p-0">
+        <div className="portal-management-toolbar">
+          <div className="portal-management-search">
+            <Search className="h-4 w-4" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search mailboxes…"
+              aria-label="Search mailboxes"
+            />
+          </div>
           <button
+            type="button"
+            className="portal-icon-button"
             onClick={fetchAll}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600"
+            disabled={loading}
+            aria-label="Refresh mailboxes"
           >
-            <RefreshCw className="h-3 w-3" />
-            Refresh
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
           </button>
         </div>
-      )}
+
+        {loading ? (
+          <div className="p-5">
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="h-14 w-full" />
+          </div>
+        ) : mailboxes.length === 0 ? (
+          <PortalEmptyState
+            title="Your first mailbox starts here"
+            description="Create a mailbox on a verified domain to begin sending and receiving mail."
+            action={
+              canCreate ? (
+                <PortalButton type="button" onClick={() => setAddOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                  Create mailbox
+                </PortalButton>
+              ) : undefined
+            }
+          />
+        ) : filteredMailboxes.length === 0 ? (
+          <PortalEmptyState title="No matching mailboxes" description="Try a different search term." />
+        ) : (
+          <div className="portal-management-table-wrap">
+            <table className="portal-management-table">
+              <thead>
+                <tr>
+                  <th>Mailbox</th>
+                  <th>Status</th>
+                  <th>Storage</th>
+                  <th>Mail service</th>
+                  <th>Last login</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMailboxes.map((mailbox) => {
+                  const usage = mailbox.quota_mb
+                    ? Math.min(100, Math.round((mailbox.storage_used_mb / mailbox.quota_mb) * 100))
+                    : 0;
+                  return (
+                    <tr key={mailbox.id} className="cursor-pointer" onClick={() => router.push(`/app/mailboxes/${mailbox.id}`)}>
+                      <td>
+                        <div className="portal-identity-cell">
+                          <span className="portal-avatar">{initials(mailbox.full_name || mailbox.email)}</span>
+                          <span>
+                            <strong>{mailbox.full_name || mailbox.email}</strong>
+                            <small>{mailbox.email}</small>
+                          </span>
+                        </div>
+                      </td>
+                      <td><PortalStatus value={mailbox.status} /></td>
+                      <td>
+                        <div className="min-w-[140px]">
+                          <div className="portal-storage-head">
+                            <span>{formatStorage(mailbox.storage_used_mb)}</span>
+                            <span>{formatStorage(mailbox.quota_mb)}</span>
+                          </div>
+                          <div className="portal-storage-meter"><span style={{ width: `${usage}%` }} /></div>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={"portal-service-state " + (mailbox.mail_service_ready ? "ready" : "waiting")}>
+                          {mailbox.mail_service_ready
+                            ? <CheckCircle2 className="h-3.5 w-3.5" />
+                            : <AlertCircle className="h-3.5 w-3.5" />}
+                          {mailbox.mail_service_ready ? "Ready" : "Needs attention"}
+                        </span>
+                      </td>
+                      <td>{mailbox.last_login ? new Date(mailbox.last_login).toLocaleDateString() : "Never"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </PortalCard>
+
+      <div className="mt-4">
+        <PortalNotice tone="info">
+          <HardDrive className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>Mailbox quota is chosen at creation and enforced against your plan. Editing quota/display name requires a backend update endpoint and is intentionally not simulated in this redesign.</span>
+        </PortalNotice>
+      </div>
     </div>
   );
 }
