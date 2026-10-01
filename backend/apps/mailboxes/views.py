@@ -178,13 +178,31 @@ class MailboxDetailView(APIView):
         if not mb:
             return Response({"detail": "Not found."}, status=404)
 
-        # Fire-and-forget deprovision
+        # Queue engine cleanup before deleting the local row.  If the mailbox
+        # is provisioned and the broker cannot accept the cleanup task, fail
+        # closed: deleting our only durable record would otherwise leave an
+        # orphaned live mailbox in the Mail Engine with no reconciliation path.
         if mb.mail_engine_provisioned:
             try:
                 from apps.mail_engine.tasks import deprovision_mailbox_task
                 deprovision_mailbox_task.delay(mb.email)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error(
+                    "Refusing to delete mailbox %s (tenant %s) because engine "
+                    "deprovisioning could not be queued: %s",
+                    mb.email,
+                    request.tenant.id,
+                    exc,
+                )
+                return Response(
+                    {
+                        "detail": (
+                            "This mailbox could not be removed right now. "
+                            "Nothing has been changed — please try again shortly."
+                        )
+                    },
+                    status=503,
+                )
 
         log_event(request.tenant, LogEventType.MAILBOX_DELETED, request=request, mailbox=mb)
         mb.delete()
