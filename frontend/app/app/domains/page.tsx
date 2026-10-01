@@ -39,6 +39,7 @@ export default function DomainsPage() {
   const router = useRouter();
   const { user, tenant } = useAuth();
   const [domains, setDomains] = useState<Domain[]>([]);
+  const [myRole, setMyRole] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
@@ -67,7 +68,15 @@ export default function DomainsPage() {
 
   useEffect(() => {
     fetchDomains();
-  }, []);
+    if (tenant?.id) {
+      apiRequest(`/api/workspaces/${tenant.id}/stats/`)
+        .then(async (res) => res.ok ? res.json() : null)
+        .then((data) => {
+          if (data?.my_role) setMyRole(data.my_role);
+        })
+        .catch(() => {});
+    }
+  }, [tenant?.id]);
 
   const filteredDomains = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -104,8 +113,9 @@ export default function DomainsPage() {
     }
   }
 
+  const canAdmin = myRole === "owner" || myRole === "admin";
   const canAttemptDomainCreate =
-    !!user?.email_verified && tenant?.status === "active";
+    !!user?.email_verified && tenant?.status === "active" && canAdmin;
 
   return (
     <div className="portal-page">
