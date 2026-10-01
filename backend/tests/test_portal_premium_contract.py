@@ -168,6 +168,62 @@ class PremiumPortalSecurityContractTest(SimpleTestCase):
         self.assertNotIn("mailbox_ids", apps)
 
 
+class MateMailHubBrandingContractTest(SimpleTestCase):
+    """The Organization Hub uses one canonical mark and wordmark."""
+
+    def test_sidebar_is_icon_plus_matemail_hub_only(self):
+        layout = read("app", "app", "layout.tsx")
+        self.assertIn("MateMail Hub", layout)
+        self.assertNotIn("ORGANIZATION PORTAL", layout)
+        self.assertNotIn("Switch workspace", layout)
+        self.assertNotIn('href="/workspaces"', layout)
+        self.assertNotIn("ChevronsUpDown", layout)
+
+    def test_browser_title_is_the_organization_hub_title(self):
+        root_layout = read("app", "layout.tsx")
+        self.assertIn('default: "MateMail · Organization Hub"', root_layout)
+        self.assertIn('icon: "/assets/matemail-mark.svg"', root_layout)
+
+    def test_brand_mark_uses_the_prototype_mark(self):
+        brand = read("components", "brand-mark.tsx")
+        self.assertIn('src="/assets/matemail-mark.svg"', brand)
+        self.assertNotIn("/matemail-logo.png", brand)
+        self.assertTrue((FRONTEND / "public" / "assets" / "matemail-mark.svg").is_file())
+        self.assertTrue((FRONTEND / "app" / "icon.svg").is_file())
+
+
+class SingleOrganizationFrontendContractTest(SimpleTestCase):
+    """Tenant users have one organization; no chooser/create/switch UI remains."""
+
+    def test_auth_context_has_no_workspace_switch_api(self):
+        auth = read("contexts", "auth-context.tsx")
+        self.assertNotIn("/api/workspaces/switch/", auth)
+        self.assertNotIn("switchWorkspace", auth)
+        self.assertIn("refreshTenant", auth)
+
+    def test_legacy_workspaces_route_is_redirect_only(self):
+        workspaces = read("app", "(auth)", "workspaces", "page.tsx")
+        self.assertIn('router.replace(isAuthenticated ? "/app" : "/login")', workspaces)
+        self.assertNotIn("Create a new workspace", workspaces)
+        self.assertNotIn("/api/workspaces/create/", workspaces)
+        self.assertNotIn("chooseWorkspace", workspaces)
+
+    def test_login_and_two_factor_land_in_current_organization(self):
+        login = read("app", "(auth)", "login", "page.tsx")
+        two_factor = read("app", "(auth)", "2fa", "page.tsx")
+        self.assertIn('const destination = explicitNext || "/app"', login)
+        self.assertNotIn('"/workspaces"', login)
+        self.assertNotIn('"/workspaces"', two_factor)
+
+    def test_invite_signup_is_bound_to_invitation(self):
+        signup = read("app", "(auth)", "signup", "page.tsx")
+        accept = read("app", "(auth)", "accept-invite", "page.tsx")
+        self.assertIn('inviteToken ? undefined : form.workspace_name', signup)
+        self.assertIn('inviteToken || undefined', signup)
+        self.assertIn('/signup?invite=', accept)
+        self.assertNotIn('/api/workspaces/switch/', accept)
+
+
 class PremiumPortalDesignIntegrationTest(SimpleTestCase):
     """All phase-owned pages must remain inside the shared premium system."""
 
