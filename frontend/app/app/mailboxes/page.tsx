@@ -273,7 +273,7 @@ export default function MailboxesPage() {
           subtitle="Set up a dedicated email identity. The password is sent to the Mail Engine and is never stored by MateMail."
         >
           <form onSubmit={handleAdd}>
-            {addErrors.detail && (
+            {errorText(addErrors.detail) && (
               <div className="mb-4">
                 <PortalNotice tone="danger">{errorText(addErrors.detail)}</PortalNotice>
               </div>
@@ -298,8 +298,8 @@ export default function MailboxesPage() {
                     ))}
                   </select>
                 </div>
-                {addErrors.local_part && <div className="portal-field-error">{errorText(addErrors.local_part)}</div>}
-                {addErrors.domain_id && <div className="portal-field-error">{errorText(addErrors.domain_id)}</div>}
+                {errorText(addErrors.local_part) && <div className="portal-field-error">{errorText(addErrors.local_part)}</div>}
+                {errorText(addErrors.domain_id) && <div className="portal-field-error">{errorText(addErrors.domain_id)}</div>}
               </div>
 
               <div className="portal-field">
@@ -311,7 +311,7 @@ export default function MailboxesPage() {
                   onChange={(event) => setFullName(event.target.value)}
                   placeholder="Amelia Chen"
                 />
-                {addErrors.full_name && <div className="portal-field-error">{errorText(addErrors.full_name)}</div>}
+                {errorText(addErrors.full_name) && <div className="portal-field-error">{errorText(addErrors.full_name)}</div>}
               </div>
 
               <div className="portal-field">
@@ -326,7 +326,7 @@ export default function MailboxesPage() {
                   placeholder="At least 10 characters"
                 />
                 <div className="portal-field-hint">The backend validates the password and sends it directly to the Mail Engine.</div>
-                {addErrors.password && <div className="portal-field-error">{errorText(addErrors.password)}</div>}
+                {errorText(addErrors.password) && <div className="portal-field-error">{errorText(addErrors.password)}</div>}
               </div>
 
               <div className="portal-field full">
@@ -345,7 +345,7 @@ export default function MailboxesPage() {
                 <div className="portal-field-hint">
                   The backend enforces the plan ceiling; the requested value cannot exceed the subscription limit.
                 </div>
-                {addErrors.quota_mb && <div className="portal-field-error">{errorText(addErrors.quota_mb)}</div>}
+                {errorText(addErrors.quota_mb) && <div className="portal-field-error">{errorText(addErrors.quota_mb)}</div>}
               </div>
             </div>
 
