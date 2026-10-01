@@ -228,6 +228,15 @@ class MailboxStatusView(APIView):
         if mb.status == new_status:
             return Response(MailboxSerializer(mb).data)
 
+        # Re-enabling a mailbox is a live mail operation.  Keep disable
+        # available during suspension so an admin can reduce access, but never
+        # let an inactive workspace reactivate service through this endpoint.
+        if new_status == "active":
+            try:
+                assert_can_use_mail(request.tenant)
+            except MailNotPermitted as exc:
+                return Response({"detail": exc.customer_message}, status=403)
+
         # Sync to the Mail Engine before updating our own record.
         if mb.mail_engine_provisioned:
             from apps.mail_engine.errors import MailEngineError
@@ -256,6 +265,11 @@ class MailboxReProvisionView(APIView):
             return Response({"detail": "Not found."}, status=404)
 
         # GATE: re-provisioning talks to the engine too.
+        try:
+            assert_can_use_mail(request.tenant)
+        except MailNotPermitted as exc:
+            return Response({"detail": exc.customer_message}, status=403)
+
         try:
             assert_provisionable(mb.domain)
         except DomainNotVerified as exc:
