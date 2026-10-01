@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Globe2,
@@ -40,6 +40,7 @@ export default function DomainsPage() {
   const { user, tenant } = useAuth();
   const [domains, setDomains] = useState<Domain[]>([]);
   const [myRole, setMyRole] = useState("");
+  const [workspaceStatus, setWorkspaceStatus] = useState(tenant?.status || "");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState("");
@@ -48,7 +49,7 @@ export default function DomainsPage() {
   const [addError, setAddError] = useState("");
   const [adding, setAdding] = useState(false);
 
-  async function fetchDomains() {
+  const fetchDomains = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try {
@@ -64,7 +65,7 @@ export default function DomainsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     fetchDomains();
@@ -73,10 +74,11 @@ export default function DomainsPage() {
         .then(async (res) => res.ok ? res.json() : null)
         .then((data) => {
           if (data?.my_role) setMyRole(data.my_role);
+          if (data?.tenant_status) setWorkspaceStatus(data.tenant_status);
         })
         .catch(() => {});
     }
-  }, [tenant?.id]);
+  }, [fetchDomains, tenant?.id]);
 
   const filteredDomains = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -115,7 +117,7 @@ export default function DomainsPage() {
 
   const canAdmin = myRole === "owner" || myRole === "admin";
   const canAttemptDomainCreate =
-    !!user?.email_verified && tenant?.status === "active" && canAdmin;
+    !!user?.email_verified && workspaceStatus === "active" && canAdmin;
 
   return (
     <div className="portal-page">
@@ -146,12 +148,12 @@ export default function DomainsPage() {
         </div>
       )}
 
-      {user?.email_verified && tenant?.status !== "active" && (
+      {user?.email_verified && workspaceStatus !== "active" && (
         <div className="mb-5">
           <PortalNotice tone="info">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              <strong>Workspace status: {pretty(tenant?.status || "pending")}.</strong>{" "}
+              <strong>Workspace status: {pretty(workspaceStatus || "pending")}.</strong>{" "}
               Domain creation becomes available after workspace approval.
             </span>
           </PortalNotice>
