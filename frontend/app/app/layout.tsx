@@ -5,8 +5,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AtSign,
+  Building2,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   CircleCheckBig,
   CreditCard,
   DatabaseBackup,
@@ -165,6 +167,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <strong>{accountName}</strong>
         <span>{user?.email}</span>
       </div>
+      {!IS_NETAMATE_EMAIL && (
+        <Link className="portal-account-action" href="/workspaces">
+          <Building2 className="h-4 w-4" />
+          Switch workspace
+        </Link>
+      )}
       <Link className="portal-account-action" href="/app/settings">
         <Settings2 className="h-4 w-4" />
         Workspace settings
@@ -216,13 +224,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
 
           {tenant && (
-            <div className="portal-workspace-card">
+            <Link
+              href={IS_NETAMATE_EMAIL ? "/app" : "/workspaces"}
+              className="portal-workspace-card"
+              aria-label={IS_NETAMATE_EMAIL ? "Current organization" : "Switch workspace"}
+            >
               <span className="portal-workspace-monogram">{workspaceInitials}</span>
               <span className="portal-workspace-copy">
                 <strong>{workspaceName}</strong>
                 <small>{shellMeta?.plan ? displayPlan(shellMeta.plan) + " workspace" : "Organization workspace"}</small>
               </span>
-            </div>
+              {!IS_NETAMATE_EMAIL && <ChevronsUpDown className="h-4 w-4 text-[var(--portal-faint)]" />}
+            </Link>
           )}
 
           <nav className="portal-nav" aria-label="Workspace navigation">
