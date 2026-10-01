@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from apps.tenants.permissions import HasTenantAccess
 from .models import SubscriptionStatus
 from .serializers import SubscriptionSerializer
-from .utils import get_subscription, days_left_on_trial
+from .utils import get_subscription
 
 
 class BillingView(APIView):
@@ -41,19 +41,27 @@ def _build_usage(tenant, plan):
     domain_count = tenant.domains.count()
     mailbox_count = tenant.mailboxes.count()
     member_count = tenant.memberships.filter(status="active").count()
+    alias_count = tenant.aliases.count()
 
-    # Storage: sum of mailbox quota_mb for all mailboxes (approximation of total quota)
     from apps.mailboxes.models import Mailbox
     from django.db.models import Sum
-    storage_used = Mailbox.objects.for_tenant(tenant).aggregate(s=Sum("quota_mb"))["s"] or 0
+
+    storage = Mailbox.objects.for_tenant(tenant).aggregate(
+        allocated=Sum("quota_mb"),
+        used=Sum("storage_used_mb"),
+    )
 
     return {
         "domains": domain_count,
         "mailboxes": mailbox_count,
         "members": member_count,
-        "storage_allocated_mb": storage_used,
+        "aliases": alias_count,
+        "storage_allocated_mb": storage["allocated"] or 0,
+        "storage_used_mb": storage["used"] or 0,
         "max_domains": plan.max_domains if plan else None,
         "max_mailboxes": plan.max_mailboxes if plan else None,
         "max_members": plan.max_members if plan else None,
+        "max_aliases": plan.max_aliases if plan else None,
         "max_storage_per_mailbox_mb": plan.max_storage_per_mailbox_mb if plan else None,
+        "max_storage_total_mb": plan.max_storage_total_mb if plan else None,
     }
