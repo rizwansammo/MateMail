@@ -4,16 +4,26 @@ export const dynamic = "force-dynamic";
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
+import { ArrowLeft, ShieldCheck } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import {
+  AuthButton,
+  AuthError,
+  AuthField,
+  PremiumAuthShell,
+} from "@/components/workspace/premium-auth";
 import { useAuth } from "@/contexts/auth-context";
 import { ApiError } from "@/lib/api";
 
 function TwoFactorContent() {
   const router = useRouter();
   const params = useSearchParams();
-  const partial_token = params.get("token") ?? "";
+  const partialToken = params.get("token") ?? "";
   const requestedNext = params.get("next") || "";
-  const next = requestedNext.startsWith("/app/") ? requestedNext : "/app";
+  const next =
+    requestedNext === "/workspaces" || requestedNext.startsWith("/app/")
+      ? requestedNext
+      : "/app";
   const { verify2fa } = useAuth();
 
   const [code, setCode] = useState("");
@@ -21,60 +31,58 @@ function TwoFactorContent() {
   const [loading, setLoading] = useState(false);
   const [useBackup, setUseBackup] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
     setError("");
     setLoading(true);
     try {
-      await verify2fa(partial_token, code);
+      await verify2fa(partialToken, code);
       router.push(next);
-    } catch (err) {
-      if (err instanceof ApiError) {
+    } catch (caught) {
+      if (caught instanceof ApiError) {
         try {
-          const body = JSON.parse(err.message);
-          setError(body.detail ?? "Invalid code.");
+          const body = JSON.parse(caught.message);
+          setError(body.detail ?? "Invalid authentication code.");
         } catch {
-          setError("Invalid code. Please try again.");
+          setError("Invalid authentication code. Please try again.");
         }
+      } else {
+        setError("Unable to verify the code. Please try again.");
       }
     } finally {
       setLoading(false);
     }
   }
 
-  if (!partial_token) {
+  if (!partialToken) {
     return (
-      <div>
-        <h2 className="text-3xl font-black tracking-tight text-slate-950">Session expired</h2>
-        <p className="mt-3 text-sm text-slate-500">Please sign in again.</p>
-        <Link href="/login" className="mt-4 inline-block text-sm font-semibold text-cyan-600 hover:underline">
-          Back to sign in
-        </Link>
-      </div>
+      <PremiumAuthShell
+        title="Session expired."
+        description="The two-factor challenge is missing or no longer available."
+        icon={<ShieldCheck className="h-6 w-6" />}
+      >
+        <div className="auth-form">
+          <AuthError>Please sign in again to start a new secure challenge.</AuthError>
+          <Link href="/login" className="auth-button">Back to sign in</Link>
+        </div>
+      </PremiumAuthShell>
     );
   }
 
   return (
-    <div>
-      <h2 className="text-3xl font-black tracking-tight text-slate-950">
-        Two-factor authentication
-      </h2>
-      <p className="mt-2 text-sm text-slate-500">
-        {useBackup
-          ? "Enter one of your 8-character backup codes."
-          : "Enter the 6-digit code from your authenticator app."}
-      </p>
-
-      <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-        {error && (
-          <div className="border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>
-        )}
-
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-slate-800">
-            {useBackup ? "Backup code" : "Authentication code"}
-          </span>
+    <PremiumAuthShell
+      title={useBackup ? "Use a backup code." : "One more step."}
+      description={
+        useBackup
+          ? "Enter one of the recovery codes you saved when two-factor authentication was enabled."
+          : "Enter the 6-digit code from your authenticator app."
+      }
+      icon={<ShieldCheck className="h-6 w-6" />}
+    >
+      <form onSubmit={handleSubmit} className="auth-form">
+        <AuthField label={useBackup ? "Backup code" : "Authentication code"}>
           <input
+            className={useBackup ? "auth-input" : "auth-code-input"}
             type="text"
             required
             autoFocus
@@ -82,35 +90,41 @@ function TwoFactorContent() {
             inputMode={useBackup ? "text" : "numeric"}
             maxLength={useBackup ? 8 : 6}
             value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            onChange={(event) => {
+              const nextValue = useBackup
+                ? event.target.value.toUpperCase()
+                : event.target.value.replace(/\D/g, "");
+              setCode(nextValue);
+              setError("");
+            }}
             placeholder={useBackup ? "XXXXXXXX" : "123456"}
-            className="w-full border border-slate-300 bg-white px-3 py-2.5 text-center text-xl font-mono tracking-[0.4em] text-slate-900 outline-none transition focus:border-slate-950 focus:ring-2 focus:ring-slate-950/10"
           />
-        </label>
+        </AuthField>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="inline-flex w-full items-center justify-center bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading ? "Verifying…" : "Verify"}
-        </button>
+        {error && <AuthError>{error}</AuthError>}
+
+        <AuthButton type="submit" loading={loading}>
+          {loading ? "Verifying…" : "Verify & sign in"}
+        </AuthButton>
 
         <button
           type="button"
-          onClick={() => { setUseBackup(!useBackup); setCode(""); setError(""); }}
-          className="w-full text-sm font-semibold text-cyan-600 hover:underline"
+          className="auth-text-button"
+          onClick={() => {
+            setUseBackup((value) => !value);
+            setCode("");
+            setError("");
+          }}
         >
-          {useBackup ? "Use authenticator app instead" : "Use a backup code instead"}
+          {useBackup ? "Use authenticator app instead" : "Use a backup code"}
         </button>
 
-        <p className="text-center text-sm text-slate-400">
-          <Link href="/login" className="hover:underline">
-            Sign in to a different account
-          </Link>
-        </p>
+        <Link href="/login" className="auth-back">
+          <ArrowLeft className="h-4 w-4" />
+          Sign in to a different account
+        </Link>
       </form>
-    </div>
+    </PremiumAuthShell>
   );
 }
 
