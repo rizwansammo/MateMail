@@ -10,6 +10,7 @@ PostBox regression suites.  ESLint, TypeScript/Next production builds and the
 backend API tests cover compilation and behavior; these assertions pin the
 cross-page integration decisions that are easiest to regress silently.
 """
+import hashlib
 from pathlib import Path
 
 from django.test import SimpleTestCase
@@ -185,13 +186,44 @@ class MateMailHubBrandingContractTest(SimpleTestCase):
         self.assertNotIn("ChevronsUpDown", layout)
         self.assertNotIn("portal-workspace-card", layout)
         self.assertNotIn("Current organization", layout)
-        self.assertIn("font-family: HemiHead, sans-serif !important;", css)
-        self.assertIn("font-size: 22px;", css)
+        self.assertIn("font-family: var(--font-matemail-hub), sans-serif !important;", css)
+        self.assertIn("font-size: 23px;", css)
         self.assertIn("font-weight: 700;", css)
         self.assertIn("letter-spacing: 0.2px;", css)
         self.assertIn("white-space: nowrap;", css)
         self.assertIn("font-synthesis: none;", css)
         self.assertIn("border-radius: 8px;", css)
+
+    def test_hub_loads_verified_hemi_head_without_postbox_redirects(self):
+        """Hub and login must load the real prototype font on their own origin."""
+        canonical = FRONTEND / "public" / "assets" / "HemiHead-Bold.otf"
+        existing = FRONTEND / "public" / "postbox" / "HemiHead-Bold.otf"
+        self.assertTrue(canonical.is_file())
+        self.assertTrue(existing.is_file())
+        self.assertEqual(canonical.read_bytes(), existing.read_bytes())
+        self.assertEqual(
+            hashlib.sha256(canonical.read_bytes()).hexdigest(),
+            "50c28e7527b3fa3bf1cbef4ede163869674e991b26d239c8cd3295a4a40602af",
+        )
+
+        root = read("app", "layout.tsx")
+        portal = read("app", "app", "portal-premium.css")
+        auth = read("app", "(auth)", "auth-premium.css")
+        self.assertIn('import localFont from "next/font/local";', root)
+        self.assertIn('src: "../public/assets/HemiHead-Bold.otf"', root)
+        self.assertIn('variable: "--font-matemail-hub"', root)
+        self.assertIn("${mateMailHubFont.variable}", root)
+        for css in (portal, auth):
+            self.assertIn(
+                "font-family: var(--font-matemail-hub), sans-serif !important;",
+                css,
+            )
+            self.assertNotIn(
+                'url("/postbox/HemiHead-Bold.otf")',
+                css,
+            )
+        self.assertIn("white-space: nowrap;", portal)
+        self.assertIn("white-space: nowrap;", auth)
 
     def test_browser_title_is_the_organization_hub_title(self):
         root_layout = read("app", "layout.tsx")
