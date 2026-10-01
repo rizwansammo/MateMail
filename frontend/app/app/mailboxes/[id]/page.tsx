@@ -9,7 +9,6 @@ import {
   AtSign,
   CheckCircle2,
   CornerUpRight,
-  HardDrive,
   KeyRound,
   Mail,
   RefreshCw,
@@ -23,7 +22,6 @@ import {
   PortalCard,
   PortalCopyButton,
   PortalNotice,
-  PortalProgress,
   PortalSkeleton,
   PortalStatus,
 } from "@/components/workspace/premium-ui";
