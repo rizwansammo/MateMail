@@ -2,7 +2,7 @@
    Scoped to .portal-premium so PostBox and Platform Console remain untouched. */
 
 @font-face {
-  font-family: "HemiHead Portal";
+  font-family: HemiHead;
   src: url("/postbox/HemiHead-Bold.otf") format("opentype");
   font-weight: 700;
   font-style: normal;
@@ -100,11 +100,12 @@
 }
 
 .portal-premium .portal-brand-word {
-  font-family: "HemiHead Portal", var(--font-sans);
-  font-size: 25px;
+  font-family: HemiHead, sans-serif !important;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
   line-height: 1;
-  color: var(--portal-text-strong);
-  letter-spacing: -0.02em;
+  color: #172a47;
 }
 
 .portal-premium .portal-brand-caption,
@@ -3159,20 +3160,26 @@
 }
 
 
-/* MateMail Hub branding correction */
+/* MateMail Hub — exact prototype brand lockup */
 .portal-premium .portal-brand {
-  min-height: 68px;
+  min-height: auto;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
   gap: 0;
-  padding: 14px 20px;
+  padding: 26px 22px 22px;
 }
 
 .portal-premium .portal-brand-lockup {
   padding: 0;
   border: 0;
   gap: 10px;
+}
+
+.portal-premium .portal-brand-mark {
+  width: 35px;
+  height: 35px;
+  border-radius: 8px;
 }
 
 .portal-premium .portal-brand-caption {
