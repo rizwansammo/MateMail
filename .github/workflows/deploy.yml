@@ -2,12 +2,10 @@ name: Deploy to MateServer
 
 # PRODUCTION DEPLOYMENT — MANUAL ONLY.
 #
-# There is deliberately no `push:` trigger. A merge to main publishes images
-# (see ci.yml) but never deploys. MateMail is not ready for CUSTOMER mail: P4 is
-# complete — the Mail Engine is live and has delivered real authenticated mail —
-# but mail policy is not enforced (P5), backups are simulated (P6) and there is
-# no operational monitoring (P7). Per DEC-012, no real customer mail may reach
-# the platform until all of P0–P7 are complete.
+# There is deliberately no `push:` trigger. A merge to main publishes
+# SHA-pinned images (see ci.yml) but never changes MateServer automatically.
+# Production deployment remains an explicit operator action so the exact
+# revision is reviewed, preflighted, backed up and recoverable before cutover.
 #
 # Three independent gates stand between a merge and a running deployment:
 #

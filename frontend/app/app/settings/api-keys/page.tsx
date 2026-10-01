@@ -1,17 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  CalendarDays,
+  CheckCircle2,
+  Copy,
+  Eye,
+  KeyRound,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import {
-  Key,
-  Plus,
-  Trash2,
-  Copy,
-  CheckCircle2,
-  Eye,
-  Pencil,
-  ShieldCheck,
-} from "lucide-react";
+  PortalButton,
+  PortalCard,
+  PortalCopyButton,
+  PortalEmptyState,
+  PortalNotice,
+  PortalPageHeading,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface APIKey {
   id: string;
@@ -20,71 +34,25 @@ interface APIKey {
   display: string;
   scopes: string[];
   is_read_only: boolean;
-  created_by_email: string;
+  created_by_email: string | null;
   created_at: string;
   last_used_at: string | null;
   expires_at: string | null;
   is_active: boolean;
-  key?: string; // only present on creation
+  key?: string;
 }
 
-/**
- * The scope model, mirroring apps/security/scopes.py.
- *
- * `read` is not offered as a choice: every key holds it, and presenting it as
- * something to tick implies it could be withheld.
- */
-const WRITE_SCOPES: { value: string; label: string; detail: string }[] = [
-  {
-    value: "domains:write",
-    label: "Manage domains",
-    detail: "Add and remove domains, run DNS and ownership checks",
-  },
-  {
-    value: "mailboxes:write",
-    label: "Manage mailboxes",
-    detail: "Create, update and delete mailboxes and their passwords",
-  },
-  {
-    value: "routing:write",
-    label: "Manage aliases and forwarding",
-    detail: "Create and remove aliases and forwarding rules",
-  },
-  {
-    value: "admin",
-    label: "Workspace administration",
-    detail: "Team, API keys, billing, backups, queue and quarantine",
-  },
-];
+const WRITE_SCOPES = [
+  { value: "domains:write", label: "Manage domains", detail: "Add/remove domains and run domain checks." },
+  { value: "mailboxes:write", label: "Manage mailboxes", detail: "Create/update/delete mailboxes and passwords." },
+  { value: "routing:write", label: "Manage routing", detail: "Create/remove aliases and forwarding rules." },
+  { value: "admin", label: "Workspace administration", detail: "Team, API keys, billing, backups, queue and quarantine." },
+] as const;
 
 const SCOPE_LABELS: Record<string, string> = {
-  read: "Read",
-  ...Object.fromEntries(WRITE_SCOPES.map((s) => [s.value, s.label])),
+  read: "Read workspace",
+  ...Object.fromEntries(WRITE_SCOPES.map((scope) => [scope.value, scope.label])),
 };
-
-function ScopeBadges({ scopes }: { scopes: string[] }) {
-  const writes = scopes.filter((s) => s !== "read");
-  if (writes.length === 0) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-200">
-        <ShieldCheck className="h-3 w-3" />
-        Read only
-      </span>
-    );
-  }
-  return (
-    <span className="flex flex-wrap gap-1">
-      {writes.map((s) => (
-        <span
-          key={s}
-          className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200"
-        >
-          {SCOPE_LABELS[s] ?? s}
-        </span>
-      ))}
-    </span>
-  );
-}
 
 function ScopePicker({
   selected,
@@ -96,341 +64,407 @@ function ScopePicker({
   function toggle(value: string) {
     onChange(
       selected.includes(value)
-        ? selected.filter((s) => s !== value)
+        ? selected.filter((scope) => scope !== value)
         : [...selected, value]
     );
   }
+
   return (
-    <fieldset className="space-y-2">
-      <legend className="mb-1 text-xs font-medium text-slate-700">
-        Permissions
-      </legend>
-      <p className="mb-2 text-xs text-slate-500">
-        Every key can read this workspace. Grant write access only where the
-        integration needs it — a key is not tied to your own permissions.
-      </p>
+    <div className="portal-scope-grid">
       {WRITE_SCOPES.map((scope) => (
-        <label
-          key={scope.value}
-          className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-200 p-2.5 hover:bg-slate-50"
-        >
+        <label key={scope.value} className="portal-scope-option" data-active={selected.includes(scope.value)}>
           <input
             type="checkbox"
             checked={selected.includes(scope.value)}
             onChange={() => toggle(scope.value)}
-            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
           />
-          <span className="min-w-0">
-            <span className="block text-sm font-medium text-slate-800">
-              {scope.label}
-            </span>
-            <span className="block text-xs text-slate-500">{scope.detail}</span>
+          <span>
+            <strong>{scope.label}</strong>
+            <small>{scope.detail}</small>
           </span>
         </label>
       ))}
-    </fieldset>
+    </div>
+  );
+}
+
+function ScopeSummary({ scopes }: { scopes: string[] }) {
+  const writes = scopes.filter((scope) => scope !== "read");
+  if (!writes.length) {
+    return <span className="portal-role-badge"><ShieldCheck className="h-3.5 w-3.5" />Read-only</span>;
+  }
+  return (
+    <div className="portal-scope-badges">
+      {writes.map((scope) => (
+        <span key={scope}>{SCOPE_LABELS[scope] ?? scope}</span>
+      ))}
+    </div>
   );
 }
 
 export default function APIKeysPage() {
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [query, setQuery] = useState("");
 
-  // Create form
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newScopes, setNewScopes] = useState<string[]>([]);
+  const [newExpiry, setNewExpiry] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
-
-  // Newly created key — shown once
   const [newKey, setNewKey] = useState<APIKey | null>(null);
-  const [copied, setCopied] = useState(false);
 
-  // Scope editing
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState("");
+  const [editName, setEditName] = useState("");
   const [editScopes, setEditScopes] = useState<string[]>([]);
-  const [savingScopes, setSavingScopes] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState("");
 
-  // Revoke state
-  const [revoking, setRevoking] = useState<string | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState("");
+  const [revoking, setRevoking] = useState("");
+  const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "danger">("success");
 
-  async function fetchKeys() {
+  const fetchKeys = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
-      const res = await apiRequest("/api/teams/apikeys/");
-      if (res.ok) setKeys(await res.json());
+      const response = await apiRequest("/api/teams/apikeys/");
+      const data = await response.json().catch(() => null);
+      if (response.ok && Array.isArray(data)) {
+        setKeys(data);
+      } else if (response.status === 403) {
+        setLoadError("Your workspace role does not permit API key management.");
+      } else {
+        setLoadError(data?.detail ?? "API keys could not be loaded.");
+      }
+    } catch {
+      setLoadError("API keys could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { fetchKeys(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchKeys(), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchKeys]);
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return keys;
+    return keys.filter((key) =>
+      [
+        key.name,
+        key.display,
+        key.created_by_email || "",
+        ...key.scopes,
+      ].some((value) => value.toLowerCase().includes(needle))
+    );
+  }, [keys, query]);
+
+  async function createKey(event: React.FormEvent) {
+    event.preventDefault();
     if (!newName.trim()) return;
     setCreateError("");
     setCreating(true);
+    setMessage("");
     try {
-      const res = await apiRequest("/api/teams/apikeys/", {
+      const body: Record<string, unknown> = {
+        name: newName.trim(),
+        scopes: ["read", ...newScopes],
+      };
+      if (newExpiry) {
+        body.expires_at = new Date(newExpiry + "T23:59:59").toISOString();
+      }
+      const response = await apiRequest("/api/teams/apikeys/", {
         method: "POST",
-        body: JSON.stringify({
-          name: newName.trim(),
-          scopes: ["read", ...newScopes],
-        }),
+        body: JSON.stringify(body),
       });
-      if (res.ok) {
-        const created: APIKey = await res.json();
-        setNewKey(created);
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        setNewKey(data);
         setNewName("");
         setNewScopes([]);
+        setNewExpiry("");
         setCreateOpen(false);
+        setMessageTone("success");
+        setMessage("API key created. Copy the secret now; it will not be shown again.");
         await fetchKeys();
       } else {
-        const body = await res.json().catch(() => ({}));
-        setCreateError(
-          body.detail ?? body.scopes?.[0] ?? "Failed to create API key."
-        );
+        setCreateError(data?.detail ?? data?.scopes?.[0] ?? data?.expires_at?.[0] ?? "API key could not be created.");
       }
+    } catch {
+      setCreateError("API key could not be created.");
     } finally {
       setCreating(false);
     }
   }
 
-  async function handleSaveScopes(keyId: string) {
+  function startEdit(key: APIKey) {
+    setEditingId(key.id);
+    setEditName(key.name);
+    setEditScopes(key.scopes.filter((scope) => scope !== "read"));
     setEditError("");
-    setSavingScopes(true);
+  }
+
+  async function saveEdit(key: APIKey) {
+    setSaving(true);
+    setEditError("");
+    setMessage("");
     try {
-      const res = await apiRequest(`/api/teams/apikeys/${keyId}/scopes/`, {
+      const response = await apiRequest("/api/teams/apikeys/" + key.id + "/scopes/", {
         method: "PATCH",
-        body: JSON.stringify({ scopes: ["read", ...editScopes] }),
+        body: JSON.stringify({
+          name: editName.trim(),
+          scopes: ["read", ...editScopes],
+        }),
       });
-      if (res.ok) {
-        setEditingId(null);
-        await fetchKeys();
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        setKeys((current) => current.map((item) => item.id === key.id ? data : item));
+        setEditingId("");
+        setMessageTone("success");
+        setMessage("API key details updated.");
       } else {
-        const body = await res.json().catch(() => ({}));
-        setEditError(body.detail ?? "Failed to update permissions.");
+        setEditError(data?.detail ?? data?.scopes?.[0] ?? "API key could not be updated.");
       }
+    } catch {
+      setEditError("API key could not be updated.");
     } finally {
-      setSavingScopes(false);
+      setSaving(false);
     }
   }
 
-  async function handleRevoke(keyId: string) {
-    setRevoking(keyId);
+  async function revokeKey(key: APIKey) {
+    setRevoking(key.id);
+    setMessage("");
     try {
-      await apiRequest(`/api/teams/apikeys/${keyId}/`, { method: "DELETE" });
-      await fetchKeys();
+      const response = await apiRequest("/api/teams/apikeys/" + key.id + "/", {
+        method: "DELETE",
+      });
+      if (response.ok || response.status === 204) {
+        setKeys((current) => current.map((item) => item.id === key.id ? { ...item, is_active: false } : item));
+        setConfirmRevoke("");
+        setMessageTone("success");
+        setMessage("API key revoked.");
+      } else {
+        const data = await response.json().catch(() => null);
+        setMessageTone("danger");
+        setMessage(data?.detail ?? "API key could not be revoked.");
+      }
+    } catch {
+      setMessageTone("danger");
+      setMessage("API key could not be revoked.");
     } finally {
-      setRevoking(null);
+      setRevoking("");
     }
-  }
-
-  function handleCopy() {
-    if (!newKey?.key) return;
-    navigator.clipboard.writeText(newKey.key).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-3xl">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Key className="h-5 w-5 text-slate-400" />
-          <div>
-            <h1 className="text-xl font-semibold text-slate-900">API Keys</h1>
-            <p className="text-sm text-slate-500">
-              Authenticate programmatic requests with Bearer mm_… tokens.
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={() => { setCreateOpen(true); setNewKey(null); }}
-          className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
-        >
-          <Plus className="h-4 w-4" />
-          New key
-        </button>
-      </div>
+    <div className="portal-page">
+      <Link href="/app/settings" className="portal-back-link">← Workspace settings</Link>
 
-      {/* New key revealed once */}
-      {newKey?.key && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-3">
-          <div className="flex items-start gap-2">
-            <Eye className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-            <div>
-              <p className="text-sm font-semibold text-emerald-800">
-                Your new API key — copy it now
-              </p>
-              <p className="mt-0.5 text-xs text-emerald-700">
-                This key will not be shown again. Store it securely.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 rounded-md border border-emerald-200 bg-white px-3 py-2 font-mono text-xs text-slate-800 break-all">
-              {newKey.key}
-            </code>
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 rounded-md border border-emerald-300 bg-white px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
-            >
-              {copied ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <p className="text-xs text-emerald-700">
-            Permissions: {newKey.scopes.map((s) => SCOPE_LABELS[s] ?? s).join(", ")}
-          </p>
-        </div>
+      <PortalPageHeading
+        title="API keys"
+        description="Create scoped credentials for programmatic MateMail API access."
+        actions={
+          <PortalButton
+            type="button"
+            onClick={() => {
+              setCreateOpen(true);
+              setNewKey(null);
+              setCreateError("");
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            New API key
+          </PortalButton>
+        }
+      />
+
+      {message && (
+        <div className="mb-5"><PortalNotice tone={messageTone}>{message}</PortalNotice></div>
       )}
 
-      {/* Create form */}
+      {newKey?.key && (
+        <PortalCard className="portal-secret-card" title="Copy your new API key now" subtitle="MateMail stores only a hash. The full key cannot be shown again.">
+          <div className="portal-secret-value">
+            <code>{newKey.key}</code>
+            <PortalCopyButton value={newKey.key} label="Copy API key" />
+          </div>
+          <div className="mt-3"><ScopeSummary scopes={newKey.scopes} /></div>
+        </PortalCard>
+      )}
+
       {createOpen && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
-          <p className="text-sm font-medium text-slate-800">Create API key</p>
-          {createError && <p className="text-sm text-red-600">{createError}</p>}
-          <form onSubmit={handleCreate} className="space-y-4">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">Key name</label>
-              <input
-                type="text"
-                placeholder="e.g. Postman, CI pipeline, Integration"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                maxLength={100}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
+        <PortalCard className="portal-form-card" title="Create API key" subtitle="Every key can read workspace data. Grant only the write scopes the integration genuinely needs.">
+          <form onSubmit={createKey}>
+            {createError && <div className="mb-4"><PortalNotice tone="danger">{createError}</PortalNotice></div>}
+            <div className="portal-form-grid">
+              <div className="portal-field">
+                <label>Key name</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={100}
+                  value={newName}
+                  onChange={(event) => setNewName(event.target.value)}
+                  placeholder="CI pipeline"
+                />
+              </div>
+              <div className="portal-field">
+                <label>Expiry date (optional)</label>
+                <input
+                  type="date"
+                  value={newExpiry}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(event) => setNewExpiry(event.target.value)}
+                />
+                <div className="portal-field-hint">Expiry is enforced by the credential model when configured.</div>
+              </div>
+              <div className="full">
+                <div className="portal-field">
+                  <label>Write permissions</label>
+                  <ScopePicker selected={newScopes} onChange={setNewScopes} />
+                </div>
+              </div>
             </div>
-
-            <ScopePicker selected={newScopes} onChange={setNewScopes} />
-
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={creating || !newName.trim()}
-                className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
-              >
-                {creating ? "Creating…" : "Create"}
-              </button>
-              <button
+            <div className="portal-detail-actions">
+              <PortalButton type="submit" disabled={creating || !newName.trim()}>
+                <KeyRound className="h-4 w-4" />
+                {creating ? "Creating…" : "Create key"}
+              </PortalButton>
+              <PortalButton
                 type="button"
-                onClick={() => { setCreateOpen(false); setCreateError(""); setNewScopes([]); }}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                variant="secondary"
+                disabled={creating}
+                onClick={() => {
+                  setCreateOpen(false);
+                  setCreateError("");
+                }}
               >
                 Cancel
-              </button>
+              </PortalButton>
             </div>
           </form>
-        </div>
+        </PortalCard>
       )}
 
-      {/* Key list */}
-      {loading ? (
-        <div className="py-12 text-center text-sm text-slate-400">Loading…</div>
-      ) : keys.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-200 py-10 text-center">
-          <Key className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-2 text-sm text-slate-400">No API keys yet. Create one above.</p>
+      {loadError && (
+        <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
+      )}
+
+      <PortalCard className="portal-management-card" bodyClassName="!p-0">
+        <div className="portal-management-toolbar">
+          <div className="portal-management-search">
+            <Search className="h-4 w-4" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search API keys…"
+              aria-label="Search API keys"
+            />
+          </div>
+          <button type="button" className="portal-icon-button" onClick={fetchKeys} disabled={loading} aria-label="Refresh API keys">
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
+          </button>
         </div>
-      ) : (
-        <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-          {keys.map((k) => (
-            <div key={k.id} className="px-5 py-4">
-              <div className="flex items-center gap-4">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium text-slate-900">{k.name}</p>
-                    {!k.is_active && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600 ring-1 ring-inset ring-red-200">
-                        Revoked
-                      </span>
-                    )}
-                    <ScopeBadges scopes={k.scopes} />
+
+        {loading ? (
+          <div className="p-5">
+            <PortalSkeleton className="mb-3 h-16 w-full" />
+            <PortalSkeleton className="h-16 w-full" />
+          </div>
+        ) : !loadError && filtered.length === 0 ? (
+          <PortalEmptyState
+            title={keys.length ? "No matching API keys" : "No API keys yet"}
+            description={keys.length ? "Try a different search term." : "Create a scoped credential when an external tool needs MateMail API access."}
+            action={!keys.length ? <PortalButton type="button" onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" />New key</PortalButton> : undefined}
+          />
+        ) : !loadError ? (
+          <div className="portal-key-list">
+            {filtered.map((key) => (
+              <div key={key.id} className="portal-key-row">
+                <div className="portal-key-main">
+                  <span className="portal-avatar"><KeyRound className="h-4 w-4" /></span>
+                  <div>
+                    <div className="portal-key-title">
+                      <strong>{key.name}</strong>
+                      <PortalStatus value={key.is_active ? "Active" : "Revoked"} />
+                    </div>
+                    <code>{key.display}</code>
+                    <div className="portal-key-meta">
+                      Created {new Date(key.created_at).toLocaleDateString()}
+                      {key.created_by_email ? " by " + key.created_by_email : ""}
+                      {" · "}
+                      {key.last_used_at ? "Last used " + new Date(key.last_used_at).toLocaleString() : "Never used"}
+                      {key.expires_at ? " · Expires " + new Date(key.expires_at).toLocaleString() : ""}
+                    </div>
+                    <div className="mt-2"><ScopeSummary scopes={key.scopes} /></div>
                   </div>
-                  <p className="font-mono text-xs text-slate-400">{k.display}</p>
-                  <p className="text-xs text-slate-400">
-                    Created {new Date(k.created_at).toLocaleDateString()} by {k.created_by_email}
-                    {k.last_used_at && (
-                      <> · Last used {new Date(k.last_used_at).toLocaleDateString()}</>
-                    )}
-                    {!k.last_used_at && <> · Never used</>}
-                    {k.expires_at && (
-                      <> · Expires {new Date(k.expires_at).toLocaleDateString()}</>
-                    )}
-                  </p>
                 </div>
-                {k.is_active && (
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      onClick={() => {
-                        setEditingId(editingId === k.id ? null : k.id);
-                        setEditScopes(k.scopes.filter((s) => s !== "read"));
-                        setEditError("");
-                      }}
-                      title="Change permissions"
-                      className="rounded p-1.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600"
-                    >
-                      <Pencil className="h-4 w-4" />
+
+                {key.is_active && (
+                  <div className="portal-inline-actions">
+                    <button type="button" className="portal-action-button" onClick={() => startEdit(key)} aria-label={"Edit " + key.name}>
+                      <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <button
-                      onClick={() => handleRevoke(k.id)}
-                      disabled={revoking === k.id}
-                      title="Revoke key"
-                      className="rounded p-1.5 text-slate-300 hover:bg-red-50 hover:text-red-500 disabled:opacity-40"
-                    >
-                      <Trash2 className="h-4 w-4" />
+                    <button type="button" className="portal-action-button danger" onClick={() => setConfirmRevoke(key.id)} aria-label={"Revoke " + key.name}>
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 )}
-              </div>
 
-              {editingId === k.id && (
-                <div className="mt-4 space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4">
-                  {editError && <p className="text-sm text-red-600">{editError}</p>}
-                  <ScopePicker selected={editScopes} onChange={setEditScopes} />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleSaveScopes(k.id)}
-                      disabled={savingScopes}
-                      className="rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
-                    >
-                      {savingScopes ? "Saving…" : "Save permissions"}
-                    </button>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
-                    >
-                      Cancel
-                    </button>
+                {editingId === key.id && (
+                  <div className="portal-key-editor">
+                    {editError && <PortalNotice tone="danger">{editError}</PortalNotice>}
+                    <div className="portal-field">
+                      <label>Key name</label>
+                      <input value={editName} maxLength={100} onChange={(event) => setEditName(event.target.value)} />
+                    </div>
+                    <div className="portal-field">
+                      <label>Write permissions</label>
+                      <ScopePicker selected={editScopes} onChange={setEditScopes} />
+                    </div>
+                    <div className="portal-detail-actions">
+                      <PortalButton type="button" onClick={() => saveEdit(key)} disabled={saving || !editName.trim()}>
+                        {saving ? "Saving…" : "Save changes"}
+                      </PortalButton>
+                      <PortalButton type="button" variant="secondary" onClick={() => setEditingId("")} disabled={saving}>Cancel</PortalButton>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+                )}
 
-      {/* Usage note */}
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-1">
-        <p className="text-xs font-semibold text-slate-600">How to use</p>
-        <p className="text-xs text-slate-500">
-          Add the key to any API request as an HTTP header:
-        </p>
-        <code className="block rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-700">
-          Authorization: Bearer mm_…
-        </code>
-        <p className="pt-1 text-xs text-slate-400">
-          A key holds only the permissions listed against it — never your own.
-          Keys cannot sign in, change passwords, or reach platform
-          administration. Revoke immediately if one is compromised.
-        </p>
+                {confirmRevoke === key.id && (
+                  <div className="portal-confirm-inline">
+                    <PortalNotice tone="warn">
+                      <div className="flex-1">Revoke <strong>{key.name}</strong>? Any system using this credential will lose access immediately.</div>
+                      <div className="flex gap-2">
+                        <PortalButton type="button" variant="secondary" onClick={() => setConfirmRevoke("")} disabled={revoking === key.id}>Cancel</PortalButton>
+                        <PortalButton type="button" variant="danger" onClick={() => revokeKey(key)} disabled={revoking === key.id}>
+                          {revoking === key.id ? "Revoking…" : "Revoke key"}
+                        </PortalButton>
+                      </div>
+                    </PortalNotice>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </PortalCard>
+
+      <div className="mt-4">
+        <PortalNotice tone="info">
+          <Eye className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Use API keys as <code>Authorization: Bearer mm_…</code>. Keys cannot sign in to the Portal, change passwords, or access platform administration. Scope changes are audited.
+          </span>
+        </PortalNotice>
       </div>
     </div>
   );

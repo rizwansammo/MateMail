@@ -178,13 +178,31 @@ class MailboxDetailView(APIView):
         if not mb:
             return Response({"detail": "Not found."}, status=404)
 
-        # Fire-and-forget deprovision
+        # Queue engine cleanup before deleting the local row.  If the mailbox
+        # is provisioned and the broker cannot accept the cleanup task, fail
+        # closed: deleting our only durable record would otherwise leave an
+        # orphaned live mailbox in the Mail Engine with no reconciliation path.
         if mb.mail_engine_provisioned:
             try:
                 from apps.mail_engine.tasks import deprovision_mailbox_task
                 deprovision_mailbox_task.delay(mb.email)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error(
+                    "Refusing to delete mailbox %s (tenant %s) because engine "
+                    "deprovisioning could not be queued: %s",
+                    mb.email,
+                    request.tenant.id,
+                    exc,
+                )
+                return Response(
+                    {
+                        "detail": (
+                            "This mailbox could not be removed right now. "
+                            "Nothing has been changed — please try again shortly."
+                        )
+                    },
+                    status=503,
+                )
 
         log_event(request.tenant, LogEventType.MAILBOX_DELETED, request=request, mailbox=mb)
         mb.delete()
@@ -209,6 +227,15 @@ class MailboxStatusView(APIView):
 
         if mb.status == new_status:
             return Response(MailboxSerializer(mb).data)
+
+        # Re-enabling a mailbox is a live mail operation.  Keep disable
+        # available during suspension so an admin can reduce access, but never
+        # let an inactive workspace reactivate service through this endpoint.
+        if new_status == "active":
+            try:
+                assert_can_use_mail(request.tenant)
+            except MailNotPermitted as exc:
+                return Response({"detail": exc.customer_message}, status=403)
 
         # Sync to the Mail Engine before updating our own record.
         if mb.mail_engine_provisioned:
@@ -238,6 +265,11 @@ class MailboxReProvisionView(APIView):
             return Response({"detail": "Not found."}, status=404)
 
         # GATE: re-provisioning talks to the engine too.
+        try:
+            assert_can_use_mail(request.tenant)
+        except MailNotPermitted as exc:
+            return Response({"detail": exc.customer_message}, status=403)
+
         try:
             assert_provisionable(mb.domain)
         except DomainNotVerified as exc:

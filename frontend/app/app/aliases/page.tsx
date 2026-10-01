@@ -1,13 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, ApiError, apiRequest } from "@/lib/api";
-import { Layers, Plus, Trash2, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  AlertCircle,
+  AtSign,
+  CheckCircle2,
+  ExternalLink,
+  Mail,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
+import { apiRequest } from "@/lib/api";
+import {
+  PortalButton,
+  PortalCard,
+  PortalEmptyState,
+  PortalNotice,
+  PortalPageHeading,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface Domain {
   id: string;
   domain: string;
+  ownership_verified: boolean;
 }
 
 interface Mailbox {
@@ -28,304 +50,499 @@ interface Alias {
   created_at: string;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  active:   "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  disabled: "bg-slate-100  text-slate-500   ring-slate-400/20",
-};
+type DestinationType = "mailbox" | "external";
 
-type DestType = "mailbox" | "external";
+function fieldError(value: unknown) {
+  if (!value) return "";
+  if (Array.isArray(value)) return value.map(String).join(" ");
+  return String(value);
+}
 
 export default function AliasesPage() {
+  const { user, tenant } = useAuth();
   const [aliases, setAliases] = useState<Alias[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
+  const [myRole, setMyRole] = useState("");
+  const [workspaceStatus, setWorkspaceStatus] = useState(tenant?.status || "");
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "warn" | "danger">("success");
   const [addOpen, setAddOpen] = useState(false);
 
-  // Form state
   const [localPart, setLocalPart] = useState("");
   const [domainId, setDomainId] = useState("");
-  const [destType, setDestType] = useState<DestType>("mailbox");
-  const [destMailboxId, setDestMailboxId] = useState("");
-  const [destAddress, setDestAddress] = useState("");
-  const [addErrors, setAddErrors] = useState<Record<string, string>>({});
+  const [destinationType, setDestinationType] = useState<DestinationType>("mailbox");
+  const [destinationMailboxId, setDestinationMailboxId] = useState("");
+  const [destinationAddress, setDestinationAddress] = useState("");
+  const [addErrors, setAddErrors] = useState<Record<string, unknown>>({});
   const [adding, setAdding] = useState(false);
+  const [toggling, setToggling] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState("");
+  const [deleting, setDeleting] = useState("");
 
-  // Per-row state
-  const [toggling, setToggling] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
-
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
-      const [aRes, dRes, mRes] = await Promise.all([
+      const [aliasResponse, domainResponse, mailboxResponse] = await Promise.all([
         apiRequest("/api/aliases/"),
         apiRequest("/api/domains/"),
         apiRequest("/api/mailboxes/"),
       ]);
-      if (aRes.ok) setAliases(await aRes.json());
-      if (dRes.ok) {
-        const d = await dRes.json();
-        setDomains(d);
-        if (d.length > 0 && !domainId) { setDomainId(d[0].id); }
+
+      if (aliasResponse.ok) setAliases(await aliasResponse.json());
+      else {
+        const data = await aliasResponse.json().catch(() => null);
+        setLoadError(data?.detail ?? "Aliases could not be loaded.");
       }
-      if (mRes.ok) {
-        const m = await mRes.json();
-        setMailboxes(m);
-        if (m.length > 0 && !destMailboxId) setDestMailboxId(m[0].id);
+
+      if (domainResponse.ok) {
+        const allDomains = (await domainResponse.json()) as Domain[];
+        const verifiedDomains = allDomains.filter((domain) => domain.ownership_verified);
+        setDomains(verifiedDomains);
+        setDomainId((current) =>
+          verifiedDomains.some((domain) => domain.id === current)
+            ? current
+            : verifiedDomains[0]?.id || ""
+        );
       }
+
+      if (mailboxResponse.ok) {
+        const rows = (await mailboxResponse.json()) as Mailbox[];
+        setMailboxes(rows);
+        setDestinationMailboxId((current) =>
+          rows.some((mailbox) => mailbox.id === current)
+            ? current
+            : rows[0]?.id || ""
+        );
+      }
+    } catch {
+      setLoadError("Aliases could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    fetchAll();
+    if (tenant?.id) {
+      apiRequest(`/api/workspaces/${tenant.id}/stats/`)
+        .then(async (response) => response.ok ? response.json() : null)
+        .then((data) => {
+          if (data?.my_role) setMyRole(data.my_role);
+          if (data?.tenant_status) setWorkspaceStatus(data.tenant_status);
+        })
+        .catch(() => {});
+    }
+  }, [fetchAll, tenant?.id]);
 
-  const selectedDomain = domains.find((d) => d.id === domainId);
+  const filteredAliases = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return aliases;
+    return aliases.filter((alias) =>
+      alias.source_address.toLowerCase().includes(needle) ||
+      alias.destination_email.toLowerCase().includes(needle) ||
+      alias.status.toLowerCase().includes(needle)
+    );
+  }, [aliases, query]);
 
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
+  const canAdmin = myRole === "owner" || myRole === "admin";
+  const canCreate = canAdmin && !!user?.email_verified && workspaceStatus === "active" && domains.length > 0;
+
+  async function createAlias(event: React.FormEvent) {
+    event.preventDefault();
     setAddErrors({});
+    setMessage("");
     setAdding(true);
     try {
       const body: Record<string, unknown> = {
         source_local_part: localPart.trim().toLowerCase(),
         domain_id: domainId,
       };
-      if (destType === "mailbox") {
-        body.destination_mailbox_id = destMailboxId;
+      if (destinationType === "mailbox") {
+        body.destination_mailbox_id = destinationMailboxId;
       } else {
-        body.destination_address = destAddress.trim();
+        body.destination_address = destinationAddress.trim();
       }
-      await api.post("/api/aliases/", body);
-      setLocalPart(""); setDestAddress("");
-      setAddOpen(false);
-      await fetchAll();
-    } catch (err) {
-      if (err instanceof ApiError) {
-        try {
-          const b = JSON.parse(err.message);
-          setAddErrors(typeof b === "object" ? b : { detail: err.message });
-        } catch {
-          setAddErrors({ detail: "Failed to create alias." });
+
+      const response = await apiRequest("/api/aliases/", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && data?.id) {
+        setLocalPart("");
+        setDestinationAddress("");
+        setAddOpen(false);
+        if (response.status === 202 || data.detail) {
+          setMessageTone("warn");
+          setMessage(data.detail ?? "Alias was created, but Mail Engine activation is still pending.");
+        } else {
+          setMessageTone("success");
+          setMessage("Alias created successfully.");
         }
+        await fetchAll();
+      } else {
+        setAddErrors(typeof data === "object" && data !== null ? data : { detail: "Failed to create alias." });
       }
+    } catch {
+      setAddErrors({ detail: "Failed to create alias." });
     } finally {
       setAdding(false);
     }
   }
 
   async function toggleStatus(alias: Alias) {
+    if (!canAdmin) return;
     setToggling(alias.id);
+    setMessage("");
     try {
-      const newStatus = alias.status === "active" ? "disabled" : "active";
-      const res = await apiRequest(`/api/aliases/${alias.id}/status/`, {
+      const response = await apiRequest(`/api/aliases/${alias.id}/status/`, {
         method: "PATCH",
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: alias.status === "active" ? "disabled" : "active" }),
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setAliases((prev) => prev.map((a) => (a.id === alias.id ? updated : a)));
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        setAliases((current) => current.map((item) => item.id === alias.id ? data : item));
+        setMessageTone("success");
+        setMessage(`Alias ${data.status === "active" ? "enabled" : "disabled"} successfully.`);
+      } else {
+        setMessageTone("danger");
+        setMessage(data?.detail ?? "Alias status could not be changed.");
       }
+    } catch {
+      setMessageTone("danger");
+      setMessage("Alias status could not be changed.");
     } finally {
-      setToggling(null);
+      setToggling("");
     }
   }
 
-  async function handleDelete(alias: Alias) {
+  async function deleteAlias(alias: Alias) {
+    if (!canAdmin) return;
     setDeleting(alias.id);
+    setMessage("");
     try {
-      await apiRequest(`/api/aliases/${alias.id}/`, { method: "DELETE" });
-      setAliases((prev) => prev.filter((a) => a.id !== alias.id));
+      const response = await apiRequest(`/api/aliases/${alias.id}/`, { method: "DELETE" });
+      if (response.ok || response.status === 204) {
+        setAliases((current) => current.filter((item) => item.id !== alias.id));
+        setDeleteTarget("");
+        setMessageTone("success");
+        setMessage("Alias removed successfully.");
+      } else {
+        const data = await response.json().catch(() => null);
+        setMessageTone("danger");
+        setMessage(data?.detail ?? "Alias could not be removed.");
+      }
+    } catch {
+      setMessageTone("danger");
+      setMessage("Alias could not be removed.");
     } finally {
-      setDeleting(null);
+      setDeleting("");
     }
   }
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Layers className="h-5 w-5 text-slate-400" />
-          <div>
-            <h1 className="text-xl font-semibold text-slate-900">Aliases</h1>
-            <p className="text-sm text-slate-500">Email addresses that redirect to mailboxes or external addresses.</p>
-          </div>
+    <div className="portal-page">
+      <PortalPageHeading
+        title="Aliases"
+        description="More ways to reach your team without creating another mailbox."
+        actions={
+          <PortalButton
+            type="button"
+            disabled={!canCreate}
+            onClick={() => {
+              setAddOpen(true);
+              setAddErrors({});
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            Create alias
+          </PortalButton>
+        }
+      />
+
+      {!user?.email_verified && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Verify your account email before provisioning new aliases.</span>
+          </PortalNotice>
         </div>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
-        >
-          <Plus className="h-4 w-4" />
-          Add alias
-        </button>
-      </div>
+      )}
 
-      {/* Add form */}
+      {workspaceStatus !== "active" && (
+        <div className="mb-5">
+          <PortalNotice tone="info">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Alias creation is unavailable while this workspace is not active.</span>
+          </PortalNotice>
+        </div>
+      )}
+
+      {!loading && domains.length === 0 && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              A verified domain is required before creating aliases.{" "}
+              <Link href="/app/domains" className="auth-text-button">Review domains</Link>
+            </span>
+          </PortalNotice>
+        </div>
+      )}
+
+      {message && (
+        <div className="mb-5">
+          <PortalNotice tone={messageTone}>{message}</PortalNotice>
+        </div>
+      )}
+
       {addOpen && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
-          <p className="text-sm font-medium text-slate-800">New alias</p>
-          {addErrors.detail && <p className="text-sm text-red-600">{addErrors.detail}</p>}
-          <form onSubmit={handleAdd} className="space-y-4">
-            {/* Source address */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">Alias address</label>
-              <div className="flex">
-                <input
-                  type="text"
-                  placeholder="sales"
-                  value={localPart}
-                  onChange={(e) => setLocalPart(e.target.value)}
-                  className="min-w-0 flex-1 rounded-l-md border border-r-0 border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                />
-                <span className="flex items-center border border-r-0 border-slate-300 bg-slate-50 px-2 text-sm text-slate-500">@</span>
-                <select
-                  value={domainId}
-                  onChange={(e) => setDomainId(e.target.value)}
-                  className="rounded-r-md border border-slate-300 px-2 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                >
-                  {domains.map((d) => <option key={d.id} value={d.id}>{d.domain}</option>)}
-                </select>
-              </div>
-              {addErrors.source_local_part && <p className="mt-1 text-xs text-red-600">{addErrors.source_local_part}</p>}
-            </div>
-
-            {/* Destination type */}
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">Deliver to</label>
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDestType("mailbox")}
-                  className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition ${destType === "mailbox" ? "border-cyan-500 bg-cyan-50 text-cyan-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}
-                >
-                  Internal mailbox
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDestType("external")}
-                  className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium transition ${destType === "external" ? "border-cyan-500 bg-cyan-50 text-cyan-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}
-                >
-                  External address
-                </button>
-              </div>
-            </div>
-
-            {destType === "mailbox" ? (
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">Destination mailbox</label>
-                {mailboxes.length === 0 ? (
-                  <p className="text-xs text-amber-600">No mailboxes yet. <Link href="/app/mailboxes" className="underline">Create one first.</Link></p>
-                ) : (
-                  <select
-                    value={destMailboxId}
-                    onChange={(e) => setDestMailboxId(e.target.value)}
-                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                  >
-                    {mailboxes.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}
-                  </select>
-                )}
-              </div>
-            ) : (
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700">Destination email</label>
-                <input
-                  type="email"
-                  placeholder="someone@gmail.com"
-                  value={destAddress}
-                  onChange={(e) => setDestAddress(e.target.value)}
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                />
-                {addErrors.destination_address && <p className="mt-1 text-xs text-red-600">{addErrors.destination_address}</p>}
-              </div>
+        <PortalCard
+          className="portal-form-card"
+          title="Create an alias"
+          subtitle="An alias receives mail at another address and delivers it to exactly one existing mailbox or external address."
+        >
+          <form onSubmit={createAlias}>
+            {fieldError(addErrors.detail) && (
+              <div className="mb-4"><PortalNotice tone="danger">{fieldError(addErrors.detail)}</PortalNotice></div>
             )}
 
-            <div className="flex gap-3 pt-1">
-              <button
-                type="submit"
-                disabled={adding || !localPart.trim() || !domainId || (destType === "external" && !destAddress.trim()) || (destType === "mailbox" && !destMailboxId)}
-                className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
-              >
-                {adding ? "Creating…" : "Create alias"}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setAddOpen(false); setAddErrors({}); }}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* No domains */}
-      {!loading && domains.length === 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          Add a domain before creating aliases.{" "}
-          <Link href="/app/domains" className="font-medium underline">Add a domain →</Link>
-        </div>
-      )}
-
-      {/* List */}
-      {loading ? (
-        <div className="py-16 text-center text-sm text-slate-400">Loading aliases…</div>
-      ) : aliases.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 py-16 text-center">
-          <Layers className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-500">No aliases yet.</p>
-          {domains.length > 0 && (
-            <button onClick={() => setAddOpen(true)} className="mt-3 text-sm font-medium text-cyan-600 hover:text-cyan-700">
-              Create your first alias →
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-          {aliases.map((alias) => (
-            <div key={alias.id} className="flex items-center gap-4 px-5 py-4">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-900">{alias.source_address}</p>
-                <p className="truncate text-xs text-slate-400">→ {alias.destination_email}</p>
+            <div className="portal-form-grid">
+              <div className="portal-field full">
+                <label>Alias address</label>
+                <div className="portal-address-composer">
+                  <input
+                    type="text"
+                    required
+                    pattern="[a-zA-Z0-9._+-]+"
+                    value={localPart}
+                    onChange={(event) => setLocalPart(event.target.value)}
+                    placeholder="sales"
+                  />
+                  <span>@</span>
+                  <select value={domainId} onChange={(event) => setDomainId(event.target.value)} required>
+                    {domains.map((domain) => (
+                      <option key={domain.id} value={domain.id}>{domain.domain}</option>
+                    ))}
+                  </select>
+                </div>
+                {fieldError(addErrors.source_local_part) && <div className="portal-field-error">{fieldError(addErrors.source_local_part)}</div>}
+                {fieldError(addErrors.domain_id) && <div className="portal-field-error">{fieldError(addErrors.domain_id)}</div>}
               </div>
 
-              {alias.mail_service_ready ? (
-                <span title="Provisioned" className="text-emerald-500"><CheckCircle2 className="h-4 w-4" /></span>
+              <div className="portal-field full">
+                <label>Deliver to</label>
+                <div className="portal-choice-grid">
+                  <button
+                    type="button"
+                    className="portal-choice"
+                    data-active={destinationType === "mailbox"}
+                    onClick={() => setDestinationType("mailbox")}
+                  >
+                    <Mail className="mb-2 h-4 w-4" />
+                    Internal mailbox
+                  </button>
+                  <button
+                    type="button"
+                    className="portal-choice"
+                    data-active={destinationType === "external"}
+                    onClick={() => setDestinationType("external")}
+                  >
+                    <ExternalLink className="mb-2 h-4 w-4" />
+                    External address
+                  </button>
+                </div>
+              </div>
+
+              {destinationType === "mailbox" ? (
+                <div className="portal-field full">
+                  <label>Destination mailbox</label>
+                  {mailboxes.length ? (
+                    <select
+                      value={destinationMailboxId}
+                      onChange={(event) => setDestinationMailboxId(event.target.value)}
+                      required
+                    >
+                      {mailboxes.map((mailbox) => (
+                        <option key={mailbox.id} value={mailbox.id}>{mailbox.email}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <PortalNotice tone="warn">
+                      No mailboxes are available.{" "}
+                      <Link href="/app/mailboxes" className="auth-text-button">Create a mailbox</Link>
+                    </PortalNotice>
+                  )}
+                  {fieldError(addErrors.destination_mailbox_id) && <div className="portal-field-error">{fieldError(addErrors.destination_mailbox_id)}</div>}
+                </div>
               ) : (
-                <span title="Not provisioned" className="text-amber-400"><AlertCircle className="h-4 w-4" /></span>
+                <div className="portal-field full">
+                  <label>Destination email</label>
+                  <input
+                    type="email"
+                    required
+                    value={destinationAddress}
+                    onChange={(event) => setDestinationAddress(event.target.value)}
+                    placeholder="teammate@example.com"
+                  />
+                  {fieldError(addErrors.destination_address) && <div className="portal-field-error">{fieldError(addErrors.destination_address)}</div>}
+                </div>
               )}
-
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[alias.status]}`}>
-                {alias.status}
-              </span>
-
-              {/* Toggle */}
-              <button
-                onClick={() => toggleStatus(alias)}
-                disabled={toggling === alias.id}
-                title={alias.status === "active" ? "Disable" : "Enable"}
-                className="text-slate-400 hover:text-slate-700 disabled:opacity-40"
-              >
-                {alias.status === "active"
-                  ? <ToggleRight className="h-5 w-5 text-emerald-500" />
-                  : <ToggleLeft className="h-5 w-5" />}
-              </button>
-
-              {/* Delete */}
-              <button
-                onClick={() => handleDelete(alias)}
-                disabled={deleting === alias.id}
-                title="Delete alias"
-                className="text-slate-300 hover:text-red-500 disabled:opacity-40"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
             </div>
-          ))}
-        </div>
+
+            <div className="portal-detail-actions">
+              <PortalButton
+                type="submit"
+                disabled={
+                  adding ||
+                  !localPart.trim() ||
+                  !domainId ||
+                  (destinationType === "mailbox" && !destinationMailboxId) ||
+                  (destinationType === "external" && !destinationAddress.trim())
+                }
+              >
+                {adding ? "Creating…" : "Create alias"}
+              </PortalButton>
+              <PortalButton
+                type="button"
+                variant="secondary"
+                disabled={adding}
+                onClick={() => {
+                  setAddOpen(false);
+                  setAddErrors({});
+                }}
+              >
+                Cancel
+              </PortalButton>
+            </div>
+          </form>
+        </PortalCard>
       )}
+
+      {loadError && (
+        <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
+      )}
+
+      <PortalCard className="portal-management-card" bodyClassName="!p-0">
+        <div className="portal-management-toolbar">
+          <div className="portal-management-search">
+            <Search className="h-4 w-4" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search aliases…"
+              aria-label="Search aliases"
+            />
+          </div>
+          <button type="button" className="portal-icon-button" onClick={fetchAll} disabled={loading} aria-label="Refresh aliases">
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="p-5">
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="h-14 w-full" />
+          </div>
+        ) : aliases.length === 0 ? (
+          <PortalEmptyState
+            title="No aliases yet"
+            description="Create an additional address that delivers to an existing destination."
+            action={canCreate ? <PortalButton type="button" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" />Create alias</PortalButton> : undefined}
+          />
+        ) : filteredAliases.length === 0 ? (
+          <PortalEmptyState title="No matching aliases" description="Try a different search term." />
+        ) : (
+          <div className="portal-management-table-wrap">
+            <table className="portal-management-table">
+              <thead>
+                <tr>
+                  <th>Alias address</th>
+                  <th>Delivers to</th>
+                  <th>Status</th>
+                  <th>Mail service</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAliases.map((alias) => (
+                  <tr key={alias.id}>
+                    <td>
+                      <div className="portal-route-address">
+                        <span className="portal-domain-symbol"><AtSign className="h-4 w-4" /></span>
+                        <code>{alias.source_address}</code>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="portal-destination-pill">
+                        {alias.destination_mailbox ? <Mail className="h-3 w-3" /> : <ExternalLink className="h-3 w-3" />}
+                        <span>{alias.destination_email}</span>
+                      </span>
+                    </td>
+                    <td><PortalStatus value={alias.status} /></td>
+                    <td>
+                      <span className={"portal-service-state " + (alias.mail_service_ready ? "ready" : "waiting")}>
+                        {alias.mail_service_ready
+                          ? <CheckCircle2 className="h-3.5 w-3.5" />
+                          : <AlertCircle className="h-3.5 w-3.5" />}
+                        {alias.mail_service_ready ? "Ready" : "Not ready"}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="portal-inline-actions">
+                        <button
+                          type="button"
+                          className="portal-toggle"
+                          data-on={alias.status === "active"}
+                          onClick={() => toggleStatus(alias)}
+                          disabled={!canAdmin || toggling === alias.id}
+                          aria-label={alias.status === "active" ? `Disable ${alias.source_address}` : `Enable ${alias.source_address}`}
+                        />
+                        <button
+                          type="button"
+                          className="portal-action-button danger"
+                          onClick={() => setDeleteTarget(alias.id)}
+                          disabled={!canAdmin || deleting === alias.id}
+                          aria-label={`Delete ${alias.source_address}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      {deleteTarget === alias.id && (
+                        <div className="portal-confirm-inline">
+                          <PortalNotice tone="warn">
+                            <div className="flex-1">Remove <strong>{alias.source_address}</strong>?</div>
+                            <div className="flex gap-2">
+                              <PortalButton type="button" variant="secondary" onClick={() => setDeleteTarget("")} disabled={deleting === alias.id}>Cancel</PortalButton>
+                              <PortalButton type="button" variant="danger" onClick={() => deleteAlias(alias)} disabled={deleting === alias.id}>
+                                {deleting === alias.id ? "Removing…" : "Remove"}
+                              </PortalButton>
+                            </div>
+                          </PortalNotice>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </PortalCard>
+
+      <div className="mt-4">
+        <PortalNotice tone="info">
+          <AtSign className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>Aliases do not have their own login or storage. The current backend supports one destination per alias; editing an existing alias requires a future update API.</span>
+        </PortalNotice>
+      </div>
     </div>
   );
 }

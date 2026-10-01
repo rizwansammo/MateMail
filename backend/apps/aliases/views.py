@@ -6,9 +6,10 @@ from rest_framework.views import APIView
 
 from apps.billing.utils import check_alias_limit, reserve_resource_slot
 from apps.domains.models import Domain
+from apps.domains.verification import DomainNotVerified, assert_provisionable
 from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
-from apps.tenants.permissions import IsTenantAdmin, TenantReadAdminWrite
+from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
 from apps.tenants.policy import MailNotPermitted, assert_can_use_mail
 from .models import Alias, AliasStatus
 from .serializers import AliasCreateSerializer, AliasSerializer
@@ -52,7 +53,7 @@ def _apply_alias(alias) -> None:
 
 
 class AliasListCreateView(APIView):
-    permission_classes = [IsAuthenticated, TenantReadAdminWrite]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite, IsEmailVerified]
 
     def get(self, request):
         aliases = (
@@ -81,6 +82,11 @@ class AliasListCreateView(APIView):
         domain = Domain.objects.for_tenant(request.tenant).filter(pk=data["domain_id"]).first()
         if not domain:
             return Response({"domain_id": "Domain not found in this workspace."}, status=400)
+
+        try:
+            assert_provisionable(domain)
+        except DomainNotVerified as exc:
+            return Response({"domain_id": exc.customer_message}, status=409)
 
         local_part = data["source_local_part"].strip().lower()
         source_address = f"{local_part}@{domain.domain}"
@@ -195,6 +201,12 @@ class AliasStatusView(APIView):
 
         if alias.status == new_status:
             return Response(AliasSerializer(alias).data)
+
+        if new_status == "active":
+            try:
+                assert_can_use_mail(request.tenant)
+            except MailNotPermitted as exc:
+                return Response({"detail": exc.customer_message}, status=403)
 
         # Set the desired status first so the instruction we push reflects it,
         # then persist only if the engine accepted the change.

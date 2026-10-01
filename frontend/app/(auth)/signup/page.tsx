@@ -2,9 +2,24 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Mail } from "lucide-react";
 import { useRouter } from "next/navigation";
+import {
+  AuthButton,
+  AuthError,
+  AuthField,
+  AuthNotice,
+  PremiumAuthShell,
+} from "@/components/workspace/premium-auth";
 import { useAuth } from "@/contexts/auth-context";
 import { ApiError } from "@/lib/api";
+import { IS_NETAMATE_EMAIL } from "@/lib/brand";
+
+function message(value: unknown): string {
+  if (Array.isArray(value)) return value.map(String).join(" ");
+  if (typeof value === "string") return value;
+  return "";
+}
 
 export default function SignupPage() {
   const router = useRouter();
@@ -15,34 +30,29 @@ export default function SignupPage() {
     full_name: "",
     workspace_name: "",
   });
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(false);
 
-  function set(field: string, value: string) {
-    setForm((f) => ({ ...f, [field]: value }));
-    setErrors((e) => ({ ...e, [field]: "" }));
+  function set(field: keyof typeof form, value: string) {
+    setForm((current) => ({ ...current, [field]: value }));
+    setErrors((current) => ({ ...current, [field]: "" }));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
     setErrors({});
     setLoading(true);
     try {
-      await signup(
-        form.email,
-        form.password,
-        form.full_name,
-        form.workspace_name
-      );
-      router.push("/app/onboarding");
-    } catch (err) {
-      if (err instanceof ApiError) {
+      await signup(form.email, form.password, form.full_name, form.workspace_name);
+      router.push("/verify-email?sent=1");
+    } catch (caught) {
+      if (caught instanceof ApiError) {
         try {
-          const body = JSON.parse(err.message);
-          if (typeof body === "object") {
+          const body = JSON.parse(caught.message);
+          if (body && typeof body === "object") {
             setErrors(body);
           } else {
-            setErrors({ _: body.detail ?? "Signup failed." });
+            setErrors({ _: "Signup failed. Please try again." });
           }
         } catch {
           setErrors({ _: "Signup failed. Please try again." });
@@ -55,66 +65,106 @@ export default function SignupPage() {
     }
   }
 
+  if (IS_NETAMATE_EMAIL) {
+    return (
+      <PremiumAuthShell
+        title="Account creation isn’t available here."
+        description="This dedicated MailAdmin host only accepts existing authorized accounts."
+        icon={<Mail className="h-6 w-6" />}
+      >
+        <div className="auth-form">
+          <AuthNotice>
+            Create and manage MateMail organization accounts from the main MateMail Portal.
+          </AuthNotice>
+          <Link href="/login" className="auth-button">
+            Back to sign in
+          </Link>
+        </div>
+      </PremiumAuthShell>
+    );
+  }
+
   return (
-    <div>
-      <h2 className="text-3xl font-black tracking-tight text-slate-950">
-        Create your account
-      </h2>
-      <p className="mt-2 text-sm text-slate-500">
-        Apply for Private Beta access — approval is required.
-      </p>
+    <PremiumAuthShell
+      title="Your team’s next chapter."
+      description="Create your MateMail account and organization workspace to apply for Private Beta access."
+      icon={<Mail className="h-6 w-6" />}
+    >
+      <form onSubmit={handleSubmit} className="auth-form">
+        {message(errors._) && <AuthError>{message(errors._)}</AuthError>}
 
-      <form onSubmit={handleSubmit} className="mt-8 space-y-4">
-        {errors._ && (
-          <div className="border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-            {errors._}
-          </div>
-        )}
-
-        {(
-          [
-            { id: "full_name", label: "Full name", type: "text", placeholder: "Jane Smith" },
-            { id: "email", label: "Work email", type: "email", placeholder: "you@company.com" },
-            { id: "workspace_name", label: "Workspace name", type: "text", placeholder: "Acme Corp" },
-            { id: "password", label: "Password", type: "password", placeholder: "Min 10 characters" },
-          ] as const
-        ).map(({ id, label, type, placeholder }) => (
-          <label key={id} className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-800">
-              {label}
-            </span>
-            <input
-              type={type}
-              required
-              value={form[id]}
-              onChange={(e) => set(id, e.target.value)}
-              placeholder={placeholder}
-              className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-950 focus:ring-2 focus:ring-slate-950/10"
-            />
-            {errors[id] && (
-              <p className="mt-1 text-xs text-rose-600">{errors[id]}</p>
-            )}
-          </label>
-        ))}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="inline-flex w-full items-center justify-center bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+        <AuthField
+          label="Full name"
+          error={message(errors.full_name)}
         >
-          {loading ? "Creating account…" : "Apply for Private Beta"}
-        </button>
+          <input
+            className="auth-input"
+            type="text"
+            autoComplete="name"
+            required
+            value={form.full_name}
+            onChange={(event) => set("full_name", event.target.value)}
+            placeholder="Your full name"
+          />
+        </AuthField>
 
-        <p className="text-center text-sm text-slate-500">
+        <AuthField
+          label="Work email"
+          error={message(errors.email)}
+        >
+          <input
+            className="auth-input"
+            type="email"
+            autoComplete="email"
+            required
+            value={form.email}
+            onChange={(event) => set("email", event.target.value)}
+            placeholder="you@yourcompany.com"
+          />
+        </AuthField>
+
+        <AuthField
+          label="Organization name"
+          hint="MateMail will create a unique workspace identifier automatically."
+          error={message(errors.workspace_name)}
+        >
+          <input
+            className="auth-input"
+            type="text"
+            required
+            value={form.workspace_name}
+            onChange={(event) => set("workspace_name", event.target.value)}
+            placeholder="Harbor & Co."
+          />
+        </AuthField>
+
+        <AuthField
+          label="Password"
+          hint="Use at least 10 characters. Standard password-strength rules apply."
+          error={message(errors.password)}
+        >
+          <input
+            className="auth-input"
+            type="password"
+            autoComplete="new-password"
+            minLength={10}
+            required
+            value={form.password}
+            onChange={(event) => set("password", event.target.value)}
+          />
+        </AuthField>
+
+        <AuthButton type="submit" loading={loading}>
+          {loading ? "Creating account…" : "Apply for Private Beta"}
+        </AuthButton>
+
+        <p className="auth-switch">
           Already have an account?{" "}
-          <Link
-            href="/login"
-            className="font-semibold text-cyan-600 hover:underline"
-          >
+          <Link href="/login" className="auth-text-button">
             Sign in
           </Link>
         </p>
       </form>
-    </div>
+    </PremiumAuthShell>
   );
 }

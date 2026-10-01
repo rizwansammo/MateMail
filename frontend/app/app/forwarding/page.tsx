@@ -1,9 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, ApiError, apiRequest } from "@/lib/api";
-import { Send, Plus, Trash2, CheckCircle2, AlertCircle, ToggleLeft, ToggleRight } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  CornerUpRight,
+  Mail,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
+import { apiRequest } from "@/lib/api";
+import {
+  PortalButton,
+  PortalCard,
+  PortalEmptyState,
+  PortalNotice,
+  PortalPageHeading,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface Mailbox {
   id: string;
@@ -21,266 +42,435 @@ interface ForwardingRule {
   created_at: string;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  active:   "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  paused:   "bg-amber-50   text-amber-700   ring-amber-600/20",
-  disabled: "bg-slate-100  text-slate-500   ring-slate-400/20",
-};
+function fieldError(value: unknown) {
+  if (!value) return "";
+  if (Array.isArray(value)) return value.map(String).join(" ");
+  return String(value);
+}
 
 export default function ForwardingPage() {
+  const { user, tenant } = useAuth();
   const [rules, setRules] = useState<ForwardingRule[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
+  const [myRole, setMyRole] = useState("");
+  const [workspaceStatus, setWorkspaceStatus] = useState(tenant?.status || "");
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "warn" | "danger">("success");
   const [addOpen, setAddOpen] = useState(false);
 
-  // Form
   const [mailboxId, setMailboxId] = useState("");
-  const [destEmail, setDestEmail] = useState("");
+  const [destinationEmail, setDestinationEmail] = useState("");
   const [keepCopy, setKeepCopy] = useState(true);
-  const [addErrors, setAddErrors] = useState<Record<string, string>>({});
+  const [addErrors, setAddErrors] = useState<Record<string, unknown>>({});
   const [adding, setAdding] = useState(false);
+  const [changingStatus, setChangingStatus] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState("");
+  const [deleting, setDeleting] = useState("");
 
-  // Per-row
-  const [toggling, setToggling] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
-
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
-      const [rRes, mRes] = await Promise.all([
+      const [ruleResponse, mailboxResponse] = await Promise.all([
         apiRequest("/api/forwarding/"),
         apiRequest("/api/mailboxes/"),
       ]);
-      if (rRes.ok) setRules(await rRes.json());
-      if (mRes.ok) {
-        const m = await mRes.json();
-        setMailboxes(m);
-        if (m.length > 0 && !mailboxId) setMailboxId(m[0].id);
+      if (ruleResponse.ok) setRules(await ruleResponse.json());
+      else {
+        const data = await ruleResponse.json().catch(() => null);
+        setLoadError(data?.detail ?? "Forwarding rules could not be loaded.");
       }
+
+      if (mailboxResponse.ok) {
+        const rows = (await mailboxResponse.json()) as Mailbox[];
+        setMailboxes(rows);
+        setMailboxId((current) =>
+          rows.some((mailbox) => mailbox.id === current)
+            ? current
+            : rows[0]?.id || ""
+        );
+      }
+    } catch {
+      setLoadError("Forwarding rules could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    fetchAll();
+    if (tenant?.id) {
+      apiRequest(`/api/workspaces/${tenant.id}/stats/`)
+        .then(async (response) => response.ok ? response.json() : null)
+        .then((data) => {
+          if (data?.my_role) setMyRole(data.my_role);
+          if (data?.tenant_status) setWorkspaceStatus(data.tenant_status);
+        })
+        .catch(() => {});
+    }
+  }, [fetchAll, tenant?.id]);
 
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
+  const filteredRules = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return rules;
+    return rules.filter((rule) =>
+      rule.source_mailbox_email.toLowerCase().includes(needle) ||
+      rule.destination_email.toLowerCase().includes(needle) ||
+      rule.status.toLowerCase().includes(needle)
+    );
+  }, [query, rules]);
+
+  const canAdmin = myRole === "owner" || myRole === "admin";
+  const canCreate = canAdmin && !!user?.email_verified && workspaceStatus === "active" && mailboxes.length > 0;
+
+  async function createRule(event: React.FormEvent) {
+    event.preventDefault();
     setAddErrors({});
+    setMessage("");
     setAdding(true);
     try {
-      await api.post("/api/forwarding/", {
-        source_mailbox_id: mailboxId,
-        destination_email: destEmail.trim(),
-        keep_copy: keepCopy,
+      const response = await apiRequest("/api/forwarding/", {
+        method: "POST",
+        body: JSON.stringify({
+          source_mailbox_id: mailboxId,
+          destination_email: destinationEmail.trim(),
+          keep_copy: keepCopy,
+        }),
       });
-      setDestEmail("");
-      setKeepCopy(true);
-      setAddOpen(false);
-      await fetchAll();
-    } catch (err) {
-      if (err instanceof ApiError) {
-        try {
-          const b = JSON.parse(err.message);
-          setAddErrors(typeof b === "object" ? b : { detail: err.message });
-        } catch {
-          setAddErrors({ detail: "Failed to create forwarding rule." });
+      const data = await response.json().catch(() => null);
+
+      if (response.ok && data?.id) {
+        setDestinationEmail("");
+        setKeepCopy(true);
+        setAddOpen(false);
+        if (response.status === 202 || data.detail) {
+          setMessageTone("warn");
+          setMessage(data.detail ?? "Forwarding rule was saved, but Mail Engine activation is still pending.");
+        } else {
+          setMessageTone("success");
+          setMessage("Forwarding rule created successfully.");
         }
+        await fetchAll();
+      } else {
+        setAddErrors(typeof data === "object" && data !== null ? data : { detail: "Failed to create forwarding rule." });
       }
+    } catch {
+      setAddErrors({ detail: "Failed to create forwarding rule." });
     } finally {
       setAdding(false);
     }
   }
 
-  async function toggleStatus(rule: ForwardingRule) {
-    setToggling(rule.id);
+  async function changeStatus(rule: ForwardingRule, nextStatus: ForwardingRule["status"]) {
+    if (!canAdmin || rule.status === nextStatus) return;
+    setChangingStatus(rule.id);
+    setMessage("");
     try {
-      const newStatus = rule.status === "active" ? "paused" : "active";
-      const res = await apiRequest(`/api/forwarding/${rule.id}/status/`, {
+      const response = await apiRequest(`/api/forwarding/${rule.id}/status/`, {
         method: "PATCH",
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: nextStatus }),
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setRules((prev) => prev.map((r) => (r.id === rule.id ? updated : r)));
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        setRules((current) => current.map((item) => item.id === rule.id ? data : item));
+        setMessageTone("success");
+        setMessage(`Forwarding rule is now ${data.status}.`);
+      } else {
+        setMessageTone("danger");
+        setMessage(data?.detail ?? "Forwarding status could not be changed.");
       }
+    } catch {
+      setMessageTone("danger");
+      setMessage("Forwarding status could not be changed.");
     } finally {
-      setToggling(null);
+      setChangingStatus("");
     }
   }
 
-  async function handleDelete(rule: ForwardingRule) {
+  async function deleteRule(rule: ForwardingRule) {
+    if (!canAdmin) return;
     setDeleting(rule.id);
+    setMessage("");
     try {
-      await apiRequest(`/api/forwarding/${rule.id}/`, { method: "DELETE" });
-      setRules((prev) => prev.filter((r) => r.id !== rule.id));
+      const response = await apiRequest(`/api/forwarding/${rule.id}/`, { method: "DELETE" });
+      if (response.ok || response.status === 204) {
+        setRules((current) => current.filter((item) => item.id !== rule.id));
+        setDeleteTarget("");
+        setMessageTone("success");
+        setMessage("Forwarding rule removed successfully.");
+      } else {
+        const data = await response.json().catch(() => null);
+        setMessageTone("danger");
+        setMessage(data?.detail ?? "Forwarding rule could not be removed.");
+      }
+    } catch {
+      setMessageTone("danger");
+      setMessage("Forwarding rule could not be removed.");
     } finally {
-      setDeleting(null);
+      setDeleting("");
     }
   }
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Send className="h-5 w-5 text-slate-400" />
-          <div>
-            <h1 className="text-xl font-semibold text-slate-900">Forwarding</h1>
-            <p className="text-sm text-slate-500">Forward incoming mail from a mailbox to another address.</p>
-          </div>
-        </div>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
-        >
-          <Plus className="h-4 w-4" />
-          Add rule
-        </button>
-      </div>
+    <div className="portal-page">
+      <PortalPageHeading
+        title="Forwarding"
+        description="Route incoming mail from a mailbox to the right destination."
+        actions={
+          <PortalButton
+            type="button"
+            disabled={!canCreate}
+            onClick={() => {
+              setAddOpen(true);
+              setAddErrors({});
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            Add forwarding rule
+          </PortalButton>
+        }
+      />
 
-      {/* Add form */}
-      {addOpen && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
-          <p className="text-sm font-medium text-slate-800">New forwarding rule</p>
-          {addErrors.detail && <p className="text-sm text-red-600">{addErrors.detail}</p>}
-          <form onSubmit={handleAdd} className="space-y-4">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">Source mailbox</label>
-              {mailboxes.length === 0 ? (
-                <p className="text-xs text-amber-600">No mailboxes yet. <Link href="/app/mailboxes" className="underline">Create one first.</Link></p>
-              ) : (
-                <select
-                  value={mailboxId}
-                  onChange={(e) => setMailboxId(e.target.value)}
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                >
-                  {mailboxes.map((m) => <option key={m.id} value={m.id}>{m.email}</option>)}
-                </select>
-              )}
-              {addErrors.source_mailbox_id && <p className="mt-1 text-xs text-red-600">{addErrors.source_mailbox_id}</p>}
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">Forward to</label>
-              <input
-                type="email"
-                placeholder="you@gmail.com"
-                value={destEmail}
-                onChange={(e) => setDestEmail(e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
-              {addErrors.destination_email && <p className="mt-1 text-xs text-red-600">{addErrors.destination_email}</p>}
-            </div>
-
-            <label className="flex items-center gap-2.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={keepCopy}
-                onChange={(e) => setKeepCopy(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-              />
-              <span className="text-sm text-slate-700">Keep a copy in the original mailbox</span>
-            </label>
-
-            <div className="flex gap-3 pt-1">
-              <button
-                type="submit"
-                disabled={adding || !mailboxId || !destEmail.trim()}
-                className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
-              >
-                {adding ? "Creating…" : "Create rule"}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setAddOpen(false); setAddErrors({}); }}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
+      {!user?.email_verified && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Verify your account email before creating a new forwarding route.</span>
+          </PortalNotice>
         </div>
       )}
 
-      {/* No mailboxes */}
+      {workspaceStatus !== "active" && (
+        <div className="mb-5">
+          <PortalNotice tone="info">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Creating new forwarding routes is unavailable while this workspace is not active.</span>
+          </PortalNotice>
+        </div>
+      )}
+
       {!loading && mailboxes.length === 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          Create a mailbox before setting up forwarding.{" "}
-          <Link href="/app/mailboxes" className="font-medium underline">Add a mailbox →</Link>
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Create a mailbox before setting up forwarding.{" "}
+              <Link href="/app/mailboxes" className="auth-text-button">Manage mailboxes</Link>
+            </span>
+          </PortalNotice>
         </div>
       )}
 
-      {/* List */}
-      {loading ? (
-        <div className="py-16 text-center text-sm text-slate-400">Loading forwarding rules…</div>
-      ) : rules.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 py-16 text-center">
-          <Send className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-500">No forwarding rules yet.</p>
-          {mailboxes.length > 0 && (
-            <button onClick={() => setAddOpen(true)} className="mt-3 text-sm font-medium text-cyan-600 hover:text-cyan-700">
-              Create your first rule →
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-          {rules.map((rule) => (
-            <div key={rule.id} className="flex items-center gap-4 px-5 py-4">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-900">
-                  {rule.source_mailbox_email}
-                  <span className="mx-1.5 text-slate-300">→</span>
-                  {rule.destination_email}
-                </p>
-                <p className="text-xs text-slate-400">
-                  {rule.keep_copy ? "Copy kept in original mailbox" : "No copy kept"}
-                </p>
+      {message && (
+        <div className="mb-5"><PortalNotice tone={messageTone}>{message}</PortalNotice></div>
+      )}
+
+      {addOpen && (
+        <PortalCard
+          className="portal-form-card"
+          title="Add a forwarding rule"
+          subtitle="Forward new incoming mail from one mailbox to one destination address."
+        >
+          <form onSubmit={createRule}>
+            {fieldError(addErrors.detail) && (
+              <div className="mb-4"><PortalNotice tone="danger">{fieldError(addErrors.detail)}</PortalNotice></div>
+            )}
+
+            <div className="portal-form-grid">
+              <div className="portal-field">
+                <label>Source mailbox</label>
+                <select value={mailboxId} onChange={(event) => setMailboxId(event.target.value)} required>
+                  {mailboxes.map((mailbox) => (
+                    <option key={mailbox.id} value={mailbox.id}>{mailbox.email}</option>
+                  ))}
+                </select>
+                {fieldError(addErrors.source_mailbox_id) && <div className="portal-field-error">{fieldError(addErrors.source_mailbox_id)}</div>}
               </div>
 
-              {rule.mail_service_ready ? (
-                <span title="Provisioned" className="text-emerald-500"><CheckCircle2 className="h-4 w-4" /></span>
-              ) : (
-                <span title="Not provisioned" className="text-amber-400"><AlertCircle className="h-4 w-4" /></span>
-              )}
+              <div className="portal-field">
+                <label>Forward to</label>
+                <input
+                  type="email"
+                  required
+                  value={destinationEmail}
+                  onChange={(event) => setDestinationEmail(event.target.value)}
+                  placeholder="teammate@example.com"
+                />
+                {fieldError(addErrors.destination_email) && <div className="portal-field-error">{fieldError(addErrors.destination_email)}</div>}
+              </div>
 
-              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[rule.status]}`}>
-                {rule.status}
-              </span>
-
-              {/* Toggle active/pause */}
-              <button
-                onClick={() => toggleStatus(rule)}
-                disabled={toggling === rule.id}
-                title={rule.status === "active" ? "Pause" : "Activate"}
-                className="text-slate-400 hover:text-slate-700 disabled:opacity-40"
-              >
-                {rule.status === "active"
-                  ? <ToggleRight className="h-5 w-5 text-emerald-500" />
-                  : <ToggleLeft className="h-5 w-5" />}
-              </button>
-
-              {/* Delete */}
-              <button
-                onClick={() => handleDelete(rule)}
-                disabled={deleting === rule.id}
-                title="Delete rule"
-                className="text-slate-300 hover:text-red-500 disabled:opacity-40"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
+              <div className="full">
+                <div className="portal-switch-row">
+                  <div>
+                    <strong>Keep a local copy</strong>
+                    <p>Preserve forwarded messages in the source mailbox.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="portal-toggle"
+                    data-on={keepCopy}
+                    onClick={() => setKeepCopy((value) => !value)}
+                    aria-label="Keep a local copy"
+                  />
+                </div>
+              </div>
             </div>
-          ))}
-        </div>
+
+            <div className="portal-detail-actions">
+              <PortalButton type="submit" disabled={adding || !mailboxId || !destinationEmail.trim()}>
+                {adding ? "Creating…" : "Create rule"}
+              </PortalButton>
+              <PortalButton
+                type="button"
+                variant="secondary"
+                disabled={adding}
+                onClick={() => {
+                  setAddOpen(false);
+                  setAddErrors({});
+                }}
+              >
+                Cancel
+              </PortalButton>
+            </div>
+          </form>
+        </PortalCard>
       )}
 
-      {/* Info note */}
-      {rules.length > 0 && (
-        <p className="text-xs text-slate-400">
-          Forwarding is handled at the mail server level. Changes take effect for new incoming messages.
-        </p>
+      {loadError && (
+        <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
       )}
+
+      <PortalCard className="portal-management-card" bodyClassName="!p-0">
+        <div className="portal-management-toolbar">
+          <div className="portal-management-search">
+            <Search className="h-4 w-4" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search forwarding rules…"
+              aria-label="Search forwarding rules"
+            />
+          </div>
+          <button type="button" className="portal-icon-button" onClick={fetchAll} disabled={loading} aria-label="Refresh forwarding rules">
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="p-5">
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="h-14 w-full" />
+          </div>
+        ) : rules.length === 0 ? (
+          <PortalEmptyState
+            title="No forwarding rules yet"
+            description="Route incoming messages from a mailbox to another address."
+            action={canCreate ? <PortalButton type="button" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" />Add rule</PortalButton> : undefined}
+          />
+        ) : filteredRules.length === 0 ? (
+          <PortalEmptyState title="No matching forwarding rules" description="Try a different search term." />
+        ) : (
+          <div className="portal-management-table-wrap">
+            <table className="portal-management-table">
+              <thead>
+                <tr>
+                  <th>Source mailbox</th>
+                  <th>Forward to</th>
+                  <th>Local copy</th>
+                  <th>Status</th>
+                  <th>Mail service</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRules.map((rule) => (
+                  <tr key={rule.id}>
+                    <td>
+                      <div className="portal-route-address">
+                        <span className="portal-domain-symbol"><CornerUpRight className="h-4 w-4" /></span>
+                        <code>{rule.source_mailbox_email}</code>
+                      </div>
+                    </td>
+                    <td>
+                      <span className="portal-destination-pill">
+                        <Mail className="h-3 w-3" />
+                        <span>{rule.destination_email}</span>
+                      </span>
+                    </td>
+                    <td>
+                      <span className="inline-flex items-center gap-1.5 text-[10px] text-[var(--portal-muted)]">
+                        {rule.keep_copy && <Check className="h-3.5 w-3.5 text-[var(--portal-success)]" />}
+                        {rule.keep_copy ? "Kept in mailbox" : "Not kept"}
+                      </span>
+                    </td>
+                    <td><PortalStatus value={rule.status} /></td>
+                    <td>
+                      <span className={"portal-service-state " + (rule.mail_service_ready ? "ready" : "waiting")}>
+                        {rule.mail_service_ready
+                          ? <CheckCircle2 className="h-3.5 w-3.5" />
+                          : <AlertCircle className="h-3.5 w-3.5" />}
+                        {rule.mail_service_ready ? "Ready" : "Not ready"}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="portal-inline-actions">
+                        <select
+                          className="portal-input !h-[31px] !min-h-[31px] !w-[102px] !py-0 text-[9px]"
+                          value={rule.status}
+                          onChange={(event) => changeStatus(rule, event.target.value as ForwardingRule["status"])}
+                          disabled={!canAdmin || changingStatus === rule.id}
+                          aria-label={`Status for forwarding from ${rule.source_mailbox_email}`}
+                        >
+                          <option value="active">Active</option>
+                          <option value="paused">Paused</option>
+                          <option value="disabled">Disabled</option>
+                        </select>
+                        <button
+                          type="button"
+                          className="portal-action-button danger"
+                          onClick={() => setDeleteTarget(rule.id)}
+                          disabled={!canAdmin || deleting === rule.id}
+                          aria-label={`Delete forwarding from ${rule.source_mailbox_email}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      {deleteTarget === rule.id && (
+                        <div className="portal-confirm-inline">
+                          <PortalNotice tone="warn">
+                            <div className="flex-1">
+                              Remove forwarding from <strong>{rule.source_mailbox_email}</strong> to <strong>{rule.destination_email}</strong>?
+                            </div>
+                            <div className="flex gap-2">
+                              <PortalButton type="button" variant="secondary" onClick={() => setDeleteTarget("")} disabled={deleting === rule.id}>Cancel</PortalButton>
+                              <PortalButton type="button" variant="danger" onClick={() => deleteRule(rule)} disabled={deleting === rule.id}>
+                                {deleting === rule.id ? "Removing…" : "Remove"}
+                              </PortalButton>
+                            </div>
+                          </PortalNotice>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </PortalCard>
+
+      <div className="mt-4">
+        <PortalNotice tone="info">
+          <CornerUpRight className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Forwarding is resolved at the mail-service layer. <strong>Active</strong> routes mail, <strong>Paused</strong> temporarily removes the route while preserving the rule, and <strong>Disabled</strong> keeps it off. The current backend does not provide an edit endpoint for destination or local-copy changes.
+          </span>
+        </PortalNotice>
+      </div>
     </div>
   );
 }

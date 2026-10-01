@@ -1,65 +1,96 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { Plus, Globe, ChevronRight, RefreshCw, ShieldAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Globe2,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+} from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
+import {
+  PortalButton,
+  PortalCard,
+  PortalEmptyState,
+  PortalNotice,
+  PortalPageHeading,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface Domain {
   id: string;
   domain: string;
   status: "pending" | "active" | "warning" | "failed" | "paused";
   dns_health_score: number;
-  dkim_selector: string;
   mail_service_ready: boolean;
   ownership_verified: boolean;
   added_at: string;
-  verified_at: string | null;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  active: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  pending: "bg-amber-50 text-amber-700 ring-amber-600/20",
-  warning: "bg-orange-50 text-orange-700 ring-orange-600/20",
-  failed: "bg-red-50 text-red-700 ring-red-600/20",
-  paused: "bg-slate-100 text-slate-600 ring-slate-500/20",
-};
-
-function HealthBar({ score }: { score: number }) {
-  const color =
-    score >= 75 ? "bg-emerald-500" : score >= 50 ? "bg-amber-500" : score > 0 ? "bg-orange-500" : "bg-slate-200";
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-1.5 w-24 rounded-full bg-slate-100 overflow-hidden">
-        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${score}%` }} />
-      </div>
-      <span className="text-xs text-slate-500 tabular-nums">{score}/100</span>
-    </div>
-  );
+function pretty(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 export default function DomainsPage() {
+  const router = useRouter();
+  const { user, tenant } = useAuth();
   const [domains, setDomains] = useState<Domain[]>([]);
+  const [myRole, setMyRole] = useState("");
+  const [workspaceStatus, setWorkspaceStatus] = useState(tenant?.status || "");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [newDomain, setNewDomain] = useState("");
   const [addError, setAddError] = useState("");
   const [adding, setAdding] = useState(false);
 
-  async function fetchDomains() {
+  const fetchDomains = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const res = await apiRequest("/api/domains/");
-      if (res.ok) setDomains(await res.json());
+      if (res.ok) {
+        setDomains(await res.json());
+      } else {
+        const data = await res.json().catch(() => null);
+        setLoadError(data?.detail ?? "Domains could not be loaded.");
+      }
+    } catch {
+      setLoadError("Domains could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { fetchDomains(); }, []);
+  useEffect(() => {
+    fetchDomains();
+    if (tenant?.id) {
+      apiRequest(`/api/workspaces/${tenant.id}/stats/`)
+        .then(async (res) => res.ok ? res.json() : null)
+        .then((data) => {
+          if (data?.my_role) setMyRole(data.my_role);
+          if (data?.tenant_status) setWorkspaceStatus(data.tenant_status);
+        })
+        .catch(() => {});
+    }
+  }, [fetchDomains, tenant?.id]);
 
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
+  const filteredDomains = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return domains;
+    return domains.filter((domain) =>
+      domain.domain.toLowerCase().includes(needle) ||
+      domain.status.toLowerCase().includes(needle)
+    );
+  }, [domains, query]);
+
+  async function handleAdd(event: React.FormEvent) {
+    event.preventDefault();
     setAddError("");
     setAdding(true);
     try {
@@ -68,128 +99,221 @@ export default function DomainsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ domain: newDomain.trim() }),
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.id) {
         setNewDomain("");
         setAddOpen(false);
-        await fetchDomains();
-      } else {
-        const data = await res.json();
-        setAddError(data.domain?.[0] ?? data.detail ?? "Failed to add domain.");
+        router.push(`/app/domains/${data.id}`);
+        return;
       }
+      const domainMessage = Array.isArray(data?.domain) ? data.domain[0] : data?.domain;
+      setAddError(domainMessage ?? data?.detail ?? "Failed to add domain.");
+    } catch {
+      setAddError("Failed to add domain. Please try again.");
     } finally {
       setAdding(false);
     }
   }
 
+  const canAdmin = myRole === "owner" || myRole === "admin";
+  const canAttemptDomainCreate =
+    !!user?.email_verified && workspaceStatus === "active" && canAdmin;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Domains</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Manage email domains for this workspace.</p>
-        </div>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
-        >
-          <Plus className="h-4 w-4" />
-          Add domain
-        </button>
-      </div>
+    <div className="portal-page">
+      <PortalPageHeading
+        title="Domains"
+        description="Connect, verify and monitor the domains that power your organization’s email."
+        actions={
+          <PortalButton
+            type="button"
+            onClick={() => {
+              setAddOpen(true);
+              setAddError("");
+            }}
+            disabled={!canAttemptDomainCreate}
+          >
+            <Plus className="h-4 w-4" />
+            Add domain
+          </PortalButton>
+        }
+      />
 
-      {/* Add domain form */}
+      {!user?.email_verified && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span><strong>Email verification required.</strong> Verify your account before managing email domains.</span>
+          </PortalNotice>
+        </div>
+      )}
+
+      {user?.email_verified && workspaceStatus !== "active" && (
+        <div className="mb-5">
+          <PortalNotice tone="info">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <strong>Workspace status: {pretty(workspaceStatus || "pending")}.</strong>{" "}
+              Domain creation becomes available after workspace approval.
+            </span>
+          </PortalNotice>
+        </div>
+      )}
+
       {addOpen && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5">
-          <p className="mb-3 text-sm font-medium text-slate-800">Add a new domain</p>
-          <form onSubmit={handleAdd} className="flex items-start gap-3">
-            <div className="flex-1">
-              <input
-                type="text"
-                placeholder="example.com"
-                value={newDomain}
-                onChange={(e) => setNewDomain(e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                autoFocus
-              />
-              {addError && <p className="mt-1 text-xs text-red-600">{addError}</p>}
-            </div>
-            <button
-              type="submit"
-              disabled={adding || !newDomain.trim()}
-              className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
-            >
-              {adding ? "Adding…" : "Add"}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setAddOpen(false); setAddError(""); setNewDomain(""); }}
-              className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Domain list */}
-      {loading ? (
-        <div className="py-16 text-center text-sm text-slate-400">Loading domains…</div>
-      ) : domains.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 py-16 text-center">
-          <Globe className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-500">No domains yet.</p>
-          <button
-            onClick={() => setAddOpen(true)}
-            className="mt-3 text-sm font-medium text-cyan-600 hover:text-cyan-700"
-          >
-            Add your first domain →
-          </button>
-        </div>
-      ) : (
-        <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-          {domains.map((d) => (
-            <Link
-              key={d.id}
-              href={`/app/domains/${d.id}`}
-              className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-colors"
-            >
-              <Globe className="h-5 w-5 shrink-0 text-slate-400" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-900">{d.domain}</p>
-                <div className="mt-1">
-                  {d.ownership_verified ? (
-                    <HealthBar score={d.dns_health_score} />
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700">
-                      <ShieldAlert className="h-3.5 w-3.5" />
-                      Verify ownership to start mail setup
-                    </span>
-                  )}
-                </div>
+        <PortalCard
+          className="portal-add-domain"
+          title="Connect a new domain"
+          subtitle="Add a domain you already own. MateMail does not transfer or purchase the domain."
+        >
+          <form onSubmit={handleAdd}>
+            <div className="portal-form-row">
+              <div className="portal-form-field">
+                <label htmlFor="portal-domain-name">Domain name</label>
+                <input
+                  id="portal-domain-name"
+                  className="portal-input"
+                  type="text"
+                  autoFocus
+                  required
+                  value={newDomain}
+                  onChange={(event) => {
+                    setNewDomain(event.target.value);
+                    setAddError("");
+                  }}
+                  placeholder="yourcompany.com"
+                />
+                <p className="mt-2 text-[10px] text-[var(--portal-muted)]">
+                  Enter the root domain. Prefixes such as https:// and www. are normalized by the backend.
+                </p>
+                {addError && <div className="portal-form-error">{addError}</div>}
               </div>
-              <span
-                className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[d.status] ?? STATUS_STYLES.pending}`}
+              <PortalButton type="submit" disabled={adding || !newDomain.trim()}>
+                {adding ? "Adding…" : "Add domain"}
+              </PortalButton>
+              <PortalButton
+                type="button"
+                variant="secondary"
+                disabled={adding}
+                onClick={() => {
+                  setAddOpen(false);
+                  setNewDomain("");
+                  setAddError("");
+                }}
               >
-                {d.status}
-              </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
-            </Link>
-          ))}
+                Cancel
+              </PortalButton>
+            </div>
+          </form>
+        </PortalCard>
+      )}
+
+      {loadError && (
+        <div className="mb-5">
+          <PortalNotice tone="danger">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{loadError}</span>
+          </PortalNotice>
         </div>
       )}
 
-      {/* Refresh */}
-      {!loading && domains.length > 0 && (
-        <div className="text-right">
+      <PortalCard bodyClassName="!p-0">
+        <div className="portal-domain-toolbar">
+          <div className="flex min-w-0 flex-1 items-center gap-2 text-[var(--portal-muted)]">
+            <Search className="h-4 w-4" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search domains…"
+              aria-label="Search domains"
+            />
+          </div>
           <button
+            type="button"
+            className="portal-icon-button"
             onClick={fetchDomains}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600"
+            disabled={loading}
+            aria-label="Refresh domains"
           >
-            <RefreshCw className="h-3 w-3" />
-            Refresh
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
           </button>
         </div>
-      )}
+
+        {loading ? (
+          <div className="p-5">
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="h-14 w-full" />
+          </div>
+        ) : domains.length === 0 ? (
+          <PortalEmptyState
+            title="Connect your first domain"
+            description="Add a domain you own, prove ownership with a TXT record, then configure mail DNS."
+            action={
+              canAttemptDomainCreate ? (
+                <PortalButton type="button" onClick={() => setAddOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                  Add domain
+                </PortalButton>
+              ) : undefined
+            }
+          />
+        ) : filteredDomains.length === 0 ? (
+          <PortalEmptyState
+            title="No matching domains"
+            description="Try a different search term."
+          />
+        ) : (
+          <div className="portal-domain-table-wrap">
+            <table className="portal-domain-table">
+              <thead>
+                <tr>
+                  <th>Domain</th>
+                  <th>Ownership</th>
+                  <th>DNS health</th>
+                  <th>Mail service</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDomains.map((domain) => (
+                  <tr
+                    key={domain.id}
+                    onClick={() => router.push(`/app/domains/${domain.id}`)}
+                    className="cursor-pointer"
+                  >
+                    <td>
+                      <div className="portal-domain-identity">
+                        <span className="portal-domain-symbol"><Globe2 className="h-4 w-4" /></span>
+                        <span>
+                          <strong>{domain.domain}</strong>
+                          <small>Added {new Date(domain.added_at).toLocaleDateString()}</small>
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <PortalStatus value={domain.ownership_verified ? "Verified" : "Pending"} />
+                    </td>
+                    <td>
+                      <div className="portal-health-inline">
+                        <span className="portal-health-inline-bar">
+                          <span style={{ width: `${Math.max(0, Math.min(100, domain.dns_health_score))}%` }} />
+                        </span>
+                        <span>{domain.dns_health_score}/100</span>
+                      </div>
+                    </td>
+                    <td>
+                      <PortalStatus value={domain.mail_service_ready ? "Ready" : "Not ready"} />
+                    </td>
+                    <td><PortalStatus value={pretty(domain.status)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </PortalCard>
     </div>
   );
 }

@@ -1,8 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  CheckCircle2,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { Shield, RefreshCw, CheckCircle2, Trash2 } from "lucide-react";
+import {
+  PortalButton,
+  PortalCard,
+  PortalEmptyState,
+  PortalNotice,
+  PortalPageHeading,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface QuarantineMessage {
   id: string;
@@ -17,216 +32,297 @@ interface QuarantineMessage {
   actioned_at: string | null;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  held:           "bg-amber-50  text-amber-700  ring-amber-600/20",
-  released:       "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  deleted:        "bg-slate-100 text-slate-500  ring-slate-400/20",
-  sender_blocked: "bg-red-50    text-red-700    ring-red-600/20",
-};
-
 const STATUSES = [
-  { value: "",         label: "Held (default)" },
-  { value: "held",     label: "Held" },
+  { value: "", label: "Held messages" },
+  { value: "held", label: "Held" },
   { value: "released", label: "Released" },
-  { value: "deleted",  label: "Deleted" },
+  { value: "deleted", label: "Deleted" },
 ];
 
-function fmt(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" });
+function fmt(value: string | null) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString();
 }
 
-function spamScoreColor(score: string) {
-  const n = parseFloat(score);
-  if (n >= 15) return "text-red-600 font-semibold";
-  if (n >= 8)  return "text-amber-600 font-medium";
-  return "text-slate-500";
+function scoreTone(score: string) {
+  const value = Number(score);
+  if (value >= 15) return "high";
+  if (value >= 8) return "medium";
+  return "low";
 }
 
 export default function SpamPage() {
   const [messages, setMessages] = useState<QuarantineMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [senderSearch, setSenderSearch] = useState("");
   const [senderInput, setSenderInput] = useState("");
-  const [releasing, setReleasing] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [releasing, setReleasing] = useState("");
+  const [deleting, setDeleting] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [actionFailed, setActionFailed] = useState(false);
 
-  async function fetchQuarantine(sf: string, sender: string) {
+  const fetchQuarantine = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const params = new URLSearchParams();
-      if (sf) params.set("status", sf);
-      if (sender) params.set("sender", sender);
-      const r = await apiRequest(`/api/quarantine/?${params}`);
-      if (r.ok) setMessages(await r.json());
+      if (statusFilter) params.set("status", statusFilter);
+      if (senderSearch) params.set("sender", senderSearch);
+      const suffix = params.toString() ? "?" + params.toString() : "";
+      const response = await apiRequest("/api/quarantine/" + suffix);
+      const data = await response.json().catch(() => null);
+      if (response.ok && Array.isArray(data)) {
+        setMessages(data);
+      } else if (response.status === 403) {
+        setLoadError("Your workspace role does not permit access to quarantine.");
+      } else {
+        setLoadError(data?.detail ?? "Quarantine could not be loaded.");
+      }
+    } catch {
+      setLoadError("Quarantine could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [senderSearch, statusFilter]);
 
-  useEffect(() => { fetchQuarantine(statusFilter, senderSearch); }, [statusFilter, senderSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchQuarantine(), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchQuarantine]);
 
-  async function handleRelease(msg: QuarantineMessage) {
-    setReleasing(msg.id);
+  const heldCount = useMemo(
+    () => messages.filter((message) => message.status === "held").length,
+    [messages]
+  );
+
+  async function release(message: QuarantineMessage) {
+    setReleasing(message.id);
+    setActionMessage("");
+    setActionFailed(false);
     try {
-      const r = await apiRequest(`/api/quarantine/${msg.id}/release/`, { method: "POST" });
-      if (r.ok) {
-        const updated = await r.json();
-        setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
+      const response = await apiRequest("/api/quarantine/" + message.id + "/release/", {
+        method: "POST",
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        setMessages((current) => current.map((item) => item.id === message.id ? data : item));
+        setActionMessage("Message released from quarantine.");
+      } else {
+        setActionFailed(true);
+        setActionMessage(data?.detail ?? "The message could not be released.");
       }
+    } catch {
+      setActionFailed(true);
+      setActionMessage("The message could not be released.");
     } finally {
-      setReleasing(null);
+      setReleasing("");
     }
   }
 
-  async function handleDelete(msg: QuarantineMessage) {
-    setDeleting(msg.id);
+  async function remove(message: QuarantineMessage) {
+    setDeleting(message.id);
+    setActionMessage("");
+    setActionFailed(false);
     try {
-      const r = await apiRequest(`/api/quarantine/${msg.id}/`, { method: "DELETE" });
-      if (r.status === 204) {
-        setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+      const response = await apiRequest("/api/quarantine/" + message.id + "/", {
+        method: "DELETE",
+      });
+      if (response.ok || response.status === 204) {
+        setMessages((current) => current.filter((item) => item.id !== message.id));
+        setConfirmDelete("");
+        setActionMessage("Quarantined message deleted.");
+      } else {
+        const data = await response.json().catch(() => null);
+        setActionFailed(true);
+        setActionMessage(data?.detail ?? "The quarantined message could not be deleted.");
       }
+    } catch {
+      setActionFailed(true);
+      setActionMessage("The quarantined message could not be deleted.");
     } finally {
-      setDeleting(null);
+      setDeleting("");
     }
   }
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Shield className="h-5 w-5 text-slate-400" />
-          <div>
-            <h1 className="text-xl font-semibold text-slate-900">Spam &amp; Quarantine</h1>
-            <p className="text-sm text-slate-500">Messages held by the spam filter. Release legitimate mail or delete spam.</p>
-          </div>
-        </div>
-        <button
-          onClick={() => fetchQuarantine(statusFilter, senderSearch)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </button>
-      </div>
+    <div className="portal-page">
+      <PortalPageHeading
+        title="Spam & quarantine"
+        description="Review messages held by the mail filter and release only mail you trust."
+        actions={
+          <button type="button" className="portal-button secondary" onClick={fetchQuarantine} disabled={loading}>
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
+            Refresh
+          </button>
+        }
+      />
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-white p-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-600">Status</label>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-          >
-            {STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
+      {actionMessage && (
+        <div className="mb-5">
+          <PortalNotice tone={actionFailed ? "danger" : "success"}>{actionMessage}</PortalNotice>
         </div>
+      )}
 
-        <div className="flex flex-col gap-1 flex-1 min-w-48">
-          <label className="text-xs font-medium text-slate-600">Filter by sender</label>
-          <div className="flex gap-2">
+      {loadError && (
+        <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
+      )}
+
+      <PortalCard className="portal-management-card" bodyClassName="!p-0">
+        <div className="portal-management-toolbar">
+          <div className="portal-management-search">
+            <Search className="h-4 w-4" />
             <input
-              type="text"
-              placeholder="sender@example.com"
+              type="search"
               value={senderInput}
-              onChange={(e) => setSenderInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { setSenderSearch(senderInput); } }}
-              className="flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              onChange={(event) => setSenderInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") setSenderSearch(senderInput.trim());
+              }}
+              placeholder="Filter by sender…"
+              aria-label="Filter quarantine by sender"
             />
-            <button
-              onClick={() => setSenderSearch(senderInput)}
-              className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700"
+          </div>
+          <div className="portal-inline-actions">
+            <PortalButton
+              type="button"
+              variant="secondary"
+              onClick={() => setSenderSearch(senderInput.trim())}
+              disabled={senderInput.trim() === senderSearch}
             >
               Search
-            </button>
-            {senderSearch && (
-              <button
-                onClick={() => { setSenderSearch(""); setSenderInput(""); }}
-                className="text-xs text-slate-400 hover:text-slate-600 underline self-center"
+            </PortalButton>
+            {(senderSearch || senderInput) && (
+              <PortalButton
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setSenderInput("");
+                  setSenderSearch("");
+                }}
               >
                 Clear
-              </button>
+              </PortalButton>
             )}
+            <select
+              className="portal-input !h-[34px] !min-h-[34px] !w-[150px] !py-0 text-[10px]"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              aria-label="Filter quarantine status"
+            >
+              {STATUSES.map((status) => (
+                <option key={status.value} value={status.value}>{status.label}</option>
+              ))}
+            </select>
           </div>
         </div>
-      </div>
 
-      {/* List */}
-      {loading ? (
-        <div className="py-16 text-center text-sm text-slate-400">Loading quarantine…</div>
-      ) : messages.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 py-16 text-center">
-          <Shield className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-500">No quarantined messages.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="min-w-full divide-y divide-slate-100 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">From</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">To</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Subject</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Score</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Received</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {messages.map((msg) => (
-                <tr key={msg.id} className="hover:bg-slate-50/50">
-                  <td className="px-4 py-3 text-slate-700 truncate max-w-[140px]">{msg.sender}</td>
-                  <td className="px-4 py-3 text-slate-500 truncate max-w-[140px]">{msg.recipient}</td>
-                  <td className="px-4 py-3 text-slate-500 truncate max-w-[180px]">{msg.subject || <span className="italic text-slate-300">no subject</span>}</td>
-                  <td className={`px-4 py-3 font-mono text-xs ${spamScoreColor(msg.spam_score)}`}>{msg.spam_score}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[msg.status] ?? ""}`}>
-                      {msg.status_display}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{fmt(msg.received_at)}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-3">
-                      {msg.status === "held" && (
-                        <button
-                          onClick={() => handleRelease(msg)}
-                          disabled={releasing === msg.id}
-                          title="Release to inbox"
-                          className="inline-flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 disabled:opacity-40"
-                        >
-                          <CheckCircle2 className="h-4 w-4" />
-                          Release
-                        </button>
-                      )}
-                      {msg.status === "held" && (
-                        <button
-                          onClick={() => handleDelete(msg)}
-                          disabled={deleting === msg.id}
-                          title="Delete permanently"
-                          className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 disabled:opacity-40"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </td>
+        {loading ? (
+          <div className="p-5">
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="h-14 w-full" />
+          </div>
+        ) : !loadError && messages.length === 0 ? (
+          <PortalEmptyState
+            title={senderSearch ? "No matching quarantined mail" : "No quarantined messages"}
+            description={senderSearch ? "Try a different sender filter." : "There are no messages in the selected quarantine state."}
+          />
+        ) : !loadError ? (
+          <div className="portal-management-table-wrap">
+            <table className="portal-management-table">
+              <thead>
+                <tr>
+                  <th>Message</th>
+                  <th>Recipient</th>
+                  <th>Spam score</th>
+                  <th>Status</th>
+                  <th>Received</th>
+                  <th>Actioned</th>
+                  <th className="text-right">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {messages.map((message) => (
+                  <tr key={message.id}>
+                    <td>
+                      <div className="portal-identity-cell">
+                        <span className="portal-avatar"><ShieldAlert className="h-4 w-4" /></span>
+                        <span>
+                          <strong>{message.subject || "No subject"}</strong>
+                          <small>{message.sender}</small>
+                        </span>
+                      </div>
+                    </td>
+                    <td><code>{message.recipient}</code></td>
+                    <td>
+                      <span className={"portal-score " + scoreTone(message.spam_score)}>
+                        {message.spam_score}
+                      </span>
+                    </td>
+                    <td><PortalStatus value={message.status_display || message.status} /></td>
+                    <td>{fmt(message.received_at)}</td>
+                    <td>{fmt(message.actioned_at)}</td>
+                    <td>
+                      <div className="portal-inline-actions">
+                        {message.status === "held" && (
+                          <>
+                            <button
+                              type="button"
+                              className="portal-action-button"
+                              onClick={() => release(message)}
+                              disabled={releasing === message.id}
+                              aria-label={"Release " + message.subject}
+                              title="Release to inbox"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              className="portal-action-button danger"
+                              onClick={() => setConfirmDelete(message.id)}
+                              disabled={deleting === message.id}
+                              aria-label={"Delete " + message.subject}
+                              title="Delete quarantined message"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
 
-      {messages.length > 0 && (
-        <p className="text-xs text-slate-400">
-          Showing up to 200 messages. Held messages older than 30 days are automatically deleted.
-        </p>
-      )}
+                      {confirmDelete === message.id && (
+                        <div className="portal-confirm-inline">
+                          <PortalNotice tone="warn">
+                            <div className="flex-1">
+                              Delete this quarantined message for <strong>{message.recipient}</strong>?
+                            </div>
+                            <div className="flex gap-2">
+                              <PortalButton type="button" variant="secondary" onClick={() => setConfirmDelete("")} disabled={deleting === message.id}>Cancel</PortalButton>
+                              <PortalButton type="button" variant="danger" onClick={() => remove(message)} disabled={deleting === message.id}>
+                                {deleting === message.id ? "Deleting…" : "Delete"}
+                              </PortalButton>
+                            </div>
+                          </PortalNotice>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </PortalCard>
+
+      <div className="mt-4">
+        <PortalNotice tone={heldCount ? "warn" : "info"}>
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{heldCount ? heldCount + " held message(s) are waiting for review. " : ""}Releasing asks the Mail Engine to release first; MateMail only marks the item released after that succeeds.</span>
+        </PortalNotice>
+      </div>
     </div>
   );
 }

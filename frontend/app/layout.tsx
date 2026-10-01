@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { AuthProvider } from "@/contexts/auth-context";
 import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 import "./globals.css";
+import "./app/portal-premium.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

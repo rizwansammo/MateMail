@@ -1,8 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  AtSign,
+  CheckCircle2,
+  Clock3,
+  CreditCard,
+  Gauge,
+  Globe2,
+  HardDrive,
+  Mail,
+  RefreshCw,
+  ShieldCheck,
+  Users,
+  XCircle,
+} from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { CreditCard, CheckCircle2, XCircle } from "lucide-react";
+import {
+  PortalCard,
+  PortalMetric,
+  PortalNotice,
+  PortalPageHeading,
+  PortalProgress,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface Plan {
   tier: string;
@@ -11,7 +33,12 @@ interface Plan {
   max_domains: number;
   max_mailboxes: number;
   max_members: number;
+  max_aliases: number;
+  default_storage_per_mailbox_mb: number;
   max_storage_per_mailbox_mb: number;
+  max_storage_total_mb: number;
+  max_messages_per_hour_per_mailbox: number;
+  max_messages_per_day_per_tenant: number;
   includes_spam_quarantine: boolean;
   includes_audit_logs: boolean;
   includes_queue_visibility: boolean;
@@ -20,62 +47,80 @@ interface Plan {
 }
 
 interface Subscription {
+  id: string;
   status: string;
   status_display: string;
   plan: Plan;
+  trial_ends_at: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  created_at: string;
 }
 
 interface Usage {
   domains: number;
   mailboxes: number;
   members: number;
+  aliases: number;
   storage_allocated_mb: number;
+  storage_used_mb: number;
   max_domains: number | null;
   max_mailboxes: number | null;
   max_members: number | null;
+  max_aliases: number | null;
   max_storage_per_mailbox_mb: number | null;
+  max_storage_total_mb: number | null;
 }
 
 interface BillingData {
   subscription: Subscription | null;
   usage: Usage;
+  trial_days_left: number;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  active:   "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  past_due: "bg-red-50 text-red-700 ring-red-600/20",
-  cancelled:"bg-slate-100 text-slate-500 ring-slate-400/20",
-};
+function formatStorage(mb: number | null | undefined) {
+  if (mb === null || mb === undefined) return "—";
+  if (mb >= 1024) {
+    const gb = mb / 1024;
+    return (Number.isInteger(gb) ? gb : gb.toFixed(1)) + " GB";
+  }
+  return mb + " MB";
+}
 
-function UsageBar({ label, used, max }: { label: string; used: number; max: number | null }) {
-  const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
-  const danger = pct >= 90;
-  const warn = pct >= 70;
+function UsageItem({
+  label,
+  used,
+  max,
+  icon,
+}: {
+  label: string;
+  used: number;
+  max: number | null;
+  icon: React.ReactNode;
+}) {
+  const percent = max && max > 0 ? Math.min(100, Math.round((used / max) * 100)) : 0;
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-xs text-slate-500">
-        <span>{label}</span>
-        <span>
-          {used} {max !== null ? `/ ${max}` : "/ —"}
-        </span>
+    <div className="portal-usage-item">
+      <div className="portal-usage-head">
+        <span>{icon}<strong>{label}</strong></span>
+        <span><strong>{used}</strong>{max !== null ? " / " + max : " / —"}</span>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-        <div
-          className={`h-full rounded-full transition-all ${danger ? "bg-red-500" : warn ? "bg-amber-400" : "bg-cyan-500"}`}
-          style={{ width: `${max ? pct : 0}%` }}
-        />
-      </div>
+      <PortalProgress value={percent} />
     </div>
   );
 }
 
-function FeatureRow({ label, included }: { label: string; included: boolean }) {
+function Feature({
+  label,
+  included,
+}: {
+  label: string;
+  included: boolean;
+}) {
   return (
-    <div className="flex items-center gap-2 text-sm">
-      {included
-        ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-        : <XCircle className="h-4 w-4 shrink-0 text-slate-300" />}
-      <span className={included ? "text-slate-700" : "text-slate-400"}>{label}</span>
+    <div className={"portal-plan-feature " + (included ? "included" : "excluded")}>
+      {included ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+      <span>{label}</span>
     </div>
   );
 }
@@ -83,107 +128,223 @@ function FeatureRow({ label, included }: { label: string; included: boolean }) {
 export default function BillingPage() {
   const [data, setData] = useState<BillingData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-  useEffect(() => {
-    apiRequest("/api/billing/")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => setData(d))
-      .finally(() => setLoading(false));
+  const fetchBilling = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+    setLoadError("");
+    try {
+      const response = await apiRequest("/api/billing/");
+      const body = await response.json().catch(() => null);
+      if (response.ok && body) {
+        setData(body);
+      } else {
+        setLoadError(body?.detail ?? "Billing information could not be loaded.");
+      }
+    } catch {
+      setLoadError("Billing information could not be loaded.");
+    } finally {
+      if (showLoading) setLoading(false);
+    }
   }, []);
 
-  if (loading) {
-    return <div className="p-6 py-16 text-center text-sm text-slate-400">Loading billing info…</div>;
-  }
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchBilling(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchBilling]);
 
-  if (!data || !data.subscription) {
+  if (loading) {
     return (
-      <div className="p-6">
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
-          No active subscription found. Contact support to activate your workspace.
+      <div className="portal-page">
+        <PortalSkeleton className="mb-5 h-20 w-full" />
+        <div className="grid gap-5 lg:grid-cols-2">
+          <PortalSkeleton className="h-[330px] w-full" />
+          <PortalSkeleton className="h-[330px] w-full" />
         </div>
       </div>
     );
   }
 
-  const { subscription: sub, usage } = data;
-  const plan = sub.plan;
+  if (!data || loadError) {
+    return (
+      <div className="portal-page">
+        <PortalPageHeading title="Billing & usage" description="Your plan, resource allowances and current usage." />
+        <PortalNotice tone="danger">{loadError || "Billing information could not be loaded."}</PortalNotice>
+      </div>
+    );
+  }
+
+  const { subscription, usage, trial_days_left: trialDaysLeft } = data;
+
+  if (!subscription) {
+    return (
+      <div className="portal-page">
+        <PortalPageHeading title="Billing & usage" description="Your plan, resource allowances and current usage." />
+        <PortalNotice tone="warn">
+          <CreditCard className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>No subscription is currently attached to this workspace. Contact MateMail support for plan activation.</span>
+        </PortalNotice>
+      </div>
+    );
+  }
+
+  const plan = subscription.plan;
+  const price = Number(plan.price_monthly || 0);
+  const isTrial = subscription.status === "trialing";
 
   return (
-    <div className="space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <CreditCard className="h-5 w-5 text-slate-400" />
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Billing &amp; Plan</h1>
-          <p className="text-sm text-slate-500">Your current plan and usage.</p>
+    <div className="portal-page">
+      <PortalPageHeading
+        title="Billing & usage"
+        description="Your current plan, resource allowances and room to grow."
+        actions={
+          <button type="button" className="portal-button secondary" onClick={() => fetchBilling(true)}>
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
+            Refresh
+          </button>
+        }
+      />
+
+      {isTrial && (
+        <div className="mb-5">
+          <PortalNotice tone="info">
+            <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <strong>{trialDaysLeft} {trialDaysLeft === 1 ? "day" : "days"} left in this trial.</strong>
+              {subscription.trial_ends_at ? " Trial end: " + new Date(subscription.trial_ends_at).toLocaleDateString() + "." : ""}
+            </span>
+          </PortalNotice>
         </div>
+      )}
+
+      <div className="portal-billing-grid">
+        <PortalCard className="portal-plan-card">
+          <div className="portal-plan-top">
+            <span className="portal-plan-symbol"><CreditCard className="h-5 w-5" /></span>
+            <PortalStatus value={subscription.status_display} />
+          </div>
+          <div className="portal-plan-eyebrow">CURRENT PLAN</div>
+          <h2>{plan.display_name}</h2>
+          <div className="portal-plan-price">
+            {price > 0 ? (
+              <><strong>{"$" + price.toFixed(2)}</strong><span>/ month</span></>
+            ) : (
+              <strong>Free</strong>
+            )}
+          </div>
+          <p>
+            Plan tier: <strong>{plan.tier}</strong>. Resource and mail-policy limits below come directly from the active MateMail plan configuration.
+          </p>
+
+          <div className="portal-plan-allowances">
+            <span><CheckCircle2 className="h-4 w-4" />{plan.max_mailboxes} mailboxes</span>
+            <span><CheckCircle2 className="h-4 w-4" />{plan.max_domains} domains</span>
+            <span><CheckCircle2 className="h-4 w-4" />{plan.max_members} team members</span>
+            <span><CheckCircle2 className="h-4 w-4" />{plan.max_aliases} aliases</span>
+          </div>
+
+          <PortalNotice tone="info">
+            Self-service plan switching is not implemented in the MateMail billing backend. Plan changes are handled through support rather than simulated in this Portal.
+          </PortalNotice>
+        </PortalCard>
+
+        <PortalCard title="Workspace usage" subtitle="Live counts and storage reported by MateMail.">
+          <div className="portal-usage-list">
+            <UsageItem label="Domains" used={usage.domains} max={usage.max_domains} icon={<Globe2 className="h-4 w-4" />} />
+            <UsageItem label="Mailboxes" used={usage.mailboxes} max={usage.max_mailboxes} icon={<Mail className="h-4 w-4" />} />
+            <UsageItem label="Team members" used={usage.members} max={usage.max_members} icon={<Users className="h-4 w-4" />} />
+            <UsageItem label="Aliases" used={usage.aliases} max={usage.max_aliases} icon={<AtSign className="h-4 w-4" />} />
+          </div>
+
+          <div className="portal-storage-summary">
+            <div>
+              <span>Actual mailbox storage used</span>
+              <strong>{formatStorage(usage.storage_used_mb)}</strong>
+            </div>
+            <div>
+              <span>Allocated mailbox quota</span>
+              <strong>{formatStorage(usage.storage_allocated_mb)}</strong>
+            </div>
+          </div>
+        </PortalCard>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Plan card */}
-        <div className="rounded-lg border border-slate-200 bg-white p-6 space-y-4">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Current Plan</p>
-              <p className="mt-1 text-2xl font-bold text-slate-900">{plan.display_name}</p>
-              {parseFloat(plan.price_monthly) > 0 ? (
-                <p className="text-sm text-slate-500">${plan.price_monthly}/month</p>
-              ) : (
-                <p className="text-sm text-slate-500">Free</p>
-              )}
+      <div className="portal-metrics-grid mt-5">
+        <PortalMetric
+          label="Default mailbox storage"
+          value={formatStorage(plan.default_storage_per_mailbox_mb)}
+          detail="Default quota assigned to a new mailbox"
+          icon={<HardDrive className="h-4 w-4" />}
+        />
+        <PortalMetric
+          label="Per-mailbox ceiling"
+          value={formatStorage(plan.max_storage_per_mailbox_mb)}
+          detail="Largest quota one mailbox may receive"
+          icon={<Gauge className="h-4 w-4" />}
+        />
+        <PortalMetric
+          label="Per-domain storage pool"
+          value={formatStorage(plan.max_storage_total_mb)}
+          detail="Mail Engine storage pool configured for each domain"
+          icon={<HardDrive className="h-4 w-4" />}
+        />
+        <PortalMetric
+          label="Workspace daily send cap"
+          value={plan.max_messages_per_day_per_tenant.toLocaleString()}
+          detail="Outbound messages per day across this workspace"
+          icon={<Mail className="h-4 w-4" />}
+        />
+      </div>
+
+      <div className="grid gap-5 mt-5 lg:grid-cols-2">
+        <PortalCard title="Mail policy limits" subtitle="Real outbound reputation safeguards configured by your plan.">
+          <div className="portal-detail-list">
+            <div className="portal-detail-row">
+              <dt>Per mailbox / hour</dt>
+              <dd>{plan.max_messages_per_hour_per_mailbox.toLocaleString()} outbound messages</dd>
             </div>
-            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset capitalize ${STATUS_STYLES[sub.status] ?? ""}`}>
-              {sub.status_display}
-            </span>
-          </div>
-
-          <div className="border-t border-slate-100 pt-4 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Included Features</p>
-            <FeatureRow label="Spam filter &amp; quarantine" included={plan.includes_spam_quarantine} />
-            <FeatureRow label="Audit logs" included={plan.includes_audit_logs} />
-            <FeatureRow label="Mail queue visibility" included={plan.includes_queue_visibility} />
-            <FeatureRow label="Backup controls" included={plan.includes_backup_controls} />
-            <FeatureRow label="Team roles &amp; permissions" included={plan.includes_team_roles} />
-          </div>
-
-          <div className="border-t border-slate-100 pt-4">
-            <p className="text-xs text-slate-400">
-              To upgrade your plan, contact{" "}
-              <a href="mailto:support@matemail.online" className="font-medium text-cyan-600 hover:underline">
-                support@matemail.online
-              </a>
-            </p>
-          </div>
-        </div>
-
-        {/* Usage card */}
-        <div className="rounded-lg border border-slate-200 bg-white p-6 space-y-5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Usage</p>
-
-          <UsageBar label="Domains" used={usage.domains} max={usage.max_domains} />
-          <UsageBar label="Mailboxes" used={usage.mailboxes} max={usage.max_mailboxes} />
-          <UsageBar label="Team members" used={usage.members} max={usage.max_members} />
-
-          <div className="border-t border-slate-100 pt-4 space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Limits</p>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-600">
-              <span>Domains</span>
-              <span className="font-medium text-slate-900">{usage.max_domains ?? "—"}</span>
-              <span>Mailboxes</span>
-              <span className="font-medium text-slate-900">{usage.max_mailboxes ?? "—"}</span>
-              <span>Team members</span>
-              <span className="font-medium text-slate-900">{usage.max_members ?? "—"}</span>
-              <span>Storage / mailbox</span>
-              <span className="font-medium text-slate-900">
-                {usage.max_storage_per_mailbox_mb
-                  ? usage.max_storage_per_mailbox_mb >= 1024
-                    ? `${usage.max_storage_per_mailbox_mb / 1024} GB`
-                    : `${usage.max_storage_per_mailbox_mb} MB`
-                  : "—"}
-              </span>
+            <div className="portal-detail-row">
+              <dt>Workspace / day</dt>
+              <dd>{plan.max_messages_per_day_per_tenant.toLocaleString()} outbound messages</dd>
+            </div>
+            <div className="portal-detail-row">
+              <dt>Plan period</dt>
+              <dd>
+                {subscription.current_period_start
+                  ? new Date(subscription.current_period_start).toLocaleDateString()
+                  : "Not set"}
+                {" — "}
+                {subscription.current_period_end
+                  ? new Date(subscription.current_period_end).toLocaleDateString()
+                  : "Not set"}
+              </dd>
             </div>
           </div>
-        </div>
+          <div className="mt-4">
+            <PortalNotice tone="info">
+              These are policy ceilings, not a guarantee of delivery volume. Mail policy and abuse controls can still refuse traffic that violates workspace or sender rules.
+            </PortalNotice>
+          </div>
+        </PortalCard>
+
+        <PortalCard title="Included capabilities" subtitle="Features enabled by this plan.">
+          <div className="portal-plan-features">
+            <Feature label="Spam filter & quarantine" included={plan.includes_spam_quarantine} />
+            <Feature label="Audit logs" included={plan.includes_audit_logs} />
+            <Feature label="Mail queue visibility" included={plan.includes_queue_visibility} />
+            <Feature label="Backup controls" included={plan.includes_backup_controls} />
+            <Feature label="Team roles & permissions" included={plan.includes_team_roles} />
+          </div>
+
+          <div className="mt-5">
+            <PortalNotice tone="success">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>All values on this page are read from your real MateMail subscription and usage state.</span>
+            </PortalNotice>
+          </div>
+        </PortalCard>
       </div>
     </div>
   );
