@@ -1,10 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  AlertCircle,
+  Building2,
+  CheckCircle2,
+  CreditCard,
+  KeyRound,
+  Link2,
+  LockKeyhole,
+  RefreshCw,
+  Settings2,
+  ShieldAlert,
+  Users,
+} from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { api, ApiError, apiRequest } from "@/lib/api";
-import { CheckCircle2, Key, Settings } from "lucide-react";
+import { apiRequest } from "@/lib/api";
+import {
+  PortalButton,
+  PortalCard,
+  PortalCopyButton,
+  PortalNotice,
+  PortalPageHeading,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface WorkspaceDetail {
   id: string;
@@ -15,223 +36,330 @@ interface WorkspaceDetail {
   domain_count: number;
   mailbox_count: number;
   member_count: number;
-  my_role: string;
+  my_role: "owner" | "admin" | "support" | "read_only";
+  approved_at: string | null;
+  review_reason: string;
+  outbound_disabled: boolean;
   created_at: string;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  trial:     "bg-cyan-50 text-cyan-700 ring-cyan-600/20",
-  active:    "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  past_due:  "bg-amber-50 text-amber-700 ring-amber-600/20",
-  suspended: "bg-red-50 text-red-700 ring-red-600/20",
-  cancelled: "bg-slate-100 text-slate-500 ring-slate-400/20",
-};
+function pretty(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
 
 export default function SettingsPage() {
-  const { tenant, setAuthResult } = useAuth();
+  const { tenant, switchWorkspace } = useAuth();
   const [workspace, setWorkspace] = useState<WorkspaceDetail | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Rename state
+  const [loadError, setLoadError] = useState("");
   const [nameEdit, setNameEdit] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [renameError, setRenameError] = useState("");
   const [renameSuccess, setRenameSuccess] = useState(false);
 
-  async function fetchWorkspace() {
+  const fetchWorkspace = useCallback(async (showLoading = true) => {
     if (!tenant?.id) return;
-    setLoading(true);
+    if (showLoading) setLoading(true);
+    setLoadError("");
     try {
-      const res = await apiRequest(`/api/workspaces/${tenant.id}/`);
-      if (res.ok) {
-        const data = await res.json();
+      const response = await apiRequest("/api/workspaces/" + tenant.id + "/");
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
         setWorkspace(data);
         setNameEdit(data.name);
+      } else {
+        setLoadError(data?.detail ?? "Workspace settings could not be loaded.");
       }
+    } catch {
+      setLoadError("Workspace settings could not be loaded.");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
-  }
+  }, [tenant?.id]);
 
-  useEffect(() => { fetchWorkspace(); }, [tenant?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!tenant?.id) {
+      setLoading(false);
+      return;
+    }
+    void (async () => {
+      await fetchWorkspace(false);
+      setLoading(false);
+    })();
+  }, [fetchWorkspace, tenant?.id]);
 
-  async function handleRename(e: React.FormEvent) {
-    e.preventDefault();
-    if (!tenant?.id || !nameEdit.trim()) return;
+  async function renameWorkspace(event: React.FormEvent) {
+    event.preventDefault();
+    if (!tenant?.id || !workspace || !nameEdit.trim()) return;
     setRenameError("");
     setRenameSuccess(false);
     setRenaming(true);
     try {
-      const res = await apiRequest(`/api/workspaces/${tenant.id}/`, {
+      const response = await apiRequest("/api/workspaces/" + tenant.id + "/", {
         method: "PATCH",
         body: JSON.stringify({ name: nameEdit.trim() }),
       });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
         setWorkspace(data);
+        setNameEdit(data.name);
         setRenameSuccess(true);
-        setTimeout(() => setRenameSuccess(false), 3000);
+        try {
+          await switchWorkspace(tenant.id);
+        } catch {
+          // The persisted rename succeeded even if refreshing the auth tenant
+          // brief fails. A later session refresh will pick up the new name.
+        }
       } else {
-        const body = await res.json().catch(() => ({}));
-        setRenameError(body.detail ?? "Failed to rename workspace.");
+        setRenameError(data?.detail ?? "Workspace name could not be changed.");
       }
-    } catch (err) {
-      if (err instanceof ApiError) setRenameError(err.message);
+    } catch {
+      setRenameError("Workspace name could not be changed.");
     } finally {
       setRenaming(false);
     }
   }
 
-  const canEdit = workspace?.my_role === "owner" || workspace?.my_role === "admin";
-
   if (loading) {
-    return <div className="p-6 text-sm text-slate-400">Loading…</div>;
+    return (
+      <div className="portal-page">
+        <PortalSkeleton className="mb-5 h-20 w-full" />
+        <PortalSkeleton className="h-[430px] w-full" />
+      </div>
+    );
   }
 
-  if (!workspace) {
-    return <div className="p-6 text-sm text-slate-500">Could not load workspace settings.</div>;
+  if (!workspace || loadError) {
+    return (
+      <div className="portal-page">
+        <PortalPageHeading title="Workspace settings" description="Manage the configuration stored for this organization." />
+        <PortalNotice tone="danger">{loadError || "Workspace settings could not be loaded."}</PortalNotice>
+      </div>
+    );
   }
+
+  const canEdit = workspace.my_role === "owner" || workspace.my_role === "admin";
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-2xl">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Settings className="h-5 w-5 text-slate-400" />
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Settings</h1>
-          <p className="text-sm text-slate-500">Workspace configuration</p>
-        </div>
-      </div>
+    <div className="portal-page">
+      <PortalPageHeading
+        title="Workspace settings"
+        description="Keep your organization identity and access entry points in one place."
+        actions={
+          <PortalButton type="button" variant="secondary" onClick={() => fetchWorkspace(true)}>
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
+            Refresh
+          </PortalButton>
+        }
+      />
 
-      {/* Workspace info */}
-      <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
-        <InfoRow label="Workspace ID">
-          <span className="font-mono text-xs text-slate-500">{workspace.id}</span>
-        </InfoRow>
-        <InfoRow label="URL slug">
-          <span className="font-mono text-sm text-slate-700">{workspace.slug}</span>
-        </InfoRow>
-        <InfoRow label="Plan">
-          <span className="capitalize text-sm text-slate-700">{workspace.plan}</span>
-        </InfoRow>
-        <InfoRow label="Status">
-          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[workspace.status] ?? STATUS_STYLES.active}`}>
-            {workspace.status.replace("_", " ")}
-          </span>
-        </InfoRow>
-        <InfoRow label="Domains">{workspace.domain_count}</InfoRow>
-        <InfoRow label="Mailboxes">{workspace.mailbox_count}</InfoRow>
-        <InfoRow label="Members">{workspace.member_count}</InfoRow>
-        <InfoRow label="Your role">
-          <span className="capitalize text-sm text-slate-700">{workspace.my_role?.replace("_", " ")}</span>
-        </InfoRow>
-        <InfoRow label="Created">
-          {new Date(workspace.created_at).toLocaleDateString(undefined, {
-            year: "numeric", month: "long", day: "numeric",
-          })}
-        </InfoRow>
-      </div>
-
-      {/* Rename workspace */}
-      {canEdit && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
-          <div>
-            <p className="text-sm font-medium text-slate-800">Workspace name</p>
-            <p className="mt-0.5 text-xs text-slate-500">This name appears in the sidebar and email headers.</p>
-          </div>
-
-          {renameError && <p className="text-sm text-red-600">{renameError}</p>}
-
-          <form onSubmit={handleRename} className="flex items-center gap-3">
-            <input
-              type="text"
-              value={nameEdit}
-              onChange={(e) => setNameEdit(e.target.value)}
-              maxLength={255}
-              className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            />
-            <button
-              type="submit"
-              disabled={renaming || !nameEdit.trim() || nameEdit.trim() === workspace.name}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-            >
-              {renaming ? "Saving…" : "Save"}
-            </button>
-          </form>
-
-          {renameSuccess && (
-            <p className="flex items-center gap-1.5 text-sm text-emerald-600">
-              <CheckCircle2 className="h-4 w-4" />
-              Workspace renamed successfully.
-            </p>
-          )}
+      {workspace.status === "pending_approval" && (
+        <div className="mb-5">
+          <PortalNotice tone="info">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>This workspace is awaiting MateMail approval. You can configure the workspace, but live mail provisioning remains gated.</span>
+          </PortalNotice>
         </div>
       )}
 
-      {/* Read-only note for non-admins */}
-      {!canEdit && (
-        <p className="text-sm text-slate-400">
-          Only workspace owners and admins can change settings.
-        </p>
-      )}
-
-      {/* API Keys */}
-      {canEdit && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-slate-800">API Keys</p>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Generate keys for programmatic access to the MateMail API.
-              </p>
-            </div>
-            <Link
-              href="/app/settings/api-keys"
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Key className="h-3.5 w-3.5" />
-              Manage
-            </Link>
-          </div>
+      {workspace.status === "rejected" && (
+        <div className="mb-5">
+          <PortalNotice tone="danger">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <strong>Workspace approval was not granted.</strong>
+              {workspace.review_reason ? " " + workspace.review_reason : ""}
+            </span>
+          </PortalNotice>
         </div>
       )}
 
-      {/* Connected apps */}
-      {canEdit && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-slate-800">Connected Apps</p>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Connect trusted apps to one exact MateMail mailbox.
-              </p>
-            </div>
-            <Link
-              href="/app/settings/integrations"
-              className="inline-flex items-center rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Manage
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {/* Suspended warning */}
       {workspace.status === "suspended" && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          <strong>Workspace suspended.</strong> Mail sending and receiving is disabled.
-          Contact support to resolve your account status.
+        <div className="mb-5">
+          <PortalNotice tone="danger">
+            <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>This workspace is suspended. Live mail operations are disabled until the account status is resolved.</span>
+          </PortalNotice>
         </div>
       )}
-    </div>
-  );
-}
 
-function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-4 px-4 py-3">
-      <span className="w-32 shrink-0 text-xs text-slate-400">{label}</span>
-      <div className="flex-1 text-sm text-slate-800">{children}</div>
+      {workspace.outbound_disabled && workspace.status !== "suspended" && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Outbound sending is currently disabled for this workspace. Administration and inbound service may remain available.</span>
+          </PortalNotice>
+        </div>
+      )}
+
+      <div className="portal-settings-layout">
+        <div>
+          <div className="portal-settings-intro">
+            <h2>Organization details</h2>
+            <p>These are the real workspace identity fields persisted by MateMail.</p>
+          </div>
+
+          <PortalCard>
+            <div className="portal-org-identity">
+              <span className="portal-workspace-monogram">{workspace.name.slice(0, 2).toUpperCase()}</span>
+              <div>
+                <strong>{workspace.name}</strong>
+                <span>Organization workspace</span>
+              </div>
+              <PortalStatus value={pretty(workspace.status)} />
+            </div>
+
+            <form onSubmit={renameWorkspace}>
+              <div className="portal-field">
+                <label>Workspace name</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={255}
+                  disabled={!canEdit}
+                  value={nameEdit}
+                  onChange={(event) => {
+                    setNameEdit(event.target.value);
+                    setRenameSuccess(false);
+                    setRenameError("");
+                  }}
+                />
+                <div className="portal-field-hint">
+                  {canEdit
+                    ? "Owners and admins can rename the workspace."
+                    : "Your role can view this setting but cannot change it."}
+                </div>
+                {renameError && <div className="portal-field-error">{renameError}</div>}
+              </div>
+
+              <div className="portal-field mt-4">
+                <label>Workspace handle</label>
+                <div className="portal-code-field">
+                  <code>{workspace.slug}</code>
+                  <PortalCopyButton value={workspace.slug} label="Copy workspace handle" />
+                </div>
+                <div className="portal-field-hint">The workspace handle is generated by MateMail and is not editable from the current backend.</div>
+              </div>
+
+              {canEdit && (
+                <div className="portal-detail-actions">
+                  <PortalButton
+                    type="submit"
+                    disabled={
+                      renaming ||
+                      !nameEdit.trim() ||
+                      nameEdit.trim() === workspace.name
+                    }
+                  >
+                    {renaming ? "Saving…" : "Save workspace name"}
+                  </PortalButton>
+                </div>
+              )}
+
+              {renameSuccess && (
+                <div className="mt-4">
+                  <PortalNotice tone="success">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>Workspace name updated.</span>
+                  </PortalNotice>
+                </div>
+              )}
+            </form>
+          </PortalCard>
+        </div>
+
+        <div>
+          <div className="portal-settings-intro">
+            <h2>Workspace facts</h2>
+            <p>Identifiers, access role and current platform state.</p>
+          </div>
+
+          <PortalCard>
+            <dl className="portal-detail-list">
+              <div className="portal-detail-row">
+                <dt>Workspace ID</dt>
+                <dd className="flex items-center gap-2">
+                  <code>{workspace.id}</code>
+                  <PortalCopyButton value={workspace.id} label="Copy workspace ID" />
+                </dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Your role</dt>
+                <dd>{pretty(workspace.my_role)}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Plan key</dt>
+                <dd>{pretty(workspace.plan)}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Domains</dt>
+                <dd>{workspace.domain_count}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Mailboxes</dt>
+                <dd>{workspace.mailbox_count}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Members</dt>
+                <dd>{workspace.member_count}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Approved</dt>
+                <dd>{workspace.approved_at ? new Date(workspace.approved_at).toLocaleString() : "Not yet"}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Outbound sending</dt>
+                <dd>{workspace.outbound_disabled ? "Disabled" : "Not separately restricted"}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Created</dt>
+                <dd>{new Date(workspace.created_at).toLocaleString()}</dd>
+              </div>
+            </dl>
+          </PortalCard>
+        </div>
+      </div>
+
+      <PortalCard
+        className="mt-5"
+        title="People & connections"
+        subtitle="Open the existing MateMail areas that control workspace access and commercial limits."
+      >
+        <div className="portal-settings-links">
+          <Link href="/app/team" className="portal-settings-link">
+            <Users className="h-5 w-5" />
+            <div><strong>Team permissions</strong><span>Members, invitations and workspace roles</span></div>
+          </Link>
+          <Link href="/app/settings/api-keys" className="portal-settings-link">
+            <KeyRound className="h-5 w-5" />
+            <div><strong>API keys</strong><span>Programmatic access and scoped credentials</span></div>
+          </Link>
+          <Link href="/app/settings/integrations" className="portal-settings-link">
+            <Link2 className="h-5 w-5" />
+            <div><strong>Connected Apps</strong><span>Trusted applications linked to exact mailboxes</span></div>
+          </Link>
+          <Link href="/app/billing" className="portal-settings-link">
+            <CreditCard className="h-5 w-5" />
+            <div><strong>Billing & usage</strong><span>Plan allowances, usage and policy limits</span></div>
+          </Link>
+        </div>
+      </PortalCard>
+
+      <div className="mt-4">
+        <PortalNotice tone="info">
+          <Settings2 className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>Prototype-only website, country, timezone, mail-default and notification controls are not shown because MateMail does not currently persist those workspace settings.</span>
+        </PortalNotice>
+      </div>
+
+      {!canEdit && (
+        <div className="mt-4">
+          <PortalNotice tone="info">
+            <Building2 className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Your <strong>{pretty(workspace.my_role)}</strong> role has read access to workspace configuration. Only Owner and Admin can rename the workspace.</span>
+          </PortalNotice>
+        </div>
+      )}
     </div>
   );
 }
