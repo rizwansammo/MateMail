@@ -101,10 +101,13 @@
 
 .portal-premium .portal-brand-word {
   font-family: HemiHead, sans-serif !important;
-  font-size: 30px;
+  font-size: 22px;
   font-weight: 700;
+  font-synthesis: none;
   letter-spacing: 0.2px;
   line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
   color: #172a47;
 }
 
@@ -3117,25 +3120,27 @@
 }
 
 
-/* MateMail Hub — exact prototype brand lockup */
+/* MateMail Hub — prototype HemiHead lockup, fitted to the 236px sidebar */
 .portal-premium .portal-brand {
-  min-height: auto;
+  min-height: 66px;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
   gap: 0;
-  padding: 26px 22px 22px;
+  padding: 16px 18px;
 }
 
 .portal-premium .portal-brand-lockup {
+  max-width: 100%;
   padding: 0;
   border: 0;
-  gap: 10px;
+  gap: 9px;
+  white-space: nowrap;
 }
 
 .portal-premium .portal-brand-mark {
-  width: 35px;
-  height: 35px;
+  width: 31px;
+  height: 31px;
   border-radius: 8px;
 }
 
