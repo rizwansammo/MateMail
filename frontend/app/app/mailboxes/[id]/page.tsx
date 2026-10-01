@@ -1,12 +1,32 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
-  ArrowLeft, CheckCircle2, AlertCircle,
-  RefreshCw, Mail, Lock, HardDrive,
+  AlertCircle,
+  ArrowLeft,
+  AtSign,
+  CheckCircle2,
+  CornerUpRight,
+  HardDrive,
+  KeyRound,
+  Mail,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
 } from "lucide-react";
-import { api, ApiError, apiRequest } from "@/lib/api";
+import { useAuth } from "@/contexts/auth-context";
+import { apiRequest } from "@/lib/api";
+import {
+  PortalButton,
+  PortalCard,
+  PortalCopyButton,
+  PortalNotice,
+  PortalProgress,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface Mailbox {
   id: string;
@@ -24,298 +44,440 @@ interface Mailbox {
   created_at: string;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  active:    "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  disabled:  "bg-slate-100  text-slate-500   ring-slate-400/20",
-  suspended: "bg-red-50     text-red-700     ring-red-600/20",
-};
+interface Alias {
+  id: string;
+  destination_mailbox: string | null;
+  destination_email: string;
+}
+
+interface ForwardingRule {
+  id: string;
+  source_mailbox: string;
+}
+
+function initials(value: string) {
+  const parts = value.split(/[\s@._-]+/).filter(Boolean).slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase()).join("") || "MB";
+}
+
+function formatStorage(mb: number) {
+  if (mb >= 1024) {
+    const gb = mb / 1024;
+    return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
+  }
+  return `${mb} MB`;
+}
 
 export default function MailboxDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const { user, tenant } = useAuth();
 
   const [mailbox, setMailbox] = useState<Mailbox | null>(null);
+  const [aliases, setAliases] = useState<Alias[]>([]);
+  const [forwarding, setForwarding] = useState<ForwardingRule[]>([]);
+  const [myRole, setMyRole] = useState("");
+  const [workspaceStatus, setWorkspaceStatus] = useState(tenant?.status || "");
   const [loading, setLoading] = useState(true);
-
-  // SSO state
-
-  // Status toggle state
   const [statusLoading, setStatusLoading] = useState(false);
-
-  // Re-provision state
   const [reprovOpen, setReprovOpen] = useState(false);
   const [reprovPassword, setReprovPassword] = useState("");
   const [reprovLoading, setReprovLoading] = useState(false);
-  const [reprovError, setReprovError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [actionFailed, setActionFailed] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchMailbox = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await apiRequest(`/api/mailboxes/${params.id}/`);
-      if (res.ok) setMailbox(await res.json());
-    } finally {
-      setLoading(false);
-    }
+    const [mailboxResponse, aliasResponse, forwardingResponse] = await Promise.all([
+      apiRequest(`/api/mailboxes/${params.id}/`),
+      apiRequest("/api/aliases/"),
+      apiRequest("/api/forwarding/"),
+    ]);
+    if (mailboxResponse.ok) setMailbox(await mailboxResponse.json());
+    if (aliasResponse.ok) setAliases(await aliasResponse.json());
+    if (forwardingResponse.ok) setForwarding(await forwardingResponse.json());
   }, [params.id]);
 
-  useEffect(() => { fetchMailbox(); }, [fetchMailbox]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await Promise.all([
+          fetchMailbox(),
+          tenant?.id
+            ? apiRequest(`/api/workspaces/${tenant.id}/stats/`)
+                .then(async (response) => response.ok ? response.json() : null)
+                .then((data) => {
+                  if (cancelled) return;
+                  if (data?.my_role) setMyRole(data.my_role);
+                  if (data?.tenant_status) setWorkspaceStatus(data.tenant_status);
+                })
+            : Promise.resolve(),
+        ]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchMailbox, tenant?.id]);
+
+  const canAdmin = myRole === "owner" || myRole === "admin";
+  const canProvision =
+    canAdmin &&
+    !!user?.email_verified &&
+    workspaceStatus === "active";
+
+  const linkedAliases = useMemo(
+    () => mailbox ? aliases.filter((alias) => alias.destination_mailbox === mailbox.id) : [],
+    [aliases, mailbox]
+  );
+  const linkedForwarding = useMemo(
+    () => mailbox ? forwarding.filter((rule) => rule.source_mailbox === mailbox.id) : [],
+    [forwarding, mailbox]
+  );
 
   async function toggleStatus() {
-    if (!mailbox || mailbox.status === "suspended") return;
-    const newStatus = mailbox.status === "active" ? "disabled" : "active";
+    if (!mailbox || !canAdmin || mailbox.status === "suspended") return;
     setStatusLoading(true);
+    setActionMessage("");
+    setActionFailed(false);
     try {
-      const res = await apiRequest(`/api/mailboxes/${params.id}/status/`, {
+      const response = await apiRequest(`/api/mailboxes/${params.id}/status/`, {
         method: "PATCH",
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({
+          status: mailbox.status === "active" ? "disabled" : "active",
+        }),
       });
-      if (res.ok) setMailbox(await res.json());
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        setMailbox(data);
+        setActionMessage(
+          data.status === "active"
+            ? "Mailbox enabled successfully."
+            : "Mailbox disabled successfully."
+        );
+      } else {
+        setActionFailed(true);
+        setActionMessage(data?.detail ?? "Mailbox status could not be changed.");
+      }
+    } catch {
+      setActionFailed(true);
+      setActionMessage("Mailbox status could not be changed.");
     } finally {
       setStatusLoading(false);
     }
   }
 
-  async function reprovision(e: React.FormEvent) {
-    e.preventDefault();
-    setReprovError("");
+  async function reprovision(event: React.FormEvent) {
+    event.preventDefault();
+    if (!mailbox || !canProvision) return;
+    setActionMessage("");
+    setActionFailed(false);
     setReprovLoading(true);
     try {
-      const res = await apiRequest(`/api/mailboxes/${params.id}/reprovision/`, {
+      const response = await apiRequest(`/api/mailboxes/${params.id}/reprovision/`, {
         method: "POST",
         body: JSON.stringify({ password: reprovPassword }),
       });
-      if (res.ok) {
-        setMailbox(await res.json());
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        setMailbox(data);
         setReprovOpen(false);
         setReprovPassword("");
+        setActionMessage("Mailbox password and mail-service state were updated.");
       } else {
-        const body = await res.json().catch(() => ({}));
-        setReprovError(body.detail ?? "Re-provisioning failed.");
+        setActionFailed(true);
+        setActionMessage(data?.detail ?? "Re-provisioning failed.");
       }
-    } catch (err) {
-      if (err instanceof ApiError) setReprovError(err.message);
+    } catch {
+      setActionFailed(true);
+      setActionMessage("Re-provisioning failed.");
     } finally {
       setReprovLoading(false);
     }
   }
 
-  if (loading) {
-    return <div className="py-24 text-center text-sm text-slate-400">Loading mailbox…</div>;
+  async function deleteMailbox() {
+    if (!mailbox || !canAdmin) return;
+    setDeleting(true);
+    setActionMessage("");
+    setActionFailed(false);
+    try {
+      const response = await apiRequest(`/api/mailboxes/${params.id}/`, { method: "DELETE" });
+      if (response.ok || response.status === 204) {
+        router.push("/app/mailboxes");
+        return;
+      }
+      const data = await response.json().catch(() => null);
+      setActionFailed(true);
+      setActionMessage(data?.detail ?? "Mailbox could not be removed.");
+    } catch {
+      setActionFailed(true);
+      setActionMessage("Mailbox could not be removed.");
+    } finally {
+      setDeleting(false);
+    }
   }
 
-  if (!mailbox) {
+  if (loading) {
     return (
-      <div className="py-24 text-center">
-        <p className="text-sm text-slate-500">Mailbox not found.</p>
-        <button
-          onClick={() => router.push("/app/mailboxes")}
-          className="mt-3 text-sm text-cyan-600 hover:text-cyan-700"
-        >
-          Back to mailboxes
-        </button>
+      <div className="portal-page">
+        <PortalSkeleton className="mb-5 h-24 w-full" />
+        <PortalSkeleton className="h-[420px] w-full" />
       </div>
     );
   }
 
-  const usagePct = mailbox.quota_mb > 0
+  if (!mailbox) {
+    return (
+      <div className="portal-page">
+        <PortalCard>
+          <div className="portal-empty">
+            <div>
+              <Mail className="mx-auto h-7 w-7 text-[var(--portal-faint)]" />
+              <h3>Mailbox not found</h3>
+              <p>This mailbox is not available in the current workspace.</p>
+              <div className="mt-4">
+                <Link href="/app/mailboxes" className="portal-button secondary">Back to mailboxes</Link>
+              </div>
+            </div>
+          </div>
+        </PortalCard>
+      </div>
+    );
+  }
+
+  const usagePercent = mailbox.quota_mb
     ? Math.min(100, Math.round((mailbox.storage_used_mb / mailbox.quota_mb) * 100))
     : 0;
-  const usageColor = usagePct >= 90 ? "bg-red-500" : usagePct >= 70 ? "bg-amber-500" : "bg-emerald-500";
-  const canToggle = mailbox.status !== "suspended";
+  const availableMb = Math.max(0, mailbox.quota_mb - mailbox.storage_used_mb);
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <button
-            onClick={() => router.push("/app/mailboxes")}
-            className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Mailboxes
-          </button>
-          <h1 className="text-xl font-semibold text-slate-900">{mailbox.email}</h1>
-          <div className="flex items-center gap-2">
-            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[mailbox.status]}`}>
-              {mailbox.status}
+    <div className="portal-page">
+      <Link href="/app/mailboxes" className="portal-back-link">
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Mailboxes
+      </Link>
+
+      <div className="portal-mailbox-hero">
+        <span className="portal-avatar">{initials(mailbox.full_name || mailbox.email)}</span>
+        <div className="min-w-0 flex-1">
+          <h1>{mailbox.full_name || mailbox.email}</h1>
+          <p>
+            {mailbox.email}
+            <PortalCopyButton value={mailbox.email} label="Copy mailbox address" />
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <PortalStatus value={mailbox.status} />
+            <span className={"portal-service-state " + (mailbox.mail_service_ready ? "ready" : "waiting")}>
+              {mailbox.mail_service_ready
+                ? <CheckCircle2 className="h-3.5 w-3.5" />
+                : <AlertCircle className="h-3.5 w-3.5" />}
+              {mailbox.mail_service_ready ? "Mail service ready" : "Mail service not ready"}
             </span>
-            {mailbox.mail_service_ready ? (
-              <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
-                <CheckCircle2 className="h-3.5 w-3.5" /> Provisioned
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-xs text-amber-500">
-                <AlertCircle className="h-3.5 w-3.5" /> Not provisioned
-              </span>
-            )}
           </div>
         </div>
-
-        {/* The "Open Webmail" button was removed in P11.
-            It called /api/webmail/sso/, which minted a mailbox login token for
-            any mailbox in the organization — letting an administrator open an
-            employee's mail. Provisioning a mailbox and reading it are different
-            powers. The mailbox user signs in themselves at
-            postbox.matemail.online; see DEC-049. */}
       </div>
 
+      {actionMessage && (
+        <div className="mb-5">
+          <PortalNotice tone={actionFailed ? "danger" : "success"}>{actionMessage}</PortalNotice>
+        </div>
+      )}
 
-      {/* Info card */}
-      <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
-        <InfoRow icon={<Mail className="h-4 w-4 text-slate-400" />} label="Email">
-          {mailbox.email}
-        </InfoRow>
-        <InfoRow icon={<span className="h-4 w-4 text-slate-400 text-xs font-mono">Fn</span>} label="Display name">
-          {mailbox.full_name}
-        </InfoRow>
-        <InfoRow icon={<HardDrive className="h-4 w-4 text-slate-400" />} label="Storage quota">
-          <div className="flex items-center gap-3">
-            <div className="h-2 w-28 rounded-full bg-slate-100 overflow-hidden">
-              <div className={`h-full rounded-full ${usageColor}`} style={{ width: `${usagePct}%` }} />
+      <div className="portal-mailbox-grid">
+        <div className="space-y-5">
+          <PortalCard title="Mailbox details" subtitle="Current mailbox identity and service state.">
+            <dl className="portal-detail-list">
+              <div className="portal-detail-row">
+                <dt>Email address</dt>
+                <dd>{mailbox.email}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Domain</dt>
+                <dd>{mailbox.domain_name}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Display name</dt>
+                <dd>{mailbox.full_name}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Created</dt>
+                <dd>{new Date(mailbox.created_at).toLocaleString()}</dd>
+              </div>
+              <div className="portal-detail-row">
+                <dt>Last login</dt>
+                <dd>{mailbox.last_login ? new Date(mailbox.last_login).toLocaleString() : "Never"}</dd>
+              </div>
+            </dl>
+          </PortalCard>
+
+          <PortalCard title="Mailbox storage" subtitle="Usage reported by the MateMail backend.">
+            <div className="portal-storage">
+              <div className="portal-storage-head">
+                <strong>{formatStorage(mailbox.storage_used_mb)} used</strong>
+                <span>{formatStorage(mailbox.quota_mb)} quota</span>
+              </div>
+              <div className="portal-storage-meter">
+                <span style={{ width: `${usagePercent}%` }} />
+              </div>
+              <small>{formatStorage(availableMb)} available · {usagePercent}% used</small>
             </div>
-            <span className="text-sm text-slate-500">
-              {Math.round(mailbox.storage_used_mb / 1024 * 10) / 10} GB of {Math.round(mailbox.quota_mb / 1024)} GB used
+          </PortalCard>
+
+          <PortalCard title="Aliases & forwarding" subtitle="Routing that currently references this mailbox.">
+            <div className="portal-routing-summary">
+              <Link href="/app/aliases" className="portal-routing-link">
+                <AtSign className="h-4 w-4" />
+                <div>
+                  <strong>{linkedAliases.length} linked {linkedAliases.length === 1 ? "alias" : "aliases"}</strong>
+                  <small>Addresses delivering directly to this mailbox</small>
+                </div>
+              </Link>
+              <Link href="/app/forwarding" className="portal-routing-link">
+                <CornerUpRight className="h-4 w-4" />
+                <div>
+                  <strong>{linkedForwarding.length} forwarding {linkedForwarding.length === 1 ? "rule" : "rules"}</strong>
+                  <small>Incoming messages routed onward from this mailbox</small>
+                </div>
+              </Link>
+            </div>
+          </PortalCard>
+        </div>
+
+        <aside className="space-y-5">
+          <PortalCard title="Mail service" subtitle="Provisioning and credential management.">
+            <div className="flex items-start gap-2">
+              {mailbox.mail_service_ready ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--portal-success)]" />
+              ) : (
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--portal-warning)]" />
+              )}
+              <div>
+                <strong className="text-[11px] text-[var(--portal-text-strong)]">
+                  {mailbox.mail_service_ready ? "Provisioned and ready" : "Needs provisioning attention"}
+                </strong>
+                <p className="mt-1 text-[9px] leading-5 text-[var(--portal-muted)]">
+                  {mailbox.mail_service_ready
+                    ? "Use re-provisioning only when setting a new mailbox password."
+                    : "Re-provision with a password to reconcile this mailbox with the Mail Engine."}
+                </p>
+              </div>
+            </div>
+
+            {mailbox.mail_service_message && (
+              <div className="mt-4">
+                <PortalNotice tone="danger">{mailbox.mail_service_message}</PortalNotice>
+              </div>
+            )}
+
+            {canAdmin && (
+              <div className="portal-detail-actions">
+                <PortalButton
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setReprovOpen((open) => !open)}
+                  disabled={!canProvision}
+                >
+                  <KeyRound className="h-4 w-4" />
+                  {mailbox.mail_service_ready ? "Change password" : "Re-provision"}
+                </PortalButton>
+              </div>
+            )}
+
+            {reprovOpen && (
+              <form onSubmit={reprovision} className="mt-4">
+                <div className="portal-field">
+                  <label>New mailbox password</label>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    minLength={10}
+                    required
+                    value={reprovPassword}
+                    onChange={(event) => setReprovPassword(event.target.value)}
+                    placeholder="At least 10 characters"
+                  />
+                  <div className="portal-field-hint">MateMail never stores this password.</div>
+                </div>
+                <div className="portal-detail-actions">
+                  <PortalButton type="submit" disabled={reprovLoading || reprovPassword.length < 10}>
+                    <RefreshCw className={"h-4 w-4 " + (reprovLoading ? "animate-spin" : "")} />
+                    {reprovLoading ? "Saving…" : "Set password"}
+                  </PortalButton>
+                  <PortalButton
+                    type="button"
+                    variant="secondary"
+                    disabled={reprovLoading}
+                    onClick={() => {
+                      setReprovOpen(false);
+                      setReprovPassword("");
+                    }}
+                  >
+                    Cancel
+                  </PortalButton>
+                </div>
+              </form>
+            )}
+          </PortalCard>
+
+          <PortalCard title="Mailbox access" subtitle="Enable or disable mail service for this address.">
+            {mailbox.status === "suspended" ? (
+              <PortalNotice tone="danger">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>This mailbox is suspended by platform policy and cannot be toggled from the workspace.</span>
+              </PortalNotice>
+            ) : (
+              <div className="portal-switch-row">
+                <div>
+                  <strong>{mailbox.status === "active" ? "Mailbox enabled" : "Mailbox disabled"}</strong>
+                  <p>{mailbox.status === "active" ? "Sending and receiving are allowed." : "Activate to resume sending and receiving."}</p>
+                </div>
+                <button
+                  type="button"
+                  className="portal-toggle"
+                  data-on={mailbox.status === "active"}
+                  disabled={!canAdmin || statusLoading}
+                  onClick={toggleStatus}
+                  aria-label={mailbox.status === "active" ? "Disable mailbox" : "Enable mailbox"}
+                />
+              </div>
+            )}
+          </PortalCard>
+
+          <PortalNotice tone="info">
+            <Mail className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Reading mailbox contents is separate from administration. The old administrator Webmail SSO was removed; mailbox users sign in to PostBox with their own credentials.
             </span>
-          </div>
-        </InfoRow>
-        <InfoRow icon={<span className="h-4 w-4" />} label="Last login">
-          {mailbox.last_login ? new Date(mailbox.last_login).toLocaleString() : "Never"}
-        </InfoRow>
-        <InfoRow icon={<span className="h-4 w-4" />} label="Created">
-          {new Date(mailbox.created_at).toLocaleDateString()}
-        </InfoRow>
+          </PortalNotice>
+        </aside>
       </div>
 
-      {/* Mail service status */}
-      <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-slate-800">Mail service</p>
-          {!mailbox.mail_service_ready && (
-            <button
-              onClick={() => setReprovOpen(true)}
-              className="text-xs font-medium text-cyan-600 hover:text-cyan-700"
-            >
-              Provision now →
-            </button>
+      {canAdmin && (
+        <div className="portal-danger-zone">
+          <strong>Delete mailbox</strong>
+          <p>Removing a mailbox permanently removes the workspace record and queues Mail Engine cleanup first. Linked aliases and forwarding rules may also be affected by database relationships.</p>
+          {!confirmDelete ? (
+            <PortalButton type="button" variant="danger" onClick={() => setConfirmDelete(true)}>
+              <Trash2 className="h-4 w-4" />
+              Delete mailbox
+            </PortalButton>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <PortalButton type="button" variant="secondary" disabled={deleting} onClick={() => setConfirmDelete(false)}>
+                Cancel
+              </PortalButton>
+              <PortalButton type="button" variant="danger" disabled={deleting} onClick={deleteMailbox}>
+                {deleting ? "Removing…" : "Confirm deletion"}
+              </PortalButton>
+            </div>
           )}
         </div>
-        {mailbox.mail_service_message && (
-          <p className="rounded bg-red-50 px-3 py-2 text-xs font-mono text-red-700">
-            {mailbox.mail_service_message}
-          </p>
-        )}
-        {mailbox.mail_service_ready && (
-          <button
-            onClick={() => setReprovOpen(true)}
-            className="text-xs text-slate-400 hover:text-slate-600"
-          >
-            Change password / re-provision
-          </button>
-        )}
-      </div>
-
-      {/* Re-provision form */}
-      {reprovOpen && (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
-          <p className="text-sm font-medium text-slate-800">
-            {mailbox.mail_service_ready ? "Change mailbox password" : "Set mailbox password"}
-          </p>
-          <p className="text-xs text-slate-500">
-            The new password takes effect immediately. MateMail never stores it.
-          </p>
-          {reprovError && <p className="text-sm text-red-600">{reprovError}</p>}
-          <form onSubmit={reprovision} className="space-y-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">New password</label>
-              <input
-                type="password"
-                placeholder="Min 10 characters"
-                value={reprovPassword}
-                onChange={(e) => setReprovPassword(e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-              />
-            </div>
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={reprovLoading || reprovPassword.length < 10}
-                className="rounded-md bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
-              >
-                {reprovLoading ? "Saving…" : "Set password"}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setReprovOpen(false); setReprovPassword(""); setReprovError(""); }}
-                className="rounded-md border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
       )}
-
-      {/* Enable / Disable */}
-      {canToggle && (
-        <div className="rounded-lg border border-slate-200 bg-white p-4 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-slate-800">
-              {mailbox.status === "active" ? "Disable mailbox" : "Enable mailbox"}
-            </p>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {mailbox.status === "active"
-                ? "The mailbox will stop accepting and sending mail immediately."
-                : "Re-activate this mailbox so it can send and receive mail."}
-            </p>
-          </div>
-          <button
-            onClick={toggleStatus}
-            disabled={statusLoading}
-            className={`rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 ${
-              mailbox.status === "active"
-                ? "border border-red-300 text-red-700 hover:bg-red-50"
-                : "border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-            }`}
-          >
-            {statusLoading
-              ? "Saving…"
-              : mailbox.status === "active" ? "Disable" : "Enable"}
-          </button>
-        </div>
-      )}
-
-      {mailbox.status === "suspended" && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          This mailbox is suspended. Contact your workspace owner to resolve the account status.
-        </div>
-      )}
-
-      {/* Password note */}
-      <div className="flex items-start gap-2 text-xs text-slate-400">
-        <Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-        <span>Mailbox passwords are never stored here. Set or change them via the &quot;Set password&quot; form above.</span>
-      </div>
-    </div>
-  );
-}
-
-function InfoRow({
-  icon,
-  label,
-  children,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center gap-4 px-4 py-3">
-      <div className="flex items-center gap-2 w-32 shrink-0">
-        {icon}
-        <span className="text-xs text-slate-400">{label}</span>
-      </div>
-      <div className="flex-1 text-sm text-slate-800">{children}</div>
     </div>
   );
 }
