@@ -128,9 +128,9 @@ export function AuthButton({
 }) {
   return (
     <button
-      className={"auth-button" + (secondary ? " secondary" : "")}
-      disabled={loading || props.disabled}
       {...props}
+      className={"auth-button" + (secondary ? " secondary" : "") + (props.className ? " " + props.className : "")}
+      disabled={loading || props.disabled}
     >
       {loading && <Loader2 className="auth-loading-spin h-4 w-4" aria-hidden="true" />}
       {children}
