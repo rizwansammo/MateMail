@@ -59,7 +59,7 @@ function fieldError(value: unknown) {
 }
 
 export default function AliasesPage() {
-  const { tenant } = useAuth();
+  const { user, tenant } = useAuth();
   const [aliases, setAliases] = useState<Alias[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
@@ -150,7 +150,7 @@ export default function AliasesPage() {
   }, [aliases, query]);
 
   const canAdmin = myRole === "owner" || myRole === "admin";
-  const canCreate = canAdmin && workspaceStatus === "active" && domains.length > 0;
+  const canCreate = canAdmin && !!user?.email_verified && workspaceStatus === "active" && domains.length > 0;
 
   async function createAlias(event: React.FormEvent) {
     event.preventDefault();
@@ -265,6 +265,15 @@ export default function AliasesPage() {
           </PortalButton>
         }
       />
+
+      {!user?.email_verified && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Verify your account email before provisioning new aliases.</span>
+          </PortalNotice>
+        </div>
+      )}
 
       {workspaceStatus !== "active" && (
         <div className="mb-5">
