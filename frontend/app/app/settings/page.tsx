@@ -78,14 +78,11 @@ export default function SettingsPage() {
   }, [tenant?.id]);
 
   useEffect(() => {
-    if (!tenant?.id) {
-      setLoading(false);
-      return;
-    }
-    void (async () => {
-      await fetchWorkspace(false);
-      setLoading(false);
-    })();
+    if (!tenant?.id) return;
+    const timer = window.setTimeout(() => {
+      void fetchWorkspace(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchWorkspace, tenant?.id]);
 
   async function renameWorkspace(event: React.FormEvent) {
