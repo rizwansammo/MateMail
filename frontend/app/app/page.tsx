@@ -230,10 +230,17 @@ export default function DashboardPage() {
         title="Workspace overview"
         description="A clear view of your organization’s email."
         actions={
-          <Link href="/app/mailboxes" className="portal-button primary">
-            <Mail className="h-4 w-4" />
-            Create mailbox
-          </Link>
+          user?.email_verified && stats?.tenant_status === "active" ? (
+            <Link href="/app/mailboxes" className="portal-button primary">
+              <Mail className="h-4 w-4" />
+              Create mailbox
+            </Link>
+          ) : (
+            <PortalButton type="button" disabled>
+              <Mail className="h-4 w-4" />
+              Create mailbox
+            </PortalButton>
+          )
         }
       />
 
@@ -331,11 +338,11 @@ export default function DashboardPage() {
                 </div>
                 <div className="portal-health-row">
                   <span><ShieldCheck className="h-4 w-4" />Ownership</span>
-                  <span>{domains.filter((item) => item.ownership_verified).length}/{stats.domain_count} verified</span>
+                  <span>{domains.length ? `${domains.filter((item) => item.ownership_verified).length}/${stats.domain_count} verified` : "Awaiting domain data"}</span>
                 </div>
                 <div className="portal-health-row">
                   <span><Mail className="h-4 w-4" />Mail services</span>
-                  <span>{domains.filter((item) => item.mail_service_ready).length}/{stats.domain_count} ready</span>
+                  <span>{domains.length ? `${domains.filter((item) => item.mail_service_ready).length}/${stats.domain_count} ready` : "Awaiting domain data"}</span>
                 </div>
               </div>
             </>
