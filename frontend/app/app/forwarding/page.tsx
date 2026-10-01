@@ -275,7 +275,7 @@ export default function ForwardingPage() {
           subtitle="Forward new incoming mail from one mailbox to one destination address."
         >
           <form onSubmit={createRule}>
-            {addErrors.detail && (
+            {fieldError(addErrors.detail) && (
               <div className="mb-4"><PortalNotice tone="danger">{fieldError(addErrors.detail)}</PortalNotice></div>
             )}
 
@@ -287,7 +287,7 @@ export default function ForwardingPage() {
                     <option key={mailbox.id} value={mailbox.id}>{mailbox.email}</option>
                   ))}
                 </select>
-                {addErrors.source_mailbox_id && <div className="portal-field-error">{fieldError(addErrors.source_mailbox_id)}</div>}
+                {fieldError(addErrors.source_mailbox_id) && <div className="portal-field-error">{fieldError(addErrors.source_mailbox_id)}</div>}
               </div>
 
               <div className="portal-field">
@@ -299,7 +299,7 @@ export default function ForwardingPage() {
                   onChange={(event) => setDestinationEmail(event.target.value)}
                   placeholder="teammate@example.com"
                 />
-                {addErrors.destination_email && <div className="portal-field-error">{fieldError(addErrors.destination_email)}</div>}
+                {fieldError(addErrors.destination_email) && <div className="portal-field-error">{fieldError(addErrors.destination_email)}</div>}
               </div>
 
               <div className="full">
