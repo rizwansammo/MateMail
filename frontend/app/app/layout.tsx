@@ -1,50 +1,104 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity,
-  Archive,
-  Clock,
+  AtSign,
+  ChevronDown,
+  ChevronRight,
+  CircleCheckBig,
   CreditCard,
   DatabaseBackup,
   ExternalLink,
   Globe2,
-  Layers,
+  KeyRound,
+  LayoutDashboard,
+  ListOrdered,
   LogOut,
+  Mail,
+  Menu,
+  PlugZap,
+  ScrollText,
   Send,
-  Settings,
-  Shield,
+  Settings2,
+  ShieldAlert,
+  Sparkles,
   Users,
-  UserPlus,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { WorkspaceThemeProvider, WorkspaceThemeToggle } from "@/components/workspace/theme";
 import { useAuth } from "@/contexts/auth-context";
 import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
-const nav = [
-  { label: "Overview", href: "/app", icon: Activity },
-  { label: "Domains", href: "/app/domains", icon: Globe2 },
-  { label: "Mailboxes", href: "/app/mailboxes", icon: Users },
-  { label: "Aliases", href: "/app/aliases", icon: Layers },
-  { label: "Forwarding", href: "/app/forwarding", icon: Send },
-  // No "DNS Health" entry: /app/dns-health has never existed, so the link 404'd.
-  // Per-domain DNS status lives on /app/domains/[id]. Restore a dedicated
-  // cross-domain page here only once that route is actually built.
-  { label: "Spam", href: "/app/spam", icon: Shield },
-  { label: "Queue", href: "/app/queue", icon: Clock },
-  { label: "Backups", href: "/app/backups", icon: DatabaseBackup },
-  { label: "Billing", href: "/app/billing", icon: CreditCard },
-  { label: "Team", href: "/app/team", icon: UserPlus },
-  { label: "Settings", href: "/app/settings", icon: Settings },
+const navGroups = [
+  {
+    label: "Workspace",
+    items: [
+      { label: "Overview", href: "/app", icon: LayoutDashboard },
+      { label: "Getting started", href: "/app/onboarding", icon: CircleCheckBig },
+      { label: "Domains", href: "/app/domains", icon: Globe2 },
+      { label: "Mailboxes", href: "/app/mailboxes", icon: Mail },
+      { label: "Aliases", href: "/app/aliases", icon: AtSign },
+      { label: "Forwarding", href: "/app/forwarding", icon: Send },
+    ],
+  },
+  {
+    label: "Management",
+    items: [
+      { label: "Team", href: "/app/team", icon: Users },
+      { label: "Billing & usage", href: "/app/billing", icon: CreditCard },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      { label: "Activity logs", href: "/app/logs", icon: ScrollText },
+      { label: "Mail queue", href: "/app/queue", icon: ListOrdered },
+      { label: "Quarantine", href: "/app/spam", icon: ShieldAlert },
+      { label: "Backups", href: "/app/backups", icon: DatabaseBackup },
+    ],
+  },
+  {
+    label: "Configuration",
+    items: [
+      { label: "API keys", href: "/app/settings/api-keys", icon: KeyRound },
+      { label: "Connected apps", href: "/app/settings/integrations", icon: PlugZap },
+      { label: "Settings", href: "/app/settings", icon: Settings2 },
+    ],
+  },
 ];
+
+const allNavItems = navGroups.flatMap((group) => group.items);
+
+function initials(value?: string | null) {
+  return (value || "?")
+    .split(/[\s@._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
+function displayPlan(value?: string | null) {
+  if (!value) return "Workspace";
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function roleLabel(value?: string | null) {
+  if (!value) return "Member";
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user, tenant, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -57,10 +111,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isLoading, isAuthenticated, pathname, router]);
 
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  const activeItem = useMemo(() => {
+    return allNavItems
+      .filter(({ href }) =>
+        href === "/app"
+          ? pathname === href
+          : pathname === href || pathname.startsWith(href + "/")
+      )
+      .sort((a, b) => b.href.length - a.href.length)[0];
+  }, [pathname]);
+
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="h-8 w-8 animate-spin border-2 border-slate-950 border-t-transparent" />
+      <div className="grid min-h-screen place-items-center bg-slate-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-slate-950" />
       </div>
     );
   }
@@ -72,91 +140,158 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     router.push("/login");
   }
 
+  const workspaceName = tenant?.name || "MateMail";
+  const workspaceInitials = initials(workspaceName);
+  const accountName = user?.full_name || user?.email || "Account";
+
+  const accountMenu = (placement: "sidebar" | "topbar") => (
+    <div className={"portal-account-menu " + (placement === "topbar" ? "portal-account-menu-top" : "")}>
+      <div className="portal-account-menu-head">
+        <strong>{accountName}</strong>
+        <span>{user?.email}</span>
+      </div>
+      <Link className="portal-account-action" href="/app/settings">
+        <Settings2 className="h-4 w-4" />
+        Workspace settings
+      </Link>
+      <Link className="portal-account-action" href="/app/settings/api-keys">
+        <KeyRound className="h-4 w-4" />
+        API keys
+      </Link>
+      <Link className="portal-account-action" href="/app/settings/integrations">
+        <PlugZap className="h-4 w-4" />
+        Connected apps
+      </Link>
+      {user?.is_platform_admin && !IS_NETAMATE_EMAIL && (
+        <Link className="portal-account-action" href="/admin">
+          <ExternalLink className="h-4 w-4" />
+          Admin console
+        </Link>
+      )}
+      <div className="portal-theme-wrap">
+        <span>Appearance</span>
+        <WorkspaceThemeToggle />
+      </div>
+      <button className="portal-account-action danger" type="button" onClick={handleLogout}>
+        <LogOut className="h-4 w-4" />
+        Sign out
+      </button>
+    </div>
+  );
+
   return (
     <WorkspaceThemeProvider>
-    <div className="ws flex min-h-screen bg-slate-50 text-slate-950">
-      {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
-        {/* Logo */}
-        <div className="flex h-14 items-center gap-3 border-b border-slate-200 px-5">
-          <BrandMark size={32} preload />
-          <span className="font-black">MateMail</span>
-        </div>
+      <div className="ws portal-premium portal-shell">
+        <button
+          className="portal-overlay"
+          data-open={mobileOpen}
+          aria-label="Close navigation"
+          onClick={() => setMobileOpen(false)}
+        />
 
-        {/* Workspace badge */}
-        {tenant && (
-          <div className="border-b border-slate-100 px-5 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              {IS_NETAMATE_EMAIL ? "Organization" : "Workspace"}
-            </p>
-            <p className="mt-0.5 truncate text-sm font-semibold text-slate-800">
-              {tenant.name}
-            </p>
+        <aside className="portal-sidebar" data-open={mobileOpen}>
+          <div className="portal-brand">
+            <div className="portal-brand-lockup">
+              <BrandMark size={35} preload />
+              <span className="portal-brand-word">MateMail</span>
+            </div>
+            <span className="portal-brand-caption">
+              {IS_NETAMATE_EMAIL ? "MAIL ADMINISTRATION" : "ORGANIZATION PORTAL"}
+            </span>
           </div>
-        )}
 
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto px-3 py-3">
-          {IS_NETAMATE_EMAIL && (
-            <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
-              Mail administration
-            </p>
+          {tenant && (
+            <div className="portal-workspace-card">
+              <span className="portal-workspace-monogram">{workspaceInitials}</span>
+              <span className="portal-workspace-copy">
+                <strong>{workspaceName}</strong>
+                <small>{displayPlan(tenant.plan)} workspace</small>
+              </span>
+            </div>
           )}
-          {nav.map(({ label, href, icon: Icon }) => {
-            const active = pathname === href || (href !== "/app" && pathname.startsWith(href));
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={`flex items-center gap-3 px-3 py-2 text-sm font-semibold transition ${
-                  active
-                    ? "bg-cyan-50 text-cyan-700"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
-                }`}
+
+          <nav className="portal-nav" aria-label="Workspace navigation">
+            {navGroups.map((group) => (
+              <section className="portal-nav-group" key={group.label}>
+                <span className="portal-nav-label">{group.label}</span>
+                <div className="portal-nav-list">
+                  {group.items.map(({ label, href, icon: Icon }) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      className="portal-nav-item"
+                      data-active={activeItem?.href === href}
+                      aria-current={activeItem?.href === href ? "page" : undefined}
+                      onClick={() => setMobileOpen(false)}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>{label}</span>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </nav>
+
+          <div className="portal-sidebar-footer">
+            {tenant && (
+              <div className="portal-plan-mini">
+                <div className="portal-plan-mini-top">
+                  <Sparkles className="h-3.5 w-3.5 text-[var(--portal-primary)]" />
+                  <strong>{displayPlan(tenant.plan)}</strong>
+                  <span>{tenant.status === "active" ? "Active" : displayPlan(tenant.status)}</span>
+                </div>
+              </div>
+            )}
+
+            <details className="portal-account">
+              <summary>
+                <span className="portal-avatar">{initials(accountName)}</span>
+                <span className="portal-account-copy">
+                  <strong>{accountName}</strong>
+                  <small>{roleLabel(tenant?.role)}</small>
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-[var(--portal-faint)]" />
+              </summary>
+              {accountMenu("sidebar")}
+            </details>
+          </div>
+        </aside>
+
+        <div className="portal-main">
+          <header className="portal-topbar">
+            <div className="portal-breadcrumb">
+              <button
+                type="button"
+                className="portal-icon-button portal-mobile-trigger"
+                aria-label="Open navigation"
+                onClick={() => setMobileOpen(true)}
               >
-                <Icon className="h-4 w-4 shrink-0" />
-                {label}
-              </Link>
-            );
-          })}
-        </nav>
+                <Menu className="h-4 w-4" />
+              </button>
+              <span>{workspaceName}</span>
+              <ChevronRight className="h-3.5 w-3.5" />
+              <strong>{activeItem?.label || "Workspace"}</strong>
+            </div>
 
-        {/* User footer */}
-        <div className="border-t border-slate-200 px-5 py-4">
-          <p className="truncate text-xs font-semibold text-slate-700">
-            {user?.full_name || user?.email}
-          </p>
-          <p className="truncate text-xs text-slate-400">{user?.email}</p>
-          {user?.is_platform_admin && !IS_NETAMATE_EMAIL && (
-            <Link
-              href="/admin"
-              className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-red-500 hover:text-red-700"
-            >
-              <ExternalLink className="h-3 w-3" />
-              Admin console
-            </Link>
-          )}
-          <div className="mt-3 border-t border-slate-100 pt-3">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              Appearance
-            </p>
-            <WorkspaceThemeToggle />
-          </div>
-          <button
-            onClick={handleLogout}
-            className="mt-3 flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-rose-600"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            Sign out
-          </button>
+            <div className="portal-top-actions">
+              <details className="portal-account">
+                <summary className="portal-icon-button" aria-label="Account menu">
+                  <span className="portal-avatar">{initials(accountName)}</span>
+                </summary>
+                {accountMenu("topbar")}
+              </details>
+            </div>
+          </header>
+
+          <main className="portal-stage">{children}</main>
+
+          <footer className="portal-footer">
+            <span>MateMail Portal · Organization workspace</span>
+            <span>Secure administration for your email organization</span>
+          </footer>
         </div>
-      </aside>
-
-      {/* Main content */}
-      <main className="flex flex-1 flex-col md:pl-64">
-        {children}
-      </main>
-    </div>
+      </div>
     </WorkspaceThemeProvider>
   );
 }
