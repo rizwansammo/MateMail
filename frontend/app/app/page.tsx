@@ -189,13 +189,10 @@ export default function DashboardPage() {
   const healthScore = useMemo(() => {
     if (!stats?.domain_count) return null;
     if (domains.length) {
-      const total = domains.reduce((sum, domain) => {
-        const ownership = domain.ownership_verified ? 20 : 0;
-        const dns = Math.round((domain.dns_health_score || 0) * 0.6);
-        const service = domain.mail_service_ready ? 20 : 0;
-        return sum + ownership + dns + service;
-      }, 0);
-      return Math.round(total / domains.length);
+      return Math.round(
+        domains.reduce((sum, domain) => sum + (domain.dns_health_score || 0), 0) /
+          domains.length
+      );
     }
     return Math.round((stats.active_domain_count / Math.max(stats.domain_count, 1)) * 100);
   }, [domains, stats]);
@@ -324,7 +321,7 @@ export default function DashboardPage() {
                 <span className="portal-health-ring" />
                 <div>
                   <strong>{healthScore ?? 0}%</strong>
-                  <small>configuration health</small>
+                  <small>average DNS health</small>
                 </div>
               </div>
               <div className="portal-health-rows">
