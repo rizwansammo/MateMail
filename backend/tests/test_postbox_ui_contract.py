@@ -300,7 +300,7 @@ class DedicatedBrandParityTest(SimpleTestCase):
     def test_mailadmin_uses_the_standard_matemail_mark_and_theme(self):
         layout = read("app", "app", "layout.tsx")
         self.assertIn("<BrandMark size={32} preload />", layout)
-        self.assertIn(">MateMail</span>", layout)
+        self.assertIn(">MateMail Hub</span>", layout)
         self.assertNotIn("NetaMateBrand", layout)
         self.assertNotIn("nm-mailadmin", layout)
 
