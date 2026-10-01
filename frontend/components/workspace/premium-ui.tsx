@@ -1,5 +1,6 @@
+import { useState } from "react";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
-import { Inbox } from "lucide-react";
+import { Check, Copy, Inbox } from "lucide-react";
 
 export function PortalPageHeading({
   title,
@@ -34,12 +35,14 @@ export function PortalCard({
   action,
   children,
   className = "",
+  bodyClassName = "",
 }: {
   title?: string;
   subtitle?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  bodyClassName?: string;
 }) {
   return (
     <section className={"portal-card " + className}>
@@ -52,7 +55,7 @@ export function PortalCard({
           {action}
         </div>
       )}
-      <div className="portal-card-body">{children}</div>
+      <div className={"portal-card-body " + bodyClassName}>{children}</div>
     </section>
   );
 }
@@ -80,15 +83,63 @@ export function PortalStatus({ value }: { value: string }) {
   const tone =
     /(active|verified|completed|success|ready|released|protected)/.test(normalized)
       ? "good"
-      : /(pending|warning|attention|retrying|deferred|quarantined|trial)/.test(normalized)
+      : /(pending|warning|attention|retrying|deferred|quarantined|trial|missing)/.test(normalized)
         ? "warn"
         : /(failed|cancelled|canceled|revoked|incorrect|suspended|rejected)/.test(normalized)
           ? "bad"
-          : /(running|queued|checking|processing)/.test(normalized)
+          : /(running|queued|checking|processing|paused)/.test(normalized)
             ? "info"
             : "";
 
   return <span className={"portal-status " + tone}>{value}</span>;
+}
+
+export function PortalMetric({
+  label,
+  value,
+  detail,
+  icon,
+  href,
+}: {
+  label: string;
+  value: ReactNode;
+  detail?: ReactNode;
+  icon: ReactNode;
+  href?: string;
+}) {
+  const content = (
+    <>
+      <div className="portal-metric-top">
+        <span>{label}</span>
+        <span className="portal-metric-icon">{icon}</span>
+      </div>
+      <div className="portal-metric-value">{value}</div>
+      {detail && <div className="portal-metric-detail">{detail}</div>}
+    </>
+  );
+  if (href) {
+    return <a className="portal-metric" href={href}>{content}</a>;
+  }
+  return <div className="portal-metric">{content}</div>;
+}
+
+export function PortalProgress({ value }: { value: number }) {
+  const clamped = Math.max(0, Math.min(100, value));
+  return (
+    <div className="portal-progress" aria-label={`${clamped}% complete`}>
+      <span style={{ width: `${clamped}%` }} />
+    </div>
+  );
+}
+
+export function PortalNotice({
+  children,
+  tone = "info",
+}: {
+  children: ReactNode;
+  tone?: "info" | "warn" | "danger" | "success";
+}) {
+  return <div className={"portal-notice " + tone}>{children}</div>;
 }
 
 export function PortalEmptyState({
@@ -131,4 +182,30 @@ export function PortalSkeleton({
 
 export function PortalTableFrame({ children }: { children: ReactNode }) {
   return <div className="portal-card overflow-hidden">{children}</div>;
+}
+
+export function PortalCopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // The value remains selectable when clipboard access is unavailable.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="portal-copy-button"
+      onClick={copy}
+      aria-label={label}
+      title={label}
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
 }
