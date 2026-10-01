@@ -31,7 +31,7 @@ function LoginContent() {
   const params = useSearchParams();
   const requestedNext = params.get("next") || "";
   const explicitNext = requestedNext.startsWith("/app/") ? requestedNext : "";
-  const destination = explicitNext || (IS_NETAMATE_EMAIL ? "/app" : "/workspaces");
+  const destination = explicitNext || "/app";
   const { login } = useAuth();
 
   const [email, setEmail] = useState("");
