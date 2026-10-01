@@ -25,6 +25,7 @@ import {
   Send,
   Settings2,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Users,
 } from "lucide-react";
@@ -73,6 +74,10 @@ const navGroups = [
 ];
 
 const allNavItems = navGroups.flatMap((group) => group.items);
+const auxiliaryNavItems = [
+  { label: "Account security", href: "/app/security", icon: ShieldCheck },
+  { label: "Authorize Connected App", href: "/app/integrations/authorize", icon: PlugZap },
+];
 
 function initials(value?: string | null) {
   return (value || "?")
@@ -132,7 +137,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [tenant?.id]);
 
   const activeItem = useMemo(() => {
-    return allNavItems
+    return [...allNavItems, ...auxiliaryNavItems]
       .filter(({ href }) =>
         href === "/app"
           ? pathname === href
@@ -176,6 +181,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Link className="portal-account-action" href="/app/settings">
         <Settings2 className="h-4 w-4" />
         Workspace settings
+      </Link>
+      <Link className="portal-account-action" href="/app/security">
+        <ShieldCheck className="h-4 w-4" />
+        Account security
       </Link>
       <Link className="portal-account-action" href="/app/settings/api-keys">
         <KeyRound className="h-4 w-4" />
