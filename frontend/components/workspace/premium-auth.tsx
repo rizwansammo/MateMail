@@ -152,7 +152,7 @@ export function AuthSuccess({ children }: { children: ReactNode }) {
 
 export function workspaceInitials(value: string) {
   return value
-    .split(/[\\s@._-]+/)
+    .split(/[\s@._-]+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
@@ -161,5 +161,5 @@ export function workspaceInitials(value: string) {
 
 export function titleCase(value?: string | null) {
   if (!value) return "";
-  return value.replaceAll("_", " ").replace(/\\b\\w/g, (letter) => letter.toUpperCase());
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
