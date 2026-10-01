@@ -1,14 +1,6 @@
 /* MateMail Portal premium design foundation.
    Scoped to .portal-premium so PostBox and Platform Console remain untouched. */
 
-@font-face {
-  font-family: HemiHead;
-  src: url("/postbox/HemiHead-Bold.otf") format("opentype");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
 .ws.portal-premium {
   --portal-canvas: #f6f8fc;
   --portal-surface: #ffffff;
@@ -100,8 +92,8 @@
 }
 
 .portal-premium .portal-brand-word {
-  font-family: HemiHead, sans-serif !important;
-  font-size: 22px;
+  font-family: var(--font-matemail-hub), sans-serif !important;
+  font-size: 23px;
   font-weight: 700;
   font-synthesis: none;
   letter-spacing: 0.2px;
@@ -109,6 +101,10 @@
   white-space: nowrap;
   flex-shrink: 0;
   color: #172a47;
+}
+
+:root[data-ws-theme="dark"] .portal-premium .portal-brand-word {
+  color: var(--portal-text-strong);
 }
 
 .portal-premium .portal-brand-caption,
