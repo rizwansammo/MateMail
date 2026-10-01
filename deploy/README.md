@@ -3,13 +3,11 @@
 Everything needed to run MateMail on **MateServer**. The control plane and the
 Mail Engine are both deployed; what follows is how they are configured.
 
-> **MateMail is not ready for CUSTOMER mail.**
-> Per **DEC-012**, no real customer mail may reach the platform until P0–P7 are
-> all complete. P4 is done — the Mail Engine is live, privately reachable, and
-> has delivered real authenticated mail — but mail policy is not enforced (P5),
-> backups are simulated (P6), and there is no operational monitoring (P7). No
-> public mail port is open. The deploy workflow is manual-only for exactly this
-> reason.
+> **Production deployments are intentional and SHA-pinned.**
+> Merging to `main` publishes release images but does not touch MateServer.
+> Use the manual **Deploy to MateServer** workflow with the exact green commit
+> SHA. The workflow validates topology, creates a pre-deploy database dump,
+> deploys the matching Compose revision and rolls back on failed health checks.
 
 ---
 
@@ -55,12 +53,11 @@ Mail Engine are both deployed; what follows is how they are configured.
 `8015`, `8016` and `3015` belong to **MateConnect** and must never be used here.
 PostgreSQL and Redis publish **no host port** at all.
 
-**The Mail Engine is not in this stack.** It arrives in P4 as its own compose
-project and will join via an additional external network declared then. The
-previous `docker-compose.mailengine.yml` was an nginx container returning a
-fake `{"status":"stub"}` payload; it was removed rather than left to be mistaken
-for infrastructure. Until P4, `MAIL_ENGINE_ADAPTER=stub` keeps the control plane
-fully functional with no mail infrastructure present.
+**The Mail Engine remains a separate Compose project.** The control-plane
+backend and Celery worker reach it only through the externally managed,
+Docker-internal `matemail_engine_link` network. The production deployment
+verifies that this network already exists with `internal=true`; it never creates
+or weakens that boundary during an application deploy.
 
 ---
 
@@ -92,7 +89,7 @@ time**. Changing a public URL therefore needs a rebuild, not a restart.
 
 ## First-time host bootstrap
 
-Run once, by hand, when P4 makes deployment appropriate. **Do not run this yet.**
+Run this only when bootstrapping MateMail on a new production host. Existing MateServer deployments should use the release workflow below.
 
 ```bash
 sudo mkdir -p /opt/MateMail/backups
