@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -318,7 +319,7 @@ export default function DashboardPage() {
             <>
               <div
                 className="portal-health-score"
-                style={{ "--health-angle": `${Math.round((healthScore ?? 0) * 3.6)}deg` } as React.CSSProperties}
+                style={{ "--health-angle": `${Math.round((healthScore ?? 0) * 3.6)}deg` } as CSSProperties}
               >
                 <span className="portal-health-ring" />
                 <div>
