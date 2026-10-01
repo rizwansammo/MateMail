@@ -72,10 +72,6 @@
   letter-spacing: 0.01em;
 }
 
-.auth-premium .auth-story .auth-brand-mark {
-  box-shadow: 0 0 0 1px #486184;
-}
-
 .auth-premium .auth-story-body {
   position: relative;
   z-index: 1;
