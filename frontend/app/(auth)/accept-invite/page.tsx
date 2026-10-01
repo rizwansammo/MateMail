@@ -23,14 +23,13 @@ function AcceptInviteContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
 
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isAuthenticated, isLoading, user, setAuthResult } = useAuth();
 
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(true);
 
   const [accepting, setAccepting] = useState(false);
   const [accepted, setAccepted] = useState(false);
-  const [tenantId, setTenantId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -55,8 +54,10 @@ function AcceptInviteContent() {
       });
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
+        if (body.access && body.user && body.tenant) {
+          setAuthResult(body);
+        }
         setAccepted(true);
-        setTenantId(body.tenant_id ?? null);
       } else {
         setError(body.detail ?? "Failed to accept invite.");
       }
@@ -106,7 +107,7 @@ function AcceptInviteContent() {
     );
   }
 
-  if (accepted && tenantId) {
+  if (accepted) {
     return (
       <InviteShell>
         <div className="flex flex-col items-center gap-4 text-center">
@@ -162,7 +163,7 @@ function AcceptInviteContent() {
                 Log in to accept
               </Link>
               <Link
-                href={`/signup?next=${encodeURIComponent(`/accept-invite?token=${token}`)}`}
+                href={`/signup?invite=${encodeURIComponent(token)}`}
                 className="flex w-full items-center justify-center rounded-md border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Create a MateMail account
@@ -228,7 +229,7 @@ function InviteShell({ children }: { children: React.ReactNode }) {
       <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="mb-6 flex items-center justify-center gap-2">
           <BrandMark size={32} />
-          <span className="font-black text-slate-900">MateMail</span>
+          <span className="auth-brand-word">MateMail Hub</span>
         </div>
         {children}
       </div>
