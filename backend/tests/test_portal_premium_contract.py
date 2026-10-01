@@ -175,7 +175,7 @@ class MateMailHubBrandingContractTest(SimpleTestCase):
         layout = read("app", "app", "layout.tsx")
         css = read("app", "app", "portal-premium.css")
         self.assertIn(
-            '<BrandMark size={35} className="portal-brand-mark" preload />',
+            '<BrandMark size={31} className="portal-brand-mark" preload />',
             layout,
         )
         self.assertIn('className="portal-brand-word">MateMail Hub</span>', layout)
@@ -186,9 +186,11 @@ class MateMailHubBrandingContractTest(SimpleTestCase):
         self.assertNotIn("portal-workspace-card", layout)
         self.assertNotIn("Current organization", layout)
         self.assertIn("font-family: HemiHead, sans-serif !important;", css)
-        self.assertIn("font-size: 30px;", css)
+        self.assertIn("font-size: 22px;", css)
         self.assertIn("font-weight: 700;", css)
         self.assertIn("letter-spacing: 0.2px;", css)
+        self.assertIn("white-space: nowrap;", css)
+        self.assertIn("font-synthesis: none;", css)
         self.assertIn("border-radius: 8px;", css)
 
     def test_browser_title_is_the_organization_hub_title(self):
