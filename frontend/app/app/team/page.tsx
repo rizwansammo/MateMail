@@ -133,14 +133,11 @@ export default function TeamPage() {
   }, [tenant?.id, user?.email]);
 
   useEffect(() => {
-    if (!tenant?.id) {
-      setLoading(false);
-      return;
-    }
-    void (async () => {
-      await loadTeam(false);
-      setLoading(false);
-    })();
+    if (!tenant?.id) return;
+    const timer = window.setTimeout(() => {
+      void loadTeam(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [loadTeam, tenant?.id]);
 
   const canManageInvites = myRole === "owner" || myRole === "admin";
