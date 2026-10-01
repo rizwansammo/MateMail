@@ -118,6 +118,7 @@ export default function DomainDetailPage() {
   const router = useRouter();
   const { tenant, user } = useAuth();
   const [domain, setDomain] = useState<Domain | null>(null);
+  const [myRole, setMyRole] = useState("");
   const [records, setRecords] = useState<DNSRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"dns" | "details">("dns");
@@ -132,7 +133,7 @@ export default function DomainDetailPage() {
   const [confirmRotate, setConfirmRotate] = useState(false);
   const pollTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  const role = tenant?.role || "";
+  const role = myRole || tenant?.role || "";
   const canAdmin = role === "owner" || role === "admin";
   const canSupportAction = canAdmin || role === "support";
 
@@ -149,7 +150,16 @@ export default function DomainDetailPage() {
     let cancelled = false;
     (async () => {
       try {
-        await fetchData();
+        await Promise.all([
+          fetchData(),
+          tenant?.id
+            ? apiRequest(`/api/workspaces/${tenant.id}/stats/`)
+                .then(async (res) => res.ok ? res.json() : null)
+                .then((data) => {
+                  if (!cancelled && data?.my_role) setMyRole(data.my_role);
+                })
+            : Promise.resolve(),
+        ]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -157,7 +167,7 @@ export default function DomainDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [fetchData]);
+  }, [fetchData, tenant?.id]);
 
   useEffect(() => {
     const timers = pollTimers.current;
