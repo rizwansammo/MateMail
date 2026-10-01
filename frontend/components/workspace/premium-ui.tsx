@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { Check, Copy, Inbox } from "lucide-react";
 
@@ -120,7 +121,7 @@ export function PortalMetric({
     </>
   );
   if (href) {
-    return <a className="portal-metric" href={href}>{content}</a>;
+    return <Link className="portal-metric" href={href}>{content}</Link>;
   }
   return <div className="portal-metric">{content}</div>;
 }
