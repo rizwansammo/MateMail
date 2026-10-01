@@ -1,5 +1,3 @@
-import hashlib
-
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
