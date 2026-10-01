@@ -18,11 +18,19 @@ class SignupSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(min_length=10, write_only=True)
     full_name = serializers.CharField(max_length=255)
-    workspace_name = serializers.CharField(max_length=255)
+    workspace_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    invite_token = serializers.CharField(required=False, allow_blank=False, write_only=True)
 
     def validate_password(self, value):
         validate_password(value)
         return value
+
+    def validate(self, attrs):
+        if not attrs.get("invite_token") and not attrs.get("workspace_name", "").strip():
+            raise serializers.ValidationError(
+                {"workspace_name": "Organization name is required."}
+            )
+        return attrs
 
 
 class LoginSerializer(serializers.Serializer):
