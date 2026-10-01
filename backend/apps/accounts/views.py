@@ -164,6 +164,20 @@ class SignupView(APIView):
             return Response({"email": "An account with this email already exists."}, status=400)
 
         invite_token = data.get("invite_token", "").strip()
+        if not invite_token:
+            from apps.tenants.membership_policy import verified_domain_is_registered
+
+            if verified_domain_is_registered(data["email"]):
+                return Response(
+                    {
+                        "email": (
+                            "This email domain is already registered to a MateMail "
+                            "organization. Ask your organization administrator for access."
+                        )
+                    },
+                    status=400,
+                )
+
         if invite_token:
             from apps.billing.utils import check_member_limit
             from apps.teams.models import TeamInvite
