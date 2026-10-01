@@ -274,6 +274,7 @@ class PostBoxLogoutAllView(APIView):
     authentication_classes = [postbox_auth.PostBoxSessionAuthentication]
 
     def post(self, request):
+        retained_before = postbox_auth.saved_account_sessions(request)[0]
         revoked = postbox_auth.revoke_other_sessions(request.mailbox)
         request.postbox_session.revoke()
         logger.info(
@@ -281,7 +282,7 @@ class PostBoxLogoutAllView(APIView):
             request.mailbox.pk, revoked,
         )
         response = Response({"detail": "Signed out on all devices.", "revoked": revoked + 1})
-        for name, _, session in postbox_auth.saved_account_sessions(request)[0]:
+        for name, _, session in retained_before:
             if session.mailbox_id == request.mailbox.id:
                 response.delete_cookie(name, path="/")
         postbox_auth.clear_session_cookie(response)
