@@ -18,8 +18,10 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "MateMail · Organization Hub",
-    template: "%s · MateMail Hub",
+    default: IS_NETAMATE_EMAIL
+      ? "MailAdmin | MateMail"
+      : "MateMail · Organization Hub",
+    template: IS_NETAMATE_EMAIL ? "%s | MateMail" : "%s · MateMail Hub",
   },
   description: IS_NETAMATE_EMAIL
     ? "Private MateMail administration for NetaMate Solutions."
