@@ -586,3 +586,38 @@ class PostBoxReaderNavigationAndHtmlLayoutRegressionTest(SimpleTestCase):
         block = self.css.split(".pb-premium-brand {", 1)[1].split("}", 1)[0]
         self.assertIn("text-decoration:none", block)
         self.assertIn("cursor:pointer", block)
+
+
+class MultiAccountSwitcherContractTest(SimpleTestCase):
+    """The account menu must stay token-safe while supporting fast switching."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.layout = read("app", "postbox", "(app)", "layout.tsx")
+        cls.login = read("app", "postbox", "login", "page.tsx")
+        cls.add_account = read("app", "postbox", "add-account", "page.tsx")
+        cls.api = read("lib", "postbox-api.ts")
+
+    def test_profile_menu_exposes_add_and_switch_actions(self):
+        self.assertIn('href="/postbox/add-account"', self.layout)
+        self.assertIn("postbox.switchAccount(item.session_id)", self.layout)
+        self.assertIn("Accounts on this device", self.layout)
+        self.assertIn("Add another account", self.layout)
+
+    def test_switching_hard_resets_mailbox_scoped_frontend_state(self):
+        self.assertIn('window.location.assign("/postbox?folder=INBOX")', self.layout)
+        self.assertIn('window.location.assign("/postbox?folder=INBOX")', self.login)
+
+    def test_saved_account_capabilities_never_use_web_storage(self):
+        combined = "\n".join((self.layout, self.login, self.add_account, self.api))
+        self.assertNotIn("localStorage", combined)
+        self.assertNotIn("sessionStorage", combined)
+
+    def test_add_account_defaults_to_a_remembered_session(self):
+        self.assertIn("const [remember, setRemember] = useState(true);", self.add_account)
+        self.assertIn("Keep this account available on this device for 30 days", self.add_account)
+
+    def test_sign_in_screen_can_resume_a_saved_account_without_a_password(self):
+        self.assertIn(".accounts()", self.login)
+        self.assertIn("postbox.switchAccount(item.session_id)", self.login)

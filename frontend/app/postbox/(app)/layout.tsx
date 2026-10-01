@@ -32,13 +32,19 @@ import {
   Star,
   Sun,
   User,
+  UserPlus,
   Trash2,
   Users,
   X,
 } from "lucide-react";
 
 import { usePostBox } from "@/contexts/postbox-context";
-import { postbox, type AccountInfo, type Folder } from "@/lib/postbox-api";
+import {
+  postbox,
+  type AccountInfo,
+  type Folder,
+  type SavedPostBoxAccount,
+} from "@/lib/postbox-api";
 
 /**
  * The standard folders, in the order they belong.
@@ -153,6 +159,9 @@ function PremiumPostBoxShell({
 }) {
   const router = useRouter();
   const [account, setAccount] = useState<AccountInfo | null>(null);
+  const [savedAccounts, setSavedAccounts] = useState<SavedPostBoxAccount[]>([]);
+  const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
+  const [accountMenuError, setAccountMenuError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,16 +176,29 @@ function PremiumPostBoxShell({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mailbox.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    postbox
+      .accounts()
+      .then((value) => {
+        if (!cancelled) setSavedAccounts(value.results);
+      })
+      .catch(() => {
+        if (!cancelled) setSavedAccounts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mailbox.id]);
 
   const byRole = new Map(folders.map((folder) => [folder.role, folder]));
   const custom = folders.filter((folder) => !PINNED_ROLES.has(folder.role));
-  const initials = (mailbox.full_name || mailbox.email)
-    .split(/\s+|@/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
+  const initials = accountInitials(mailbox.full_name, mailbox.email);
+  const otherAccounts = savedAccounts.filter(
+    (item) => item.mailbox.id !== mailbox.id,
+  );
 
   const storage = account?.storage;
   const storagePercent =
@@ -334,28 +356,126 @@ function PremiumPostBoxShell({
                 <ChevronDown className="h-3.5 w-3.5 pb-muted" aria-hidden="true" />
               </summary>
               <div className="pb-premium-account-panel">
-                <div className="pb-premium-account-copy">
-                  <strong>{mailbox.full_name || mailbox.email}</strong>
-                  <span>{mailbox.email}</span>
+                <div className="pb-premium-account-current">
+                  <span className="pb-premium-account-avatar-lg" aria-hidden="true">
+                    {initials || "PB"}
+                  </span>
+                  <div className="pb-premium-account-copy">
+                    <strong>{mailbox.full_name || mailbox.email}</strong>
+                    <span>{mailbox.email}</span>
+                  </div>
+                  <Link
+                    href="/postbox/settings?section=account"
+                    className="pb-premium-account-manage"
+                  >
+                    <User className="h-4 w-4" aria-hidden="true" />
+                    Manage account
+                  </Link>
                 </div>
-                <Link href="/postbox/settings?section=account">
-                  <User className="h-4 w-4" aria-hidden="true" />
-                  Account
-                </Link>
-                <Link href="/postbox/settings">
-                  <Settings className="h-4 w-4" aria-hidden="true" />
-                  Settings
-                </Link>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await signOut();
-                    router.replace("/postbox/login");
-                  }}
+
+                {otherAccounts.length > 0 && (
+                  <div className="pb-premium-account-switcher">
+                    <div className="pb-premium-account-section-label">
+                      Accounts on this device
+                    </div>
+                    {otherAccounts.map((item) => {
+                      const itemInitials = accountInitials(
+                        item.mailbox.full_name,
+                        item.mailbox.email,
+                      );
+                      const switching = switchingAccount === item.session_id;
+                      return (
+                        <button
+                          key={item.session_id}
+                          type="button"
+                          className="pb-premium-account-row"
+                          disabled={Boolean(switchingAccount)}
+                          onClick={async () => {
+                            setAccountMenuError(null);
+                            setSwitchingAccount(item.session_id);
+                            try {
+                              await postbox.switchAccount(item.session_id);
+                              window.location.assign("/postbox?folder=INBOX");
+                            } catch {
+                              setAccountMenuError(
+                                "This account needs to be signed in again.",
+                              );
+                              setSavedAccounts((current) =>
+                                current.filter(
+                                  (saved) => saved.session_id !== item.session_id,
+                                ),
+                              );
+                              setSwitchingAccount(null);
+                            }
+                          }}
+                        >
+                          <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                            {itemInitials || "PB"}
+                          </span>
+                          <span className="pb-premium-account-row-copy">
+                            <strong>
+                              {item.mailbox.full_name || item.mailbox.email}
+                            </strong>
+                            <small>{item.mailbox.email}</small>
+                          </span>
+                          {switching ? (
+                            <Loader2
+                              className="h-4 w-4 animate-spin pb-muted"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <span className="pb-premium-account-switch-label">
+                              Switch
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <Link
+                  href="/postbox/add-account"
+                  className="pb-premium-account-add"
                 >
-                  <LogOut className="h-4 w-4" aria-hidden="true" />
-                  Sign out
-                </button>
+                  <UserPlus className="h-4 w-4" aria-hidden="true" />
+                  Add another account
+                </Link>
+
+                {accountMenuError && (
+                  <p className="pb-premium-account-error" role="alert">
+                    {accountMenuError}
+                  </p>
+                )}
+
+                <div className="pb-premium-account-footer">
+                  <Link href="/postbox/settings">
+                    <Settings className="h-4 w-4" aria-hidden="true" />
+                    Settings
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await signOut();
+                      router.replace("/postbox/login");
+                    }}
+                  >
+                    <LogOut className="h-4 w-4" aria-hidden="true" />
+                    Sign out
+                  </button>
+                  {savedAccounts.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await postbox.logoutDevice();
+                        window.location.assign("/postbox/login");
+                      }}
+                    >
+                      <LogOut className="h-4 w-4" aria-hidden="true" />
+                      Sign out all
+                    </button>
+                  )}
+                </div>
               </div>
             </details>
           </div>
@@ -457,6 +577,15 @@ function PremiumSearchForm({
       )}
     </form>
   );
+}
+
+function accountInitials(name: string, email: string): string {
+  return (name || email)
+    .split(/\s+|@/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

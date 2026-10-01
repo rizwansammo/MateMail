@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { KeyRound, Loader2, Mail } from "lucide-react";
 
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
+import { postbox, type SavedPostBoxAccount } from "@/lib/postbox-api";
 
 export default function PostBoxLoginPage() {
   const router = useRouter();
@@ -29,10 +30,27 @@ export default function PostBoxLoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const [savedAccounts, setSavedAccounts] = useState<SavedPostBoxAccount[]>([]);
+  const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isLoading && mailbox) router.replace("/postbox");
   }, [isLoading, mailbox, router]);
+
+  useEffect(() => {
+    let cancelled = false;
+    postbox
+      .accounts()
+      .then((value) => {
+        if (!cancelled) setSavedAccounts(value.results);
+      })
+      .catch(() => {
+        if (!cancelled) setSavedAccounts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const submit = useCallback(
     async (event: React.FormEvent) => {
@@ -83,6 +101,57 @@ export default function PostBoxLoginPage() {
           </span>
           <h1 id="postbox-login-title">Welcome back.</h1>
           <p>Sign in to your PostBox mailbox.</p>
+
+          {savedAccounts.length > 0 && (
+            <div className="pb-premium-login-saved">
+              <span className="pb-premium-login-saved-label">Accounts on this device</span>
+              {savedAccounts.map((item) => {
+                const label = item.mailbox.full_name || item.mailbox.email;
+                const initials = label
+                  .split(/\s+|@/)
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((part) => part[0]?.toUpperCase())
+                  .join("");
+                const switching = switchingAccount === item.session_id;
+                return (
+                  <button
+                    key={item.session_id}
+                    type="button"
+                    disabled={Boolean(switchingAccount)}
+                    onClick={async () => {
+                      setError(null);
+                      setSwitchingAccount(item.session_id);
+                      try {
+                        await postbox.switchAccount(item.session_id);
+                        window.location.assign("/postbox?folder=INBOX");
+                      } catch {
+                        setSavedAccounts((current) =>
+                          current.filter(
+                            (saved) => saved.session_id !== item.session_id,
+                          ),
+                        );
+                        setError("This account needs to be signed in again.");
+                        setSwitchingAccount(null);
+                      }
+                    }}
+                  >
+                    <span className="pb-premium-login-saved-avatar" aria-hidden="true">
+                      {initials || "PB"}
+                    </span>
+                    <span className="pb-premium-login-saved-copy">
+                      <strong>{label}</strong>
+                      <small>{item.mailbox.email}</small>
+                    </span>
+                    {switching && (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    )}
+                  </button>
+                );
+              })}
+              <div className="pb-premium-login-or"><span>or sign in with another account</span></div>
+            </div>
+          )}
 
           <form onSubmit={submit} className="pb-premium-login-form" noValidate>
             <div className="pb-premium-field">

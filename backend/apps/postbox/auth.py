@@ -6,11 +6,12 @@ THE IDENTITY IS A MAILBOX, NOT A USER
     organization administrator has the first; an employee has the second; a
     person may have both, or either, and one says nothing about the other.
 
-    So a PostBox session is bound to a `Mailbox` row and nothing else. There is
-    no request field naming a mailbox, no way to switch mailbox after signing
-    in, and the Workspace JWT is not accepted here as proof of anything. The
-    only way to obtain a PostBox session is to present that mailbox's own
-    password to Dovecot.
+    So every PostBox session is bound to exactly one Mailbox row and nothing
+    else. Multi-account switching does not weaken that boundary: the browser
+    may retain several independently authenticated session capabilities, but
+    only one is active on a request and switching merely activates another
+    already-authenticated session. No request can name an arbitrary mailbox,
+    and a Workspace JWT is never accepted as proof of mailbox access.
 
 WHAT IS CHECKED, AND WHEN
     Authorisation is re-checked on EVERY request, not only at sign-in. A
@@ -42,6 +43,13 @@ logger = logging.getLogger(__name__)
 #: cannot be set by, or sent to, any other subdomain. It is the one cookie
 #: attribute a sibling host cannot override.
 SESSION_COOKIE_NAME = "__Host-postbox_session"
+
+#: Retained account sessions use one opaque HttpOnly cookie per independently
+#: authenticated mailbox. JavaScript can list accounts only through the API;
+#: it never receives a session token. Each name is bound to the session UUID so
+#: a copied value under a different cookie name is rejected.
+SAVED_ACCOUNT_COOKIE_PREFIX = "__Host-postbox_account_"
+MAX_SAVED_ACCOUNTS = 8
 
 #: One message for every sign-in failure. Wrong password, unknown address,
 #: disabled mailbox and suspended organization must be indistinguishable, or
@@ -261,6 +269,115 @@ def set_session_cookie(response, raw_token: str, session: PostBoxSession):
 
 def clear_session_cookie(response):
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return response
+
+
+def saved_account_cookie_name(session_id) -> str:
+    """Cookie name for one retained mailbox session on this browser."""
+    return SAVED_ACCOUNT_COOKIE_PREFIX + str(session_id)
+
+
+def set_saved_account_cookie(response, raw_token: str, session: PostBoxSession):
+    """
+    Retain one independently authenticated mailbox session for account switching.
+
+    This capability is deliberately stricter than the active navigation cookie:
+    SameSite=Strict means it is sent only after the browser is already on the
+    PostBox site. It remains HttpOnly, Secure and host-only, and expires at the
+    same fixed deadline as the underlying session.
+    """
+    from django.conf import settings
+
+    response.set_cookie(
+        saved_account_cookie_name(session.id),
+        raw_token,
+        max_age=max(0, int((session.expires_at - timezone.now()).total_seconds())),
+        secure=not settings.DEBUG,
+        httponly=True,
+        samesite="Strict",
+        path="/",
+    )
+    return response
+
+
+def clear_saved_account_cookie(response, session_id):
+    response.delete_cookie(saved_account_cookie_name(session_id), path="/")
+    return response
+
+
+def saved_account_sessions(request):
+    """
+    Return valid retained sessions plus stale cookie names.
+
+    The session's mailbox eligibility is re-checked here just as it is on
+    normal authenticated requests.
+    """
+    valid = []
+    stale = []
+    for name, raw_token in request.COOKIES.items():
+        if not name.startswith(SAVED_ACCOUNT_COOKIE_PREFIX):
+            continue
+
+        session = session_for_token(raw_token)
+        if session is None or saved_account_cookie_name(session.id) != name:
+            stale.append(name)
+            continue
+        if not tenant_matches_request(request, session.mailbox.tenant):
+            stale.append(name)
+            continue
+        try:
+            assert_mailbox_may_sign_in(session.mailbox)
+        except MailboxUnavailable:
+            session.revoke()
+            stale.append(name)
+            continue
+        valid.append((name, raw_token, session))
+    return valid, stale
+
+
+def remember_session_on_device(response, request, raw_token: str, session: PostBoxSession):
+    """
+    Keep this mailbox available in the account switcher without storing a password.
+
+    The previously active mailbox is promoted before the active cookie is
+    replaced, which makes Add another account safe even for sessions created
+    before multi-account support existed. Duplicate sessions for the same
+    mailbox are revoked, and a small hard cap prevents unbounded cookie growth.
+    """
+    retained, stale = saved_account_sessions(request)
+    for name in stale:
+        response.delete_cookie(name, path="/")
+
+    active_raw = request.COOKIES.get(SESSION_COOKIE_NAME)
+    active = session_for_token(active_raw) if active_raw else None
+    if active is not None and tenant_matches_request(request, active.mailbox.tenant):
+        try:
+            assert_mailbox_may_sign_in(active.mailbox)
+        except MailboxUnavailable:
+            active.revoke()
+        else:
+            if all(existing.id != active.id for _, _, existing in retained):
+                retained.append((saved_account_cookie_name(active.id), active_raw, active))
+
+    others = []
+    for name, old_raw, old_session in retained:
+        if old_session.id == session.id:
+            continue
+        if old_session.mailbox_id == session.mailbox_id:
+            old_session.revoke()
+            response.delete_cookie(name, path="/")
+            continue
+        others.append((name, old_raw, old_session))
+
+    others.sort(key=lambda row: row[2].last_seen_at, reverse=True)
+    keep = others[: max(0, MAX_SAVED_ACCOUNTS - 1)]
+    for name, _, old_session in others[len(keep):]:
+        old_session.revoke()
+        response.delete_cookie(name, path="/")
+
+    for _, old_raw, old_session in keep:
+        set_saved_account_cookie(response, old_raw, old_session)
+    set_saved_account_cookie(response, raw_token, session)
     return response
 
 

@@ -105,6 +105,14 @@ export interface MailboxProfile {
   domain: string;
 }
 
+export interface SavedPostBoxAccount {
+  session_id: string;
+  mailbox: MailboxProfile;
+  expires_at: string;
+  remembered: boolean;
+  current: boolean;
+}
+
 /** Mail-client settings, served by the backend so there is one source. */
 export interface MailClientSettings {
   username: string;
@@ -349,7 +357,18 @@ export const postbox = {
       { method: "POST", body: JSON.stringify({ email, password, remember }) },
     ),
   logout: () => request<{ detail: string }>("/auth/logout/", { method: "POST" }),
+  logoutDevice: () =>
+    request<{ detail: string }>("/auth/logout-device/", { method: "POST" }),
   logoutAll: () => request<{ detail: string }>("/auth/logout-all/", { method: "POST" }),
+  accounts: () =>
+    request<{ results: SavedPostBoxAccount[]; current_session_id: string | null }>(
+      "/auth/accounts/",
+    ),
+  switchAccount: (sessionId: string) =>
+    request<{ mailbox: MailboxProfile; session: { id: string; expires_at: string; remembered: boolean } }>(
+      "/auth/switch/",
+      { method: "POST", body: JSON.stringify({ session_id: sessionId }) },
+    ),
   me: () =>
     request<{
       mailbox: MailboxProfile;
