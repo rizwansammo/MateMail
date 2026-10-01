@@ -5,7 +5,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.billing.utils import check_alias_limit, reserve_resource_slot
-from apps.domains.models import Domain\nfrom apps.domains.verification import DomainNotVerified, assert_provisionable
+from apps.domains.models import Domain
+from apps.domains.verification import DomainNotVerified, assert_provisionable
 from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
 from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
