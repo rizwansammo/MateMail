@@ -6,7 +6,8 @@ from rest_framework.views import APIView
 
 from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
-from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite\nfrom apps.tenants.policy import MailNotPermitted, assert_can_use_mail
+from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
+from apps.tenants.policy import MailNotPermitted, assert_can_use_mail
 from .models import ForwardingRule, ForwardingStatus
 from .serializers import ForwardingRuleCreateSerializer, ForwardingRuleSerializer
 from .services import apply_forwarding
