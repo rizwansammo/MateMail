@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class ForwardingRuleListCreateView(APIView):
-    permission_classes = [IsAuthenticated, TenantReadAdminWrite]
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite, IsEmailVerified]
 
     def get(self, request):
         rules = (
