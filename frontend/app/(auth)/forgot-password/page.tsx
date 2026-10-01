@@ -2,6 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { ArrowLeft, Mail } from "lucide-react";
+import {
+  AuthButton,
+  AuthError,
+  AuthField,
+  AuthNotice,
+  PremiumAuthShell,
+} from "@/components/workspace/premium-auth";
 import { api, ApiError } from "@/lib/api";
 
 export default function ForgotPasswordPage() {
@@ -10,18 +18,18 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
     setError("");
     setLoading(true);
     try {
       await api.post("/api/auth/forgot-password/", { email });
       setSent(true);
-    } catch (err) {
-      if (err instanceof ApiError && err.status !== 200) {
+    } catch (caught) {
+      if (caught instanceof ApiError && caught.status !== 200) {
         setError("Something went wrong. Please try again.");
       } else {
-        setSent(true); // Always show success to avoid email enumeration
+        setSent(true);
       }
     } finally {
       setLoading(false);
@@ -30,76 +38,54 @@ export default function ForgotPasswordPage() {
 
   if (sent) {
     return (
-      <div>
-        <h2 className="text-3xl font-black tracking-tight text-slate-950">
-          Check your inbox
-        </h2>
-        <p className="mt-3 text-sm text-slate-600">
-          If <strong>{email}</strong> is registered, a password reset link has
-          been sent. Check your spam folder if it doesn&apos;t arrive within a
-          few minutes.
-        </p>
-        <p className="mt-2 text-xs text-slate-400">Reset links expire in 1 hour.</p>
-        <div className="mt-6">
-          <Link
-            href="/login"
-            className="text-sm font-semibold text-cyan-600 hover:underline"
-          >
+      <PremiumAuthShell
+        title="A fresh start is on its way."
+        description="If that address belongs to a MateMail account, a secure reset link has been sent."
+        icon={<Mail className="h-6 w-6" />}
+      >
+        <div className="auth-form">
+          <AuthNotice>
+            Check <strong>{email}</strong> and your spam folder. Reset links expire in 1 hour.
+          </AuthNotice>
+          <Link href="/login" className="auth-button">
             Back to sign in
           </Link>
         </div>
-      </div>
+      </PremiumAuthShell>
     );
   }
 
   return (
-    <div>
-      <h2 className="text-3xl font-black tracking-tight text-slate-950">
-        Reset password
-      </h2>
-      <p className="mt-2 text-sm text-slate-500">
-        Enter your email and we&apos;ll send you a secure reset link.
-      </p>
-
-      <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-        {error && (
-          <div className="border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-            {error}
-          </div>
-        )}
-
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-slate-800">
-            Email address
-          </span>
+    <PremiumAuthShell
+      title="Forgot your password?"
+      description="Enter your email and we’ll send a secure password-reset link if the account exists."
+      icon={<Mail className="h-6 w-6" />}
+    >
+      <form onSubmit={handleSubmit} className="auth-form">
+        <AuthField label="Email address">
           <input
+            className="auth-input"
             type="email"
-            required
+            autoComplete="email"
             autoFocus
+            required
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@company.com"
-            className="w-full border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-950 focus:ring-2 focus:ring-slate-950/10"
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@yourcompany.com"
           />
-        </label>
+        </AuthField>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="inline-flex w-full items-center justify-center bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
+        {error && <AuthError>{error}</AuthError>}
+
+        <AuthButton type="submit" loading={loading}>
           {loading ? "Sending…" : "Send reset link"}
-        </button>
+        </AuthButton>
 
-        <p className="text-center">
-          <Link
-            href="/login"
-            className="text-sm font-semibold text-slate-600 hover:underline"
-          >
-            Back to sign in
-          </Link>
-        </p>
+        <Link href="/login" className="auth-back">
+          <ArrowLeft className="h-4 w-4" />
+          Back to sign in
+        </Link>
       </form>
-    </div>
+    </PremiumAuthShell>
   );
 }
