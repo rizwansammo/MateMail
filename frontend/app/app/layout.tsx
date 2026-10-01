@@ -161,7 +161,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const shellMeta = workspaceMeta?.id === tenant?.id ? workspaceMeta : null;
   const workspaceName = tenant?.name || "MateMail";
-  const workspaceInitials = initials(workspaceName);
   const accountName = user?.full_name || user?.email || "Account";
 
   const accountMenu = (placement: "sidebar" | "topbar") => (
@@ -216,24 +215,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <aside className="portal-sidebar" data-open={mobileOpen}>
           <div className="portal-brand">
             <div className="portal-brand-lockup">
-              <BrandMark size={32} preload />
+              <BrandMark size={35} className="portal-brand-mark" preload />
               <span className="portal-brand-word">MateMail Hub</span>
             </div>
           </div>
-
-          {tenant && (
-            <div
-              className="portal-workspace-card"
-              aria-label="Current organization"
-            >
-              <span className="portal-workspace-monogram">{workspaceInitials}</span>
-              <span className="portal-workspace-copy">
-                <strong>{workspaceName}</strong>
-                <small>{shellMeta?.plan ? displayPlan(shellMeta.plan) + " workspace" : "Organization workspace"}</small>
-              </span>
-            </div>
-          )}
-
           <nav className="portal-nav" aria-label="Workspace navigation">
             {navGroups.map((group) => (
               <section className="portal-nav-group" key={group.label}>
