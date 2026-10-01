@@ -217,12 +217,19 @@ function PremiumPostBoxShell({
       {railOpen && <button type="button" className="pb-premium-overlay" aria-label="Close folders" onClick={closeRail} />}
 
       <aside className="pb-premium-sidebar" data-open={railOpen ? "true" : "false"}>
-        <div className="pb-premium-brand">
+        <Link
+          href="/postbox?folder=INBOX"
+          className="pb-premium-brand"
+          aria-label="PostBox Inbox"
+          onClick={() => {
+            closeRail();
+            window.dispatchEvent(new Event("postbox:return-to-list"));
+          }}
+        >
           <svg
             className="pb-premium-brand-mark"
             viewBox="0 0 64 64"
-            role="img"
-            aria-label="PostBox"
+            aria-hidden="true"
           >
             <rect width="64" height="64" fill="#0B1F44" />
             <path
@@ -235,7 +242,7 @@ function PremiumPostBoxShell({
             />
           </svg>
           <span className="pb-premium-wordmark">PostBox</span>
-        </div>
+        </Link>
 
         <div className="pb-premium-compose-wrap">
           <Link href="/postbox?compose=new" className="pb-premium-compose" onClick={closeRail}>
@@ -502,7 +509,10 @@ function PremiumFolderNavigation({
             className="pb-premium-nav-link"
             data-role={role}
             aria-current={active ? "page" : undefined}
-            onClick={onNavigate}
+            onClick={() => {
+              onNavigate();
+              window.dispatchEvent(new Event("postbox:return-to-list"));
+            }}
           >
             <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
             <span className="truncate">{label}</span>
@@ -523,7 +533,10 @@ function PremiumFolderNavigation({
                 href={`/postbox?folder=${encodeURIComponent(folder.name)}`}
                 className="pb-premium-nav-link"
                 aria-current={active ? "page" : undefined}
-                onClick={onNavigate}
+                onClick={() => {
+                  onNavigate();
+                  window.dispatchEvent(new Event("postbox:return-to-list"));
+                }}
               >
                 <FolderIcon className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
                 <span className="truncate">{folder.name}</span>

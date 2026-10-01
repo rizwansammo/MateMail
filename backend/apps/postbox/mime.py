@@ -299,10 +299,9 @@ def _strip_remote_references(html: str) -> tuple[str, bool]:
     def drop(match: re.Match) -> str:
         nonlocal found
         found = True
-        quote = match.group("quote")
-        if quote:
-            return f'{match.group("attr")}{quote}{quote}'
-        return f'{match.group("attr")}""'
+        # Remove the source-bearing attribute entirely. Keeping src=""
+        # creates a broken-image glyph and can resolve against the current page.
+        return ""
 
     html = _REMOTE_SRC.sub(drop, html)
 

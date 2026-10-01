@@ -540,3 +540,49 @@ class PostBoxComposeAndImageRenderingRegressionTest(SimpleTestCase):
         self.assertIn("detail.remote_images_blocked && !showRemote", page)
         self.assertIn(">Display images</button>", page)
         self.assertIn("Always display images from this sender", page)
+
+
+class PostBoxReaderNavigationAndHtmlLayoutRegressionTest(SimpleTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.page = read("app", "postbox", "(app)", "page.tsx")
+        cls.layout = read("app", "postbox", "(app)", "layout.tsx")
+        cls.css = read("app", "globals.css")
+
+    def test_html_mail_is_not_forced_into_a_centered_postbox_card(self):
+        body = self.css.split(
+            ".pb-premium-shell .pb-premium-message-body {", 1
+        )[1].split("}", 1)[0]
+        html = self.css.split(
+            ".pb-premium-shell .pb-premium-html-mail {", 1
+        )[1].split("}", 1)[0]
+
+        self.assertIn("width:100%", body)
+        self.assertIn("max-width:none", body)
+        self.assertIn("width:100%", html)
+        self.assertIn("max-width:none", html)
+        self.assertIn("margin:0", html)
+        self.assertIn("border:0", html)
+        self.assertIn("padding:0", html)
+        self.assertNotIn("margin:0 auto", html)
+        self.assertNotIn("max-width:750px", html)
+
+    def test_brand_and_folder_clicks_explicitly_return_reader_to_list(self):
+        self.assertIn('aria-label="PostBox Inbox"', self.layout)
+        self.assertIn('href="/postbox?folder=INBOX"', self.layout)
+        self.assertIn('"postbox:return-to-list"', self.layout)
+        self.assertIn('"postbox:return-to-list"', self.page)
+
+    def test_inline_mime_parts_do_not_show_as_download_attachments(self):
+        self.assertIn(
+            "detail.attachments.filter((attachment) => !attachment.inline)",
+            self.page,
+        )
+        self.assertIn("visibleAttachments.length", self.page)
+        self.assertIn("visibleAttachments.map((attachment)", self.page)
+
+    def test_clickable_brand_keeps_normal_link_styling(self):
+        block = self.css.split(".pb-premium-brand {", 1)[1].split("}", 1)[0]
+        self.assertIn("text-decoration:none", block)
+        self.assertIn("cursor:pointer", block)
