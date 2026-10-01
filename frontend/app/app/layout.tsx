@@ -216,7 +216,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <aside className="portal-sidebar" data-open={mobileOpen}>
           <div className="portal-brand">
             <div className="portal-brand-lockup">
-              <BrandMark size={32} preload />
+              <BrandMark size={35} className="portal-brand-mark" preload />
               <span className="portal-brand-word">MateMail Hub</span>
             </div>
           </div>
