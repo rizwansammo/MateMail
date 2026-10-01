@@ -149,10 +149,10 @@ export default function BillingPage() {
   }, []);
 
   useEffect(() => {
-    void (async () => {
-      await fetchBilling(false);
-      setLoading(false);
-    })();
+    const timer = window.setTimeout(() => {
+      void fetchBilling(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchBilling]);
 
   if (loading) {
