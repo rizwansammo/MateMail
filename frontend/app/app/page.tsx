@@ -1,10 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { Activity, Globe2, HardDrive, Inbox, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { apiRequest } from "@/lib/api";
+import {
+  Activity,
+  AlertCircle,
+  CheckCircle2,
+  Globe2,
+  HardDrive,
+  Mail,
+  ShieldCheck,
+  Sparkles,
+  Users,
+} from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
+import { api, apiRequest } from "@/lib/api";
+import {
+  PortalButton,
+  PortalCard,
+  PortalEmptyState,
+  PortalMetric,
+  PortalNotice,
+  PortalPageHeading,
+  PortalProgress,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface WorkspaceStats {
   domain_count: number;
@@ -19,172 +40,415 @@ interface WorkspaceStats {
   tenant_plan: string;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  trial:     "bg-cyan-50 text-cyan-700 ring-cyan-600/20",
-  active:    "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  past_due:  "bg-amber-50 text-amber-700 ring-amber-600/20",
-  suspended: "bg-red-50 text-red-700 ring-red-600/20",
-  cancelled: "bg-slate-100 text-slate-500 ring-slate-400/20",
-};
+interface OnboardingStatus {
+  workspace_created: boolean;
+  domain_added: boolean;
+  dns_verified: boolean;
+  first_mailbox_created: boolean;
+}
+
+interface DomainSummary {
+  id: string;
+  domain: string;
+  status: string;
+  dns_health_score: number;
+  ownership_verified: boolean;
+  mail_service_ready: boolean;
+}
+
+interface AuditEvent {
+  id: string;
+  event_type: string;
+  source: string;
+  result: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+function pretty(value?: string | null) {
+  if (!value) return "Unknown";
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function eventLabel(value: string) {
+  return pretty(value);
+}
+
+function relativeTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const diff = Math.max(0, Date.now() - date.getTime());
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function metadataTarget(event: AuditEvent) {
+  const metadata = event.metadata || {};
+  const target =
+    metadata.domain ??
+    metadata.mailbox ??
+    metadata.email ??
+    metadata.target ??
+    metadata.name;
+  return typeof target === "string" && target ? target : event.source || "Workspace";
+}
+
+function ApprovalNotice({ status }: { status: string }) {
+  if (status === "active") return null;
+  const content: Record<string, { tone: "info" | "warn" | "danger"; title: string; text: string }> = {
+    pending_approval: {
+      tone: "info",
+      title: "Private Beta approval pending",
+      text: "You can review your workspace while approval is pending. Mail provisioning actions become available after platform approval.",
+    },
+    rejected: {
+      tone: "danger",
+      title: "Workspace application was not approved",
+      text: "Mail provisioning is unavailable for this workspace.",
+    },
+    suspended: {
+      tone: "danger",
+      title: "Workspace suspended",
+      text: "Mail sending, receiving and provisioning actions are currently unavailable.",
+    },
+    cancelled: {
+      tone: "danger",
+      title: "Workspace cancelled",
+      text: "This workspace can no longer provision or operate mail services.",
+    },
+  };
+  const item = content[status] ?? {
+    tone: "warn" as const,
+    title: pretty(status),
+    text: "Some mail operations may be unavailable in the current workspace state.",
+  };
+  return (
+    <div className="portal-approval-banner">
+      <PortalNotice tone={item.tone}>
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span><strong>{item.title}.</strong> {item.text}</span>
+      </PortalNotice>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const { user, tenant } = useAuth();
   const [stats, setStats] = useState<WorkspaceStats | null>(null);
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
+  const [domains, setDomains] = useState<DomainSummary[]>([]);
+  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [verifyMessage, setVerifyMessage] = useState("");
+  const [verifyBusy, setVerifyBusy] = useState(false);
 
   useEffect(() => {
     if (!tenant?.id) return;
-    apiRequest(`/api/workspaces/${tenant.id}/stats/`)
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => { if (data) setStats(data); })
-      .catch(() => {});
+    let cancelled = false;
+
+    Promise.allSettled([
+      apiRequest(`/api/workspaces/${tenant.id}/stats/`).then(async (res) => res.ok ? res.json() : null),
+      apiRequest(`/api/workspaces/${tenant.id}/onboarding/`).then(async (res) => res.ok ? res.json() : null),
+      apiRequest("/api/domains/").then(async (res) => res.ok ? res.json() : []),
+      apiRequest("/api/logs/").then(async (res) => res.ok ? res.json() : []),
+    ]).then((results) => {
+      if (cancelled) return;
+      const [statsResult, onboardingResult, domainResult, logResult] = results;
+      if (statsResult.status === "fulfilled" && statsResult.value) setStats(statsResult.value);
+      if (onboardingResult.status === "fulfilled" && onboardingResult.value) setOnboarding(onboardingResult.value);
+      if (domainResult.status === "fulfilled" && Array.isArray(domainResult.value)) setDomains(domainResult.value);
+      if (logResult.status === "fulfilled" && Array.isArray(logResult.value)) setEvents(logResult.value.slice(0, 4));
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [tenant?.id]);
 
-  const storageUsedGb = stats ? (stats.storage_used_mb / 1024).toFixed(1) : null;
-  const storageQuotaGb = stats ? Math.round(stats.storage_quota_mb / 1024) : null;
+  const setupSteps = useMemo(() => {
+    if (!onboarding) return 0;
+    return [
+      onboarding.workspace_created,
+      onboarding.domain_added,
+      onboarding.dns_verified,
+      onboarding.first_mailbox_created,
+    ].filter(Boolean).length;
+  }, [onboarding]);
 
-  const statCards = [
-    {
-      label: "Domains",
-      value: stats ? `${stats.domain_count}` : "—",
-      sub: stats ? `${stats.active_domain_count} active` : null,
-      icon: Globe2,
-      href: "/app/domains",
-    },
-    {
-      label: "Mailboxes",
-      value: stats ? `${stats.mailbox_count}` : "—",
-      sub: stats ? `${stats.active_mailbox_count} active` : null,
-      icon: Users,
-      href: "/app/mailboxes",
-    },
-    {
-      label: "Team members",
-      value: stats ? `${stats.member_count}` : "—",
-      sub: stats ? stats.my_role : null,
-      icon: Inbox,
-      href: "/app/team",
-    },
-    {
-      label: "Storage used",
-      value: storageUsedGb !== null ? `${storageUsedGb} GB` : "—",
-      sub: storageQuotaGb !== null ? `of ${storageQuotaGb} GB` : null,
-      icon: HardDrive,
-      href: "/app/mailboxes",
-    },
-  ];
+  const setupComplete = setupSteps === 4;
+  const storageUsedGb = stats ? stats.storage_used_mb / 1024 : 0;
+  const storageQuotaGb = stats ? stats.storage_quota_mb / 1024 : 0;
 
-  const setupComplete = stats && stats.domain_count > 0 && stats.mailbox_count > 0;
+  const healthScore = useMemo(() => {
+    if (!stats?.domain_count) return null;
+    if (domains.length) {
+      const total = domains.reduce((sum, domain) => {
+        const ownership = domain.ownership_verified ? 20 : 0;
+        const dns = Math.round((domain.dns_health_score || 0) * 0.6);
+        const service = domain.mail_service_ready ? 20 : 0;
+        return sum + ownership + dns + service;
+      }, 0);
+      return Math.round(total / domains.length);
+    }
+    return Math.round((stats.active_domain_count / Math.max(stats.domain_count, 1)) * 100);
+  }, [domains, stats]);
+
+  async function resendVerification() {
+    setVerifyBusy(true);
+    setVerifyMessage("");
+    try {
+      const result = await api.post<{ detail?: string }>("/api/auth/resend-verification/");
+      setVerifyMessage(result.detail ?? "Verification email sent.");
+    } catch {
+      setVerifyMessage("Could not send the verification email right now.");
+    } finally {
+      setVerifyBusy(false);
+    }
+  }
+
+  if (loading && !stats) {
+    return (
+      <div className="portal-page">
+        <PortalSkeleton className="mb-5 h-16 w-full" />
+        <div className="portal-metrics-grid">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <PortalSkeleton key={index} className="h-32 w-full" />
+          ))}
+        </div>
+        <PortalSkeleton className="h-72 w-full" />
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-950">
-            {tenant ? `${tenant.name}` : "Overview"}
-          </h1>
-          <p className="mt-0.5 text-sm text-slate-500">Workspace overview</p>
-        </div>
-        {stats && (
-          <div className="flex items-center gap-2">
-            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[stats.tenant_status] ?? STATUS_STYLES.active}`}>
-              {stats.tenant_status.replace("_", " ")}
-            </span>
-            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-400/20 capitalize">
-              {stats.tenant_plan}
-            </span>
-          </div>
-        )}
-      </div>
+    <div className="portal-page">
+      <PortalPageHeading
+        title="Workspace overview"
+        description="A clear view of your organization’s email."
+        actions={
+          <Link href="/app/mailboxes" className="portal-button primary">
+            <Mail className="h-4 w-4" />
+            Create mailbox
+          </Link>
+        }
+      />
 
-      {/* Email verification banner */}
+      <ApprovalNotice status={stats?.tenant_status || tenant?.status || "active"} />
+
       {user && !user.email_verified && (
-        <div className="flex items-start gap-3 border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm text-amber-800">
-            <strong>Verify your email address</strong> — check your inbox for a
-            verification link.{" "}
-            <Link href="/verify-email" className="font-semibold underline">
-              Resend
-            </Link>
-          </p>
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="flex-1">
+              <strong>Verify your email address.</strong> Domain and provisioning actions require a verified account.
+              {verifyMessage && <span className="ml-1">{verifyMessage}</span>}
+            </div>
+            <PortalButton variant="secondary" type="button" disabled={verifyBusy} onClick={resendVerification}>
+              {verifyBusy ? "Sending…" : "Resend"}
+            </PortalButton>
+          </PortalNotice>
         </div>
       )}
 
-      {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {statCards.map(({ label, value, sub, icon: Icon, href }) => (
-          <Link
-            key={label}
-            href={href}
-            className="flex items-center gap-4 border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300 hover:shadow"
-          >
-            <div className="grid h-10 w-10 shrink-0 place-items-center bg-slate-50">
-              <Icon className="h-5 w-5 text-slate-500" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-2xl font-black text-slate-950">{value}</p>
-              <p className="text-xs font-semibold text-slate-500">{label}</p>
-              {sub && (
-                <p className="mt-0.5 truncate text-xs capitalize text-slate-400">{sub}</p>
-              )}
-            </div>
-          </Link>
-        ))}
+      <div className="portal-metrics-grid">
+        <PortalMetric
+          icon={<Globe2 className="h-4 w-4" />}
+          label="Connected domains"
+          value={String(stats?.domain_count ?? 0).padStart(2, "0")}
+          detail={
+            stats?.domain_count
+              ? stats.active_domain_count === stats.domain_count
+                ? "All domains healthy"
+                : `${stats.domain_count - stats.active_domain_count} need attention`
+              : "Connect your first domain"
+          }
+          href="/app/domains"
+        />
+        <PortalMetric
+          icon={<Mail className="h-4 w-4" />}
+          label="Total mailboxes"
+          value={String(stats?.mailbox_count ?? 0).padStart(2, "0")}
+          detail={stats ? `${stats.active_mailbox_count} active` : "—"}
+          href="/app/mailboxes"
+        />
+        <PortalMetric
+          icon={<Users className="h-4 w-4" />}
+          label="Team members"
+          value={String(stats?.member_count ?? 0).padStart(2, "0")}
+          detail={stats ? `Your role: ${pretty(stats.my_role)}` : "—"}
+          href="/app/team"
+        />
+        <PortalMetric
+          icon={<HardDrive className="h-4 w-4" />}
+          label="Storage used"
+          value={<>{storageUsedGb.toFixed(1)}<small>GB</small></>}
+          detail={storageQuotaGb > 0 ? `of ${storageQuotaGb.toFixed(storageQuotaGb % 1 ? 1 : 0)} GB allocated` : "No mailbox quota allocated yet"}
+          href="/app/mailboxes"
+        />
       </div>
 
-      {/* Onboarding CTA — hidden once fully set up */}
       {!setupComplete && (
-        <div className="border border-cyan-200 bg-cyan-50 p-6">
-          <h2 className="text-lg font-black text-slate-950">
-            Complete your workspace setup
-          </h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Add your first domain, configure DNS records, and create your first
-            mailbox to start sending and receiving email.
-          </p>
-          <Link
-            href="/app/onboarding"
-            className="mt-4 inline-flex items-center gap-2 bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
-          >
-            Start setup
-          </Link>
+        <div className="portal-setup-banner">
+          <span className="portal-setup-icon"><Sparkles className="h-5 w-5" /></span>
+          <div className="portal-setup-copy">
+            <h3>{stats?.domain_count ? "You’re almost set up" : "Let’s get your email workspace ready"}</h3>
+            <p>Connect your domain, verify DNS, and create your first mailbox.</p>
+          </div>
+          <div className="portal-setup-progress">
+            <span>{setupSteps} of 4 core steps complete</span>
+            <PortalProgress value={setupSteps * 25} />
+          </div>
+          <Link href="/app/onboarding" className="portal-button secondary">Continue setup</Link>
         </div>
       )}
 
-      {/* Quick links */}
-      {setupComplete && (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Link href="/app/domains" className="border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
-            <p className="text-sm font-semibold text-slate-800">Manage domains</p>
-            <p className="mt-0.5 text-xs text-slate-400">DNS health, DKIM, provisioning</p>
-          </Link>
-          <Link href="/app/mailboxes" className="border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
-            <p className="text-sm font-semibold text-slate-800">Manage mailboxes</p>
-            <p className="mt-0.5 text-xs text-slate-400">Enable, disable, change passwords</p>
-          </Link>
-          <Link href="/app/team" className="border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300">
-            <p className="text-sm font-semibold text-slate-800">Team &amp; settings</p>
-            <p className="mt-0.5 text-xs text-slate-400">Members, roles, workspace name</p>
-          </Link>
-        </div>
-      )}
+      <div className="portal-overview-grid">
+        <PortalCard
+          title="Workspace readiness"
+          subtitle="Real configuration status from your workspace."
+          action={<ShieldCheck className="h-4 w-4 text-[var(--portal-muted)]" />}
+        >
+          {stats?.domain_count ? (
+            <>
+              <div
+                className="portal-health-score"
+                style={{ "--health-angle": `${Math.round((healthScore ?? 0) * 3.6)}deg` } as React.CSSProperties}
+              >
+                <span className="portal-health-ring" />
+                <div>
+                  <strong>{healthScore ?? 0}%</strong>
+                  <small>configuration health</small>
+                </div>
+              </div>
+              <div className="portal-health-rows">
+                <div className="portal-health-row">
+                  <span><Globe2 className="h-4 w-4" />Domain readiness</span>
+                  <span>{stats.active_domain_count}/{stats.domain_count} active</span>
+                </div>
+                <div className="portal-health-row">
+                  <span><ShieldCheck className="h-4 w-4" />Ownership</span>
+                  <span>{domains.filter((item) => item.ownership_verified).length}/{stats.domain_count} verified</span>
+                </div>
+                <div className="portal-health-row">
+                  <span><Mail className="h-4 w-4" />Mail services</span>
+                  <span>{domains.filter((item) => item.mail_service_ready).length}/{stats.domain_count} ready</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <PortalEmptyState
+              title="Workspace health starts with a domain"
+              description="Connect your business domain to begin ownership, DNS and mail-service checks."
+              action={<Link href="/app/domains" className="portal-button primary">Add domain</Link>}
+            />
+          )}
+        </PortalCard>
 
-      {/* Suspended banner */}
-      {stats?.tenant_status === "suspended" && (
-        <div className="border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          <strong>Workspace suspended.</strong> Mail sending and receiving is disabled.
-          Contact support to resolve your account status.
-        </div>
-      )}
+        <PortalCard
+          title="Workspace status"
+          subtitle="Approval and resource state."
+        >
+          <div className="portal-detail-grid">
+            <div className="portal-fact">
+              <span>Workspace</span>
+              <strong>{tenant?.name || "—"}</strong>
+            </div>
+            <div className="portal-fact">
+              <span>Status</span>
+              <div className="mt-2"><PortalStatus value={pretty(stats?.tenant_status || tenant?.status)} /></div>
+            </div>
+            <div className="portal-fact">
+              <span>Plan</span>
+              <strong>{pretty(stats?.tenant_plan)}</strong>
+            </div>
+            <div className="portal-fact">
+              <span>Your role</span>
+              <strong>{pretty(stats?.my_role)}</strong>
+            </div>
+          </div>
+          <div className="mt-4">
+            <PortalNotice tone={stats?.tenant_status === "active" ? "success" : "info"}>
+              {stats?.tenant_status === "active"
+                ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                : <Activity className="mt-0.5 h-4 w-4 shrink-0" />}
+              <span>
+                {stats?.tenant_status === "active"
+                  ? "Workspace mail operations are approved."
+                  : "Approval state is enforced by the backend; unavailable mail actions stay blocked."}
+              </span>
+            </PortalNotice>
+          </div>
+        </PortalCard>
+      </div>
 
-      {/* Activity placeholder */}
-      <div className="border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-5 py-4">
-          <h2 className="font-bold text-slate-950">Recent activity</h2>
-        </div>
-        <div className="flex h-28 items-center justify-center text-sm text-slate-400">
-          Mail logs available in Phase 10.
-        </div>
+      <div className="portal-overview-bottom">
+        <PortalCard
+          title="Your domains"
+          subtitle="Connected to this workspace."
+          action={<Link href="/app/domains" className="auth-text-button">View all domains</Link>}
+        >
+          {domains.length ? (
+            <>
+              <div className="portal-domain-mini-head">
+                <span>Domain</span>
+                <span>Health</span>
+                <span>Status</span>
+              </div>
+              {domains.slice(0, 3).map((domain) => (
+                <Link className="portal-domain-mini" key={domain.id} href={`/app/domains/${domain.id}`}>
+                  <span className="portal-domain-identity">
+                    <span className="portal-domain-symbol"><Globe2 className="h-4 w-4" /></span>
+                    <span>
+                      <strong>{domain.domain}</strong>
+                      <small>{domain.ownership_verified ? "Ownership verified" : "Ownership pending"}</small>
+                    </span>
+                  </span>
+                  <span>{domain.dns_health_score}%</span>
+                  <PortalStatus value={pretty(domain.status)} />
+                </Link>
+              ))}
+              <div className="mt-3">
+                <Link href="/app/domains" className="portal-button secondary">
+                  Manage domains
+                </Link>
+              </div>
+            </>
+          ) : (
+            <PortalEmptyState
+              title="Connect your first domain"
+              description="Use your own domain for professional email."
+              action={<Link href="/app/domains" className="portal-button primary">Add domain</Link>}
+            />
+          )}
+        </PortalCard>
+
+        <PortalCard title="Recent activity" subtitle="Latest workspace audit events available to your role.">
+          {events.length ? (
+            <div className="portal-activity-list">
+              {events.map((event) => (
+                <div className="portal-activity-row" key={event.id}>
+                  <span className="portal-activity-icon"><Activity className="h-3.5 w-3.5" /></span>
+                  <span className="portal-activity-copy">
+                    <strong>{eventLabel(event.event_type)}</strong>
+                    <small>{metadataTarget(event)} · {pretty(event.result)}</small>
+                  </span>
+                  <time>{relativeTime(event.created_at)}</time>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <PortalEmptyState
+              title="No activity to show"
+              description="Audit events will appear here when available to your workspace role."
+            />
+          )}
+        </PortalCard>
       </div>
     </div>
   );
