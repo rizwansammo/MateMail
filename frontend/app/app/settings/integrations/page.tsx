@@ -193,7 +193,7 @@ export default function IntegrationsPage() {
         setMessage("Connected App created. Copy the one-time Integration Secret now.");
         await load();
       } else {
-        setCreateError(data?.detail ?? JSON.stringify(data ?? {}) || "Connected App could not be created.");
+        setCreateError(data?.detail ?? (data ? JSON.stringify(data) : "Connected App could not be created."));
       }
     } catch {
       setCreateError("Connected App could not be created.");
