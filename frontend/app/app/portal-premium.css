@@ -285,6 +285,13 @@
   display: none;
 }
 
+.portal-premium .portal-account > summary.portal-icon-button {
+  width: 36px;
+  height: 36px;
+  padding: 2px;
+  justify-content: center;
+}
+
 .portal-premium .portal-account > summary:hover,
 .portal-premium .portal-account-button:hover {
   background: var(--portal-surface-hover);
