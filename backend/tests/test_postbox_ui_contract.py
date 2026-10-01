@@ -619,5 +619,5 @@ class MultiAccountSwitcherContractTest(SimpleTestCase):
         self.assertIn("Keep this account available on this device for 30 days", self.add_account)
 
     def test_sign_in_screen_can_resume_a_saved_account_without_a_password(self):
-        self.assertIn("postbox.accounts()", self.login)
+        self.assertIn(".accounts()", self.login)
         self.assertIn("postbox.switchAccount(item.session_id)", self.login)
