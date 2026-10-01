@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 
 from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
-from apps.tenants.permissions import IsTenantAdmin, TenantReadAdminWrite
+from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite\nfrom apps.tenants.policy import MailNotPermitted, assert_can_use_mail
 from .models import ForwardingRule, ForwardingStatus
 from .serializers import ForwardingRuleCreateSerializer, ForwardingRuleSerializer
 from .services import apply_forwarding
@@ -26,6 +26,11 @@ class ForwardingRuleListCreateView(APIView):
         return Response(ForwardingRuleSerializer(rules, many=True).data)
 
     def post(self, request):
+        try:
+            assert_can_use_mail(request.tenant)
+        except MailNotPermitted as exc:
+            return Response({"detail": exc.customer_message}, status=403)
+
         serializer = ForwardingRuleCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -132,6 +137,12 @@ class ForwardingRuleStatusView(APIView):
 
         if rule.status == new_status:
             return Response(ForwardingRuleSerializer(rule).data)
+
+        if new_status == "active":
+            try:
+                assert_can_use_mail(request.tenant)
+            except MailNotPermitted as exc:
+                return Response({"detail": exc.customer_message}, status=403)
 
         previous_status = rule.status
         rule.status = new_status
