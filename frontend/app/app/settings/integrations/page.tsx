@@ -1,19 +1,54 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  AppWindow,
+  CheckCircle2,
+  KeyRound,
+  Link2,
+  Mail,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import {
+  PortalButton,
+  PortalCard,
+  PortalCopyButton,
+  PortalEmptyState,
+  PortalNotice,
+  PortalPageHeading,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
-type Mailbox = { id: string; email: string; full_name: string; status: string };
+type Mailbox = {
+  id: string;
+  email: string;
+  full_name: string;
+  status: string;
+  mail_service_ready?: boolean;
+};
+
 type Permission = { key: string; label: string };
+
 type Integration = {
   id: string;
   name: string;
   purpose: string;
   purpose_label: string;
   tenant_id: string;
+  organization: string;
+  mailbox_id: string;
   mailbox_email: string;
+  mailbox_name: string;
   permissions: Permission[];
+  created_at: string;
+  last_used_at: string | null;
   active: boolean;
 };
 
@@ -24,31 +59,11 @@ const PURPOSES = [
 ];
 
 const SCOPES = [
-  {
-    key: "mailbox.read",
-    label: "See mailbox details",
-    description: "See the approved mailbox address and display name.",
-  },
-  {
-    key: "mail.send",
-    label: "Send email",
-    description: "Send email only from this approved mailbox.",
-  },
-  {
-    key: "mail.read",
-    label: "Read email",
-    description: "Read messages and folders in this mailbox.",
-  },
-  {
-    key: "mail.modify",
-    label: "Update read status",
-    description: "Mark messages as read or unread. Does not allow deletion.",
-  },
-  {
-    key: "signatures.read",
-    label: "Use signatures",
-    description: "See and use signatures saved for this mailbox.",
-  },
+  { key: "mailbox.read", label: "See mailbox details", description: "See the approved mailbox address and display name." },
+  { key: "mail.send", label: "Send email", description: "Send email only from this approved mailbox." },
+  { key: "mail.read", label: "Read email", description: "Read messages and folders in this mailbox." },
+  { key: "mail.modify", label: "Update read status", description: "Mark messages as read or unread. Does not allow deletion." },
+  { key: "signatures.read", label: "Use signatures", description: "See and use signatures saved for this mailbox." },
 ];
 
 const PRESETS: Record<string, string[]> = {
@@ -60,30 +75,79 @@ const PRESETS: Record<string, string[]> = {
 export default function IntegrationsPage() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [query, setQuery] = useState("");
+
+  const [createOpen, setCreateOpen] = useState(false);
   const [mailboxId, setMailboxId] = useState("");
   const [name, setName] = useState("");
   const [purpose, setPurpose] = useState("sales_crm");
   const [permissions, setPermissions] = useState<string[]>(PRESETS.sales_crm);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
   const [secret, setSecret] = useState("");
   const [tenantId, setTenantId] = useState("");
-  const [error, setError] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [confirmRevoke, setConfirmRevoke] = useState("");
+  const [revoking, setRevoking] = useState("");
+  const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<"success" | "danger">("success");
 
-  async function load() {
-    const [ir, mr] = await Promise.all([
-      apiRequest("/api/integrations/"),
-      apiRequest("/api/mailboxes/"),
-    ]);
-    if (ir.ok) setIntegrations(await ir.json());
-    if (mr.ok) {
-      const rows: Mailbox[] = await mr.json();
-      const active = rows.filter((item) => item.status === "active");
-      setMailboxes(active);
-      setMailboxId((current) => current || active[0]?.id || "");
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const [integrationResponse, mailboxResponse] = await Promise.all([
+        apiRequest("/api/integrations/"),
+        apiRequest("/api/mailboxes/"),
+      ]);
+
+      const integrationData = await integrationResponse.json().catch(() => null);
+      if (integrationResponse.ok && Array.isArray(integrationData)) {
+        setIntegrations(integrationData);
+      } else if (integrationResponse.status === 403) {
+        setLoadError("Your workspace role does not permit Connected Apps management.");
+      } else {
+        setLoadError(integrationData?.detail ?? "Connected Apps could not be loaded.");
+      }
+
+      if (mailboxResponse.ok) {
+        const rows = await mailboxResponse.json() as Mailbox[];
+        const active = rows.filter((mailbox) =>
+          mailbox.status === "active" && mailbox.mail_service_ready !== false
+        );
+        setMailboxes(active);
+        setMailboxId((current) =>
+          active.some((mailbox) => mailbox.id === current)
+            ? current
+            : active[0]?.id || ""
+        );
+      }
+    } catch {
+      setLoadError("Connected Apps could not be loaded.");
+    } finally {
+      setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return integrations;
+    return integrations.filter((integration) =>
+      [
+        integration.name,
+        integration.purpose_label,
+        integration.mailbox_email,
+        ...integration.permissions.map((permission) => permission.label),
+      ].some((value) => value.toLowerCase().includes(needle))
+    );
+  }, [integrations, query]);
 
   function choosePurpose(value: string) {
     setPurpose(value);
@@ -93,18 +157,22 @@ export default function IntegrationsPage() {
   function togglePermission(key: string) {
     setPermissions((current) =>
       current.includes(key)
-        ? current.filter((item) => item !== key)
+        ? current.filter((permission) => permission !== key)
         : [...current, key]
     );
   }
 
-  async function create(event: React.FormEvent) {
+  async function createIntegration(event: React.FormEvent) {
     event.preventDefault();
+    if (!name.trim() || !mailboxId || !permissions.length) return;
     setCreating(true);
-    setError("");
+    setCreateError("");
     setSecret("");
+    setTenantId("");
+    setMessage("");
+
     try {
-      const res = await apiRequest("/api/integrations/", {
+      const response = await apiRequest("/api/integrations/", {
         method: "POST",
         body: JSON.stringify({
           name: name.trim(),
@@ -113,163 +181,286 @@ export default function IntegrationsPage() {
           permissions,
         }),
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(body.detail || JSON.stringify(body));
-        return;
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        setSecret(data.integration_secret || "");
+        setTenantId(data.tenant_id || "");
+        setName("");
+        setPurpose("sales_crm");
+        setPermissions(PRESETS.sales_crm);
+        setCreateOpen(false);
+        setMessageTone("success");
+        setMessage("Connected App created. Copy the one-time Integration Secret now.");
+        await load();
+      } else {
+        setCreateError(data?.detail ?? JSON.stringify(data ?? {}) || "Connected App could not be created.");
       }
-      setSecret(body.integration_secret);
-      setTenantId(body.tenant_id);
-      setName("");
-      await load();
+    } catch {
+      setCreateError("Connected App could not be created.");
     } finally {
       setCreating(false);
     }
   }
 
-  async function revoke(id: string) {
-    if (!window.confirm("Revoke this integration? The connected app will lose access immediately.")) return;
-    const res = await apiRequest("/api/integrations/" + id + "/", { method: "DELETE" });
-    if (!res.ok) {
-      setError("Unable to revoke the integration.");
-      return;
+  async function revokeIntegration(integration: Integration) {
+    setRevoking(integration.id);
+    setMessage("");
+    try {
+      const response = await apiRequest("/api/integrations/" + integration.id + "/", {
+        method: "DELETE",
+      });
+      if (response.ok || response.status === 204) {
+        setIntegrations((current) =>
+          current.map((item) => item.id === integration.id ? { ...item, active: false } : item)
+        );
+        setConfirmRevoke("");
+        setMessageTone("success");
+        setMessage("Connected App revoked. Existing access tokens for it are no longer valid.");
+      } else {
+        const data = await response.json().catch(() => null);
+        setMessageTone("danger");
+        setMessage(data?.detail ?? "Connected App could not be revoked.");
+      }
+    } catch {
+      setMessageTone("danger");
+      setMessage("Connected App could not be revoked.");
+    } finally {
+      setRevoking("");
     }
-    await load();
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
-      <div>
-        <Link href="/app/settings" className="text-xs font-semibold text-cyan-700 hover:underline">← Settings</Link>
-        <h1 className="mt-2 text-xl font-semibold text-slate-900">Connected apps</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Connect CRM, helpdesk, ticketing or other trusted applications to one exact mailbox without sharing its password.
-        </p>
-      </div>
+    <div className="portal-page">
+      <Link href="/app/settings" className="portal-back-link">← Workspace settings</Link>
 
-      <form onSubmit={create} className="space-y-4 border border-slate-200 bg-white p-5">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900">Create connected app</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            MateMail creates a Tenant ID and one-time Integration Secret. The external app must still open MateMail and receive administrator approval.
-          </p>
-        </div>
-
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold text-slate-600">Application name</span>
-          <input
-            className="w-full border border-slate-300 px-3 py-2 text-sm"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Example: NetaMate SalesHub, MateDesk, Acme Helpdesk"
-            maxLength={100}
-            required
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold text-slate-600">Application purpose</span>
-          <select
-            className="w-full border border-slate-300 px-3 py-2 text-sm"
-            value={purpose}
-            onChange={(e) => choosePurpose(e.target.value)}
+      <PortalPageHeading
+        title="Connected Apps"
+        description="Give trusted CRM, helpdesk and business applications scoped access to one exact mailbox—without sharing its password."
+        actions={
+          <PortalButton
+            type="button"
+            disabled={!mailboxes.length}
+            onClick={() => {
+              setCreateOpen(true);
+              setCreateError("");
+              setSecret("");
+            }}
           >
-            {PURPOSES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </select>
-          <p className="mt-1 text-xs text-slate-400">Purpose only chooses a safe starting set of permissions. You can adjust them below.</p>
-        </label>
+            <Plus className="h-4 w-4" />
+            Create connected app
+          </PortalButton>
+        }
+      />
 
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold text-slate-600">Mailbox</span>
-          <select className="w-full border border-slate-300 px-3 py-2 text-sm" value={mailboxId} onChange={(e) => setMailboxId(e.target.value)} required>
-            {mailboxes.map((mailbox) => (
-              <option key={mailbox.id} value={mailbox.id}>
-                {mailbox.full_name ? mailbox.full_name + " — " : ""}{mailbox.email}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-slate-400">This connected app can never switch to another mailbox with the same credential.</p>
-        </label>
+      {message && (
+        <div className="mb-5"><PortalNotice tone={messageTone}>{message}</PortalNotice></div>
+      )}
 
-        <div className="border border-slate-200 p-3 text-sm">
-          <p className="font-semibold text-slate-800">Access</p>
-          <div className="mt-2 space-y-3">
-            {SCOPES.map((scope) => (
-              <label key={scope.key} className="flex items-start gap-2 text-slate-700">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={permissions.includes(scope.key)}
-                  onChange={() => togglePermission(scope.key)}
-                />
-                <span>
-                  <span className="block font-medium">{scope.label}</span>
-                  <span className="block text-xs text-slate-400">{scope.description}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-slate-400">
-            Connected apps never receive domain management, mailbox password, tenant administration, delete-message or PostBox master access.
-          </p>
-        </div>
-
-        {error && <div className="text-sm text-red-600">{error}</div>}
-        <button disabled={creating || !mailboxId || !name.trim() || permissions.length === 0} className="bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-          {creating ? "Creating…" : "Create connected app"}
-        </button>
-      </form>
-
-      {secret && (
-        <div className="border border-amber-300 bg-amber-50 p-5">
-          <h2 className="font-semibold text-amber-950">Copy these now</h2>
-          <p className="mt-1 text-xs text-amber-800">The Integration Secret is shown only once. It starts authorization but does not bypass MateMail approval or 2FA.</p>
-          <div className="mt-4 space-y-3">
-            <CopyRow label="Tenant ID" value={tenantId} />
-            <CopyRow label="Integration Secret" value={secret} />
-          </div>
+      {!loading && !mailboxes.length && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <Mail className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>An active, provisioned mailbox is required before a Connected App can be issued.</span>
+          </PortalNotice>
         </div>
       )}
 
-      <div className="border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 p-4">
-          <h2 className="text-sm font-semibold text-slate-900">Existing connected apps</h2>
-        </div>
-        {integrations.length === 0 ? (
-          <p className="p-4 text-sm text-slate-500">No connected apps yet.</p>
-        ) : integrations.map((item) => (
-          <div key={item.id} className="border-b border-slate-100 p-4 last:border-0">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="font-semibold text-slate-900">{item.name}</p>
-                <p className="mt-0.5 text-xs text-slate-400">{item.purpose_label}</p>
-                <p className="mt-1 text-sm text-slate-600">{item.mailbox_email}</p>
-                <p className="mt-2 text-xs text-slate-400">
-                  {item.permissions.map((permission) => permission.label).join(" · ")}
-                </p>
+      {secret && (
+        <PortalCard className="portal-secret-card" title="Copy these credentials now" subtitle="The Integration Secret is shown once. It begins the authorization flow but does not bypass administrator approval, password verification or 2FA.">
+          <div className="portal-secret-stack">
+            <div>
+              <span>Tenant ID</span>
+              <div className="portal-secret-value">
+                <code>{tenantId}</code>
+                <PortalCopyButton value={tenantId} label="Copy tenant ID" />
               </div>
-              {item.active && (
-                <button onClick={() => void revoke(item.id)} className="border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">
-                  Revoke
-                </button>
-              )}
+            </div>
+            <div>
+              <span>Integration Secret</span>
+              <div className="portal-secret-value">
+                <code>{secret}</code>
+                <PortalCopyButton value={secret} label="Copy integration secret" />
+              </div>
             </div>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+        </PortalCard>
+      )}
 
-function CopyRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold text-amber-900">{label}</p>
-      <div className="mt-1 flex gap-2">
-        <input readOnly value={value} className="min-w-0 flex-1 border border-amber-300 bg-white px-3 py-2 font-mono text-xs" />
-        <button type="button" onClick={() => void navigator.clipboard.writeText(value)} className="border border-amber-400 bg-white px-3 text-xs font-semibold text-amber-900">
-          Copy
-        </button>
+      {createOpen && (
+        <PortalCard className="portal-form-card" title="Create connected app" subtitle="The resulting credential is permanently bound to one workspace mailbox.">
+          <form onSubmit={createIntegration}>
+            {createError && <div className="mb-4"><PortalNotice tone="danger">{createError}</PortalNotice></div>}
+
+            <div className="portal-form-grid">
+              <div className="portal-field">
+                <label>Application name</label>
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  maxLength={100}
+                  required
+                  placeholder="MateCRM"
+                />
+              </div>
+
+              <div className="portal-field">
+                <label>Purpose</label>
+                <select value={purpose} onChange={(event) => choosePurpose(event.target.value)}>
+                  {PURPOSES.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                </select>
+                <div className="portal-field-hint">Purpose chooses a safe starting permission set; you can adjust it below.</div>
+              </div>
+
+              <div className="portal-field full">
+                <label>Mailbox</label>
+                <select value={mailboxId} onChange={(event) => setMailboxId(event.target.value)} required>
+                  {mailboxes.map((mailbox) => (
+                    <option key={mailbox.id} value={mailbox.id}>
+                      {mailbox.full_name ? mailbox.full_name + " — " : ""}{mailbox.email}
+                    </option>
+                  ))}
+                </select>
+                <div className="portal-field-hint">This Connected App can never switch to another mailbox with the same credential.</div>
+              </div>
+
+              <div className="portal-field full">
+                <label>Mailbox permissions</label>
+                <div className="portal-integration-permissions">
+                  {SCOPES.map((scope) => (
+                    <label key={scope.key} className="portal-scope-option" data-active={permissions.includes(scope.key)}>
+                      <input
+                        type="checkbox"
+                        checked={permissions.includes(scope.key)}
+                        onChange={() => togglePermission(scope.key)}
+                      />
+                      <span>
+                        <strong>{scope.label}</strong>
+                        <small>{scope.description}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <PortalNotice tone="info">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>Connected Apps never receive domain administration, mailbox passwords, workspace administration, message deletion or PostBox master access.</span>
+              </PortalNotice>
+            </div>
+
+            <div className="portal-detail-actions">
+              <PortalButton type="submit" disabled={creating || !mailboxId || !name.trim() || !permissions.length}>
+                <Link2 className="h-4 w-4" />
+                {creating ? "Creating…" : "Create connected app"}
+              </PortalButton>
+              <PortalButton type="button" variant="secondary" disabled={creating} onClick={() => setCreateOpen(false)}>Cancel</PortalButton>
+            </div>
+          </form>
+        </PortalCard>
+      )}
+
+      {loadError && (
+        <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
+      )}
+
+      <PortalCard className="portal-management-card" bodyClassName="!p-0">
+        <div className="portal-management-toolbar">
+          <div className="portal-management-search">
+            <Search className="h-4 w-4" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search connected apps…"
+              aria-label="Search connected apps"
+            />
+          </div>
+          <button type="button" className="portal-icon-button" onClick={load} disabled={loading} aria-label="Refresh Connected Apps">
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="p-5">
+            <PortalSkeleton className="mb-3 h-16 w-full" />
+            <PortalSkeleton className="h-16 w-full" />
+          </div>
+        ) : !loadError && filtered.length === 0 ? (
+          <PortalEmptyState
+            title={integrations.length ? "No matching Connected Apps" : "No Connected Apps yet"}
+            description={integrations.length ? "Try a different search term." : "Create a mailbox-scoped connection when a trusted application needs mail access."}
+          />
+        ) : !loadError ? (
+          <div className="portal-key-list">
+            {filtered.map((integration) => (
+              <div key={integration.id} className="portal-key-row">
+                <div className="portal-key-main">
+                  <span className="portal-avatar"><AppWindow className="h-4 w-4" /></span>
+                  <div>
+                    <div className="portal-key-title">
+                      <strong>{integration.name}</strong>
+                      <PortalStatus value={integration.active ? "Active" : "Revoked"} />
+                    </div>
+                    <div className="portal-key-meta">{integration.purpose_label}</div>
+                    <div className="portal-destination-pill mt-2">
+                      <Mail className="h-3 w-3" />
+                      <span>{integration.mailbox_email}</span>
+                    </div>
+                    <div className="portal-scope-badges mt-2">
+                      {integration.permissions.map((permission) => (
+                        <span key={permission.key}>{permission.label}</span>
+                      ))}
+                    </div>
+                    <div className="portal-key-meta mt-2">
+                      Created {new Date(integration.created_at).toLocaleString()}
+                      {" · "}
+                      {integration.last_used_at ? "Last used " + new Date(integration.last_used_at).toLocaleString() : "Never used"}
+                    </div>
+                  </div>
+                </div>
+
+                {integration.active && (
+                  <div className="portal-inline-actions">
+                    <button
+                      type="button"
+                      className="portal-action-button danger"
+                      onClick={() => setConfirmRevoke(integration.id)}
+                      disabled={revoking === integration.id}
+                      aria-label={"Revoke " + integration.name}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {confirmRevoke === integration.id && (
+                  <div className="portal-confirm-inline">
+                    <PortalNotice tone="warn">
+                      <div className="flex-1">Revoke <strong>{integration.name}</strong>? The application will immediately lose access to <strong>{integration.mailbox_email}</strong>.</div>
+                      <div className="flex gap-2">
+                        <PortalButton type="button" variant="secondary" onClick={() => setConfirmRevoke("")} disabled={revoking === integration.id}>Cancel</PortalButton>
+                        <PortalButton type="button" variant="danger" onClick={() => revokeIntegration(integration)} disabled={revoking === integration.id}>
+                          {revoking === integration.id ? "Revoking…" : "Revoke"}
+                        </PortalButton>
+                      </div>
+                    </PortalNotice>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </PortalCard>
+
+      <div className="mt-4">
+        <PortalNotice tone="info">
+          <KeyRound className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>Connected Apps use a separate approval flow from general API keys. The one-time Integration Secret identifies the app; operational access is issued only after MateMail authorization completes.</span>
+        </PortalNotice>
       </div>
     </div>
   );
