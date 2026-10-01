@@ -1,4 +1,4 @@
-from apps.domains.models import DomainOwnership
+from apps.domains.models import Domain, DomainOwnership
 from .models import MemberStatus, TenantMembership
 
 
@@ -22,6 +22,17 @@ def tenant_allows_member_email(tenant, email: str) -> bool:
         ownership_status=DomainOwnership.VERIFIED,
     ).exists()
 
+
+
+def verified_domain_is_registered(email: str) -> bool:
+    """True when the email domain already belongs to any verified tenant."""
+    domain = email_domain(email)
+    if not domain:
+        return False
+    return Domain.objects.filter(
+        domain__iexact=domain,
+        ownership_status=DomainOwnership.VERIFIED,
+    ).exists()
 
 def user_has_other_active_tenant(user, tenant) -> bool:
     """Defense in depth for legacy data and domain ownership transfers."""
