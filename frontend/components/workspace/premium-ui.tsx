@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { Check, Copy, Inbox } from "lucide-react";
