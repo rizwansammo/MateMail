@@ -173,11 +173,23 @@ class MateMailHubBrandingContractTest(SimpleTestCase):
 
     def test_sidebar_is_icon_plus_matemail_hub_only(self):
         layout = read("app", "app", "layout.tsx")
-        self.assertIn("MateMail Hub", layout)
+        css = read("app", "app", "portal-premium.css")
+        self.assertIn(
+            '<BrandMark size={35} className="portal-brand-mark" preload />',
+            layout,
+        )
+        self.assertIn('className="portal-brand-word">MateMail Hub</span>', layout)
         self.assertNotIn("ORGANIZATION PORTAL", layout)
         self.assertNotIn("Switch workspace", layout)
         self.assertNotIn('href="/workspaces"', layout)
         self.assertNotIn("ChevronsUpDown", layout)
+        self.assertNotIn("portal-workspace-card", layout)
+        self.assertNotIn("Current organization", layout)
+        self.assertIn("font-family: HemiHead, sans-serif !important;", css)
+        self.assertIn("font-size: 30px;", css)
+        self.assertIn("font-weight: 700;", css)
+        self.assertIn("letter-spacing: 0.2px;", css)
+        self.assertIn("border-radius: 8px;", css)
 
     def test_browser_title_is_the_organization_hub_title(self):
         root_layout = read("app", "layout.tsx")
