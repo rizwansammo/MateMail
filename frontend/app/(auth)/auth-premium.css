@@ -1,6 +1,14 @@
 /* Premium authentication and workspace-entry experience.
    Scoped to .auth-premium so Platform Console/PostBox auth are untouched. */
 
+@font-face {
+  font-family: HemiHead;
+  src: url("/postbox/HemiHead-Bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 .auth-premium {
   --auth-navy: #122c51;
   --auth-navy-2: #1a365b;
@@ -65,11 +73,19 @@
   user-select: none;
 }
 
+
+.auth-premium .auth-brand-mark {
+  width: 35px;
+  height: 35px;
+  border-radius: 8px;
+}
+
 .auth-premium .auth-brand-word {
-  font-family: "HemiHead Portal", var(--font-sans);
+  font-family: HemiHead, sans-serif !important;
   font-size: 30px;
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.2px;
 }
 
 .auth-premium .auth-story-body {
