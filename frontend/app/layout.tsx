@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     default: IS_NETAMATE_EMAIL
       ? "MailAdmin | MateMail"
       : "MateMail · Organization Hub",
-    template: IS_NETAMATE_EMAIL ? "%s | MateMail" : "%s · MateMail Hub",
+    template: "%s | MateMail",
   },
   description: IS_NETAMATE_EMAIL
     ? "Private MateMail administration for NetaMate Solutions."
