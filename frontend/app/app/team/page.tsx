@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   Clock3,
@@ -39,7 +40,7 @@ interface Invite {
   id: string;
   email: string;
   role: "admin" | "support" | "read_only";
-  invited_by_email: string;
+  invited_by_email: string | null;
   created_at: string;
   expires_at: string;
   accepted_at: string | null;
@@ -68,6 +69,7 @@ function initials(name: string, email: string) {
 }
 
 export default function TeamPage() {
+  const router = useRouter();
   const { tenant, user } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -159,7 +161,7 @@ export default function TeamPage() {
     return invites.filter((invite) =>
       invite.email.toLowerCase().includes(needle) ||
       invite.role.toLowerCase().includes(needle) ||
-      invite.invited_by_email.toLowerCase().includes(needle)
+      (invite.invited_by_email || "").toLowerCase().includes(needle)
     );
   }, [invites, query]);
 
@@ -240,7 +242,11 @@ export default function TeamPage() {
       if (response.ok || response.status === 204) {
         setConfirmRemove("");
         setMessageTone("success");
-        setMessage(member.email === user?.email ? "You left the workspace." : "Member removed from the workspace.");
+        if (member.email === user?.email) {
+          router.push("/workspaces");
+          return;
+        }
+        setMessage("Member removed from the workspace.");
         await loadTeam(false);
       } else {
         const data = await response.json().catch(() => null);
@@ -526,7 +532,7 @@ export default function TeamPage() {
                     </td>
                     <td><span className="portal-role-badge">{pretty(invite.role)}</span></td>
                     <td><PortalStatus value={invite.is_pending ? "Pending" : "Expired"} /></td>
-                    <td>{invite.invited_by_email}</td>
+                    <td>{invite.invited_by_email || "Former member"}</td>
                     <td>{new Date(invite.expires_at).toLocaleDateString()}</td>
                     <td>
                       <div className="portal-inline-actions">
