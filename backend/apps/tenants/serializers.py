@@ -44,9 +44,14 @@ class WorkspaceDetailSerializer(serializers.ModelSerializer):
         fields = [
             "id", "name", "slug", "status", "plan",
             "domain_count", "mailbox_count", "member_count",
-            "my_role", "created_at",
+            "my_role", "approved_at", "review_reason", "outbound_disabled",
+            "created_at",
         ]
-        read_only_fields = ["id", "slug", "status", "plan", "created_at"]
+        read_only_fields = [
+            "id", "slug", "status", "plan",
+            "approved_at", "review_reason", "outbound_disabled",
+            "created_at",
+        ]
 
     def get_domain_count(self, obj):
         return obj.domains.count()
