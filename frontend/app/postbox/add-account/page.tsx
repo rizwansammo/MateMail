@@ -124,8 +124,8 @@ export default function PostBoxAddAccountPage() {
           <div className="pb-premium-login-help">
             <p className="flex items-start gap-2">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              PostBox keeps an encrypted browser session capability, not your mailbox password.
-              The session remains revocable from Settings → Security.
+              PostBox keeps an opaque, HttpOnly browser session capability, not your mailbox
+              password. The session remains revocable from Settings → Security.
             </p>
             <Link href="/postbox" className="mt-4 inline-flex items-center gap-2">
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
