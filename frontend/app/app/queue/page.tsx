@@ -1,8 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle,
+  Clock3,
+  Mail,
+  RefreshCw,
+  Search,
+  Send,
+  XCircle,
+} from "lucide-react";
 import { apiRequest } from "@/lib/api";
-import { Clock, RefreshCw, XCircle } from "lucide-react";
+import {
+  PortalButton,
+  PortalCard,
+  PortalEmptyState,
+  PortalNotice,
+  PortalPageHeading,
+  PortalSkeleton,
+  PortalStatus,
+} from "@/components/workspace/premium-ui";
 
 interface QueueMessage {
   id: string;
@@ -19,156 +36,244 @@ interface QueueMessage {
   retry_count: number;
 }
 
-const STATUS_STYLES: Record<string, string> = {
-  pending:   "bg-blue-50   text-blue-700   ring-blue-600/20",
-  deferred:  "bg-amber-50  text-amber-700  ring-amber-600/20",
-  failed:    "bg-red-50    text-red-700    ring-red-600/20",
-  delivered: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  cancelled: "bg-slate-100 text-slate-500  ring-slate-400/20",
-};
-
 const STATUSES = [
-  { value: "", label: "Active (pending + deferred + failed)" },
-  { value: "pending",   label: "Pending" },
-  { value: "deferred",  label: "Deferred" },
-  { value: "failed",    label: "Failed" },
+  { value: "", label: "Active queue" },
+  { value: "pending", label: "Pending" },
+  { value: "deferred", label: "Deferred" },
+  { value: "failed", label: "Failed" },
   { value: "delivered", label: "Delivered" },
   { value: "cancelled", label: "Cancelled" },
 ];
 
-function fmt(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" });
+function fmt(value: string | null) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString();
+}
+
+function canCancel(status: string) {
+  return status === "pending" || status === "deferred" || status === "failed";
 }
 
 export default function QueuePage() {
   const [messages, setMessages] = useState<QueueMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState("");
+  const [cancelling, setCancelling] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [actionFailed, setActionFailed] = useState(false);
 
-  async function fetchQueue(sf: string) {
+  const fetchQueue = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
-      const params = sf ? `?status=${sf}` : "";
-      const r = await apiRequest(`/api/queue/${params}`);
-      if (r.ok) setMessages(await r.json());
+      const params = statusFilter ? "?status=" + encodeURIComponent(statusFilter) : "";
+      const response = await apiRequest("/api/queue/" + params);
+      const data = await response.json().catch(() => null);
+      if (response.ok && Array.isArray(data)) {
+        setMessages(data);
+      } else if (response.status === 403) {
+        setLoadError("Your workspace role does not permit access to the mail queue.");
+      } else {
+        setLoadError(data?.detail ?? "Mail queue could not be loaded.");
+      }
+    } catch {
+      setLoadError("Mail queue could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [statusFilter]);
 
-  useEffect(() => { fetchQueue(statusFilter); }, [statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchQueue(), 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchQueue]);
 
-  async function handleCancel(msg: QueueMessage) {
-    setCancelling(msg.id);
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return messages;
+    return messages.filter((message) =>
+      [
+        message.sender,
+        message.recipient,
+        message.subject,
+        message.status,
+        message.reason,
+      ].some((value) => value.toLowerCase().includes(needle))
+    );
+  }, [messages, query]);
+
+  async function cancelMessage(message: QueueMessage) {
+    setCancelling(message.id);
+    setActionMessage("");
+    setActionFailed(false);
     try {
-      const r = await apiRequest(`/api/queue/${msg.id}/cancel/`, { method: "POST" });
-      if (r.ok) {
-        const updated = await r.json();
-        setMessages((prev) => prev.map((m) => (m.id === msg.id ? updated : m)));
+      const response = await apiRequest("/api/queue/" + message.id + "/cancel/", {
+        method: "POST",
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok && data) {
+        setMessages((current) => current.map((item) => item.id === message.id ? data : item));
+        setConfirmCancel("");
+        setActionMessage("Queued message cancelled.");
+      } else {
+        setActionFailed(true);
+        setActionMessage(data?.detail ?? "The queued message could not be cancelled.");
       }
+    } catch {
+      setActionFailed(true);
+      setActionMessage("The queued message could not be cancelled.");
     } finally {
-      setCancelling(null);
+      setCancelling("");
     }
   }
 
-  const canCancel = (s: string) => s === "pending" || s === "deferred" || s === "failed";
-
   return (
-    <div className="space-y-6 p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Clock className="h-5 w-5 text-slate-400" />
-          <div>
-            <h1 className="text-xl font-semibold text-slate-900">Mail Queue</h1>
-            <p className="text-sm text-slate-500">Outbound messages waiting to be delivered or retried.</p>
+    <div className="portal-page">
+      <PortalPageHeading
+        title="Mail queue"
+        description="Outbound messages waiting for delivery, retry, or administrator action."
+        actions={
+          <button type="button" className="portal-button secondary" onClick={fetchQueue} disabled={loading}>
+            <RefreshCw className={"h-4 w-4 " + (loading ? "animate-spin" : "")} />
+            Refresh
+          </button>
+        }
+      />
+
+      {actionMessage && (
+        <div className="mb-5">
+          <PortalNotice tone={actionFailed ? "danger" : "success"}>{actionMessage}</PortalNotice>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
+      )}
+
+      <PortalCard className="portal-management-card" bodyClassName="!p-0">
+        <div className="portal-management-toolbar">
+          <div className="portal-management-search">
+            <Search className="h-4 w-4" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search sender, recipient, subject or reason…"
+              aria-label="Search mail queue"
+            />
           </div>
+          <select
+            className="portal-input !h-[34px] !min-h-[34px] !w-[170px] !py-0 text-[10px]"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            aria-label="Filter queue status"
+          >
+            {STATUSES.map((status) => (
+              <option key={status.value} value={status.value}>{status.label}</option>
+            ))}
+          </select>
         </div>
-        <button
-          onClick={() => fetchQueue(statusFilter)}
-          className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </button>
-      </div>
 
-      {/* Filter */}
-      <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-slate-600">Show:</label>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-        >
-          {STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
-      </div>
-
-      {/* List */}
-      {loading ? (
-        <div className="py-16 text-center text-sm text-slate-400">Loading queue…</div>
-      ) : messages.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-300 py-16 text-center">
-          <Clock className="mx-auto h-8 w-8 text-slate-300" />
-          <p className="mt-3 text-sm text-slate-500">Queue is empty.</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-          <table className="min-w-full divide-y divide-slate-100 text-sm">
-            <thead className="bg-slate-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">From</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">To</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Subject</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Queued</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Retries</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Next retry</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {messages.map((msg) => (
-                <tr key={msg.id} className="hover:bg-slate-50/50">
-                  <td className="px-4 py-3 text-slate-700 truncate max-w-[140px]">{msg.sender}</td>
-                  <td className="px-4 py-3 text-slate-700 truncate max-w-[140px]">{msg.recipient}</td>
-                  <td className="px-4 py-3 text-slate-500 truncate max-w-[200px]">{msg.subject || <span className="italic text-slate-300">no subject</span>}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset capitalize ${STATUS_STYLES[msg.status] ?? ""}`}>
-                      {msg.status_display}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{fmt(msg.queued_at)}</td>
-                  <td className="px-4 py-3 text-center text-slate-500">{msg.retry_count}</td>
-                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{fmt(msg.next_retry)}</td>
-                  <td className="px-4 py-3 text-right">
-                    {canCancel(msg.status) && (
-                      <button
-                        onClick={() => handleCancel(msg)}
-                        disabled={cancelling === msg.id}
-                        title="Cancel message"
-                        className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 disabled:opacity-40"
-                      >
-                        <XCircle className="h-4 w-4" />
-                        Cancel
-                      </button>
-                    )}
-                  </td>
+        {loading ? (
+          <div className="p-5">
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="mb-3 h-14 w-full" />
+            <PortalSkeleton className="h-14 w-full" />
+          </div>
+        ) : !loadError && filtered.length === 0 ? (
+          <PortalEmptyState
+            title={messages.length ? "No matching messages" : "Queue is clear"}
+            description={messages.length ? "Try a different search or status filter." : "There are no messages in the selected queue state."}
+          />
+        ) : !loadError ? (
+          <div className="portal-management-table-wrap">
+            <table className="portal-management-table">
+              <thead>
+                <tr>
+                  <th>Message</th>
+                  <th>Recipient</th>
+                  <th>Status</th>
+                  <th>Retries</th>
+                  <th>Next retry</th>
+                  <th>Queued</th>
+                  <th className="text-right">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {filtered.map((message) => (
+                  <tr key={message.id}>
+                    <td>
+                      <div className="portal-identity-cell">
+                        <span className="portal-avatar"><Send className="h-4 w-4" /></span>
+                        <span>
+                          <strong>{message.subject || "No subject"}</strong>
+                          <small>{message.sender}</small>
+                        </span>
+                      </div>
+                    </td>
+                    <td><code>{message.recipient}</code></td>
+                    <td>
+                      <PortalStatus value={message.status_display || message.status} />
+                      {message.reason && (
+                        <div className="portal-table-note">{message.reason}</div>
+                      )}
+                    </td>
+                    <td>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Clock3 className="h-3.5 w-3.5 text-[var(--portal-faint)]" />
+                        {message.retry_count}
+                      </span>
+                      {message.last_retry && <div className="portal-table-note">Last: {fmt(message.last_retry)}</div>}
+                    </td>
+                    <td>{fmt(message.next_retry)}</td>
+                    <td>{fmt(message.queued_at)}</td>
+                    <td>
+                      <div className="portal-inline-actions">
+                        {canCancel(message.status) && (
+                          <button
+                            type="button"
+                            className="portal-action-button danger"
+                            onClick={() => setConfirmCancel(message.id)}
+                            disabled={cancelling === message.id}
+                            aria-label={"Cancel queued message " + message.subject}
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      {confirmCancel === message.id && (
+                        <div className="portal-confirm-inline">
+                          <PortalNotice tone="warn">
+                            <div className="flex-1">
+                              Cancel delivery to <strong>{message.recipient}</strong>? MateMail will ask the Mail Engine to remove it before changing local status.
+                            </div>
+                            <div className="flex gap-2">
+                              <PortalButton type="button" variant="secondary" onClick={() => setConfirmCancel("")} disabled={cancelling === message.id}>Keep</PortalButton>
+                              <PortalButton type="button" variant="danger" onClick={() => cancelMessage(message)} disabled={cancelling === message.id}>
+                                {cancelling === message.id ? "Cancelling…" : "Cancel message"}
+                              </PortalButton>
+                            </div>
+                          </PortalNotice>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </PortalCard>
 
-      {messages.length > 0 && (
-        <p className="text-xs text-slate-400">
-          Showing up to 200 messages. Delivered and cancelled messages are retained for 30 days.
-        </p>
-      )}
+      <div className="mt-4">
+        <PortalNotice tone="info">
+          <Mail className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>By default MateMail shows active pending, deferred and failed messages. Delivered and cancelled records can be selected explicitly.</span>
+        </PortalNotice>
+      </div>
     </div>
   );
 }
