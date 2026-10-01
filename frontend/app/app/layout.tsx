@@ -220,7 +220,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <span className="portal-workspace-monogram">{workspaceInitials}</span>
               <span className="portal-workspace-copy">
                 <strong>{workspaceName}</strong>
-                <small>{shellMeta?.plan ? displayPlan(workspaceMeta.plan) + " workspace" : "Organization workspace"}</small>
+                <small>{shellMeta?.plan ? displayPlan(shellMeta.plan) + " workspace" : "Organization workspace"}</small>
               </span>
             </div>
           )}
@@ -253,7 +253,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <div className="portal-plan-mini">
                 <div className="portal-plan-mini-top">
                   <Sparkles className="h-3.5 w-3.5 text-[var(--portal-primary)]" />
-                  <strong>{shellMeta?.plan ? displayPlan(workspaceMeta.plan) : "Workspace"}</strong>
+                  <strong>{shellMeta?.plan ? displayPlan(shellMeta.plan) : "Workspace"}</strong>
                   <span>{tenant.status === "active" ? "Active" : displayPlan(tenant.status)}</span>
                 </div>
               </div>
