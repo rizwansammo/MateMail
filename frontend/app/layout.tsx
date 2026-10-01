@@ -18,10 +18,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: IS_NETAMATE_EMAIL
-      ? "MailAdmin | MateMail"
-      : "MateMail — Professional Email Hosting",
-    template: "%s | MateMail",
+    default: "MateMail · Organization Hub",
+    template: "%s · MateMail Hub",
   },
   description: IS_NETAMATE_EMAIL
     ? "Private MateMail administration for NetaMate Solutions."
@@ -32,13 +30,12 @@ export const metadata: Metadata = {
         ? "https://mailadmin.netamate.com"
         : "https://matemail.online"),
   ),
+  icons: {
+    icon: "/assets/matemail-mark.svg",
+    shortcut: "/assets/matemail-mark.svg",
+  },
   ...(IS_NETAMATE_EMAIL
     ? {
-        icons: {
-          icon: "/icon.png",
-          shortcut: "/icon.png",
-          apple: "/apple-icon.png",
-        },
         robots: { index: false, follow: false },
       }
     : {}),
