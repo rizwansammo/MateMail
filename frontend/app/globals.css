@@ -2454,6 +2454,83 @@ body {
   color:var(--pb-muted);
   font-size:14px;
 }
+.pb-premium-login-saved {
+  margin-top:24px;
+  border:1px solid var(--pb-border);
+  border-radius:13px;
+  padding:8px;
+  background:var(--pb-surface);
+}
+.pb-premium-login-saved-label {
+  display:block;
+  padding:5px 7px 8px;
+  color:var(--pb-subtle);
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+}
+.pb-premium-login-saved button {
+  display:flex;
+  width:100%;
+  align-items:center;
+  gap:10px;
+  border:0;
+  border-radius:9px;
+  padding:10px;
+  background:transparent;
+  color:var(--pb-fg);
+  text-align:left;
+}
+.pb-premium-login-saved button:hover { background:var(--pb-surface-2); }
+.pb-premium-login-saved button:disabled { cursor:wait; opacity:.65; }
+.pb-premium-login-saved-avatar {
+  display:inline-flex;
+  width:36px;
+  height:36px;
+  flex:0 0 auto;
+  align-items:center;
+  justify-content:center;
+  border-radius:50%;
+  background:#e2eee8;
+  color:#3e7360;
+  font-size:11px;
+  font-weight:700;
+}
+:root[data-pb-theme="dark"] .pb-premium-login-saved-avatar {
+  background:#243c37;
+  color:#92d8c5;
+}
+.pb-premium-login-saved-copy {
+  min-width:0;
+  flex:1;
+}
+.pb-premium-login-saved-copy strong,
+.pb-premium-login-saved-copy small {
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.pb-premium-login-saved-copy strong { font-size:12.5px; }
+.pb-premium-login-saved-copy small { margin-top:2px; color:var(--pb-muted); font-size:11px; }
+.pb-premium-login-or {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:8px 4px 0;
+  color:var(--pb-subtle);
+  font-size:10px;
+}
+.pb-premium-login-or::before,
+.pb-premium-login-or::after {
+  height:1px;
+  flex:1;
+  background:var(--pb-border);
+  content:"";
+}
+.pb-premium-login-or span { white-space:nowrap; }
+.pb-premium-login-saved + .pb-premium-login-form { margin-top:20px; }
 .pb-premium-login-form { margin-top:30px; }
 .pb-premium-field { margin-bottom:21px; }
 .pb-premium-field label {
