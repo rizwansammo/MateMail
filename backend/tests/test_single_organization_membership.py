@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -112,6 +113,7 @@ class OrganizationMembershipPolicyTest(TestCase):
 )
 class InviteBoundSignupTest(TestCase):
     def setUp(self):
+        cache.clear()
         disable_throttling(self)
         self.owner = make_user("owner@acme.test")
         self.tenant = make_tenant(self.owner, name="Acme", slug="acme")
