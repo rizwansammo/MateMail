@@ -129,11 +129,7 @@ function VerifyEmailContent() {
   }
 
   if (status === "success") {
-    const next = isAuthenticated
-      ? IS_NETAMATE_EMAIL
-        ? "/app"
-        : "/workspaces"
-      : "/login";
+    const next = isAuthenticated ? "/app" : "/login";
     return (
       <PremiumAuthShell
         title="Email verified."
