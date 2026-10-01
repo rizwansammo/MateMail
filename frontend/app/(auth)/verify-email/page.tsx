@@ -15,7 +15,6 @@ import {
 } from "@/components/workspace/premium-auth";
 import { useAuth } from "@/contexts/auth-context";
 import { api, ApiError } from "@/lib/api";
-import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 function VerifyEmailContent() {
   const params = useSearchParams();
@@ -129,11 +128,7 @@ function VerifyEmailContent() {
   }
 
   if (status === "success") {
-    const next = isAuthenticated
-      ? IS_NETAMATE_EMAIL
-        ? "/app"
-        : "/workspaces"
-      : "/login";
+    const next = isAuthenticated ? "/app" : "/login";
     return (
       <PremiumAuthShell
         title="Email verified."

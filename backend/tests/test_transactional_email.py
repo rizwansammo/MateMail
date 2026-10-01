@@ -25,6 +25,7 @@ from tests.factories import (
     TEST_PASSWORD,
     auth_client,
     disable_throttling,
+    make_domain,
     make_tenant,
     make_user,
 )
@@ -206,6 +207,7 @@ class EndpointHonestyTest(TestCase):
     def test_an_invite_reports_whether_the_email_went_out(self):
         verified = make_user("inviter@example.test")
         tenant = make_tenant(verified, name="Inv", slug="inv")
+        make_domain(tenant, "example.test")
         api = auth_client(verified, tenant)
 
         with mock.patch("apps.teams.views.send_transactional", return_value=False):
@@ -219,6 +221,7 @@ class EndpointHonestyTest(TestCase):
     def test_an_invite_reports_success_normally(self):
         verified = make_user("inviter2@example.test")
         tenant = make_tenant(verified, name="Inv2", slug="inv2")
+        make_domain(tenant, "example.test")
         res = auth_client(verified, tenant).post(
             "/api/teams/invites/", {"email": "guest2@example.test", "role": "admin"}
         )

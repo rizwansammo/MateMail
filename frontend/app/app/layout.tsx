@@ -5,10 +5,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AtSign,
-  Building2,
   ChevronDown,
   ChevronRight,
-  ChevronsUpDown,
   CircleCheckBig,
   CreditCard,
   DatabaseBackup,
@@ -172,12 +170,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <strong>{accountName}</strong>
         <span>{user?.email}</span>
       </div>
-      {!IS_NETAMATE_EMAIL && (
-        <Link className="portal-account-action" href="/workspaces">
-          <Building2 className="h-4 w-4" />
-          Switch workspace
-        </Link>
-      )}
       <Link className="portal-account-action" href="/app/settings">
         <Settings2 className="h-4 w-4" />
         Workspace settings
@@ -225,26 +217,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="portal-brand">
             <div className="portal-brand-lockup">
               <BrandMark size={32} preload />
-              <span className="portal-brand-word">MateMail</span>
+              <span className="portal-brand-word">MateMail Hub</span>
             </div>
-            <span className="portal-brand-caption">
-              {IS_NETAMATE_EMAIL ? "MAIL ADMINISTRATION" : "ORGANIZATION PORTAL"}
-            </span>
           </div>
 
           {tenant && (
-            <Link
-              href={IS_NETAMATE_EMAIL ? "/app" : "/workspaces"}
+            <div
               className="portal-workspace-card"
-              aria-label={IS_NETAMATE_EMAIL ? "Current organization" : "Switch workspace"}
+              aria-label="Current organization"
             >
               <span className="portal-workspace-monogram">{workspaceInitials}</span>
               <span className="portal-workspace-copy">
                 <strong>{workspaceName}</strong>
                 <small>{shellMeta?.plan ? displayPlan(shellMeta.plan) + " workspace" : "Organization workspace"}</small>
               </span>
-              {!IS_NETAMATE_EMAIL && <ChevronsUpDown className="h-4 w-4 text-[var(--portal-faint)]" />}
-            </Link>
+            </div>
           )}
 
           <nav className="portal-nav" aria-label="Workspace navigation">
@@ -324,7 +311,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <main className="portal-stage">{children}</main>
 
           <footer className="portal-footer">
-            <span>MateMail Portal · Organization workspace</span>
+            <span>MateMail Hub</span>
             <span>Secure administration for your email organization</span>
           </footer>
         </div>

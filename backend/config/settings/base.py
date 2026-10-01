@@ -480,11 +480,6 @@ REFRESH_COOKIE_SAMESITE = env("REFRESH_COOKIE_SAMESITE", default="Strict")
 # Setting this too high lets a caller forge their own address.
 TRUSTED_PROXY_COUNT = env.int("TRUSTED_PROXY_COUNT", default=0)
 
-# How many workspaces one user may own. Free signup plus unlimited workspace
-# creation is a trial-abuse and resource-exhaustion path, so this is capped and
-# overridable per environment without a code change.
-MAX_WORKSPACES_PER_USER = env.int("MAX_WORKSPACES_PER_USER", default=5)
-
 # Internal API secret — used by the Mail Engine policy bridge and the webmail
 # front end to call /api/internal/. nginx denies that prefix at the edge.
 # Generate with: python -c "import secrets; print(secrets.token_urlsafe(40))"

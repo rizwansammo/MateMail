@@ -388,21 +388,23 @@ the oracle the uniform response exists to prevent.
 
 ---
 
-## Workspace and Plan Limits
+## Organization Membership and Plan Limits
 
-**Status: IMPLEMENTED (P3b).**
+**Status: IMPLEMENTED.**
 
-`MAX_WORKSPACES_PER_USER` (default **5**, overridable by environment variable)
-caps how many workspaces one user may **own**. Each workspace carries its own
-trial subscription, domains and mailboxes, so an uncapped endpoint is both a
-trial-abuse path and a way for one account to consume provisioning capacity.
-Workspaces the user has merely been *invited* into do not count — that is not
-abuse, and counting it would stop legitimate users creating their own.
+MateMail Hub tenant users are **single-organization**. The additional-workspace
+creation and workspace-switch endpoints do not exist. Team membership is also
+bound to organization identity: a member or invitee must use an email address
+whose domain is ownership-verified for that tenant. A pending domain claim is
+not sufficient. This prevents an organization from adding an arbitrary external
+domain to its team simply by typing that domain into MateMail.
 
-`Plan.max_members` is now genuinely enforced. `check_member_limit` existed in
-`apps.billing.utils` before P3b and **was never called from anywhere**: the
-number was in the database and nothing consulted it. It is now checked on every
-path that can take a seat:
+Legacy duplicate memberships may exist in historical data, but the Hub exposes
+only the organization carried by the authenticated tenant context and provides
+no switcher. New member/invite flows also refuse creating a second active
+organization membership for the same user.
+
+`Plan.max_members` remains enforced on every path that can take a seat:
 
 | Path | Behaviour at the limit |
 |------|------------------------|
@@ -420,8 +422,7 @@ about. Expired invitations release their seat automatically.
 
 Each check runs inside the transaction that takes the seat, with the tenant row
 locked (`select_for_update`). Without the lock, two admins inviting at the same
-moment both read the pre-change count and both succeed. Workspace creation
-locks the user row instead, because the row being counted does not exist yet.
+moment both read the pre-change count and both succeed.
 
 ---
 
@@ -1022,7 +1023,7 @@ Both write audit events (`domain_ownership_verified`, `domain_ownership_failed`,
 | Alias minting as cheap sending identities | `Plan.max_aliases`, enforced workspace-wide under a row lock (P5) |
 | Credential stuffing | Per-IP and per-account login lockout on failures (P3b) |
 | Tenant enumeration | Workspace slugs not enumerable via public API |
-| Trial abuse / mass signup | 3 signups per hour per IP; `MAX_WORKSPACES_PER_USER` caps owned workspaces (P3b) |
+| Trial abuse / mass signup | 3 signups per hour per IP; tenant users cannot create additional workspaces |
 | Over-privileged automation | API keys are read-only by default, scoped, and can never reach platform administration (P3b) |
 | Mass mailbox creation | 20/hour per tenant plus `Plan.max_mailboxes` (P3b) |
 | DNS abuse | DNS verification re-checks, domain pause on repeated failures |

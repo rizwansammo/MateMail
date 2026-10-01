@@ -25,6 +25,7 @@ from tests.factories import (
     add_member,
     auth_client,
     disable_throttling,
+    make_domain,
     make_plan,
     make_tenant,
     make_user,
@@ -40,59 +41,38 @@ LOCMEM_CACHE = {
 
 
 @override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS, CACHES=LOCMEM_CACHE)
-class WorkspaceCapTest(TestCase):
+class SingleOrganizationWorkspaceTest(TestCase):
     def setUp(self):
         cache.clear()
         disable_throttling(self)
-        self.user = make_user("wscap@example.test")
-        self.tenant = make_tenant(self.user, name="First", slug="first")
+        self.user = make_user("single@example.test")
+        self.tenant = make_tenant(self.user, name="Only", slug="only")
         self.api = auth_client(self.user, self.tenant)
 
-    def _create(self, n):
-        return self.api.post("/api/workspaces/create/", {"name": f"Workspace {n}"})
-
-    @override_settings(MAX_WORKSPACES_PER_USER=3)
-    def test_creation_is_capped(self):
-        # One workspace already exists from setUp.
-        self.assertEqual(self._create(2).status_code, 201)
-        self.assertEqual(self._create(3).status_code, 201)
-        blocked = self._create(4)
-        self.assertEqual(blocked.status_code, 403)
-        self.assertIn("3", blocked.data["detail"])
-
-    @override_settings(MAX_WORKSPACES_PER_USER=3)
-    def test_nothing_is_created_when_the_cap_is_reached(self):
-        self._create(2)
-        self._create(3)
-        before = Tenant.objects.filter(owner=self.user).count()
-        self._create(4)
-        self.assertEqual(Tenant.objects.filter(owner=self.user).count(), before)
-
-    @override_settings(MAX_WORKSPACES_PER_USER=1)
-    def test_the_cap_counts_only_workspaces_the_user_owns(self):
-        """
-        Being invited into other people's workspaces is not abuse, and must not
-        stop someone creating their own.
-        """
-        stranger = make_user("stranger@example.test")
-        for i in range(5):
-            other = make_tenant(stranger, name=f"Other {i}", slug=f"other-{i}")
-            add_member(other, self.user, "admin")
-
-        # Still refused — but on the one workspace they own, not the six they
-        # are a member of.
-        self.assertEqual(self._create(9).status_code, 403)
+    def test_additional_workspace_creation_route_is_not_available(self):
+        response = self.api.post("/api/workspaces/create/", {"name": "Second"})
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(Tenant.objects.filter(owner=self.user).count(), 1)
 
-    @override_settings(MAX_WORKSPACES_PER_USER=10)
-    def test_a_raised_cap_takes_effect_without_a_code_change(self):
-        for n in range(2, 8):
-            self.assertEqual(self._create(n).status_code, 201)
+    def test_workspace_switch_route_is_not_available(self):
+        response = self.api.post(
+            "/api/workspaces/switch/",
+            {"tenant_id": str(self.tenant.id)},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 404)
 
-    def test_the_default_cap_is_documented_and_finite(self):
-        from django.conf import settings
+    def test_workspace_list_contains_only_the_token_bound_organization(self):
+        # Legacy duplicate memberships can exist in old data, but the Hub
+        # never exposes them as switchable organizations.
+        legacy_owner = make_user("legacy-owner@example.test")
+        legacy = make_tenant(legacy_owner, name="Legacy", slug="legacy")
+        add_member(legacy, self.user, "admin")
 
-        self.assertEqual(settings.MAX_WORKSPACES_PER_USER, 5)
+        response = self.api.get("/api/workspaces/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], str(self.tenant.id))
 
 
 @override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS, CACHES=LOCMEM_CACHE)
@@ -102,6 +82,7 @@ class MemberCapTest(TestCase):
         disable_throttling(self)
         self.owner = make_user("plan-owner@example.test")
         self.tenant = make_tenant(self.owner, name="Capped", slug="capped")
+        make_domain(self.tenant, "example.test")
         self.plan = make_plan(PlanTier.STARTER, max_members=2)
         subscribe(self.tenant, self.plan)
         self.api = auth_client(self.owner, self.tenant)
@@ -230,12 +211,13 @@ class MemberCapTest(TestCase):
 
     def test_a_workspace_without_a_subscription_is_not_blocked(self):
         """Plans gate paid features; an unsubscribed workspace is not an abuse case."""
-        free_owner = make_user("free@example.test")
+        free_owner = make_user("free@free.test")
         free = make_tenant(free_owner, name="Free", slug="free")
-        make_user("guest@example.test")
+        make_domain(free, "free.test")
+        make_user("guest@free.test")
         res = auth_client(free_owner, free).post(
             f"/api/workspaces/{free.id}/members/",
-            {"email": "guest@example.test", "role": "admin"},
+            {"email": "guest@free.test", "role": "admin"},
         )
         self.assertEqual(res.status_code, 201)
 

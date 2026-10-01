@@ -9,11 +9,20 @@ from rest_framework.views import APIView
 from django.db import transaction
 
 from apps.accounts.mailer import send_transactional
+from apps.accounts.serializers import UserProfileSerializer
+from apps.accounts.tokens import make_tokens
+from apps.accounts.views import authenticated_response
 from apps.billing.utils import check_member_limit
 from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
 from apps.security.scopes import normalise as normalise_scopes
 from apps.tenants.models import MemberRole, MemberStatus, Tenant, TenantMembership
+from apps.tenants.membership_policy import (
+    MEMBER_DOMAIN_ERROR,
+    SINGLE_ORGANIZATION_ERROR,
+    tenant_allows_member_email,
+    user_has_other_active_tenant,
+)
 from apps.tenants.permissions import HasTenantAccess, IsTenantAdmin
 from .models import APIKey, TeamInvite
 from .serializers import (
@@ -42,6 +51,9 @@ class TeamInviteListView(APIView):
         email = serializer.validated_data["email"].lower()
         role = serializer.validated_data["role"]
 
+        if not tenant_allows_member_email(request.tenant, email):
+            return Response({"detail": MEMBER_DOMAIN_ERROR}, status=400)
+
         # Reject if a pending invite already exists for this email
         existing = TeamInvite.objects.filter(
             tenant=request.tenant,
@@ -64,9 +76,11 @@ class TeamInviteListView(APIView):
             ).exists()
             if already_member:
                 return Response(
-                    {"detail": "That person is already an active member of this workspace."},
+                    {"detail": "That person is already an active member of this organization."},
                     status=400,
                 )
+            if user_has_other_active_tenant(existing_user, request.tenant):
+                return Response({"detail": SINGLE_ORGANIZATION_ERROR}, status=400)
 
         # A pending invite holds a seat (see billing.utils.count_member_slots).
         # Checked and taken under a lock on the tenant row, so two admins
@@ -86,11 +100,11 @@ class TeamInviteListView(APIView):
             subject=f"You've been invited to {request.tenant.name} on MateMail",
             body=(
                 f"Hi,\n\n"
-                f"{inviter} has invited you to join the {request.tenant.name} workspace "
-                f"on MateMail as {role_display}.\n\n"
+                f"{inviter} has invited you to join {request.tenant.name} "
+                f"on MateMail Hub as {role_display}.\n\n"
                 f"Accept your invitation (expires in 7 days):\n{accept_url}\n\n"
-                f"If you don't have a MateMail account yet, you'll be able to create one "
-                f"after clicking the link.\n\n"
+                f"If you don't have a MateMail account yet, the invite link will create "
+                f"your account directly inside this organization.\n\n"
                 f"— MateMail, by NetaMate Solutions"
             ),
             to=email,
@@ -159,6 +173,12 @@ class TeamInviteAcceptView(APIView):
                 status=403,
             )
 
+        if not tenant_allows_member_email(invite.tenant, request.user.email):
+            return Response({"detail": MEMBER_DOMAIN_ERROR}, status=403)
+
+        if user_has_other_active_tenant(request.user, invite.tenant):
+            return Response({"detail": SINGLE_ORGANIZATION_ERROR}, status=403)
+
         with transaction.atomic():
             tenant = Tenant.objects.select_for_update().get(pk=invite.tenant_id)
 
@@ -168,8 +188,20 @@ class TeamInviteAcceptView(APIView):
             if existing and existing.status == MemberStatus.ACTIVE:
                 invite.accepted_at = timezone.now()
                 invite.save(update_fields=["accepted_at"])
-                return Response(
-                    {"detail": "Already a member.", "tenant_id": str(invite.tenant_id)},
+                tokens = make_tokens(request.user, tenant_id=invite.tenant_id)
+                return authenticated_response(
+                    tokens,
+                    {
+                        "detail": "Already a member.",
+                        "user": UserProfileSerializer(request.user).data,
+                        "tenant": {
+                            "id": str(invite.tenant.id),
+                            "name": invite.tenant.name,
+                            "slug": invite.tenant.slug,
+                            "status": invite.tenant.status,
+                            "role": existing.role,
+                        },
+                    },
                     status=200,
                 )
 
@@ -197,12 +229,26 @@ class TeamInviteAcceptView(APIView):
             invite.accepted_at = timezone.now()
             invite.save(update_fields=["accepted_at"])
 
-        return Response(
+        membership = TenantMembership.objects.get(
+            tenant=invite.tenant,
+            user=request.user,
+            status=MemberStatus.ACTIVE,
+        )
+        tokens = make_tokens(request.user, tenant_id=invite.tenant_id)
+        return authenticated_response(
+            tokens,
             {
                 "detail": "Invite accepted.",
-                "tenant_id": str(invite.tenant_id),
-                "tenant_name": invite.tenant.name,
-            }
+                "user": UserProfileSerializer(request.user).data,
+                "tenant": {
+                    "id": str(invite.tenant.id),
+                    "name": invite.tenant.name,
+                    "slug": invite.tenant.slug,
+                    "status": invite.tenant.status,
+                    "role": membership.role,
+                },
+            },
+            status=200,
         )
 
 
@@ -227,7 +273,7 @@ class TeamInvitePreviewView(APIView):
 
         return Response(
             {
-                "valid": invite.is_pending,
+                "valid": invite.is_pending and tenant_allows_member_email(invite.tenant, invite.email),
                 "email": invite.email,
                 "role": invite.role,
                 "tenant_name": invite.tenant.name,

@@ -152,7 +152,7 @@ class SignupView(APIView):
                 limit=SIGNUP_PER_IP.limit,
                 window=SIGNUP_PER_IP.window,
             ),
-            "Too many workspaces created from this address. Please try again later.",
+            "Too many account creation attempts from this address. Please try again later.",
         )
 
         serializer = SignupSerializer(data=request.data)
@@ -162,6 +162,91 @@ class SignupView(APIView):
 
         if User.objects.filter(email=data["email"]).exists():
             return Response({"email": "An account with this email already exists."}, status=400)
+
+        invite_token = data.get("invite_token", "").strip()
+        if not invite_token:
+            from apps.tenants.membership_policy import verified_domain_is_registered
+
+            if verified_domain_is_registered(data["email"]):
+                return Response(
+                    {
+                        "email": (
+                            "This email domain is already registered to a MateMail "
+                            "organization. Ask your organization administrator for access."
+                        )
+                    },
+                    status=400,
+                )
+
+        if invite_token:
+            from apps.billing.utils import check_member_limit
+            from apps.teams.models import TeamInvite
+            from apps.tenants.membership_policy import (
+                MEMBER_DOMAIN_ERROR,
+                tenant_allows_member_email,
+            )
+
+            token_hash = hashlib.sha256(invite_token.encode()).hexdigest()
+            try:
+                invite = TeamInvite.objects.select_related("tenant").get(
+                    token_hash=token_hash,
+                    is_revoked=False,
+                    accepted_at__isnull=True,
+                )
+            except TeamInvite.DoesNotExist:
+                return Response({"invite_token": "Invalid or expired invite link."}, status=400)
+
+            if not invite.is_pending:
+                return Response({"invite_token": "This invite has expired."}, status=400)
+
+            if data["email"].lower() != invite.email.lower():
+                return Response(
+                    {"email": f"This invite was sent to {invite.email}."},
+                    status=400,
+                )
+
+            if not tenant_allows_member_email(invite.tenant, data["email"]):
+                return Response({"email": MEMBER_DOMAIN_ERROR}, status=400)
+
+            with transaction.atomic():
+                invite = (
+                    TeamInvite.objects.select_for_update()
+                    .select_related("tenant")
+                    .get(pk=invite.pk)
+                )
+                if not invite.is_pending:
+                    return Response({"invite_token": "This invite is no longer valid."}, status=400)
+
+                tenant = Tenant.objects.select_for_update().get(pk=invite.tenant_id)
+                allowed, msg = check_member_limit(tenant, additional=0)
+                if not allowed:
+                    return Response({"detail": msg}, status=403)
+
+                user = User.objects.create_user(
+                    email=data["email"],
+                    password=data["password"],
+                    full_name=data["full_name"],
+                )
+                TenantMembership.objects.create(
+                    tenant=tenant,
+                    user=user,
+                    role=invite.role,
+                    status=MemberStatus.ACTIVE,
+                    invited_by_id=invite.invited_by_id,
+                )
+                invite.accepted_at = timezone.now()
+                invite.save(update_fields=["accepted_at"])
+
+            _send_verification_email(user)
+            tokens = make_tokens(user, tenant_id=tenant.id)
+            return authenticated_response(
+                tokens,
+                {
+                    "user": UserProfileSerializer(user).data,
+                    "tenant": _tenant_brief(tenant),
+                },
+                status=201,
+            )
 
         with transaction.atomic():
             user = User.objects.create_user(

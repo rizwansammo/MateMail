@@ -3157,3 +3157,28 @@
     margin-left: 32px;
   }
 }
+
+
+/* MateMail Hub branding correction */
+.portal-premium .portal-brand {
+  min-height: 68px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 14px 20px;
+}
+
+.portal-premium .portal-brand-lockup {
+  padding: 0;
+  border: 0;
+  gap: 10px;
+}
+
+.portal-premium .portal-brand-caption {
+  display: none;
+}
+
+.portal-premium .portal-workspace-card {
+  cursor: default;
+}

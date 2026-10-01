@@ -131,7 +131,6 @@ x-backend-env: &backend_env
   # Proxy hops whose X-Forwarded-For may be trusted. Host-native nginx is one.
   # Raising this lets a caller forge the address every per-IP limit keys on.
   TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}
-  MAX_WORKSPACES_PER_USER: ${MAX_WORKSPACES_PER_USER:-5}
 
   # ── Refresh-token cookie (P3c) ───────────────────────────────────────────
   # Must stay True in production: the cookie carries the durable credential.

@@ -14,9 +14,9 @@ import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 export function AuthBrand({ href = "/" }: { href?: string }) {
   return (
-    <Link href={href} className="auth-brand" aria-label="MateMail home">
+    <Link href={href} className="auth-brand" aria-label="MateMail Hub home">
       <BrandMark size={35} className="auth-brand-mark" preload />
-      <span className="auth-brand-word">MateMail</span>
+      <span className="auth-brand-word">MateMail Hub</span>
     </Link>
   );
 }
@@ -69,8 +69,8 @@ export function PremiumAuthShell({
             </div>
           </div>
           <footer className="auth-story-footer">
-            <span>MateMail</span>
-            <span>{IS_NETAMATE_EMAIL ? "MailAdmin" : "Organization Portal"}</span>
+            <span>MateMail Hub</span>
+            <span>{IS_NETAMATE_EMAIL ? "MailAdmin" : "Organization Hub"}</span>
           </footer>
         </aside>
 

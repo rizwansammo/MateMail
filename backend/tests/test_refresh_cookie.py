@@ -152,19 +152,17 @@ class BodyNeverCarriesTheTokenTest(TestCase):
         self.assertEqual(res.status_code, 200)
         self._assert_clean(res)
 
-    def test_workspace_switch(self):
+    def test_workspace_switch_is_not_an_auth_token_minting_path(self):
         res = auth_client(self.user, self.tenant).post(
             "/api/workspaces/switch/", {"tenant_id": str(self.tenant.id)}, format="json"
         )
-        self.assertEqual(res.status_code, 200)
-        self._assert_clean(res)
+        self.assertEqual(res.status_code, 404)
 
-    def test_workspace_create(self):
+    def test_additional_workspace_creation_is_not_an_auth_token_minting_path(self):
         res = auth_client(self.user, self.tenant).post(
             "/api/workspaces/create/", {"name": "Second"}, format="json"
         )
-        self.assertEqual(res.status_code, 201)
-        self._assert_clean(res)
+        self.assertEqual(res.status_code, 404)
 
 
 @override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS, CACHES=LOCMEM_CACHE)
@@ -243,25 +241,16 @@ class RefreshFlowTest(TestCase):
         claims = jwt.decode(access, options={"verify_signature": False})
         self.assertEqual(claims["tenant_id"], str(self.tenant.id))
 
-    def test_workspace_switch_moves_the_cookie_to_the_new_tenant(self):
-        """
-        Otherwise the refresh token still carries the old tenant_id and the
-        next refresh silently switches the user back.
-        """
-        second = make_tenant(self.user, name="Second", slug="second-ws")
+    def test_removed_workspace_switch_cannot_change_refresh_context(self):
         self._login()
-        self.client_api.credentials(
-            HTTP_AUTHORIZATION=f"Bearer {self._login().data['access']}"
+        before = self.client_api.cookies[REFRESH_COOKIE_NAME].value
+        response = self.client_api.post(
+            "/api/workspaces/switch/",
+            {"tenant_id": str(self.tenant.id)},
+            format="json",
         )
-        self.client_api.post(
-            "/api/workspaces/switch/", {"tenant_id": str(second.id)}, format="json"
-        )
-        access = self.client_api.post("/api/auth/refresh/").data["access"]
-
-        import jwt
-
-        claims = jwt.decode(access, options={"verify_signature": False})
-        self.assertEqual(claims["tenant_id"], str(second.id))
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.client_api.cookies[REFRESH_COOKIE_NAME].value, before)
 
 
 @override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS, CACHES=LOCMEM_CACHE)

@@ -20,7 +20,7 @@ export const metadata: Metadata = {
   title: {
     default: IS_NETAMATE_EMAIL
       ? "MailAdmin | MateMail"
-      : "MateMail — Professional Email Hosting",
+      : "MateMail · Organization Hub",
     template: "%s | MateMail",
   },
   description: IS_NETAMATE_EMAIL
@@ -32,13 +32,12 @@ export const metadata: Metadata = {
         ? "https://mailadmin.netamate.com"
         : "https://matemail.online"),
   ),
+  icons: {
+    icon: "/assets/matemail-mark.svg",
+    shortcut: "/assets/matemail-mark.svg",
+  },
   ...(IS_NETAMATE_EMAIL
     ? {
-        icons: {
-          icon: "/icon.png",
-          shortcut: "/icon.png",
-          apple: "/apple-icon.png",
-        },
         robots: { index: false, follow: false },
       }
     : {}),

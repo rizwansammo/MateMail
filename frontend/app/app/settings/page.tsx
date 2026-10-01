@@ -48,7 +48,7 @@ function pretty(value: string) {
 }
 
 export default function SettingsPage() {
-  const { tenant, switchWorkspace } = useAuth();
+  const { tenant, refreshTenant } = useAuth();
   const [workspace, setWorkspace] = useState<WorkspaceDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -102,7 +102,7 @@ export default function SettingsPage() {
         setNameEdit(data.name);
         setRenameSuccess(true);
         try {
-          await switchWorkspace(tenant.id);
+          await refreshTenant();
         } catch {
           // The persisted rename succeeded even if refreshing the auth tenant
           // brief fails. A later session refresh will pick up the new name.
