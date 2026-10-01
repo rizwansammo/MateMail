@@ -21,7 +21,7 @@ function TwoFactorContent() {
   const partialToken = params.get("token") ?? "";
   const requestedNext = params.get("next") || "";
   const next =
-    requestedNext === "/workspaces" || requestedNext.startsWith("/app/")
+    requestedNext === "/app" || requestedNext.startsWith("/app/")
       ? requestedNext
       : "/app";
   const { verify2fa } = useAuth();
