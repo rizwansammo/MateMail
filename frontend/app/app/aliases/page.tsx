@@ -309,7 +309,7 @@ export default function AliasesPage() {
           subtitle="An alias receives mail at another address and delivers it to exactly one existing mailbox or external address."
         >
           <form onSubmit={createAlias}>
-            {addErrors.detail && (
+            {fieldError(addErrors.detail) && (
               <div className="mb-4"><PortalNotice tone="danger">{fieldError(addErrors.detail)}</PortalNotice></div>
             )}
 
@@ -332,8 +332,8 @@ export default function AliasesPage() {
                     ))}
                   </select>
                 </div>
-                {addErrors.source_local_part && <div className="portal-field-error">{fieldError(addErrors.source_local_part)}</div>}
-                {addErrors.domain_id && <div className="portal-field-error">{fieldError(addErrors.domain_id)}</div>}
+                {fieldError(addErrors.source_local_part) && <div className="portal-field-error">{fieldError(addErrors.source_local_part)}</div>}
+                {fieldError(addErrors.domain_id) && <div className="portal-field-error">{fieldError(addErrors.domain_id)}</div>}
               </div>
 
               <div className="portal-field full">
@@ -379,7 +379,7 @@ export default function AliasesPage() {
                       <Link href="/app/mailboxes" className="auth-text-button">Create a mailbox</Link>
                     </PortalNotice>
                   )}
-                  {addErrors.destination_mailbox_id && <div className="portal-field-error">{fieldError(addErrors.destination_mailbox_id)}</div>}
+                  {fieldError(addErrors.destination_mailbox_id) && <div className="portal-field-error">{fieldError(addErrors.destination_mailbox_id)}</div>}
                 </div>
               ) : (
                 <div className="portal-field full">
@@ -391,7 +391,7 @@ export default function AliasesPage() {
                     onChange={(event) => setDestinationAddress(event.target.value)}
                     placeholder="teammate@example.com"
                   />
-                  {addErrors.destination_address && <div className="portal-field-error">{fieldError(addErrors.destination_address)}</div>}
+                  {fieldError(addErrors.destination_address) && <div className="portal-field-error">{fieldError(addErrors.destination_address)}</div>}
                 </div>
               )}
             </div>
