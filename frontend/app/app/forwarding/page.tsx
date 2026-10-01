@@ -49,7 +49,7 @@ function fieldError(value: unknown) {
 }
 
 export default function ForwardingPage() {
-  const { tenant } = useAuth();
+  const { user, tenant } = useAuth();
   const [rules, setRules] = useState<ForwardingRule[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [myRole, setMyRole] = useState("");
@@ -124,7 +124,7 @@ export default function ForwardingPage() {
   }, [query, rules]);
 
   const canAdmin = myRole === "owner" || myRole === "admin";
-  const canCreate = canAdmin && workspaceStatus === "active" && mailboxes.length > 0;
+  const canCreate = canAdmin && !!user?.email_verified && workspaceStatus === "active" && mailboxes.length > 0;
 
   async function createRule(event: React.FormEvent) {
     event.preventDefault();
@@ -233,6 +233,15 @@ export default function ForwardingPage() {
           </PortalButton>
         }
       />
+
+      {!user?.email_verified && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Verify your account email before creating a new forwarding route.</span>
+          </PortalNotice>
+        </div>
+      )}
 
       {workspaceStatus !== "active" && (
         <div className="mb-5">
