@@ -156,6 +156,8 @@ function PremiumPostBoxShell({
   updatePreferences: ReturnType<typeof usePostBox>["updatePreferences"];
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const accountMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [savedAccounts, setSavedAccounts] = useState<SavedPostBoxAccount[]>([]);
   const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
   const [accountMenuError, setAccountMenuError] = useState<string | null>(null);
@@ -174,6 +176,35 @@ function PremiumPostBoxShell({
       cancelled = true;
     };
   }, [mailbox.id]);
+
+  useEffect(() => {
+    // Native <details> does not close when the user clicks elsewhere. Keep
+    // built-in summary/keyboard behavior and dismiss only outside the card.
+    const dismissOutside = (event: PointerEvent) => {
+      const menu = accountMenuRef.current;
+      if (menu?.open && event.target instanceof Node &&
+          !menu.contains(event.target)) {
+        menu.open = false;
+      }
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      const menu = accountMenuRef.current;
+      if (!menu?.open || event.key !== "Escape") return;
+      event.preventDefault();
+      menu.open = false;
+      menu.querySelector("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (accountMenuRef.current) accountMenuRef.current.open = false;
+  }, [pathname]);
 
   const byRole = new Map(folders.map((folder) => [folder.role, folder]));
   const custom = folders.filter((folder) => !PINNED_ROLES.has(folder.role));
@@ -288,7 +319,7 @@ function PremiumPostBoxShell({
               <Settings2 className="h-5 w-5" aria-hidden="true" />
             </Link>
 
-            <details className="pb-premium-account">
+            <details className="pb-premium-account" ref={accountMenuRef}>
               <summary aria-label="Account menu">
                 <span className="pb-premium-avatar" aria-hidden="true">{initials || "PB"}</span>
                 <ChevronDown className="h-3.5 w-3.5 pb-muted" aria-hidden="true" />
@@ -404,6 +435,14 @@ function PremiumPostBoxShell({
                     {accountMenuError}
                   </p>
                 )}
+
+                <Link
+                  href="/postbox/contacts"
+                  className="pb-premium-account-contacts"
+                >
+                  <Users className="h-4 w-4" aria-hidden="true" />
+                  Contacts
+                </Link>
 
                 <div className="pb-premium-account-footer">
                   <Link href="/postbox/settings">
@@ -633,25 +672,6 @@ function PremiumFolderNavigation({
         </>
       )}
 
-      <div className="pb-premium-separator" />
-      <Link
-        href="/postbox/contacts"
-        className="pb-premium-nav-link"
-        aria-current={pathname === "/postbox/contacts" ? "page" : undefined}
-        onClick={onNavigate}
-      >
-        <Users className="h-[18px] w-[18px]" aria-hidden="true" />
-        Contacts
-      </Link>
-      <Link
-        href="/postbox/settings"
-        className="pb-premium-nav-link"
-        aria-current={pathname === "/postbox/settings" ? "page" : undefined}
-        onClick={onNavigate}
-      >
-        <Settings className="h-[18px] w-[18px]" aria-hidden="true" />
-        Settings
-      </Link>
     </>
   );
 }
