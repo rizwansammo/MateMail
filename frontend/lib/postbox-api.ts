@@ -511,6 +511,10 @@ export const postbox = {
       method: "DELETE",
       body: JSON.stringify({ sender }),
     }),
+  headers: (folder: string, uid: number, uidValidity: number) =>
+    request<{ headers: string }>(
+      `/messages/${encodeFolder(folder)}/${uid}/headers/${qs({ uid_validity: uidValidity })}`,
+    ),
   rawUrl: (folder: string, uid: number, uidValidity?: number) =>
     `${BASE}/messages/${encodeFolder(folder)}/${uid}/raw/${qs({ uid_validity: uidValidity })}`,
   attachmentUrl: (folder: string, uid: number, partId: string, uidValidity?: number) =>
