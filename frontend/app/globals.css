@@ -5965,3 +5965,36 @@ body {
 .pb-label-panel button .pb-colored-tag {
   flex:0 0 auto;
 }
+
+
+/* Full headers + original message controls shared by single and conversation readers. */
+.pb-thread-source-actions,
+.pb-single-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.pb-message-headers { display: contents; }
+.pb-message-headers-content {
+  flex: 1 0 100%;
+  min-width: 0;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--pb-border);
+  border-radius: 9px;
+  background: var(--pb-surface-2);
+  color: var(--pb-fg);
+  font-size: 12px;
+}
+.pb-message-headers-content pre {
+  max-height: 280px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.pb-message-headers-content [role="alert"] { color: var(--pb-warn); }
+.pb-single-source-actions { padding: 2px 0 10px; }
