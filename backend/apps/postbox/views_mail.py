@@ -452,7 +452,14 @@ class MessageDetailView(PostBoxView):
             _assert_uid_validity(request, info.uid_validity)
             raw = connection.fetch_raw(uid)
             # Header identity survives a MOVE, unlike IMAP folder/UID.
-            label_summaries = connection.fetch_summaries([uid])
+            # Do not add another IMAP fetch for mailboxes with no labels.
+            # Reading a message must remain independent of virtual labels.
+            from .models import MailLabel
+            label_summaries = (
+                connection.fetch_summaries([uid])
+                if MailLabel.objects.for_mailbox(self.mailbox).exists()
+                else []
+            )
             parsed = mime.parse_message(raw, load_remote_images=show_remote)
 
             # A per-sender decision survives reloads and devices. Parse once
