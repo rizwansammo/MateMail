@@ -549,6 +549,14 @@ function Mailbox() {
         ) ?? null
       : null;
 
+  const changeConversationMode = (mode: "conversations" | "messages") => {
+    const next = new URLSearchParams(params.toString());
+    if (mode === "messages") next.set("view", "messages");
+    else next.delete("view");
+    setSelected(new Set());
+    router.push("/postbox?" + next.toString());
+  };
+
   const applyFilter = (nextFilter: "all" | "unread" | "starred") => {
     const next = new URLSearchParams(params.toString());
     next.delete("starred");
@@ -574,7 +582,7 @@ function Mailbox() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="pb-premium-mail-toolbar">
-          {!isCrossFolderView && (
+          {!isCrossFolderView && !conversationMode && (
             <input
               className="pb-premium-select-all"
               type="checkbox"
@@ -647,6 +655,14 @@ function Mailbox() {
           )}
 
           <div className="pb-premium-mail-toolbar-actions">
+            {conversationEligible && (
+              <div className="pb-conversation-switch" role="group" aria-label="Mailbox layout">
+                <button type="button" aria-pressed={conversationMode}
+                  onClick={() => changeConversationMode("conversations")}>Conversations</button>
+                <button type="button" aria-pressed={!conversationMode}
+                  onClick={() => changeConversationMode("messages")}>Messages</button>
+              </div>
+            )}
             <select
               className="pb-premium-sort-select"
               aria-label="Message order"
@@ -663,8 +679,8 @@ function Mailbox() {
               className="pb-premium-icon-button"
               aria-label="Refresh mailbox"
               title="Refresh mailbox"
-              disabled={loading}
-              onClick={() => void loadList()}
+              disabled={loading || (conversationMode && conversations.loading)}
+              onClick={() => { loadList(); if (conversationMode) conversations.reload(); }}
             >
               <RefreshCw className={`h-[18px] w-[18px] ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
             </button>
@@ -673,7 +689,7 @@ function Mailbox() {
                 <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
               </summary>
               <div className="pb-premium-mail-menu">
-                {!isCrossFolderView && (
+                {!isCrossFolderView && !conversationMode && (
                   <button
                     type="button"
                     disabled={rows.length === 0}
