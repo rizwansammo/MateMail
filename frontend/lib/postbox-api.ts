@@ -207,6 +207,7 @@ export interface MessageDetail {
   bcc?: string[];
   signature_id?: string | null;
   signature_missing?: boolean;
+  quoted_text?: string; // own Drafts only; clean editor + optional quote
   reply_to: string;
   date: string;
   message_id: string;
@@ -329,6 +330,7 @@ export interface ComposePayload {
   subject?: string;
   text?: string;
   html?: string;
+  quoted_text?: string;
   in_reply_to?: string;
   references?: string[];
   signature_id?: string | null;
@@ -425,7 +427,7 @@ export const postbox = {
   replyContext: (folder: string, uid: number, mode: string) =>
     request<{
       mode: string; subject: string; to: string[]; cc: string[];
-      from_address: string; text: string; html: string;
+      from_address: string; text: string; html: string; quoted_text: string;
       in_reply_to: string; references: string[];
       attachments: ComposeAttachmentRef[];
     }>(`/messages/${encodeFolder(folder)}/${uid}/reply-context/${qs({ mode })}`),
