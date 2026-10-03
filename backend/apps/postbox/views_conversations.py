@@ -14,7 +14,8 @@ from apps.security import ratelimit
 from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX
 
 from . import imap, threading
-from .views_mail import PostBoxView, _summary_payload, _fetch_summaries_chunked
+from .views_mail import PostBoxView, _summary_payload, _fetch_summaries_chunked, _message_provenance_key
+from .views_labels import labels_for_summaries
 
 MAX_CONVERSATION_MESSAGES = 5000
 MAX_CONVERSATION_FOLDERS = 40
@@ -160,16 +161,20 @@ class ConversationListView(ConversationMixin):
         if scope == "inbox":
             conversations = [item for item in conversations if item.has_inbox]
         offset = (page - 1) * page_size
+        window = conversations[offset:offset + page_size]
+        mapping = labels_for_summaries(
+            self.mailbox, [item.latest.primary for item in window]
+        )
+        results = [_conversation_payload(item) for item in window]
+        for result, item in zip(results, window):
+            result["latest"]["labels"] = mapping[_message_provenance_key(item.latest.primary)]
         return Response({
             "scope": scope,
             "page": page,
             "page_size": page_size,
             "total": len(conversations),
             "has_next": offset + page_size < len(conversations),
-            "results": [
-                _conversation_payload(item)
-                for item in conversations[offset:offset + page_size]
-            ],
+            "results": results,
         })
 
 
@@ -203,8 +208,15 @@ class ConversationForMessageView(ConversationMixin):
                 and copy.uid_validity == uid_validity
                 for member in item.messages for copy in member.copies
             ):
-                return Response({
-                    **_conversation_payload(item),
-                    "messages": [_member_payload(member) for member in item.messages],
-                })
+                mapping = labels_for_summaries(
+                    self.mailbox, [member.primary for member in item.messages]
+                )
+                members = [_member_payload(member) for member in item.messages]
+                for payload, member in zip(members, item.messages):
+                    payload["labels"] = mapping[_message_provenance_key(member.primary)]
+                conversation_payload = _conversation_payload(item)
+                conversation_payload["latest"]["labels"] = mapping[
+                    _message_provenance_key(item.latest.primary)
+                ]
+                return Response({**conversation_payload, "messages": members})
         return Response({"detail": "That message was not found."}, status=404)
