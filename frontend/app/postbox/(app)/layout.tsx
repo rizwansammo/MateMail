@@ -16,7 +16,6 @@ import {
   Clock,
   FileText,
   Folder as FolderIcon,
-  HardDrive,
   Inbox,
   Loader2,
   LogOut,
@@ -41,7 +40,6 @@ import {
 import { usePostBox } from "@/contexts/postbox-context";
 import {
   postbox,
-  type AccountInfo,
   type Folder,
   type SavedPostBoxAccount,
 } from "@/lib/postbox-api";
@@ -158,25 +156,9 @@ function PremiumPostBoxShell({
   updatePreferences: ReturnType<typeof usePostBox>["updatePreferences"];
 }) {
   const router = useRouter();
-  const [account, setAccount] = useState<AccountInfo | null>(null);
   const [savedAccounts, setSavedAccounts] = useState<SavedPostBoxAccount[]>([]);
   const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
   const [accountMenuError, setAccountMenuError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    postbox
-      .account()
-      .then((value) => {
-        if (!cancelled) setAccount(value);
-      })
-      .catch(() => {
-        if (!cancelled) setAccount(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [mailbox.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -199,12 +181,6 @@ function PremiumPostBoxShell({
   const otherAccounts = savedAccounts.filter(
     (item) => item.mailbox.id !== mailbox.id,
   );
-
-  const storage = account?.storage;
-  const storagePercent =
-    storage?.available && typeof storage.percent === "number"
-      ? Math.max(0, Math.min(100, storage.percent))
-      : null;
 
   const themeOptions = [
     { value: "light" as const, Icon: Sun, label: "Light" },
@@ -285,44 +261,6 @@ function PremiumPostBoxShell({
           </Suspense>
         </nav>
 
-        <div className="pb-premium-sidebar-footer">
-          {storage?.available && storagePercent !== null ? (
-            <Link href="/postbox/settings?section=account" className="pb-premium-storage" onClick={closeRail}>
-              <span className="pb-premium-storage-head">
-                <HardDrive className="h-4 w-4" aria-hidden="true" />
-                Mailbox storage
-              </span>
-              <span className="pb-premium-storage-track" aria-hidden="true">
-                <span className="pb-premium-storage-fill" style={{ width: `${storagePercent}%` }} />
-              </span>
-              <small>
-                {typeof storage.used_mb === "number" ? `${storage.used_mb.toFixed(1)} MB used` : "Storage usage"}{typeof storage.quota_mb === "number" ? ` of ${storage.quota_mb.toFixed(0)} MB` : ""}
-              </small>
-            </Link>
-          ) : (
-            <Link href="/postbox/settings?section=account" className="pb-premium-storage" onClick={closeRail}>
-              <span className="pb-premium-storage-head">
-                <HardDrive className="h-4 w-4" aria-hidden="true" />
-                Mailbox settings
-              </span>
-            </Link>
-          )}
-
-          <div className="pb-premium-theme-row" role="group" aria-label="Colour theme">
-            {themeOptions.map(({ value, Icon, label }) => (
-              <button
-                key={value}
-                type="button"
-                className="pb-premium-theme"
-                aria-label={label}
-                aria-pressed={preferences.theme === value}
-                onClick={() => void updatePreferences({ theme: value })}
-              >
-                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-            ))}
-          </div>
-        </div>
       </aside>
 
       <main className="pb-premium-workspace">
@@ -441,6 +379,25 @@ function PremiumPostBoxShell({
                   <UserPlus className="h-4 w-4" aria-hidden="true" />
                   Add another account
                 </Link>
+
+                <div className="pb-premium-account-appearance">
+                  <span className="pb-premium-account-appearance-label">Theme</span>
+                  <div className="pb-premium-theme-row" role="group" aria-label="Colour theme">
+                    {themeOptions.map(({ value, Icon, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className="pb-premium-theme"
+                        aria-label={`${label} theme`}
+                        title={`${label} theme`}
+                        aria-pressed={preferences.theme === value}
+                        onClick={() => void updatePreferences({ theme: value })}
+                      >
+                        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 {accountMenuError && (
                   <p className="pb-premium-account-error" role="alert">
