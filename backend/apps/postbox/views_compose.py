@@ -36,7 +36,7 @@ from apps.security.limits import POSTBOX_SEND_PER_MAILBOX
 
 from . import imap, mime, sending, signatures
 from .models import PostBoxPreference, ScheduledMessage
-from .views_mail import PostBoxView
+from .views_mail import PostBoxView, _assert_uid_validity
 
 logger = logging.getLogger(__name__)
 
@@ -523,6 +523,7 @@ class ReplyContextView(PostBoxView):
 
         with imap.open_mailbox(self.mailbox.email) as connection:
             info = connection.select(folder, readonly=True)
+            _assert_uid_validity(request, info.uid_validity)
             raw = connection.fetch_raw(uid)
 
         parsed = mime.parse_message(raw, load_remote_images=False)
