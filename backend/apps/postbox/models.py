@@ -768,6 +768,31 @@ class PostBoxPushEvent(models.Model):
         )
 
 
+class FolderAppearance(models.Model):
+    """PostBox-only mailbox-scoped visual metadata for real IMAP folders.
+
+    Folder names and message contents remain owned by IMAP/Dovecot.
+    """
+
+    mailbox = models.ForeignKey(
+        "mailboxes.Mailbox", on_delete=models.CASCADE,
+        related_name="postbox_folder_appearances",
+    )
+    name = models.CharField(max_length=255)
+    color = models.CharField(max_length=7, default="#2563eb")
+
+    objects = MailboxScopedQuerySet.as_manager()
+
+    class Meta:
+        db_table = "postbox_folder_appearance"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mailbox", "name"],
+                name="postbox_folder_appearance_unique",
+            ),
+        ]
+
+
 class MailLabel(models.Model):
     """Mailbox-private virtual label; never creates another IMAP message."""
 
@@ -776,6 +801,7 @@ class MailLabel(models.Model):
         "mailboxes.Mailbox", on_delete=models.CASCADE, related_name="postbox_labels"
     )
     name = models.CharField(max_length=80)
+    color = models.CharField(max_length=7, default="#9333ea")
     created_at = models.DateTimeField(auto_now_add=True)
     objects = MailboxScopedQuerySet.as_manager()
 
