@@ -2078,11 +2078,6 @@ body {
   font-weight:600;
   letter-spacing:1.3px;
 }
-.pb-premium-separator {
-  height:1px;
-  margin:22px 12px 17px;
-  background:var(--pb-border);
-}
 .pb-premium-theme-row {
   display:flex;
   gap:4px;
@@ -2363,6 +2358,27 @@ body {
   border-color:var(--pb-border-strong);
 }
 .pb-premium-account-appearance .pb-premium-theme:focus-visible {
+  outline:2px solid var(--pb-primary);
+  outline-offset:2px;
+}
+.pb-premium-account-contacts {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  width:100%;
+  margin:3px 0;
+  padding:10px;
+  border-radius:9px;
+  color:var(--pb-fg);
+  text-decoration:none;
+  font-size:12px;
+  font-weight:600;
+}
+.pb-premium-account-contacts:hover,
+.pb-premium-account-contacts:focus-visible {
+  background:var(--pb-surface-2);
+}
+.pb-premium-account-contacts:focus-visible {
   outline:2px solid var(--pb-primary);
   outline-offset:2px;
 }
