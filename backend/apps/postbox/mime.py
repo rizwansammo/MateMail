@@ -32,6 +32,7 @@ import email
 import email.policy
 import html as html_module
 import email.utils
+import hashlib
 import logging
 import mimetypes
 import re
@@ -43,6 +44,12 @@ from email.message import EmailMessage
 import nh3
 
 logger = logging.getLogger(__name__)
+
+# Small draft-only markers: the quoted text stays in ordinary text/plain so
+# other IMAP clients can still open the draft. The hash lets PostBox split it
+# back out without guessing at an arbitrary user's own words.
+DRAFT_QUOTE_LINES_HEADER = "X-PostBox-Reply-Quote-Lines"
+DRAFT_QUOTE_SHA_HEADER = "X-PostBox-Reply-Quote-SHA256"
 
 #: Everything a legitimate message needs to express itself, and nothing that
 #: executes, navigates, embeds or submits.
@@ -123,6 +130,8 @@ class ParsedMessage:
     draft_signature_id: str = ""
     #: True for PostBox-created editable draft/scheduled source messages.
     draft_state: bool = False
+    draft_quote_lines: int = 0
+    draft_quote_sha: str = ""
     reply_to: str = ""
     date: str = ""
     message_id: str = ""
@@ -172,6 +181,14 @@ def parse_message(raw: bytes, *, load_remote_images: bool = False) -> ParsedMess
     parsed.draft_state = (
         clean_header(str(message.get(DRAFT_STATE_HEADER, "") or "")) == "1"
     )
+    # Only used after a caller has verified that this is the mailbox's Drafts.
+    try:
+        parsed.draft_quote_lines = int(message.get(DRAFT_QUOTE_LINES_HEADER, "0"))
+    except (TypeError, ValueError):
+        parsed.draft_quote_lines = 0
+    # Header folding can add a leading space to the unfolded SHA-256 value.
+    # It is an opaque hex digest, so surrounding whitespace is never meaningful.
+    parsed.draft_quote_sha = str(message.get(DRAFT_QUOTE_SHA_HEADER, "") or "").strip()
 
     text_parts: list[str] = []
     html_parts: list[str] = []
@@ -501,6 +518,7 @@ def build_message(
     message_id: str = "",
     keep_bcc: bool = False,
     draft_signature_id: str = "",
+    draft_quoted_text: str = "",
 ) -> EmailMessage:
     """
     An RFC-compliant message.
@@ -556,6 +574,11 @@ def build_message(
         message[DRAFT_STATE_HEADER] = "1"
     if draft_signature_id:
         message[DRAFT_SIGNATURE_HEADER] = clean_header(draft_signature_id)
+    if keep_bcc and draft_quoted_text:
+        message[DRAFT_QUOTE_LINES_HEADER] = str(len(draft_quoted_text.splitlines()))
+        message[DRAFT_QUOTE_SHA_HEADER] = hashlib.sha256(
+            draft_quoted_text.encode("utf-8")
+        ).hexdigest()
     message["Subject"] = clean_header(subject)
     message["Date"] = email.utils.formatdate(localtime=True)
     message["Message-ID"] = message_id or email.utils.make_msgid(
@@ -669,6 +692,53 @@ def _html_to_text(html: str) -> str:
     return text.strip()
 
 
+def append_reply_quote(text: str, html: str, quoted_text: str) -> tuple[str, str]:
+    """Append an *opted-in* quote after the body/signature, never in the editor.
+
+    The text/plain alternative uses standard email quote markers. The HTML
+    alternative uses a modest blockquote instead of displaying raw > markers.
+    """
+    if not quoted_text:
+        return text, html
+    combined_text = f"{text.rstrip()}\n\n{quoted_text}" if text.strip() else quoted_text
+    lines = quoted_text.splitlines()
+    heading = lines[0] if lines else ""
+    original = "\n".join(
+        line.removeprefix("> ") if line.startswith("> ") else line.removeprefix(">")
+        for line in lines[1:]
+    )
+    block = (
+        '<div style="margin-top:16px;color:#64748b;font-size:12px">'
+        + text_to_html(heading) + "</div>"
+        + '<blockquote style="margin:8px 0 0 0;padding:0 0 0 12px;'
+        + 'border-left:2px solid #cbd5e1">'
+        + text_to_html(original) + "</blockquote>"
+    )
+    original_html = html or text_to_html(text)
+    combined_html = f"{original_html}<br><br>{block}" if original_html else block
+    return combined_text, combined_html
+
+
+def split_draft_reply_quote(parsed: ParsedMessage) -> tuple[str, str]:
+    """Recover only a quote PostBox explicitly recorded in its own draft.
+
+    If another IMAP client changed the body, the digest will no longer match.
+    Never remove text merely because it resembles a quote.
+    """
+    text = parsed.text
+    count = parsed.draft_quote_lines
+    digest = parsed.draft_quote_sha
+    if not parsed.draft_state or not (0 < count <= 10000) or not digest:
+        return text, ""
+    lines = text.split("\n")
+    if count > len(lines):
+        return text, ""
+    quote = "\n".join(lines[-count:])
+    if hashlib.sha256(quote.encode("utf-8")).hexdigest() != digest:
+        return text, ""
+    return "\n".join(lines[:-count]).rstrip(), quote
+
+
 def quote_for_reply(parsed: ParsedMessage) -> tuple[str, str]:
     """The quoted original, as (text, html)."""
     who = parsed.from_name or parsed.from_address
@@ -727,17 +797,29 @@ def reply_recipients(
     in a thread adds the sender to their own Cc list and the header grows
     without bound.
     """
-    primary = parsed.reply_to or parsed.from_address
-    to = [primary] if primary else []
+    # Clicking Reply in a conversation often targets the newest message.
+    # When that message lives in Sent, its From is our own identity. The
+    # normal exclusion would otherwise return an empty To address and make
+    # the new inline reply impossible to send. Reply to the original external
+    # recipient instead, preserving Reply All's additional recipients.
+    if parsed.from_address.strip().lower() in own_identities:
+        recipients = _dedupe([*parsed.to, *parsed.cc], own_identities)
+        if not recipients:
+            return [], []
+        if not reply_all:
+            return recipients[:1], []
+        return recipients[:1], recipients[1:]
 
+    primary = parsed.reply_to or parsed.from_address
+    to = _dedupe([primary] if primary else [], own_identities)
     if not reply_all:
-        return _dedupe(to, own_identities), []
+        return to, []
 
     cc_candidates = [a for a in (*parsed.to, *parsed.cc) if a]
-    to_final = _dedupe(to, own_identities)
-    cc_final = _dedupe(cc_candidates, own_identities | {a.lower() for a in to_final})
-    return to_final, cc_final
-
+    cc_final = _dedupe(
+        cc_candidates, own_identities | {a.lower() for a in to},
+    )
+    return to, cc_final
 
 def _dedupe(addresses: list[str], exclude: set[str]) -> list[str]:
     seen: set[str] = set()

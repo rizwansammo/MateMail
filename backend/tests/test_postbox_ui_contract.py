@@ -190,7 +190,9 @@ class ComposeContractTest(SimpleTestCase):
     def test_cc_bcc_toggles_both_ways(self):
         self.assertIn("setShowCopies((current) => !current)", self.source)
         self.assertIn("aria-expanded={showCopies}", self.source)
-        self.assertIn('aria-controls="pb-copies"', self.source)
+        self.assertIn('aria-controls={fieldId("copies")}', self.source)
+        self.assertIn('id={fieldId("copies")}', self.source)
+        self.assertIn('inline ? "pb-thread-" : "pb-"', self.source)
 
     def test_collapsing_cc_bcc_does_not_clear_the_values(self):
         """
@@ -239,8 +241,8 @@ class ComposeContractTest(SimpleTestCase):
         """
         code = code_only(self.source)
         self.assertNotIn('aria-modal="true"', code)
-        self.assertIn('role="dialog"', code)
-        self.assertIn('aria-label="Compose message"', code)
+        self.assertIn('role={inline ? "region" : "dialog"}', code)
+        self.assertIn('aria-label={inline ? "Inline reply editor" : "Compose message"}', code)
 
     def test_the_backdrop_is_styled_by_class_not_by_aria_label(self):
         self.assertIn("pb-compose-backdrop", self.source)
@@ -529,11 +531,16 @@ class PostBoxComposeAndImageRenderingRegressionTest(SimpleTestCase):
 
     def test_reader_resolves_safe_cid_images_through_preview_endpoint(self):
         page = read("app", "postbox", "(app)", "page.tsx")
-        self.assertIn("function resolveInlineImageReferences", page)
-        self.assertIn("attachment.content_id", page)
-        self.assertIn("attachment.previewable", page)
-        self.assertIn("postbox.attachmentPreviewUrl", page)
+        conversation = read("components", "postbox", "conversation-reader.tsx")
+        resolver = read("lib", "postbox-inline-images.ts")
+        self.assertIn("export function resolveInlineImageReferences", resolver)
+        self.assertIn("attachment.content_id", resolver)
+        self.assertIn("attachment.previewable", resolver)
+        self.assertIn("postbox.attachmentPreviewUrl", resolver)
+        self.assertIn("import { resolveInlineImageReferences }", page)
+        self.assertIn("import { resolveInlineImageReferences }", conversation)
         self.assertIn("dangerouslySetInnerHTML={{ __html: renderedHtml }}", page)
+        self.assertIn("dangerouslySetInnerHTML={{ __html: safeHtml }}", conversation)
 
     def test_external_image_privacy_controls_remain_visible_when_blocked(self):
         page = read("app", "postbox", "(app)", "page.tsx")
@@ -621,3 +628,36 @@ class MultiAccountSwitcherContractTest(SimpleTestCase):
     def test_sign_in_screen_can_resume_a_saved_account_without_a_password(self):
         self.assertIn(".accounts()", self.login)
         self.assertIn("postbox.switchAccount(item.session_id)", self.login)
+
+
+class Phase4ThreadSecurityAndAccessibilityContractTest(SimpleTestCase):
+    """Guard the integration seams not covered by the Python mail-engine tests."""
+
+    def test_thread_cards_are_keyboard_accessible_and_html_is_sanitised(self):
+        thread = read("components", "postbox", "conversation-reader.tsx")
+        self.assertIn("aria-expanded={open}", thread)
+        self.assertIn('aria-label="Messages in conversation"', thread)
+        self.assertIn("resolveInlineImageReferences(detail)", thread)
+        self.assertIn("dangerouslySetInnerHTML={{ __html: safeHtml }}", thread)
+        self.assertIn('postbox.message(member.folder, member.uid, false, member.uid_validity)', thread)
+        self.assertIn('uid_validity: copy.uid_validity', thread)
+
+    def test_inline_reply_cannot_silently_unmount_from_common_navigation(self):
+        page = read("app", "postbox", "(app)", "page.tsx")
+        thread = read("components", "postbox", "conversation-reader.tsx")
+        self.assertIn("threadInlineActive", page)
+        self.assertIn('document.addEventListener("click", protectInlineDraft, true)', page)
+        self.assertIn("onInlineChange={reportInlineState}", page)
+        self.assertIn("Save or close your inline reply", page)
+        self.assertIn("guardNavigation(onBack)", thread)
+        self.assertIn("guardNavigation(onSingle)", thread)
+
+    def test_raw_and_attachment_urls_carry_folder_generation(self):
+        api = read("lib", "postbox-api.ts")
+        resolver = read("lib", "postbox-inline-images.ts")
+        thread = read("components", "postbox", "conversation-reader.tsx")
+        for field in ("rawUrl:", "attachmentUrl:", "attachmentPreviewUrl:"):
+            self.assertIn(field, api)
+        self.assertIn("qs({ uid_validity: uidValidity })", api)
+        self.assertIn("detail.uid_validity", resolver)
+        self.assertIn("detail.uid_validity", thread)

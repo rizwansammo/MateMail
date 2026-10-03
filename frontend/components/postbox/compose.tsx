@@ -54,6 +54,7 @@ export interface ComposeInitial {
   subject?: string;
   text?: string;
   html?: string;
+  quoted_text?: string;
   in_reply_to?: string;
   references?: string[];
   from_address?: string;
@@ -76,13 +77,19 @@ export function Compose({
   signatures,
   onClose,
   onSent,
+  inline = false,
 }: {
   initial: ComposeInitial;
   identities: Identity[];
   signatures: Signature[];
   onClose: () => void;
   onSent: (message: string) => void;
+  inline?: boolean;
 }) {
+  // Two composers may coexist (inline reply and sidebar Compose). Form labels
+  // and ARIA references must remain unique instead of targeting the other one.
+  const fieldId = (part: string) => (inline ? "pb-thread-" : "pb-") + part;
+
   const primary =
     initial.from_address ||
     identities.find((i) => i.is_primary)?.address ||
@@ -123,6 +130,11 @@ export function Compose({
   const [expanded, setExpanded] = useState(false);
   const [subject, setSubject] = useState(initial.subject ?? "");
   const [body, setBody] = useState(initial.text ?? "");
+  // The original is separate from editable text, including after reopening a draft.
+  const [includeOriginal, setIncludeOriginal] = useState(
+    initial.mode === "draft" && Boolean(initial.quoted_text),
+  );
+  const [previewOriginal, setPreviewOriginal] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<ComposeAttachmentRef[]>(
     initial.existing_attachments ?? [],
@@ -163,6 +175,7 @@ export function Compose({
       bcc: splitAddresses(bcc),
       subject,
       text: body,
+      quoted_text: includeOriginal ? initial.quoted_text ?? "" : "",
       in_reply_to: initial.in_reply_to ?? "",
       references: initial.references ?? [],
       signature_id: signatureId || null,
@@ -188,6 +201,7 @@ export function Compose({
       bcc,
       subject,
       body,
+      includeOriginal,
       signatureId,
       attachments,
       existingAttachments,
@@ -233,6 +247,7 @@ export function Compose({
           bcc.trim() ||
           subject.trim() ||
           body.trim() ||
+          (includeOriginal && Boolean(initial.quoted_text)) ||
           attachments.length ||
           existingAttachments.length,
       );
@@ -272,6 +287,8 @@ export function Compose({
       bcc,
       body,
       cc,
+      includeOriginal,
+      initial.quoted_text,
       draftUid,
       existingAttachments.length,
       onClose,
@@ -391,6 +408,7 @@ export function Compose({
   }, [draftUid, onClose]);
 
   useEffect(() => {
+    if (inline) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !busy && !saving) {
         void saveDraftNow(true);
@@ -398,7 +416,21 @@ export function Compose({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onClose, saveDraftNow, saving]);
+  }, [busy, inline, onClose, saveDraftNow, saving]);
+
+  useEffect(() => {
+    // Hard refresh, tab closure and cross-origin navigation must warn if
+    // the inline reply has edits not yet confirmed by the draft API.
+    // Same-app link navigation is guarded by the PostBox mailbox component.
+    if (!inline) return;
+    const protectUnsavedDraft = (event: BeforeUnloadEvent) => {
+      if (!dirty.current && !saving) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectUnsavedDraft);
+    return () => window.removeEventListener("beforeunload", protectUnsavedDraft);
+  }, [inline, saving]);
 
   const totalBytes =
     attachments.reduce((sum, attachment) => sum + attachment.size, 0) +
@@ -406,7 +438,7 @@ export function Compose({
 
   return (
     <div
-      className={`pb-compose-backdrop fixed inset-0 z-50 flex items-stretch justify-center p-0 ${
+      className={inline ? "pb-thread-compose-host" : `pb-compose-backdrop fixed inset-0 z-50 flex items-stretch justify-center p-0 ${
         expanded
           ? "sm:items-center sm:justify-center sm:p-6"
           : "sm:items-end sm:justify-end sm:p-4"
@@ -429,11 +461,11 @@ export function Compose({
         `role="dialog"` stays: it is a dialog, it has a name, it is dismissible.
         It is simply not a modal one.
       */
-      role="dialog"
-      aria-label="Compose message"
+      role={inline ? "region" : "dialog"}
+      aria-label={inline ? "Inline reply editor" : "Compose message"}
     >
       <div
-        className={`pb-panel pb-compose-shell pb-premium-compose-shell flex w-full flex-col ${
+        className={inline ? "pb-panel pb-compose-shell pb-premium-compose-shell pb-thread-inline-panel flex w-full flex-col" : `pb-panel pb-compose-shell pb-premium-compose-shell flex w-full flex-col ${
           expanded
             ? // Underscores, not spaces: Tailwind arbitrary values cannot contain
             // spaces, and `calc` is invalid without them around the operator.
@@ -472,7 +504,7 @@ export function Compose({
               so its `display` wins. Same reason as the sidebar's close
               button.
             */}
-            <div className="hidden sm:block">
+            {!inline && <div className="hidden sm:block">
               <button
                 type="button"
                 className="pb-btn pb-btn-plain"
@@ -487,7 +519,7 @@ export function Compose({
                   <Maximize2 className="h-4 w-4" aria-hidden="true" />
                 )}
               </button>
-            </div>
+            </div>}
             <button
               type="button"
               className="pb-btn pb-btn-plain"
@@ -506,9 +538,9 @@ export function Compose({
             pushing the footer actions off the panel. */}
         <div className="pb-compose-content pb-scroll flex min-h-0 flex-1 flex-col p-3">
           <div className="pb-compose-fields space-y-2">
-            <Field label="From" htmlFor="pb-from">
+            <Field label="From" htmlFor={fieldId("from")}>
               <select
-                id="pb-from"
+                id={fieldId("from")}
                 className="pb-select"
                 value={from}
                 onChange={(event) => {
@@ -525,10 +557,10 @@ export function Compose({
               </select>
             </Field>
 
-            <Field label="To" htmlFor="pb-to">
+            <Field label="To" htmlFor={fieldId("to")}>
               <div className="flex gap-2">
                 <RecipientInput
-                  id="pb-to"
+                  id={fieldId("to")}
                   label="To"
                   value={to}
                   onChange={(value) => {
@@ -541,7 +573,7 @@ export function Compose({
                   type="button"
                   className="pb-btn pb-btn-plain shrink-0"
                   aria-expanded={showCopies}
-                  aria-controls="pb-copies"
+                  aria-controls={fieldId("copies")}
                   aria-label={
                     showCopies
                       ? "Hide Cc and Bcc fields"
@@ -565,10 +597,10 @@ export function Compose({
               still sent — and still saved into the draft.
             */}
             {showCopies && (
-              <div id="pb-copies" className="space-y-2">
-                <Field label="Cc" htmlFor="pb-cc">
+              <div id={fieldId("copies")} className="space-y-2">
+                <Field label="Cc" htmlFor={fieldId("cc")}>
                   <RecipientInput
-                    id="pb-cc"
+                    id={fieldId("cc")}
                     label="Cc"
                     value={cc}
                     onChange={(value) => {
@@ -577,9 +609,9 @@ export function Compose({
                     }}
                   />
                 </Field>
-                <Field label="Bcc" htmlFor="pb-bcc">
+                <Field label="Bcc" htmlFor={fieldId("bcc")}>
                   <RecipientInput
-                    id="pb-bcc"
+                    id={fieldId("bcc")}
                     label="Bcc"
                     value={bcc}
                     onChange={(value) => {
@@ -591,9 +623,9 @@ export function Compose({
               </div>
             )}
 
-            <Field label="Subject" htmlFor="pb-subject">
+            <Field label="Subject" htmlFor={fieldId("subject")}>
               <input
-                id="pb-subject"
+                id={fieldId("subject")}
                 className="pb-input"
                 value={subject}
                 onChange={(event) => {
@@ -605,7 +637,7 @@ export function Compose({
           </div>
 
           <textarea
-            id="pb-body"
+            id={fieldId("body")}
             aria-label="Message"
             className="pb-textarea pb-compose-body mt-3"
             value={body}
@@ -643,11 +675,11 @@ export function Compose({
 
           {signatures.length > 0 && (
             <div className="mt-2 flex items-center gap-2">
-              <label htmlFor="pb-signature" className="pb-label">
+              <label htmlFor={fieldId("signature")} className="pb-label">
                 Signature
               </label>
               <select
-                id="pb-signature"
+                id={fieldId("signature")}
                 className="pb-select"
                 style={{ width: "auto" }}
                 value={signatureId}
@@ -663,6 +695,52 @@ export function Compose({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {Boolean(initial.quoted_text) && (
+            <div
+              className="mt-3 shrink-0 rounded-lg border px-3 py-2 text-sm"
+              style={{ borderColor: "var(--pb-border)", background: "var(--pb-surface-2)" }}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="flex cursor-pointer items-center gap-2" htmlFor={fieldId("include-original")}>
+                  <input
+                    id={fieldId("include-original")}
+                    type="checkbox"
+                    className="h-4 w-4 accent-[var(--pb-primary)]"
+                    checked={includeOriginal}
+                    onChange={(event) => {
+                      setIncludeOriginal(event.target.checked);
+                      markDirty();
+                    }}
+                  />
+                  Include original message
+                </label>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 underline-offset-2 hover:underline"
+                  aria-expanded={previewOriginal}
+                  aria-controls={fieldId("original-preview")}
+                  onClick={() => setPreviewOriginal((current) => !current)}
+                >
+                  {previewOriginal ? "Hide preview" : "Preview original"}
+                  {previewOriginal ? (
+                    <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+              {previewOriginal && (
+                <pre
+                  id={fieldId("original-preview")}
+                  className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words border-t pt-2 text-xs"
+                  style={{ borderColor: "var(--pb-border)" }}
+                >
+                  {initial.quoted_text?.replace(/^> ?/gm, "")}
+                </pre>
+              )}
             </div>
           )}
 
@@ -723,11 +801,11 @@ export function Compose({
           {showSchedule && (
             <div className="pb-compose-schedule mt-3 flex flex-wrap items-end gap-2">
               <div>
-                <label htmlFor="pb-schedule" className="pb-label">
+                <label htmlFor={fieldId("schedule")} className="pb-label">
                   Send at
                 </label>
                 <input
-                  id="pb-schedule"
+                  id={fieldId("schedule")}
                   className="pb-input mt-1"
                   type="datetime-local"
                   value={scheduleAt}

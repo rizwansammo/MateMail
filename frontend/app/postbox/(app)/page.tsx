@@ -44,6 +44,8 @@ import {
 } from "lucide-react";
 
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
+import { ConversationReader } from "@/components/postbox/conversation-reader";
+import { resolveInlineImageReferences } from "@/lib/postbox-inline-images";
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
 import {
@@ -51,6 +53,9 @@ import {
   formatMessageDate,
   postbox,
   type Folder,
+  type ConversationDetail,
+  type ConversationPage,
+  type ConversationSummary,
   type MessageDetail,
   type MessagePage,
   type MessageSummary,
@@ -67,54 +72,6 @@ export default function MailPage() {
 
 /** Stable, so a derived empty selection does not change identity each render. */
 const EMPTY_SELECTION: Set<number> = new Set();
-
-/**
- * A browser does not understand RFC 2392 cid: URLs by itself. Map only CIDs
- * that the server reported as safe, previewable image parts to authenticated
- * same-origin preview URLs. The message HTML itself was already sanitised by
- * the backend; this function only resolves its inert inline-image references.
- */
-function resolveInlineImageReferences(detail: MessageDetail): string {
-  if (!detail.html || !detail.html.toLowerCase().includes("cid:")) {
-    return detail.html;
-  }
-
-  const inlineImages = new Map(
-    detail.attachments
-      .filter(
-        (attachment) =>
-          attachment.content_id &&
-          attachment.previewable &&
-          attachment.content_type.toLowerCase().startsWith("image/"),
-      )
-      .map((attachment) => [
-        attachment.content_id.trim().replace(/^<|>$/g, "").toLowerCase(),
-        postbox.attachmentPreviewUrl(
-          detail.folder,
-          detail.uid,
-          attachment.part_id,
-        ),
-      ]),
-  );
-
-  if (inlineImages.size === 0) return detail.html;
-
-  return detail.html.replace(
-    /(\bsrc\s*=\s*["'])cid:([^"']+)(["'])/gi,
-    (match, prefix: string, rawCid: string, suffix: string) => {
-      let cid = rawCid.trim();
-      try {
-        cid = decodeURIComponent(cid);
-      } catch {
-        // A malformed percent escape is just a CID that will not match.
-      }
-      const url = inlineImages.get(
-        cid.replace(/^<|>$/g, "").toLowerCase(),
-      );
-      return url ? `${prefix}${url}${suffix}` : match;
-    },
-  );
-}
 
 function CentredSpinner() {
   return (
@@ -162,7 +119,7 @@ function Mailbox() {
   // One key for "which list am I looking at". Paging and selection both reset
   // when it changes, and both derive that from the key rather than having an
   // effect write it — a reset is a consequence of the key, not an event.
-  const listKey = `${folder}|${search}|${filterMode}|${searchScope}|${sortMode}`;
+  const listKey = `${folder}|${search}|${filterMode}|${searchScope}|${sortMode}|${params.get("view") || "conversations"}`;
 
   const [pageState, setPageState] = useState({ key: listKey, page: 1 });
   const pageNumber = pageState.key === listKey ? pageState.page : 1;
@@ -189,17 +146,48 @@ function Mailbox() {
     [listKey],
   );
   const [detail, setDetail] = useState<MessageDetail | null>(null);
+  const [thread, setThread] = useState<ConversationDetail | null>(null);
+  const [showSingle, setShowSingle] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
+  const openRequestId = useRef(0);
+  const threadInlineActive = useRef(false);
+  const reportInlineState = useCallback((active: boolean) => {
+    threadInlineActive.current = active;
+  }, []);
 
   useEffect(() => {
     const returnToList = () => {
+      if (threadInlineActive.current) {
+        setNotice("Save or close your inline reply before navigating.");
+        return;
+      }
+      openRequestId.current += 1;
       setDetail(null);
+      setThread(null);
+      setShowSingle(false);
       setShowRemote(false);
     };
     window.addEventListener("postbox:return-to-list", returnToList);
     return () =>
       window.removeEventListener("postbox:return-to-list", returnToList);
+  }, []);
+
+  useEffect(() => {
+    // Next.js Link navigations do not trigger beforeunload. Intercept them
+    // while a full inline composer is open so unsaved reply text is retained.
+    const protectInlineDraft = (event: MouseEvent) => {
+      if (!threadInlineActive.current || !(event.target instanceof Element)) return;
+      const anchor = event.target.closest("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = new URL(anchor.href, window.location.href);
+      if (href.origin !== window.location.origin || !href.pathname.startsWith("/postbox")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setNotice("Save or close your inline reply before navigating.");
+    };
+    document.addEventListener("click", protectInlineDraft, true);
+    return () => document.removeEventListener("click", protectInlineDraft, true);
   }, []);
 
   const [explicitCompose, setExplicitCompose] = useState<ComposeInitial | null>(null);
@@ -258,6 +246,25 @@ function Mailbox() {
     [directory.data],
   );
 
+  // Inbox defaults to conversations. Searches, filtered views and other
+  // folders retain the existing precise per-message interface.
+  const conversationEligible =
+    (folder.toUpperCase() === "INBOX" ||
+      mailFolders.some((item) => item.name === folder && item.role === "inbox")) &&
+    !search && !unreadOnly && !filteredStarredOnly &&
+    sortMode === "newest" && searchScope === "folder";
+  const conversationMode = conversationEligible && params.get("view") !== "messages";
+  const conversations = useAsyncData<ConversationPage>(
+    () => conversationMode
+      ? postbox.conversations({ scope: "inbox", page: pageNumber, page_size: Math.min(100, preferences.messages_per_page || 25) })
+      : Promise.resolve({
+          scope: "inbox" as const, page: 1, page_size: 25, total: 0,
+          has_next: false, results: [],
+        }),
+    [conversationMode, pageNumber, preferences.messages_per_page],
+    "Conversation view is unavailable. Switch to Messages.",
+  );
+
   const scheduledData = useAsyncData(
     () => postbox.scheduled(),
     [],
@@ -313,10 +320,20 @@ function Mailbox() {
 
   const openMessage = useCallback(
     async (summary: MessageSummary, remote = false) => {
+      if (threadInlineActive.current) {
+        setNotice("Save or close your inline reply before switching messages.");
+        return;
+      }
+      const requestId = ++openRequestId.current;
       setDetailLoading(true);
+      if (!remote) {
+        setThread(null);
+        setShowSingle(false);
+      }
       setShowRemote(remote);
       try {
-        const data = await postbox.message(summary.folder, summary.uid, remote);
+        const data = await postbox.message(summary.folder, summary.uid, remote, summary.uid_validity);
+        if (requestId !== openRequestId.current) return;
         const role = mailFolders.find((item) => item.name === summary.folder)?.role;
 
         if (role === "drafts") {
@@ -329,6 +346,7 @@ function Mailbox() {
             subject: data.subject,
             text: data.text,
             html: data.html,
+            quoted_text: data.quoted_text ?? "",
             from_address: data.from.address,
             in_reply_to: data.in_reply_to,
             references: data.references,
@@ -352,16 +370,41 @@ function Mailbox() {
         // Marking read is a separate, explicit call — the list does not mark
         // things seen as it scrolls past them.
         if (!summary.seen) {
-          await postbox.act("read", summary.folder, [summary.uid]);
+          await postbox.act("read", summary.folder, [summary.uid], {
+            uid_validity: summary.uid_validity,
+          });
           void loadList();
         }
+        if (!remote &&
+            !["drafts", "scheduled", "trash", "junk"].includes(role || "") &&
+            !/(^|[./_-])(spam|junk|trash|scheduled)($|[./_-])/i.test(summary.folder)) {
+          try {
+            const grouped = await postbox.conversationForMessage(
+              data.folder, data.uid, data.uid_validity,
+            );
+            if (requestId === openRequestId.current) setThread(grouped);
+          } catch (caught) {
+            // A mailbox over the header-scan cap stays fully usable through
+            // its original reader. Never claim a partial thread is complete.
+            if (requestId === openRequestId.current) {
+              setThread(null);
+              if (conversationMode) {
+                setNotice(describePostBoxError(
+                  caught, "Conversation view unavailable. Showing this message instead.",
+                ));
+              }
+            }
+          }
+        }
       } catch (caught) {
-        setNotice(describePostBoxError(caught, "That message could not be opened."));
+        if (requestId === openRequestId.current) {
+          setNotice(describePostBoxError(caught, "That message could not be opened."));
+        }
       } finally {
-        setDetailLoading(false);
+        if (requestId === openRequestId.current) setDetailLoading(false);
       }
     },
-    [loadList, mailFolders],
+    [loadList, mailFolders, conversationMode],
   );
 
   const act = useCallback(
@@ -449,6 +492,7 @@ function Mailbox() {
           cc: context.cc,
           subject: context.subject,
           text: context.text,
+          quoted_text: context.quoted_text,
           from_address: context.from_address,
           in_reply_to: context.in_reply_to,
           references: context.references,
@@ -461,6 +505,23 @@ function Mailbox() {
     },
     [detail],
   );
+
+  const refreshConversation = useCallback(async () => {
+    if (!detail) return;
+    try {
+      const updated = await postbox.conversationForMessage(
+        detail.folder, detail.uid, detail.uid_validity,
+      );
+      setThread(updated);
+    } catch {
+      // The anchor may have been moved or deleted. Returning to the mailbox
+      // is safer than rendering a stale conversation after that action.
+      setThread(null);
+      setDetail(null);
+    }
+    conversations.reload();
+    loadList();
+  }, [detail, conversations.reload, loadList]);
 
   const rescheduleScheduled = useCallback(
     async (row: ScheduledRow, scheduledAt: string) => {
@@ -519,6 +580,18 @@ function Mailbox() {
         ) ?? null
       : null;
 
+  const changeConversationMode = (mode: "conversations" | "messages") => {
+    if (threadInlineActive.current) {
+      setNotice("Save or close your inline reply before changing views.");
+      return;
+    }
+    const next = new URLSearchParams(params.toString());
+    if (mode === "messages") next.set("view", "messages");
+    else next.delete("view");
+    setSelected(new Set());
+    router.push("/postbox?" + next.toString());
+  };
+
   const applyFilter = (nextFilter: "all" | "unread" | "starred") => {
     const next = new URLSearchParams(params.toString());
     next.delete("starred");
@@ -544,7 +617,7 @@ function Mailbox() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="pb-premium-mail-toolbar">
-          {!isCrossFolderView && (
+          {!isCrossFolderView && !conversationMode && (
             <input
               className="pb-premium-select-all"
               type="checkbox"
@@ -617,6 +690,14 @@ function Mailbox() {
           )}
 
           <div className="pb-premium-mail-toolbar-actions">
+            {conversationEligible && (
+              <div className="pb-conversation-switch" role="group" aria-label="Mailbox layout">
+                <button type="button" aria-pressed={conversationMode}
+                  onClick={() => changeConversationMode("conversations")}>Conversations</button>
+                <button type="button" aria-pressed={!conversationMode}
+                  onClick={() => changeConversationMode("messages")}>Messages</button>
+              </div>
+            )}
             <select
               className="pb-premium-sort-select"
               aria-label="Message order"
@@ -633,8 +714,8 @@ function Mailbox() {
               className="pb-premium-icon-button"
               aria-label="Refresh mailbox"
               title="Refresh mailbox"
-              disabled={loading}
-              onClick={() => void loadList()}
+              disabled={loading || (conversationMode && conversations.loading)}
+              onClick={() => { loadList(); if (conversationMode) conversations.reload(); }}
             >
               <RefreshCw className={`h-[18px] w-[18px] ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
             </button>
@@ -643,7 +724,7 @@ function Mailbox() {
                 <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
               </summary>
               <div className="pb-premium-mail-menu">
-                {!isCrossFolderView && (
+                {!isCrossFolderView && !conversationMode && (
                   <button
                     type="button"
                     disabled={rows.length === 0}
@@ -787,7 +868,72 @@ function Mailbox() {
           }`}
           style={{ borderColor: "var(--pb-border)" }}
         >
-          {loading ? (
+          {conversationMode ? (
+            conversations.loading ? <CentredSpinner /> :
+            conversations.error ? (
+              <div className="flex flex-col items-center gap-3 p-5">
+                <EmptyState title="Conversation view unavailable" detail={conversations.error} />
+                <button type="button" className="pb-btn pb-btn-ghost"
+                  onClick={() => changeConversationMode("messages")}>
+                  Switch to Messages
+                </button>
+              </div>
+            ) : !conversations.data?.results.length ? (
+              <EmptyState title="No conversations yet"
+                detail="Messages in your Inbox and their replies will appear together here." />
+            ) : (
+              <>
+                {conversations.data.results.map((conversation: ConversationSummary) => (
+                  <div className="pb-thread-list-item"
+                    key={conversation.id}
+                    data-unread={conversation.unread_count > 0}
+                    data-selected={thread?.id === conversation.id}>
+                    <button type="button"
+                      onClick={() => void openMessage(conversation.latest)}
+                      aria-label={"Open conversation: " + (conversation.subject || "(no subject)")}>
+                      <span className="pb-premium-row-avatar" aria-hidden="true">
+                        {senderInitials(conversation.latest.from.name || conversation.latest.from.address)}
+                      </span>
+                      <span className="pb-thread-list-copy">
+                        <span className="pb-thread-list-top">
+                          <strong>{conversation.latest.from.name || conversation.latest.from.address}</strong>
+                          <time>{formatMessageDate(conversation.latest_date)}</time>
+                        </span>
+                        <span className="pb-thread-list-subject">
+                          {conversation.subject || "(no subject)"}
+                          {conversation.unread_count > 0 && (
+                            <span className="ml-2 pb-premium-unread-dot"
+                              aria-label={conversation.unread_count + " unread"} />
+                          )}
+                        </span>
+                      </span>
+                      {conversation.flagged && <Star className="h-4 w-4 shrink-0"
+                        style={{ color: "var(--pb-warn)" }} fill="currentColor"
+                        aria-label="Contains starred messages" />}
+                      <span className="pb-thread-count" aria-label={
+                        conversation.message_count + " messages"
+                      }>{conversation.message_count}</span>
+                    </button>
+                  </div>
+                ))}
+                {conversations.data.total > conversations.data.page_size && (
+                  <div className="flex items-center justify-between gap-2 p-3 text-xs pb-subtle">
+                    <span>{(pageNumber - 1) * conversations.data.page_size + 1}–{
+                      Math.min(pageNumber * conversations.data.page_size, conversations.data.total)
+                    } of {conversations.data.total} conversations</span>
+                    <div className="flex gap-2">
+                      <button type="button" className="pb-btn pb-btn-ghost"
+                        disabled={pageNumber <= 1}
+                        onClick={() => setPageNumber((n) => n - 1)}>Newer</button>
+                      <button type="button" className="pb-btn pb-btn-ghost"
+                        disabled={!conversations.data.has_next}
+                        onClick={() => setPageNumber((n) => n + 1)}>Older</button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          ) : loading ? (
             <CentredSpinner />
           ) : listError ? (
             <EmptyState title="Mail unavailable" detail={listError} />
@@ -910,12 +1056,39 @@ function Mailbox() {
               title="No message selected"
               detail="Choose a message to read it here."
             />
+          ) : thread && !showSingle ? (
+            <ConversationReader
+              key={thread.id + ":" + detail.folder + ":" + detail.uid}
+              conversation={thread}
+              initialDetail={detail}
+              identities={identities}
+              signatures={signatures}
+              onBack={() => {
+                openRequestId.current += 1;
+                setThread(null);
+                setDetail(null);
+              }}
+              onSingle={() => setShowSingle(true)}
+              onInlineChange={reportInlineState}
+              onChanged={refreshConversation}
+              onNotice={setNotice}
+              onSuccess={(message) => {
+                setSuccessNotice(message);
+                setSuccessVisible(true);
+                setNotice(null);
+              }}
+              onFloatingCompose={setExplicitCompose}
+            />
           ) : (
             <Reader
               detail={detail}
               summary={activeSummary}
               showRemote={showRemote}
-              onBack={() => setDetail(null)}
+              onBack={() => {
+                openRequestId.current += 1;
+                setThread(null);
+                setDetail(null);
+              }}
               onLoadRemote={() =>
                 void openMessage(
                   { ...detail, seen: true } as unknown as MessageSummary,
@@ -929,10 +1102,10 @@ function Mailbox() {
               onRescheduleScheduled={rescheduleScheduled}
               onCancelScheduled={cancelScheduled}
               onMove={(destination) =>
-                void act("move", [detail.uid], { destination }, detail.folder)
+                void act("move", [detail.uid], { destination, uid_validity: detail.uid_validity }, detail.folder)
               }
               onAction={(action) =>
-                void act(action, [detail.uid], {}, detail.folder)
+                void act(action, [detail.uid], { uid_validity: detail.uid_validity }, detail.folder)
               }
             />
           )}
@@ -950,6 +1123,8 @@ function Mailbox() {
             setSuccessNotice(message);
             setSuccessVisible(true);
             void loadList();
+            if (conversationMode) conversations.reload();
+            if (thread) void refreshConversation();
             void scheduledData.reload();
           }}
         />
@@ -1039,7 +1214,7 @@ function Reader({
         <span className="flex-1" />
         <a
           className="pb-btn pb-btn-plain"
-          href={postbox.rawUrl(detail.folder, detail.uid)}
+          href={postbox.rawUrl(detail.folder, detail.uid, detail.uid_validity)}
           target="_blank"
           rel="noopener noreferrer"
           title="Download original message"
@@ -1154,6 +1329,7 @@ function Reader({
                           detail.folder,
                           detail.uid,
                           attachment.part_id,
+                          detail.uid_validity,
                         )}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -1168,6 +1344,7 @@ function Reader({
                         detail.folder,
                         detail.uid,
                         attachment.part_id,
+                        detail.uid_validity,
                       )}
                       download={attachment.filename}
                       aria-label={`Download ${attachment.filename}`}

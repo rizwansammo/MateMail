@@ -202,11 +202,15 @@ def _scheduled_message_for_delivery(mailbox, raw: bytes):
             ),
         )
 
+    # Editable scheduled replies store their opted-in quote as ordinary MIME
+    # text with verified draft markers. Apply signature BEFORE the quote.
+    draft_body, quoted_text = mime.split_draft_reply_quote(parsed)
     text, html, related = signatures.apply(
-        text=parsed.text,
-        html=parsed.html,
+        text=draft_body,
+        html="" if quoted_text else parsed.html,
         signature=signature,
     )
+    text, html = mime.append_reply_quote(text, html, quoted_text)
 
     attachments = []
     for attachment in parsed.attachments:

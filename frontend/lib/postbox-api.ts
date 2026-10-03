@@ -176,6 +176,42 @@ export interface MessagePage {
   results: MessageSummary[];
 }
 
+/** Header-only conversation data. Message bodies load through existing message API. */
+export interface ConversationMember extends MessageSummary {
+  copies: Array<{
+    folder: string;
+    uid_validity: number;
+    uid: number;
+    seen: boolean;
+    flagged: boolean;
+  }>;
+}
+
+export interface ConversationSummary {
+  id: string;
+  subject: string;
+  latest: ConversationMember;
+  latest_date: string;
+  message_count: number;
+  unread_count: number;
+  flagged: boolean;
+  participants: string[];
+  has_inbox: boolean;
+}
+
+export interface ConversationPage {
+  scope: "inbox" | "all";
+  page: number;
+  page_size: number;
+  total: number;
+  has_next: boolean;
+  results: ConversationSummary[];
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  messages: ConversationMember[];
+}
+
 export interface AttachmentInfo {
   part_id: string;
   filename: string;
@@ -207,6 +243,7 @@ export interface MessageDetail {
   bcc?: string[];
   signature_id?: string | null;
   signature_missing?: boolean;
+  quoted_text?: string; // own Drafts only; clean editor + optional quote
   reply_to: string;
   date: string;
   message_id: string;
@@ -329,6 +366,7 @@ export interface ComposePayload {
   subject?: string;
   text?: string;
   html?: string;
+  quoted_text?: string;
   in_reply_to?: string;
   references?: string[];
   signature_id?: string | null;
@@ -391,13 +429,23 @@ export const postbox = {
   deleteFolder: (name: string) =>
     request<void>(`/folders/${encodeFolder(name)}/`, { method: "DELETE" }),
 
+  // Phase 2 conversation engine; opt-in UI integration comes in Phase 3.
+  conversations: (params: {
+    scope?: "inbox" | "all"; page?: number; page_size?: number;
+  } = {}) => request<ConversationPage>(`/conversations/${qs(params)}`),
+  conversationForMessage: (folder: string, uid: number, uidValidity: number) =>
+    request<ConversationDetail>(`/conversations/for-message/${qs({
+      folder, uid, uid_validity: uidValidity,
+    })}`),
+
   // messages
   messages: (params: Record<string, string | number | boolean | undefined>) =>
     request<MessagePage>(`/messages/${qs(params)}`),
-  message: (folder: string, uid: number, remoteImages = false) =>
+  message: (folder: string, uid: number, remoteImages = false, uidValidity?: number) =>
     request<MessageDetail>(
       `/messages/${encodeFolder(folder)}/${uid}/${qs({
         remote_images: remoteImages ? "true" : undefined,
+        uid_validity: uidValidity,
       })}`,
     ),
   trustRemoteImages: (folder: string, uid: number, uidValidity: number) =>
@@ -416,19 +464,19 @@ export const postbox = {
       method: "DELETE",
       body: JSON.stringify({ sender }),
     }),
-  rawUrl: (folder: string, uid: number) =>
-    `${BASE}/messages/${encodeFolder(folder)}/${uid}/raw/`,
-  attachmentUrl: (folder: string, uid: number, partId: string) =>
-    `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/`,
-  attachmentPreviewUrl: (folder: string, uid: number, partId: string) =>
-    `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/preview/`,
-  replyContext: (folder: string, uid: number, mode: string) =>
+  rawUrl: (folder: string, uid: number, uidValidity?: number) =>
+    `${BASE}/messages/${encodeFolder(folder)}/${uid}/raw/${qs({ uid_validity: uidValidity })}`,
+  attachmentUrl: (folder: string, uid: number, partId: string, uidValidity?: number) =>
+    `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/${qs({ uid_validity: uidValidity })}`,
+  attachmentPreviewUrl: (folder: string, uid: number, partId: string, uidValidity?: number) =>
+    `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/preview/${qs({ uid_validity: uidValidity })}`,
+  replyContext: (folder: string, uid: number, mode: string, uidValidity?: number) =>
     request<{
       mode: string; subject: string; to: string[]; cc: string[];
-      from_address: string; text: string; html: string;
+      from_address: string; text: string; html: string; quoted_text: string;
       in_reply_to: string; references: string[];
       attachments: ComposeAttachmentRef[];
-    }>(`/messages/${encodeFolder(folder)}/${uid}/reply-context/${qs({ mode })}`),
+    }>(`/messages/${encodeFolder(folder)}/${uid}/reply-context/${qs({ mode, uid_validity: uidValidity })}`),
 
   act: (
     action: MessageAction,
