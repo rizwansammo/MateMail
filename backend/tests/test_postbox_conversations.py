@@ -133,6 +133,24 @@ class HeaderThreadingTest(unittest.TestCase):
         self.assertTrue(first.flagged)
         self.assertEqual(0, first.unread_count)
 
+    def test_full_bounded_scan_remains_one_header_only_conversation(self):
+        """Exercise the documented 5,000-summary capacity without MIME bodies."""
+        root = mail(1, "INBOX", "<root@load.example.test>")
+        replies = [
+            mail(
+                n, "Sent", f"<reply-{n}@load.example.test>",
+                subject="Re: Project",
+                references=["<root@load.example.test>"],
+                reply_to="<root@load.example.test>",
+                date=DATE2,
+            )
+            for n in range(2, 5001)
+        ]
+        result = threading.build_conversations([*reversed(replies), root], ROLES)
+        self.assertEqual(1, len(result))
+        self.assertEqual(5000, len(result[0].messages))
+        self.assertEqual(0, result[0].unread_count)
+
     def test_bare_reply_to_references_are_not_subject_fallback(self):
         root = mail(1, "INBOX", "<root@example.test>")
         reply = mail(
