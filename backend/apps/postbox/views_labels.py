@@ -16,6 +16,7 @@ from rest_framework.response import Response
 
 from . import imap
 from .models import MailLabel, MessageLabel
+from .appearance import DEFAULT_LABEL_COLOR, validate_color
 from .views_mail import (
     PostBoxView, _fetch_summaries_chunked, _global_message_sort_key,
     _message_provenance_key, _summary_payload,
@@ -51,6 +52,7 @@ def labels_for_summaries(mailbox, summaries):
             mapping[entry.message_key].append({
                 "id": str(entry.label_id),
                 "name": entry.label.name,
+                "color": entry.label.color,
             })
     return mapping
 
@@ -78,6 +80,7 @@ def _payload(label):
     return {
         "id": str(label.id),
         "name": label.name,
+        "color": label.color,
         "count": label.assignments.count(),
     }
 
@@ -89,17 +92,18 @@ class LabelListView(PostBoxView):
             assignment_count=Count("assignments")
         )
         return Response({"results": [
-            {"id": str(item.id), "name": item.name, "count": item.assignment_count}
+            {"id": str(item.id), "name": item.name, "color": item.color, "count": item.assignment_count}
             for item in labels
         ]})
 
     def post(self, request):
         name = _name(request.data.get("name"))
+        color = validate_color(request.data["color"]) if "color" in request.data else DEFAULT_LABEL_COLOR
         if MailLabel.objects.for_mailbox(self.mailbox).filter(name__iexact=name).exists():
             return Response({"name": "A label with that name already exists."}, status=400)
         try:
             with transaction.atomic():
-                label = MailLabel.objects.create(mailbox=self.mailbox, name=name)
+                label = MailLabel.objects.create(mailbox=self.mailbox, name=name, color=color)
         except IntegrityError:
             return Response({"name": "A label with that name already exists."}, status=400)
         return Response(_payload(label), status=201)
@@ -113,15 +117,21 @@ class LabelDetailView(PostBoxView):
         label = self._get(pk)
         if label is None:
             return Response({"detail": "Label not found."}, status=404)
-        name = _name(request.data.get("name"))
+        if "name" not in request.data and "color" not in request.data:
+            return Response({"detail": "Supply a name or color to update."}, status=400)
+
+        name = _name(request.data["name"]) if "name" in request.data else label.name
+        color = validate_color(request.data["color"]) if "color" in request.data else label.color
         if MailLabel.objects.for_mailbox(self.mailbox).filter(
             name__iexact=name
         ).exclude(pk=pk).exists():
             return Response({"name": "A label with that name already exists."}, status=400)
+
         label.name = name
+        label.color = color
         try:
             with transaction.atomic():
-                label.save(update_fields=["name"])
+                label.save(update_fields=["name", "color"])
         except IntegrityError:
             return Response({"name": "A label with that name already exists."}, status=400)
         return Response(_payload(label))
