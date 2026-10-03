@@ -418,11 +418,11 @@ function ThreadMessageCard({
                   </span>
                   <span className="pb-premium-attachment-actions">
                     {item.previewable && <a
-                      href={postbox.attachmentPreviewUrl(detail.folder, detail.uid, item.part_id)}
+                      href={postbox.attachmentPreviewUrl(detail.folder, detail.uid, item.part_id, detail.uid_validity)}
                       target="_blank" rel="noopener noreferrer" title="Preview attachment"
                       aria-label={"Preview " + item.filename}>
                       <Eye className="h-4 w-4" /></a>}
-                    <a href={postbox.attachmentUrl(detail.folder, detail.uid, item.part_id)}
+                    <a href={postbox.attachmentUrl(detail.folder, detail.uid, item.part_id, detail.uid_validity)}
                       download={item.filename} aria-label={"Download " + item.filename}>
                       <Download className="h-4 w-4" /></a>
                   </span>
