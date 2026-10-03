@@ -26,6 +26,7 @@ import uuid
 from datetime import timedelta
 
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
@@ -783,7 +784,7 @@ class MailLabel(models.Model):
         ordering = ["name", "id"]
         constraints = [
             models.UniqueConstraint(
-                models.functions.Lower("name"), "mailbox",
+                Lower("name"), "mailbox",
                 name="postbox_label_mailbox_name_ci",
             )
         ]
