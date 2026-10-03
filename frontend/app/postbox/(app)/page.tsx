@@ -1105,6 +1105,14 @@ function Mailbox() {
               initialDetail={detail}
               identities={identities}
               signatures={signatures}
+              labels={mailLabels}
+              onApplyLabel={(member, id, remove) => {
+                if (threadInlineActive.current) {
+                  setNotice("Save or close your inline reply before changing labels.");
+                  return;
+                }
+                void applyLabel(id, remove, [member.uid], member.folder, member.uid_validity);
+              }}
               onBack={() => {
                 openRequestId.current += 1;
                 setThread(null);
