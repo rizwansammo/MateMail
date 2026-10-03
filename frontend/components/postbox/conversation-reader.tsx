@@ -496,7 +496,7 @@ function ThreadMessageCard({
                     event.currentTarget.closest("details")!.open = false;
                     onApplyLabel(item.id, applied);
                   }}>
-                    <Tag size={14} /> {item.name} {applied ? "✓" : ""}
+                    <Tag size={14} style={{ color: item.color || "#9333ea" }} /> {item.name} {applied ? "✓" : ""}
                   </button>;
                 })}
               </div>

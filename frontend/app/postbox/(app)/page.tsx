@@ -13,7 +13,7 @@
  * before it was sent. Nothing is cleaned here — a second, weaker sanitiser in
  * the browser would be the one people trusted.
  */
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
@@ -27,6 +27,7 @@ import {
   Download,
   Eye,
   Forward,
+  Folder as FolderIcon,
   ImageOff,
   Loader2,
   Mail,
@@ -955,7 +956,7 @@ function Mailbox() {
                         </span>
                         <span className="pb-thread-list-subject">
                           {conversation.subject || "(no subject)"}
-                          <MessageLabelBadges labels={conversation.latest.labels} />
+                          <MessageLabelBadges labels={conversation.latest.labels} palette={mailLabels} />
                           {conversation.unread_count > 0 && (
                             <span className="ml-2 pb-premium-unread-dot"
                               aria-label={conversation.unread_count + " unread"} />
@@ -1059,7 +1060,7 @@ function Mailbox() {
                       <span className="pb-premium-row-copy">
                         <span className="pb-row-subject">
                           {row.subject || "(no subject)"}
-                          <MessageLabelBadges labels={row.labels} />
+                          <MessageLabelBadges labels={row.labels} palette={mailLabels} />
                         </span>
                       </span>
                       <span className="pb-premium-row-indicators">
@@ -1555,11 +1556,12 @@ function toLocalDateTimeInput(value: string): string {
   return local.toISOString().slice(0, 16);
 }
 
-function MessageLabelBadges({ labels }: { labels?: MessageLabel[] }) {
+function MessageLabelBadges({ labels, palette }: { labels?: MessageLabel[]; palette?: MailLabel[] }) {
   if (!labels?.length) return null;
   return (
     <span className="pb-message-labels">
-      {labels.map((item) => <span key={item.id} className="pb-message-label">
+      {labels.map((item) => <span key={item.id} className="pb-message-label"
+        style={{ "--pb-label-color": palette?.find((available) => available.id === item.id)?.color || item.color || "#9333ea" } as CSSProperties}>
         <Tag size={10} aria-hidden="true" /><span>{item.name}</span>
       </span>)}
     </span>
@@ -1593,7 +1595,7 @@ function LabelMenu({
             event.currentTarget.closest("details")!.open = false;
             onApply(item.id, active.has(item.id));
           }}>
-            <Tag size={14} />
+            <Tag size={14} className="pb-colored-tag" style={{ color: item.color || "#9333ea" }} />
             {item.name}
             {active.has(item.id) && <CheckCircle2 size={14} aria-label="Applied" />}
           </button>
@@ -1647,6 +1649,7 @@ function MoveMenu({
               onMove(item.name);
             }}
           >
+            {item.color && <FolderIcon size={14} style={{ color: item.color }} />}
             {item.name}
           </button>
         ))}

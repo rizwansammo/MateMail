@@ -141,16 +141,19 @@ export interface MailLabel {
   id: string;
   name: string;
   count: number;
+  color: string;
 }
 
 export interface MessageLabel {
   id: string;
   name: string;
+  color: string;
 }
 
 export interface Folder {
   name: string;
   role: string;
+  color: string | null;
   messages: number;
   unseen: number;
 }
@@ -429,28 +432,36 @@ export const postbox = {
 
   // folders
   folders: () => request<{ results: Folder[] }>("/folders/"),
-  createFolder: (name: string) =>
-    request<{ name: string }>("/folders/", {
+  createFolder: (name: string, color?: string) =>
+    request<{ name: string; color: string }>("/folders/", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, ...(color ? { color } : {}) }),
     }),
-  renameFolder: (name: string, next: string) =>
-    request<{ name: string }>(`/folders/${encodeFolder(name)}/`, {
+  renameFolder: (name: string, next: string, color?: string) =>
+    request<{ name: string; color: string }>(`/folders/${encodeFolder(name)}/`, {
       method: "PATCH",
-      body: JSON.stringify({ name: next }),
+      body: JSON.stringify({ name: next, ...(color ? { color } : {}) }),
+    }),
+  colorFolder: (name: string, color: string) =>
+    request<{ name: string; color: string }>(`/folders/${encodeFolder(name)}/`, {
+      method: "PATCH", body: JSON.stringify({ color }),
     }),
   deleteFolder: (name: string) =>
     request<void>(`/folders/${encodeFolder(name)}/`, { method: "DELETE" }),
 
   // Virtual labels are PostBox metadata, not additional IMAP copies.
   labels: () => request<{ results: MailLabel[] }>("/labels/"),
-  createLabel: (name: string) =>
+  createLabel: (name: string, color?: string) =>
     request<MailLabel>("/labels/", {
-      method: "POST", body: JSON.stringify({ name }),
+      method: "POST", body: JSON.stringify({ name, ...(color ? { color } : {}) }),
     }),
-  renameLabel: (id: string, name: string) =>
+  renameLabel: (id: string, name: string, color?: string) =>
     request<MailLabel>(`/labels/${id}/`, {
-      method: "PATCH", body: JSON.stringify({ name }),
+      method: "PATCH", body: JSON.stringify({ name, ...(color ? { color } : {}) }),
+    }),
+  colorLabel: (id: string, color: string) =>
+    request<MailLabel>(`/labels/${id}/`, {
+      method: "PATCH", body: JSON.stringify({ color }),
     }),
   deleteLabel: (id: string) =>
     request<void>(`/labels/${id}/`, { method: "DELETE" }),

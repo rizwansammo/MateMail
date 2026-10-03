@@ -37,7 +37,8 @@ class VirtualLabelTest(TestCase):
 
     def login(self, mailbox):
         client = APIClient()
-        with mock.patch("apps.postbox.auth.imap.authenticate", return_value=True), \
+        with mock.patch("apps.postbox.auth.ratelimit.hit", return_value=SimpleNamespace(allowed=True, retry_after=0)), \
+             mock.patch("apps.postbox.auth.imap.authenticate", return_value=True), \
              mock.patch("apps.postbox.imap.open_mailbox"):
             result = client.post("/api/postbox/auth/login/", {
                 "email": mailbox.email, "password": "secret",

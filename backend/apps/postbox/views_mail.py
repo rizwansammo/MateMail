@@ -30,7 +30,8 @@ from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX, POSTBOX_SEND_PER_MA
 
 from . import imap, mime, sending
 from .auth import PostBoxSessionAuthentication
-from .models import MailRule, MessageMoveProvenance, PostBoxPreference, RemoteImageSenderTrust
+from .models import FolderAppearance, MailRule, MessageMoveProvenance, PostBoxPreference, RemoteImageSenderTrust
+from .appearance import DEFAULT_FOLDER_COLOR, validate_color
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,7 @@ class FolderListView(PostBoxView):
     def get(self, request):
         with imap.open_mailbox(self.mailbox.email) as connection:
             folders = connection.list_folders()
+            colors = dict(FolderAppearance.objects.for_mailbox(self.mailbox).values_list("name", "color"))
             payload = []
             for folder in folders:
                 if not folder.selectable:
@@ -96,14 +98,19 @@ class FolderListView(PostBoxView):
                     "role": folder.role,
                     "messages": total,
                     "unseen": unseen,
+                    "color": colors.get(folder.name, DEFAULT_FOLDER_COLOR) if not folder.role else None,
                 })
         return Response({"results": payload})
 
     def post(self, request):
         name = (request.data.get("name") or "").strip()
+        color = validate_color(request.data["color"]) if "color" in request.data else DEFAULT_FOLDER_COLOR
         with imap.open_mailbox(self.mailbox.email) as connection:
             connection.create_folder(name)
-        return Response({"name": name}, status=201)
+        FolderAppearance.objects.update_or_create(
+            mailbox=self.mailbox, name=name, defaults={"color": color}
+        )
+        return Response({"name": name, "color": color}, status=201)
 
 
 class FolderDetailView(PostBoxView):
@@ -121,27 +128,56 @@ class FolderDetailView(PostBoxView):
     def patch(self, request, name: str):
         from .views_settings import _sync_sieve
 
-        new_name = (request.data.get("name") or "").strip()
+        changing_name = "name" in request.data
+        changing_color = "color" in request.data
+        if not changing_name and not changing_color:
+            return Response({"detail": "Supply a name or color to update."}, status=400)
+
+        if changing_name:
+            raw_name = request.data["name"]
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                return Response({"name": "Enter a folder name."}, status=400)
+            new_name = raw_name.strip()
+        else:
+            new_name = name
+        color = validate_color(request.data["color"]) if changing_color else None
+
         with imap.open_mailbox(self.mailbox.email) as connection:
             folder = self._folder(connection, name)
             if folder is None:
                 return Response({"detail": "That folder could not be found."}, status=404)
             if folder.role:
                 return Response(
-                    {"detail": "Standard mail folders cannot be renamed."},
-                    status=400,
+                    {"detail": "Standard mail folders cannot be customized."}, status=400
                 )
-            connection.rename_folder(name, new_name)
+            if new_name != name:
+                connection.rename_folder(name, new_name)
 
-        MailRule.objects.for_mailbox(self.mailbox).filter(
-            action=MailRule.Action.MOVE,
-            action_folder=name,
-        ).update(action_folder=new_name)
-        MessageMoveProvenance.objects.for_mailbox(self.mailbox).filter(
-            original_folder=name
-        ).update(original_folder=new_name)
-        _sync_sieve(self.mailbox)
-        return Response({"name": new_name})
+        if new_name != name:
+            MailRule.objects.for_mailbox(self.mailbox).filter(
+                action=MailRule.Action.MOVE, action_folder=name
+            ).update(action_folder=new_name)
+            MessageMoveProvenance.objects.for_mailbox(self.mailbox).filter(
+                original_folder=name
+            ).update(original_folder=new_name)
+            _sync_sieve(self.mailbox)
+
+        appearance = FolderAppearance.objects.for_mailbox(self.mailbox).filter(
+            name=name
+        ).first()
+        if appearance:
+            appearance.name = new_name
+            if color is not None:
+                appearance.color = color
+            appearance.save(update_fields=["name", "color"])
+            applied_color = appearance.color
+        else:
+            applied_color = color or DEFAULT_FOLDER_COLOR
+            FolderAppearance.objects.update_or_create(
+                mailbox=self.mailbox, name=new_name,
+                defaults={"color": applied_color},
+            )
+        return Response({"name": new_name, "color": applied_color})
 
     def delete(self, request, name: str):
         from .views_settings import _sync_sieve
@@ -175,6 +211,7 @@ class FolderDetailView(PostBoxView):
             _sync_sieve(self.mailbox)
             connection.delete_folder(name)
 
+        FolderAppearance.objects.for_mailbox(self.mailbox).filter(name=name).delete()
         return Response(status=204)
 
 
