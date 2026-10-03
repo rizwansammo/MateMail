@@ -732,3 +732,45 @@ class SidebarThemeRelocationTest(SimpleTestCase):
         self.assertIn('href="/postbox/settings"', layout)
         self.assertIn('href="/postbox/settings?section=appearance"', layout)
         self.assertIn('postbox.switchAccount(item.session_id)', layout)
+
+
+class ThreadOriginalAndProfileDismissalTest(SimpleTestCase):
+    """Each thread member owns its raw MIME reference; account card dismisses safely."""
+
+    def test_expanded_thread_message_original_download_matches_single_reader(self):
+        thread = read("components", "postbox", "conversation-reader.tsx")
+        single = read("app", "postbox", "(app)", "page.tsx")
+        api = read("lib", "postbox-api.ts")
+        self.assertIn("postbox.rawUrl(member.folder, member.uid, member.uid_validity)", thread)
+        self.assertIn("Download original message with complete headers", thread)
+        self.assertIn('rel="noopener noreferrer"', thread)
+        self.assertIn("postbox.rawUrl(detail.folder, detail.uid, detail.uid_validity)", single)
+        self.assertIn("qs({ uid_validity: uidValidity })", api)
+
+    def test_profile_outside_pointer_and_escape_both_dismiss(self):
+        layout = read("app", "postbox", "(app)", "layout.tsx")
+        self.assertIn("useRef<HTMLDetailsElement | null>(null)", layout)
+        self.assertIn('ref={accountMenuRef}', layout)
+        self.assertIn("menu?.open && event.target instanceof Node", layout)
+        self.assertIn("!menu.contains(event.target)", layout)
+        self.assertIn("menu.open = false", layout)
+        self.assertIn('event.key !== "Escape"', layout)
+        self.assertIn('menu.querySelector("summary")?.focus()', layout)
+        self.assertIn('document.addEventListener("pointerdown", dismissOutside)', layout)
+        self.assertIn('document.removeEventListener("pointerdown", dismissOutside)', layout)
+        self.assertIn('document.removeEventListener("keydown", dismissOnEscape)', layout)
+        # Controls inside the menu remain usable.
+        self.assertIn("postbox.switchAccount(item.session_id)", layout)
+        self.assertIn("onClick={() => void updatePreferences({ theme: value })}", layout)
+
+    def test_sidebar_only_lists_mail_folders_but_contacts_and_settings_survive_in_profile(self):
+        layout = read("app", "postbox", "(app)", "layout.tsx")
+        nav = layout.split("function PremiumFolderNavigation(", 1)[1]
+        self.assertNotIn('href="/postbox/contacts"', nav)
+        self.assertNotIn('href="/postbox/settings"', nav)
+        self.assertNotIn('pb-premium-separator', nav)
+        self.assertIn('href="/postbox/contacts"', layout)
+        self.assertIn('className="pb-premium-account-contacts"', layout)
+        self.assertIn('href="/postbox/settings"', layout)
+        self.assertIn('href="/postbox/settings?section=appearance"', layout)
+        self.assertIn('className="pb-premium-account-footer"', layout)
