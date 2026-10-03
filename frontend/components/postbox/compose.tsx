@@ -626,52 +626,6 @@ export function Compose({
             }}
           />
 
-          {Boolean(initial.quoted_text) && (
-            <div
-              className="mt-3 shrink-0 rounded-lg border px-3 py-2 text-sm"
-              style={{ borderColor: "var(--pb-border)", background: "var(--pb-surface-2)" }}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="flex cursor-pointer items-center gap-2" htmlFor="pb-include-original">
-                  <input
-                    id="pb-include-original"
-                    type="checkbox"
-                    className="h-4 w-4 accent-[var(--pb-primary)]"
-                    checked={includeOriginal}
-                    onChange={(event) => {
-                      setIncludeOriginal(event.target.checked);
-                      markDirty();
-                    }}
-                  />
-                  Include original message
-                </label>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 underline-offset-2 hover:underline"
-                  aria-expanded={previewOriginal}
-                  aria-controls="pb-original-preview"
-                  onClick={() => setPreviewOriginal((current) => !current)}
-                >
-                  {previewOriginal ? "Hide preview" : "Preview original"}
-                  {previewOriginal ? (
-                    <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
-                  ) : (
-                    <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-                  )}
-                </button>
-              </div>
-              {previewOriginal && (
-                <pre
-                  id="pb-original-preview"
-                  className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words border-t pt-2 text-xs"
-                  style={{ borderColor: "var(--pb-border)" }}
-                >
-                  {initial.quoted_text}
-                </pre>
-              )}
-            </div>
-          )}
-
           {/*
             The signature, shown but NOT editable and NOT part of `body`.
 
@@ -720,6 +674,52 @@ export function Compose({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {Boolean(initial.quoted_text) && (
+            <div
+              className="mt-3 shrink-0 rounded-lg border px-3 py-2 text-sm"
+              style={{ borderColor: "var(--pb-border)", background: "var(--pb-surface-2)" }}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="flex cursor-pointer items-center gap-2" htmlFor="pb-include-original">
+                  <input
+                    id="pb-include-original"
+                    type="checkbox"
+                    className="h-4 w-4 accent-[var(--pb-primary)]"
+                    checked={includeOriginal}
+                    onChange={(event) => {
+                      setIncludeOriginal(event.target.checked);
+                      markDirty();
+                    }}
+                  />
+                  Include original message
+                </label>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 underline-offset-2 hover:underline"
+                  aria-expanded={previewOriginal}
+                  aria-controls="pb-original-preview"
+                  onClick={() => setPreviewOriginal((current) => !current)}
+                >
+                  {previewOriginal ? "Hide preview" : "Preview original"}
+                  {previewOriginal ? (
+                    <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+              {previewOriginal && (
+                <pre
+                  id="pb-original-preview"
+                  className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words border-t pt-2 text-xs"
+                  style={{ borderColor: "var(--pb-border)" }}
+                >
+                  {initial.quoted_text?.replace(/^> ?/gm, "")}
+                </pre>
+              )}
             </div>
           )}
 
