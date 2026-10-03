@@ -30,7 +30,7 @@ class PostBoxColorUiTest(SimpleTestCase):
         css = read("app", "globals.css")
         self.assertIn("folder.color || FOLDER_COLOR_DEFAULT", layout)
         self.assertIn("label.color || LABEL_COLOR_DEFAULT", layout)
-        self.assertIn('"--pb-label-color": item.color', page)
+        self.assertIn('"--pb-label-color": palette?.find', page)
         self.assertIn('color: item.color || "#9333ea"', thread)
         self.assertIn("var(--pb-label-color, #9333ea)", css)
 
