@@ -176,6 +176,42 @@ export interface MessagePage {
   results: MessageSummary[];
 }
 
+/** Header-only conversation data. Message bodies load through existing message API. */
+export interface ConversationMember extends MessageSummary {
+  copies: Array<{
+    folder: string;
+    uid_validity: number;
+    uid: number;
+    seen: boolean;
+    flagged: boolean;
+  }>;
+}
+
+export interface ConversationSummary {
+  id: string;
+  subject: string;
+  latest: ConversationMember;
+  latest_date: string;
+  message_count: number;
+  unread_count: number;
+  flagged: boolean;
+  participants: string[];
+  has_inbox: boolean;
+}
+
+export interface ConversationPage {
+  scope: "inbox" | "all";
+  page: number;
+  page_size: number;
+  total: number;
+  has_next: boolean;
+  results: ConversationSummary[];
+}
+
+export interface ConversationDetail extends ConversationSummary {
+  messages: ConversationMember[];
+}
+
 export interface AttachmentInfo {
   part_id: string;
   filename: string;
@@ -392,6 +428,15 @@ export const postbox = {
     }),
   deleteFolder: (name: string) =>
     request<void>(`/folders/${encodeFolder(name)}/`, { method: "DELETE" }),
+
+  // Phase 2 conversation engine; opt-in UI integration comes in Phase 3.
+  conversations: (params: {
+    scope?: "inbox" | "all"; page?: number; page_size?: number;
+  } = {}) => request<ConversationPage>(`/conversations/${qs(params)}`),
+  conversationForMessage: (folder: string, uid: number, uidValidity: number) =>
+    request<ConversationDetail>(`/conversations/for-message/${qs({
+      folder, uid, uid_validity: uidValidity,
+    })}`),
 
   // messages
   messages: (params: Record<string, string | number | boolean | undefined>) =>
