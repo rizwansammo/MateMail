@@ -25,6 +25,7 @@ export function resolveInlineImageReferences(detail: MessageDetail): string {
           detail.folder,
           detail.uid,
           attachment.part_id,
+          detail.uid_validity,
         ),
       ]),
   );
