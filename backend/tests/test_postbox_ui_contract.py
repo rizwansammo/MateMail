@@ -84,11 +84,14 @@ class ResponsiveDisplayTest(SimpleTestCase):
         self.assertIn('aria-label="Close folders"', source)
         self.assertNotIn('className="pb-btn pb-btn-plain md:hidden"', source)
 
-    def test_the_reader_back_button_is_wrapped(self):
+    def test_the_reader_back_button_is_available_on_desktop_and_mobile(self):
         source = read("app", "postbox", "(app)", "page.tsx")
-        reader = source.split('className="pb-premium-reader-toolbar"', 1)[1][:700]
-        self.assertIn('<div className="md:hidden">', reader)
+        reader = source.split('className="pb-premium-reader-toolbar"', 1)[1][:850]
+        # The reader now needs Back at every viewport, not a mobile-only
+        # wrapper: Single Message must be navigable after opening a thread.
+        self.assertNotIn('<div className="md:hidden">', reader)
         self.assertIn('aria-label="Back to mailbox"', reader)
+        self.assertIn('<span>Back</span>', reader)
 
 
 class FolderPresentationTest(SimpleTestCase):
