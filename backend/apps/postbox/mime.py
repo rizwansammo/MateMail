@@ -797,17 +797,29 @@ def reply_recipients(
     in a thread adds the sender to their own Cc list and the header grows
     without bound.
     """
-    primary = parsed.reply_to or parsed.from_address
-    to = [primary] if primary else []
+    # Clicking Reply in a conversation often targets the newest message.
+    # When that message lives in Sent, its From is our own identity. The
+    # normal exclusion would otherwise return an empty To address and make
+    # the new inline reply impossible to send. Reply to the original external
+    # recipient instead, preserving Reply All's additional recipients.
+    if parsed.from_address.strip().lower() in own_identities:
+        recipients = _dedupe([*parsed.to, *parsed.cc], own_identities)
+        if not recipients:
+            return [], []
+        if not reply_all:
+            return recipients[:1], []
+        return recipients[:1], recipients[1:]
 
+    primary = parsed.reply_to or parsed.from_address
+    to = _dedupe([primary] if primary else [], own_identities)
     if not reply_all:
-        return _dedupe(to, own_identities), []
+        return to, []
 
     cc_candidates = [a for a in (*parsed.to, *parsed.cc) if a]
-    to_final = _dedupe(to, own_identities)
-    cc_final = _dedupe(cc_candidates, own_identities | {a.lower() for a in to_final})
-    return to_final, cc_final
-
+    cc_final = _dedupe(
+        cc_candidates, own_identities | {a.lower() for a in to},
+    )
+    return to, cc_final
 
 def _dedupe(addresses: list[str], exclude: set[str]) -> list[str]:
     seen: set[str] = set()
