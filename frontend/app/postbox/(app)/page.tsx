@@ -303,7 +303,7 @@ function Mailbox() {
       }
       setShowRemote(remote);
       try {
-        const data = await postbox.message(summary.folder, summary.uid, remote);
+        const data = await postbox.message(summary.folder, summary.uid, remote, summary.uid_validity);
         if (requestId !== openRequestId.current) return;
         const role = mailFolders.find((item) => item.name === summary.folder)?.role;
 
@@ -341,7 +341,9 @@ function Mailbox() {
         // Marking read is a separate, explicit call — the list does not mark
         // things seen as it scrolls past them.
         if (!summary.seen) {
-          await postbox.act("read", summary.folder, [summary.uid]);
+          await postbox.act("read", summary.folder, [summary.uid], {
+            uid_validity: summary.uid_validity,
+          });
           void loadList();
         }
         if (!remote &&
@@ -1066,10 +1068,10 @@ function Mailbox() {
               onRescheduleScheduled={rescheduleScheduled}
               onCancelScheduled={cancelScheduled}
               onMove={(destination) =>
-                void act("move", [detail.uid], { destination }, detail.folder)
+                void act("move", [detail.uid], { destination, uid_validity: detail.uid_validity }, detail.folder)
               }
               onAction={(action) =>
-                void act(action, [detail.uid], {}, detail.folder)
+                void act(action, [detail.uid], { uid_validity: detail.uid_validity }, detail.folder)
               }
             />
           )}
