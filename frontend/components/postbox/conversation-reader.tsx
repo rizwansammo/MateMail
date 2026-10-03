@@ -33,6 +33,7 @@ interface ConversationReaderProps {
   signatures: Signature[];
   onBack: () => void;
   onSingle: () => void;
+  onInlineChange: (active: boolean) => void;
   onChanged: () => Promise<void>;
   onNotice: (notice: string) => void;
   onSuccess: (message: string) => void;
@@ -74,7 +75,7 @@ function initials(name: string): string {
 
 export function ConversationReader({
   conversation, initialDetail, identities, signatures, onBack, onSingle,
-  onChanged, onNotice, onSuccess, onFloatingCompose,
+  onInlineChange, onChanged, onNotice, onSuccess, onFloatingCompose,
 }: ConversationReaderProps) {
   const [inline, setInline] = useState<{
     key: string;
@@ -82,6 +83,19 @@ export function ConversationReader({
   } | null>(null);
   const [preparing, setPreparing] = useState<string | null>(null);
   const [readState, setReadState] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    onInlineChange(Boolean(inline));
+    return () => onInlineChange(false);
+  }, [inline, onInlineChange]);
+
+  const guardNavigation = (next: () => void) => {
+    if (inline) {
+      onNotice("Save or close your inline reply before leaving this conversation.");
+      return;
+    }
+    next();
+  };
 
   const startReply = useCallback(async (member: ConversationMember, mode: ReplyMode) => {
     if (inline) {
@@ -142,7 +156,7 @@ export function ConversationReader({
   return (
     <article className="pb-thread-reader" aria-label="Email conversation">
       <div className="pb-premium-reader-toolbar pb-thread-toolbar">
-        <button type="button" className="pb-btn pb-btn-plain" onClick={onBack}
+        <button type="button" className="pb-btn pb-btn-plain" onClick={() => guardNavigation(onBack)}
           aria-label="Back to mailbox">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           <span>Back</span>
@@ -153,7 +167,7 @@ export function ConversationReader({
           {unreadCount > 0 && " · " + unreadCount + " unread"}
         </span>
         <span className="flex-1" />
-        <button type="button" className="pb-btn pb-btn-ghost" onClick={onSingle}>
+        <button type="button" className="pb-btn pb-btn-ghost" onClick={() => guardNavigation(onSingle)}>
           Single message
         </button>
       </div>
