@@ -446,3 +446,14 @@ reports.
 ⬜ **The relay queue is in memory.** Events waiting in the API when it restarts
 are lost; the push is missed and the mail is not. Revisit only if missed pushes
 around deploys turn out to matter.
+
+
+---
+
+## PostBox UI follow-ups (2026-10-04)
+
+✅ **Remove duplicate Sidebar storage/appearance footer** — Settings already exposes mailbox usage and appearance. Keep the three compact Light/System/Dark controls in the avatar's account card. Implemented in `fix/postbox-sidebar-cleanup-theme-profile`.
+
+⬜ **Thread-view Original / full headers download parity** — Each expanded conversation message must expose its *own* Original (.eml) action using its exact folder + UID + UIDVALIDITY (no download of another member's headers). Preserve the existing Single Message action.
+
+⬜ **Avatar profile card dismiss behavior** — Clicking outside should close the card; Escape should also close it. Clicking controls inside must not prematurely dismiss it. Preserve account switching and keyboard accessibility. This is a separate pending issue; not part of the Sidebar footer change.
