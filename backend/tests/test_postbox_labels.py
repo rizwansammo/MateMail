@@ -144,6 +144,20 @@ class VirtualLabelTest(TestCase):
             self.assertEqual(result.status_code, 409)
         self.assertEqual(MessageLabel.objects.count(), 0)
 
+    def test_forged_reused_message_id_does_not_inherit_labels(self):
+        from apps.postbox.views_labels import virtual_label_key
+
+        real_message = self.message()
+        another_message = self.message()
+        another_message.subject = "Another sender's unrelated message"
+        self.assertNotEqual(
+            virtual_label_key(real_message), virtual_label_key(another_message),
+        )
+        self.assertEqual(
+            virtual_label_key(real_message),
+            virtual_label_key(self.message(folder="Clients")),
+        )
+
     def test_label_view_uses_live_imap_and_keeps_original_folder(self):
         label = MailLabel.objects.create(mailbox=self.alice, name="Finance")
         summary = self.message(folder="Archive")
