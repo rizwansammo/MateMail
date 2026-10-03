@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Archive, ArrowLeft, ChevronDown, ChevronUp, Download, Eye, Forward,
-  ImageOff, Loader2, Mail, Paperclip, ShieldAlert, Star, Trash2,
+  ImageOff, Loader2, Mail, Paperclip, ShieldAlert, Star, Tag, Trash2,
   CornerUpLeft, CornerUpRight,
 } from "lucide-react";
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
@@ -21,7 +21,7 @@ import { describePostBoxError } from "@/contexts/postbox-context";
 import {
   formatBytes, formatMessageDate, postbox,
   type ConversationDetail, type ConversationMember, type Identity,
-  type MessageAction, type MessageDetail, type Signature,
+  type MessageAction, type MessageDetail, type Signature, type MailLabel,
 } from "@/lib/postbox-api";
 
 type ReplyMode = "reply" | "reply-all" | "forward";
@@ -38,6 +38,8 @@ interface ConversationReaderProps {
   onNotice: (notice: string) => void;
   onSuccess: (message: string) => void;
   onFloatingCompose: (initial: ComposeInitial) => void;
+  labels: MailLabel[];
+  onApplyLabel: (member: ConversationMember, labelId: string, remove: boolean) => void;
 }
 
 function memberKey(member: ConversationMember): string {
@@ -76,6 +78,7 @@ function initials(name: string): string {
 export function ConversationReader({
   conversation, initialDetail, identities, signatures, onBack, onSingle,
   onInlineChange, onChanged, onNotice, onSuccess, onFloatingCompose,
+  labels, onApplyLabel,
 }: ConversationReaderProps) {
   const [inline, setInline] = useState<{
     key: string;
@@ -197,6 +200,8 @@ export function ConversationReader({
                     void onChanged();
                   }}
                   onAction={(action) => void memberAction(member, action)}
+                  labels={labels}
+                  onApplyLabel={(id, remove) => onApplyLabel(member, id, remove)}
                   onReply={(mode) => void startReply(member, mode)}
                   preparing={Boolean(inline) || preparing === key + "reply" ||
                     preparing === key + "reply-all" || preparing === key + "forward"}
@@ -252,7 +257,7 @@ export function ConversationReader({
 
 function ThreadMessageCard({
   member, initialDetail, defaultOpen, seen, onSeen, onAction, onReply,
-  preparing, onNotice,
+  labels, onApplyLabel, preparing, onNotice,
 }: {
   member: ConversationMember;
   initialDetail: MessageDetail | null;
@@ -260,6 +265,8 @@ function ThreadMessageCard({
   seen: boolean;
   onSeen: () => void;
   onAction: (action: MessageAction) => void;
+  labels: MailLabel[];
+  onApplyLabel: (id: string, remove: boolean) => void;
   onReply: (mode: ReplyMode) => void;
   preparing: boolean;
   onNotice: (message: string) => void;
@@ -477,6 +484,23 @@ function ThreadMessageCard({
               onClick={() => onAction(seen ? "unread" : "read")}>
               <Mail className="h-4 w-4" /> {seen ? "Mark unread" : "Mark read"}
             </button>
+            <details className="pb-label-menu">
+              <summary className="pb-btn pb-btn-plain" aria-label="Add label">
+                <Tag className="h-4 w-4" /> Add Label
+              </summary>
+              <div className="pb-label-panel">
+                {labels.length === 0 && <p className="pb-subtle text-xs p-2">Create a label using the sidebar +.</p>}
+                {labels.map((item) => {
+                  const applied = (member.labels || []).some((value) => value.id === item.id);
+                  return <button type="button" key={item.id} onClick={(event) => {
+                    event.currentTarget.closest("details")!.open = false;
+                    onApplyLabel(item.id, applied);
+                  }}>
+                    <Tag size={14} /> {item.name} {applied ? "✓" : ""}
+                  </button>;
+                })}
+              </div>
+            </details>
             <button type="button" className="pb-btn pb-btn-plain"
               onClick={() => onAction("archive")}>
               <Archive className="h-4 w-4" /> Archive
