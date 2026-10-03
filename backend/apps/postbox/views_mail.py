@@ -471,6 +471,11 @@ class MessageDetailView(PostBoxView):
             ) and _is_drafts(connection, folder)
             bcc = parsed.bcc if drafts else []
 
+        # Only split recorded quotes in the mailbox\'s own Drafts folder.
+        # Other incoming mail may contain arbitrary, legitimate > lines.
+        editor_text, quoted_text = (
+            mime.split_draft_reply_quote(parsed) if drafts else (parsed.text, "")
+        )
         signature_id, signature_missing = (
             _draft_signature(self.mailbox, parsed.draft_signature_id)
             if drafts
@@ -495,7 +500,8 @@ class MessageDetailView(PostBoxView):
             "message_id": parsed.message_id,
             "in_reply_to": parsed.in_reply_to,
             "references": parsed.references,
-            "text": parsed.text,
+            "text": editor_text,
+            "quoted_text": quoted_text,
             "html": parsed.html,
             "remote_images_blocked": parsed.has_remote_images and not show_remote,
             "attachments": [
