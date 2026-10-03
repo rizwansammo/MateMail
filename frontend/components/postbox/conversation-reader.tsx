@@ -449,6 +449,18 @@ function ThreadMessageCard({
             </section>}
           </>}
           <div className="pb-thread-card-actions">
+            <a
+              className="pb-btn pb-btn-plain"
+              href={postbox.rawUrl(member.folder, member.uid, member.uid_validity)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Download original message with complete headers"
+              aria-label={"Download original message with complete headers from " +
+                (member.from.name || member.from.address)}
+            >
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Original
+            </a>
             <button type="button" className="pb-btn pb-btn-ghost"
               disabled={preparing} onClick={() => onReply("reply")}>
               <CornerUpLeft className="h-4 w-4" /> Reply
