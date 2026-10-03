@@ -5621,3 +5621,19 @@ body {
   .pb-premium-shell .pb-thread-reply-prompt {align-items:flex-start;flex-direction:column;}
   .pb-premium-shell .pb-conversation-switch button {padding:6px 7px;}
 }
+
+.pb-premium-shell .pb-thread-compose-host #pb-thread-signature {
+  height:30px;border:0;background:transparent;
+  color:var(--pb-muted);font-size:12px;
+}
+.pb-premium-shell .pb-thread-quoted-history {
+  border-top:1px solid var(--pb-border);margin-top:19px;padding-top:12px;
+  color:var(--pb-muted);font-size:12px;
+}
+.pb-premium-shell .pb-thread-quoted-history summary {
+  cursor:pointer;display:list-item;padding:4px 0;color:var(--pb-accent-fg);
+}
+.pb-premium-shell .pb-thread-quoted-history pre {
+  margin-top:12px;border-left:2px solid var(--pb-border-strong);
+  padding-left:14px;line-height:1.5;white-space:pre-wrap;word-break:break-word;
+}
