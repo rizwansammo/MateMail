@@ -335,6 +335,17 @@ class PostBoxComposePhase3Test(TestCase):
         self.assertIn("<earlier@example.net>", data["references"])
         self.assertIn("<source@example.net>", data["references"])
 
+    def test_reply_context_rejects_stale_uidvalidity_before_reading(self):
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            response = self.api.get(
+                "/api/postbox/messages/INBOX/17/reply-context/"
+                "?mode=reply&uid_validity=123"
+            )
+            connection.fetch_raw.assert_not_called()
+        self.assertEqual(502, response.status_code)
+        self.assertIn("refresh", response.json()["detail"].lower())
+
     def test_reply_without_opt_in_sends_only_new_text_and_thread_headers(self):
         with mock.patch("apps.postbox.imap.open_mailbox") as opener, \
              mock.patch("apps.postbox.sending.submit") as submit:
