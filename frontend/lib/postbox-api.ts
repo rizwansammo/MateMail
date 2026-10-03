@@ -464,12 +464,12 @@ export const postbox = {
       method: "DELETE",
       body: JSON.stringify({ sender }),
     }),
-  rawUrl: (folder: string, uid: number) =>
-    `${BASE}/messages/${encodeFolder(folder)}/${uid}/raw/`,
-  attachmentUrl: (folder: string, uid: number, partId: string) =>
-    `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/`,
-  attachmentPreviewUrl: (folder: string, uid: number, partId: string) =>
-    `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/preview/`,
+  rawUrl: (folder: string, uid: number, uidValidity?: number) =>
+    `${BASE}/messages/${encodeFolder(folder)}/${uid}/raw/${qs({ uid_validity: uidValidity })}`,
+  attachmentUrl: (folder: string, uid: number, partId: string, uidValidity?: number) =>
+    `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/${qs({ uid_validity: uidValidity })}`,
+  attachmentPreviewUrl: (folder: string, uid: number, partId: string, uidValidity?: number) =>
+    `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/preview/${qs({ uid_validity: uidValidity })}`,
   replyContext: (folder: string, uid: number, mode: string, uidValidity?: number) =>
     request<{
       mode: string; subject: string; to: string[]; cc: string[];
