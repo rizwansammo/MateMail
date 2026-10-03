@@ -391,6 +391,17 @@ class PostBoxComposePhase3Test(TestCase):
             )
             self.assertEqual(200, response.status_code)
             saved = connection.append.call_args.args[1]
+            saved_parsed = mime.parse_message(saved)
+            self.assertTrue(saved_parsed.draft_state)
+            self.assertEqual(len(quote.splitlines()), saved_parsed.draft_quote_lines)
+            self.assertEqual(
+                __import__("hashlib").sha256(quote.encode("utf-8")).hexdigest(),
+                saved_parsed.draft_quote_sha,
+            )
+            self.assertEqual(
+                ("Draft reply.", quote),
+                mime.split_draft_reply_quote(saved_parsed),
+            )
             connection.fetch_raw.return_value = saved
             connection.select.return_value = imap.FolderInfo(
                 name="Drafts", role="drafts", uid_validity=9
