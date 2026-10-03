@@ -451,6 +451,22 @@ class PostBoxComposePhase3Test(TestCase):
                 self.assertEqual(fixture["message_id"], parsed.in_reply_to)
                 self.assertEqual(data["references"], parsed.references)
 
+    def test_original_and_attachment_endpoints_block_recycled_uid(self):
+        """Stale browser tabs must not access a different message's bytes."""
+        endpoints = (
+            "/api/postbox/messages/INBOX/17/raw/",
+            "/api/postbox/messages/INBOX/17/attachments/2/",
+            "/api/postbox/messages/INBOX/17/attachments/2/preview/",
+        )
+        for endpoint in endpoints:
+            with self.subTest(endpoint=endpoint):
+                with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+                    connection = self._connection(opener)
+                    response = self.api.get(endpoint + "?uid_validity=99")
+                    connection.fetch_raw.assert_not_called()
+                self.assertEqual(502, response.status_code)
+                self.assertIn("refresh", response.json()["detail"].lower())
+
     def test_reply_context_rejects_stale_uidvalidity_before_reading(self):
         with mock.patch("apps.postbox.imap.open_mailbox") as opener:
             connection = self._connection(opener)
