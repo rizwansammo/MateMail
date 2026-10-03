@@ -441,10 +441,11 @@ export const postbox = {
   // messages
   messages: (params: Record<string, string | number | boolean | undefined>) =>
     request<MessagePage>(`/messages/${qs(params)}`),
-  message: (folder: string, uid: number, remoteImages = false) =>
+  message: (folder: string, uid: number, remoteImages = false, uidValidity?: number) =>
     request<MessageDetail>(
       `/messages/${encodeFolder(folder)}/${uid}/${qs({
         remote_images: remoteImages ? "true" : undefined,
+        uid_validity: uidValidity,
       })}`,
     ),
   trustRemoteImages: (folder: string, uid: number, uidValidity: number) =>
@@ -469,13 +470,13 @@ export const postbox = {
     `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/`,
   attachmentPreviewUrl: (folder: string, uid: number, partId: string) =>
     `${BASE}/messages/${encodeFolder(folder)}/${uid}/attachments/${encodeURIComponent(partId)}/preview/`,
-  replyContext: (folder: string, uid: number, mode: string) =>
+  replyContext: (folder: string, uid: number, mode: string, uidValidity?: number) =>
     request<{
       mode: string; subject: string; to: string[]; cc: string[];
       from_address: string; text: string; html: string; quoted_text: string;
       in_reply_to: string; references: string[];
       attachments: ComposeAttachmentRef[];
-    }>(`/messages/${encodeFolder(folder)}/${uid}/reply-context/${qs({ mode })}`),
+    }>(`/messages/${encodeFolder(folder)}/${uid}/reply-context/${qs({ mode, uid_validity: uidValidity })}`),
 
   act: (
     action: MessageAction,
