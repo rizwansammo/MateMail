@@ -698,10 +698,10 @@ def append_reply_quote(text: str, html: str, quoted_text: str) -> tuple[str, str
     """
     if not quoted_text:
         return text, html
-    combined_text = f"{text.rstrip()}\\n\\n{quoted_text}" if text.strip() else quoted_text
+    combined_text = f"{text.rstrip()}\n\n{quoted_text}" if text.strip() else quoted_text
     lines = quoted_text.splitlines()
     heading = lines[0] if lines else ""
-    original = "\\n".join(
+    original = "\n".join(
         line.removeprefix("> ") if line.startswith("> ") else line.removeprefix(">")
         for line in lines[1:]
     )
@@ -728,13 +728,13 @@ def split_draft_reply_quote(parsed: ParsedMessage) -> tuple[str, str]:
     digest = parsed.draft_quote_sha
     if not parsed.draft_state or not (0 < count <= 10000) or not digest:
         return text, ""
-    lines = text.split("\\n")
+    lines = text.split("\n")
     if count > len(lines):
         return text, ""
-    quote = "\\n".join(lines[-count:])
+    quote = "\n".join(lines[-count:])
     if hashlib.sha256(quote.encode("utf-8")).hexdigest() != digest:
         return text, ""
-    return "\\n".join(lines[:-count]).rstrip(), quote
+    return "\n".join(lines[:-count]).rstrip(), quote
 
 
 def quote_for_reply(parsed: ParsedMessage) -> tuple[str, str]:
