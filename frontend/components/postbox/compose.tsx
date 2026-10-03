@@ -420,7 +420,7 @@ export function Compose({
 
   return (
     <div
-      className={`pb-compose-backdrop fixed inset-0 z-50 flex items-stretch justify-center p-0 ${
+      className={inline ? "pb-thread-compose-host" : `pb-compose-backdrop fixed inset-0 z-50 flex items-stretch justify-center p-0 ${
         expanded
           ? "sm:items-center sm:justify-center sm:p-6"
           : "sm:items-end sm:justify-end sm:p-4"
@@ -443,11 +443,11 @@ export function Compose({
         `role="dialog"` stays: it is a dialog, it has a name, it is dismissible.
         It is simply not a modal one.
       */
-      role="dialog"
-      aria-label="Compose message"
+      role={inline ? "region" : "dialog"}
+      aria-label={inline ? "Inline reply editor" : "Compose message"}
     >
       <div
-        className={`pb-panel pb-compose-shell pb-premium-compose-shell flex w-full flex-col ${
+        className={inline ? "pb-panel pb-compose-shell pb-premium-compose-shell pb-thread-inline-panel flex w-full flex-col" : `pb-panel pb-compose-shell pb-premium-compose-shell flex w-full flex-col ${
           expanded
             ? // Underscores, not spaces: Tailwind arbitrary values cannot contain
             // spaces, and `calc` is invalid without them around the operator.
@@ -486,7 +486,7 @@ export function Compose({
               so its `display` wins. Same reason as the sidebar's close
               button.
             */}
-            <div className="hidden sm:block">
+            {!inline && <div className="hidden sm:block">
               <button
                 type="button"
                 className="pb-btn pb-btn-plain"
@@ -501,7 +501,7 @@ export function Compose({
                   <Maximize2 className="h-4 w-4" aria-hidden="true" />
                 )}
               </button>
-            </div>
+            </div>}
             <button
               type="button"
               className="pb-btn pb-btn-plain"
