@@ -28,6 +28,7 @@ from .views_compose import (
     ScheduledListView,
     SendView,
 )
+from .views_conversations import ConversationForMessageView, ConversationListView
 from .views_push import DeviceDetailView, DeviceListView
 from .views_mail import (
     AttachmentPreviewView,
@@ -73,6 +74,9 @@ urlpatterns = [
     path("folders/", FolderListView.as_view(), name="postbox-folders"),
     path("folders/<path:name>/", FolderDetailView.as_view(), name="postbox-folder"),
 
+    path("conversations/", ConversationListView.as_view(), name="postbox-conversations"),
+    path("conversations/for-message/", ConversationForMessageView.as_view(),
+         name="postbox-conversation-for-message"),
     path("messages/", MessageListView.as_view(), name="postbox-messages"),
     # Before the generic message route, so "action" is never read as a folder.
     path("messages/action/<str:action>/", MessageActionView.as_view(),
