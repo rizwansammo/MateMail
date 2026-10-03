@@ -5429,3 +5429,195 @@ body {
     width:100%;
   }
 }
+
+
+/* Phase 3: conversation cards and true inline full Compose.
+   Scoped to PostBox tokens: the same hierarchy works in light/dark mode. */
+.pb-premium-shell .pb-conversation-switch {
+  display:flex;align-items:center;gap:3px;padding:3px;
+  border:1px solid var(--pb-border);border-radius:10px;
+  background:var(--pb-surface-2);white-space:nowrap;
+}
+.pb-premium-shell .pb-conversation-switch button {
+  border:0;background:transparent;color:var(--pb-muted);
+  padding:7px 11px;border-radius:7px;font-size:12px;font-weight:600;
+  cursor:pointer;
+}
+.pb-premium-shell .pb-conversation-switch button[aria-pressed="true"] {
+  background:var(--pb-bg);color:var(--pb-fg);
+  box-shadow:0 1px 4px rgb(0 0 0 / .08);
+}
+.pb-premium-shell .pb-thread-list-item {
+  border-bottom:1px solid var(--pb-border);min-width:0;
+}
+.pb-premium-shell .pb-thread-list-item > button {
+  display:flex;align-items:center;width:100%;min-height:81px;
+  gap:13px;padding:12px 19px;text-align:left;color:var(--pb-fg);
+  background:transparent;border:0;cursor:pointer;
+}
+.pb-premium-shell .pb-thread-list-item > button:hover {
+  background:var(--pb-surface-2);
+}
+.pb-premium-shell .pb-thread-list-item[data-selected="true"] > button {
+  background:var(--pb-selected);
+}
+.pb-premium-shell .pb-thread-list-item[data-unread="true"] > button {
+  box-shadow:inset 3px 0 var(--pb-primary);
+}
+.pb-premium-shell .pb-thread-list-copy {
+  display:flex;flex:1;min-width:0;flex-direction:column;gap:5px;
+}
+.pb-premium-shell .pb-thread-list-top {
+  display:flex;justify-content:space-between;align-items:center;gap:10px;
+  color:var(--pb-fg);font-size:13px;
+}
+.pb-premium-shell .pb-thread-list-top > strong,
+.pb-premium-shell .pb-thread-list-subject {
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.pb-premium-shell .pb-thread-list-subject {font-size:13px;color:var(--pb-muted);}
+.pb-premium-shell .pb-thread-count {
+  flex-shrink:0;border-radius:999px;padding:2px 7px;
+  background:var(--pb-surface-2);border:1px solid var(--pb-border);
+  color:var(--pb-muted);font-size:11px;font-weight:700;
+}
+.pb-premium-shell .pb-thread-reader {
+  display:flex;min-height:0;height:100%;min-width:0;
+  flex-direction:column;background:var(--pb-bg);
+}
+.pb-premium-shell .pb-thread-toolbar {gap:12px;padding:0 clamp(14px,3vw,32px);}
+.pb-premium-shell .pb-thread-toolbar-divider {
+  height:20px;border-left:1px solid var(--pb-border);
+}
+.pb-premium-shell .pb-thread-toolbar-caption {
+  font-size:12px;color:var(--pb-muted);white-space:nowrap;
+}
+.pb-premium-shell .pb-thread-scroll {
+  flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  padding:34px clamp(16px,4vw,72px) 54px;
+}
+.pb-premium-shell .pb-thread-heading {margin-bottom:25px;}
+.pb-premium-shell .pb-thread-heading h1 {
+  color:var(--pb-fg);font-size:clamp(19px,2.5vw,27px);
+  font-weight:650;letter-spacing:-.4px;line-height:1.35;
+}
+.pb-premium-shell .pb-thread-heading p {
+  color:var(--pb-muted);font-size:12px;margin-top:6px;
+}
+.pb-premium-shell .pb-thread-cards {
+  display:flex;flex-direction:column;gap:10px;list-style:none;
+  padding:0;margin:0;max-width:1100px;
+}
+.pb-premium-shell .pb-thread-card {
+  border:1px solid var(--pb-border);border-radius:12px;
+  background:var(--pb-bg);overflow:hidden;
+  box-shadow:0 2px 8px rgb(0 0 0 / .025);
+}
+.pb-premium-shell .pb-thread-card[data-expanded="true"] {
+  border-color:var(--pb-border-strong);
+  box-shadow:0 6px 20px rgb(0 0 0 / .035);
+}
+.pb-premium-shell .pb-thread-card[data-unread="true"] {
+  border-left:3px solid var(--pb-primary);
+}
+.pb-premium-shell .pb-thread-card-top {
+  display:flex;align-items:center;min-width:0;
+}
+.pb-premium-shell .pb-thread-card-toggle {
+  display:flex;align-items:center;flex:1;gap:12px;
+  min-width:0;padding:17px 13px 17px 19px;
+  text-align:left;background:transparent;border:0;
+  color:var(--pb-fg);cursor:pointer;
+}
+.pb-premium-shell .pb-thread-avatar {
+  display:flex;align-items:center;justify-content:center;
+  flex:0 0 37px;height:37px;border-radius:50%;
+  font-size:12px;font-weight:700;color:var(--pb-primary);
+  background:var(--pb-selected);
+}
+.pb-premium-shell .pb-thread-card-overview {
+  display:flex;min-width:0;flex:1;flex-direction:column;gap:4px;
+}
+.pb-premium-shell .pb-thread-card-overview strong {
+  color:var(--pb-fg);font-size:13px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;
+}
+.pb-premium-shell .pb-thread-card-excerpt {
+  color:var(--pb-muted);font-size:12px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.pb-premium-shell .pb-thread-card-toggle > time {
+  font-size:11px;color:var(--pb-muted);flex-shrink:0;
+}
+.pb-premium-shell .pb-thread-card-toggle > svg {flex-shrink:0;color:var(--pb-muted);}
+.pb-premium-shell .pb-thread-card-star {
+  flex:0 0 36px;margin-right:15px;padding:9px;border:0;
+  background:transparent;color:var(--pb-muted);cursor:pointer;
+}
+.pb-premium-shell .pb-thread-card-star[aria-pressed="true"] {color:var(--pb-warn);}
+.pb-premium-shell .pb-thread-card-content {
+  border-top:1px solid var(--pb-border);padding:18px 24px 22px;
+}
+.pb-premium-shell .pb-thread-metadata {
+  margin-bottom:18px;color:var(--pb-muted);font-size:12px;
+  overflow-wrap:anywhere;
+}
+.pb-premium-shell .pb-thread-metadata summary {
+  cursor:pointer;margin-bottom:5px;
+}
+.pb-premium-shell .pb-thread-metadata > div {padding:3px 0 0 12px;}
+.pb-premium-shell .pb-thread-loading {display:flex;align-items:center;gap:7px;color:var(--pb-muted);font-size:13px;padding:22px 0;}
+.pb-premium-shell .pb-thread-privacy-banner {margin:0 0 18px;}
+.pb-premium-shell .pb-thread-mail-body {
+  color:var(--pb-fg);font-size:14px;line-height:1.65;
+  overflow-wrap:anywhere;overflow-x:auto;
+}
+.pb-premium-shell .pb-thread-mail-body img,
+.pb-premium-shell .pb-thread-mail-body table {max-width:100%;}
+.pb-premium-shell .pb-thread-mail-body pre {
+  margin:0;white-space:pre-wrap;word-break:break-word;
+  font:inherit;
+}
+.pb-premium-shell .pb-thread-attachments {margin:22px 0 0;}
+.pb-premium-shell .pb-thread-attachments h3 {
+  display:flex;align-items:center;gap:7px;
+  color:var(--pb-fg);font-size:12px;font-weight:600;margin-bottom:12px;
+}
+.pb-premium-shell .pb-thread-card-actions {
+  display:flex;flex-wrap:wrap;gap:7px;
+  border-top:1px solid var(--pb-border);margin-top:24px;padding-top:18px;
+}
+.pb-premium-shell .pb-thread-card-actions button {font-size:12px;}
+.pb-premium-shell .pb-thread-inline-anchor {
+  margin-top:18px;max-width:1100px;
+}
+.pb-premium-shell .pb-thread-reply-prompt {
+  display:flex;gap:12px;align-items:center;justify-content:space-between;
+  padding:15px 19px;border:1px dashed var(--pb-border-strong);
+  border-radius:12px;color:var(--pb-muted);font-size:12px;
+}
+.pb-premium-shell .pb-thread-compose-host {
+  display:block;position:relative;z-index:auto;
+  width:100%;min-width:0;pointer-events:auto;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-thread-inline-panel {
+  width:100%;height:auto;min-height:360px;max-height:none;
+  border:1px solid var(--pb-border-strong);border-radius:12px;
+  box-shadow:none !important;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-compose-content {
+  flex:0 1 auto;max-height:520px;overflow-y:auto;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-compose-body {
+  min-height:145px;flex:0 0 auto;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-compose-head {min-height:49px;}
+.pb-premium-shell .pb-thread-compose-host .pb-compose-footer {flex-wrap:wrap;}
+@media (max-width:740px) {
+  .pb-premium-shell .pb-thread-scroll {padding:20px 12px 30px;}
+  .pb-premium-shell .pb-thread-card-content {padding:14px;}
+  .pb-premium-shell .pb-thread-card-toggle {padding:12px 6px 12px 12px;gap:9px;}
+  .pb-premium-shell .pb-thread-card-toggle > time {font-size:10px;}
+  .pb-premium-shell .pb-thread-reply-prompt {align-items:flex-start;flex-direction:column;}
+  .pb-premium-shell .pb-conversation-switch button {padding:6px 7px;}
+}
