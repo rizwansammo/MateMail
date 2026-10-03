@@ -36,6 +36,7 @@ import {
   Sun,
   User,
   UserPlus,
+  Users,
   Trash2,
   X,
 } from "lucide-react";
