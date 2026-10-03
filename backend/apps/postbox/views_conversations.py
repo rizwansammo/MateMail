@@ -14,8 +14,8 @@ from apps.security import ratelimit
 from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX
 
 from . import imap, threading
-from .views_mail import PostBoxView, _summary_payload, _fetch_summaries_chunked, _message_provenance_key
-from .views_labels import labels_for_summaries
+from .views_mail import PostBoxView, _summary_payload, _fetch_summaries_chunked
+from .views_labels import labels_for_summaries, virtual_label_key
 
 MAX_CONVERSATION_MESSAGES = 5000
 MAX_CONVERSATION_FOLDERS = 40
@@ -167,7 +167,7 @@ class ConversationListView(ConversationMixin):
         )
         results = [_conversation_payload(item) for item in window]
         for result, item in zip(results, window):
-            result["latest"]["labels"] = mapping[_message_provenance_key(item.latest.primary)]
+            result["latest"]["labels"] = mapping[virtual_label_key(item.latest.primary)]
         return Response({
             "scope": scope,
             "page": page,
@@ -213,10 +213,10 @@ class ConversationForMessageView(ConversationMixin):
                 )
                 members = [_member_payload(member) for member in item.messages]
                 for payload, member in zip(members, item.messages):
-                    payload["labels"] = mapping[_message_provenance_key(member.primary)]
+                    payload["labels"] = mapping[virtual_label_key(member.primary)]
                 conversation_payload = _conversation_payload(item)
                 conversation_payload["latest"]["labels"] = mapping[
-                    _message_provenance_key(item.latest.primary)
+                    virtual_label_key(item.latest.primary)
                 ]
                 return Response({**conversation_payload, "messages": members})
         return Response({"detail": "That message was not found."}, status=404)
