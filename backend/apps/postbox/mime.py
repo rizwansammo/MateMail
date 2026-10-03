@@ -181,12 +181,14 @@ def parse_message(raw: bytes, *, load_remote_images: bool = False) -> ParsedMess
     parsed.draft_state = (
         clean_header(str(message.get(DRAFT_STATE_HEADER, "") or "")) == "1"
     )
-    # Only used after a caller has verified that this is the mailbox\'s Drafts.
+    # Only used after a caller has verified that this is the mailbox's Drafts.
     try:
         parsed.draft_quote_lines = int(message.get(DRAFT_QUOTE_LINES_HEADER, "0"))
     except (TypeError, ValueError):
         parsed.draft_quote_lines = 0
-    parsed.draft_quote_sha = str(message.get(DRAFT_QUOTE_SHA_HEADER, "") or "")
+    # Header folding can add a leading space to the unfolded SHA-256 value.
+    # It is an opaque hex digest, so surrounding whitespace is never meaningful.
+    parsed.draft_quote_sha = str(message.get(DRAFT_QUOTE_SHA_HEADER, "") or "").strip()
 
     text_parts: list[str] = []
     html_parts: list[str] = []
