@@ -1181,17 +1181,16 @@ function Reader({
   return (
     <article className="pb-premium-reader flex h-full min-h-0 flex-col">
       <div className="pb-premium-reader-toolbar">
-        <div className="md:hidden">
-          <button
-            type="button"
-            className="pb-btn pb-btn-plain"
-            aria-label="Back to mailbox"
-            onClick={onBack}
-          >
-            <ArrowLeft className="h-[19px] w-[19px]" aria-hidden="true" />
-          </button>
-        </div>
-        <span className="pb-premium-toolbar-divider md:hidden" aria-hidden="true" />
+        <button
+          type="button"
+          className="pb-btn pb-btn-plain"
+          aria-label="Back to mailbox"
+          onClick={onBack}
+        >
+          <ArrowLeft className="h-[19px] w-[19px]" aria-hidden="true" />
+          <span>Back</span>
+        </button>
+        <span className="pb-premium-toolbar-divider" aria-hidden="true" />
         <ToolbarButton label="Archive" icon={Archive} onClick={() => onAction("archive")} />
         <ToolbarButton
           label={isTrash ? "Permanently delete" : "Move to Trash"}
