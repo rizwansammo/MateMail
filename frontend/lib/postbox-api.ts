@@ -178,7 +178,7 @@ export interface MessageSummary {
 
 export interface MessagePage {
   folder: string;
-  scope?: "folder" | "all" | "all_with_spam_trash";
+  scope?: "folder" | "all" | "all_with_spam_trash" | "label";
   sort?: "newest" | "oldest";
   uid_validity: number;
   page: number;
