@@ -487,9 +487,9 @@ class MessageDetailView(PostBoxView):
             else (None, False)
         )
 
-        from .views_labels import labels_for_summaries
+        from .views_labels import labels_for_summaries, virtual_label_key
         message_labels = labels_for_summaries(self.mailbox, label_summaries)
-        labels = (message_labels.get(_message_provenance_key(label_summaries[0]), [])
+        labels = (message_labels.get(virtual_label_key(label_summaries[0]), [])
                   if label_summaries else [])
         return Response({
             "uid": uid,
