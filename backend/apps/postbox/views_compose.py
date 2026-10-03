@@ -73,6 +73,8 @@ class ComposeSerializer(serializers.Serializer):
     subject = serializers.CharField(required=False, allow_blank=True, default="", max_length=900)
     text = serializers.CharField(required=False, allow_blank=True, default="")
     html = serializers.CharField(required=False, allow_blank=True, default="")
+    # Opt-in quote is separate from editable text; never silently inserted.
+    quoted_text = serializers.CharField(required=False, allow_blank=True, default="", max_length=500000)
     in_reply_to = serializers.CharField(required=False, allow_blank=True, default="")
     references = serializers.ListField(
         child=serializers.CharField(), required=False, default=list
@@ -228,6 +230,7 @@ class ComposeMixin:
 
         html = data.get("html") or ""
         text = data.get("text") or ""
+        quoted_text = data.get("quoted_text") or ""
 
         # An explicitly chosen signature that this mailbox no longer has —
         # deleted elsewhere, or never its own — is refused. Sending without
@@ -247,6 +250,10 @@ class ComposeMixin:
             # as metadata, so it can be reopened and edited with the same
             # choice. The signature is applied only when it is sent.
             related = []
+            if quoted_text:
+                # Ordinary text/plain draft remains usable in other IMAP clients.
+                # Draft-only digest metadata lets PostBox recover a clean editor.
+                text, _ = mime.append_reply_quote(text, "", quoted_text)
         else:
             # The signature is applied HERE and nowhere else — see
             # apps/postbox/signatures.py. The composer renders a preview but
@@ -259,6 +266,8 @@ class ComposeMixin:
             text, html, related = signatures.apply(
                 text=text, html=html, signature=signature
             )
+            # Keep signature above the original, never after the quoted thread.
+            text, html = mime.append_reply_quote(text, html, quoted_text)
 
         uploaded_attachments = _decode_attachments(
             data.get("attachments"),
@@ -296,6 +305,7 @@ class ComposeMixin:
             related=related,
             keep_bcc=draft,
             draft_signature_id=str(signature.id) if draft and signature else "",
+            draft_quoted_text=quoted_text if draft else "",
         )
         return message, identity
 
@@ -518,6 +528,7 @@ class ReplyContextView(PostBoxView):
         parsed = mime.parse_message(raw, load_remote_images=False)
         identities = {i.address.lower() for i in sending.allowed_identities(self.mailbox)}
 
+        quoted_text = ""
         if mode == "forward":
             text, html = mime.forward_body(parsed)
             subject = parsed.subject
@@ -525,7 +536,8 @@ class ReplyContextView(PostBoxView):
                 subject = f"Fwd: {subject}"
             to, cc = [], []
         else:
-            text, html = mime.quote_for_reply(parsed)
+            quoted_text, _ = mime.quote_for_reply(parsed)
+            text, html = "", ""  # a reply must start with a clean editor
             subject = parsed.subject
             if not subject.lower().startswith("re:"):
                 subject = f"Re: {subject}"
@@ -544,6 +556,7 @@ class ReplyContextView(PostBoxView):
             "from_address": default_identity,
             "text": text,
             "html": html,
+            "quoted_text": quoted_text,
             "in_reply_to": parsed.message_id,
             "references": [*parsed.references, parsed.message_id] if parsed.message_id
                           else parsed.references,
