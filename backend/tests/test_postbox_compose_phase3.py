@@ -1,6 +1,7 @@
 """Regression coverage for the premium PostBox compose lifecycle."""
 
 import email
+import hashlib
 from datetime import timedelta
 from unittest import mock
 
@@ -395,7 +396,7 @@ class PostBoxComposePhase3Test(TestCase):
             self.assertTrue(saved_parsed.draft_state)
             self.assertEqual(len(quote.splitlines()), saved_parsed.draft_quote_lines)
             self.assertEqual(
-                __import__("hashlib").sha256(quote.encode("utf-8")).hexdigest(),
+                hashlib.sha256(quote.encode("utf-8")).hexdigest(),
                 saved_parsed.draft_quote_sha,
             )
             self.assertEqual(
