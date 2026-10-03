@@ -37,7 +37,6 @@ import {
   User,
   UserPlus,
   Trash2,
-  Users,
   X,
 } from "lucide-react";
 
@@ -201,6 +200,9 @@ function PremiumPostBoxShell({
         if (editor.original) await postbox.renameFolder(editor.original, entryName.trim());
         else await postbox.createFolder(entryName.trim());
         await refreshFolders();
+        if (editor.original && new URLSearchParams(window.location.search).get("folder") === editor.original) {
+          router.push("/postbox?folder=" + encodeURIComponent(entryName.trim()));
+        }
       } else {
         if (editor.id) await postbox.renameLabel(editor.id, entryName.trim());
         else await postbox.createLabel(entryName.trim());
@@ -827,13 +829,6 @@ function PremiumFolderNavigation({
         </div>
       ))}
 
-      <div className="pb-premium-separator" />
-      <Link href="/postbox/contacts" className="pb-premium-nav-link"
-        aria-current={pathname === "/postbox/contacts" ? "page" : undefined}
-        onClick={onNavigate}><Users size={18} /> Contacts</Link>
-      <Link href="/postbox/settings" className="pb-premium-nav-link"
-        aria-current={pathname === "/postbox/settings" ? "page" : undefined}
-        onClick={onNavigate}><Settings size={18} /> Settings</Link>
     </>
   );
 }
