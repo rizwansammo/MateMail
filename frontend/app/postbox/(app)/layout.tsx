@@ -286,6 +286,30 @@ function PremiumPostBoxShell({
     if (accountMenuRef.current) accountMenuRef.current.open = false;
   }, [pathname]);
 
+  useEffect(() => {
+    // The same outside-click behavior as the profile card. Native details
+    // do not dismiss themselves when the user clicks elsewhere.
+    const selector = "details.pb-organize-item-menu[open], details.pb-label-menu[open], details.pb-premium-move-menu[open]";
+    const dismiss = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      document.querySelectorAll<HTMLDetailsElement>(selector).forEach((menu) => {
+        if (!menu.contains(event.target as Node)) menu.open = false;
+      });
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      document.querySelectorAll<HTMLDetailsElement>(selector).forEach((menu) => {
+        menu.open = false;
+      });
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, []);
+
   const byRole = new Map(folders.map((folder) => [folder.role, folder]));
   const custom = folders.filter((folder) => !PINNED_ROLES.has(folder.role));
   const initials = accountInitials(mailbox.full_name, mailbox.email);
