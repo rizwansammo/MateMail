@@ -833,7 +833,72 @@ function Mailbox() {
           }`}
           style={{ borderColor: "var(--pb-border)" }}
         >
-          {loading ? (
+          {conversationMode ? (
+            conversations.loading ? <CentredSpinner /> :
+            conversations.error ? (
+              <div className="flex flex-col items-center gap-3 p-5">
+                <EmptyState title="Conversation view unavailable" detail={conversations.error} />
+                <button type="button" className="pb-btn pb-btn-ghost"
+                  onClick={() => changeConversationMode("messages")}>
+                  Switch to Messages
+                </button>
+              </div>
+            ) : !conversations.data?.results.length ? (
+              <EmptyState title="No conversations yet"
+                detail="Messages in your Inbox and their replies will appear together here." />
+            ) : (
+              <>
+                {conversations.data.results.map((conversation: ConversationSummary) => (
+                  <div className="pb-thread-list-item"
+                    key={conversation.id}
+                    data-unread={conversation.unread_count > 0}
+                    data-selected={thread?.id === conversation.id}>
+                    <button type="button"
+                      onClick={() => void openMessage(conversation.latest)}
+                      aria-label={"Open conversation: " + (conversation.subject || "(no subject)")}>
+                      <span className="pb-premium-row-avatar" aria-hidden="true">
+                        {senderInitials(conversation.latest.from.name || conversation.latest.from.address)}
+                      </span>
+                      <span className="pb-thread-list-copy">
+                        <span className="pb-thread-list-top">
+                          <strong>{conversation.latest.from.name || conversation.latest.from.address}</strong>
+                          <time>{formatMessageDate(conversation.latest_date)}</time>
+                        </span>
+                        <span className="pb-thread-list-subject">
+                          {conversation.subject || "(no subject)"}
+                          {conversation.unread_count > 0 && (
+                            <span className="ml-2 pb-premium-unread-dot"
+                              aria-label={conversation.unread_count + " unread"} />
+                          )}
+                        </span>
+                      </span>
+                      {conversation.flagged && <Star className="h-4 w-4 shrink-0"
+                        style={{ color: "var(--pb-warn)" }} fill="currentColor"
+                        aria-label="Contains starred messages" />}
+                      <span className="pb-thread-count" aria-label={
+                        conversation.message_count + " messages"
+                      }>{conversation.message_count}</span>
+                    </button>
+                  </div>
+                ))}
+                {conversations.data.total > conversations.data.page_size && (
+                  <div className="flex items-center justify-between gap-2 p-3 text-xs pb-subtle">
+                    <span>{(pageNumber - 1) * conversations.data.page_size + 1}–{
+                      Math.min(pageNumber * conversations.data.page_size, conversations.data.total)
+                    } of {conversations.data.total} conversations</span>
+                    <div className="flex gap-2">
+                      <button type="button" className="pb-btn pb-btn-ghost"
+                        disabled={pageNumber <= 1}
+                        onClick={() => setPageNumber((n) => n - 1)}>Newer</button>
+                      <button type="button" className="pb-btn pb-btn-ghost"
+                        disabled={!conversations.data.has_next}
+                        onClick={() => setPageNumber((n) => n + 1)}>Older</button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          ) : loading ? (
             <CentredSpinner />
           ) : listError ? (
             <EmptyState title="Mail unavailable" detail={listError} />
@@ -956,12 +1021,38 @@ function Mailbox() {
               title="No message selected"
               detail="Choose a message to read it here."
             />
+          ) : thread && !showSingle ? (
+            <ConversationReader
+              key={thread.id + ":" + detail.folder + ":" + detail.uid}
+              conversation={thread}
+              initialDetail={detail}
+              identities={identities}
+              signatures={signatures}
+              onBack={() => {
+                openRequestId.current += 1;
+                setThread(null);
+                setDetail(null);
+              }}
+              onSingle={() => setShowSingle(true)}
+              onChanged={refreshConversation}
+              onNotice={setNotice}
+              onSuccess={(message) => {
+                setSuccessNotice(message);
+                setSuccessVisible(true);
+                setNotice(null);
+              }}
+              onFloatingCompose={setExplicitCompose}
+            />
           ) : (
             <Reader
               detail={detail}
               summary={activeSummary}
               showRemote={showRemote}
-              onBack={() => setDetail(null)}
+              onBack={() => {
+                openRequestId.current += 1;
+                setThread(null);
+                setDetail(null);
+              }}
               onLoadRemote={() =>
                 void openMessage(
                   { ...detail, seen: true } as unknown as MessageSummary,
@@ -996,6 +1087,8 @@ function Mailbox() {
             setSuccessNotice(message);
             setSuccessVisible(true);
             void loadList();
+            if (conversationMode) conversations.reload();
+            if (thread) void refreshConversation();
             void scheduledData.reload();
           }}
         />
