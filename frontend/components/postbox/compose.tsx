@@ -86,6 +86,10 @@ export function Compose({
   onSent: (message: string) => void;
   inline?: boolean;
 }) {
+  // Two composers may coexist (inline reply and sidebar Compose). Form labels
+  // and ARIA references must remain unique instead of targeting the other one.
+  const fieldId = (part: string) => (inline ? "pb-thread-" : "pb-") + part;
+
   const primary =
     initial.from_address ||
     identities.find((i) => i.is_primary)?.address ||
@@ -520,9 +524,9 @@ export function Compose({
             pushing the footer actions off the panel. */}
         <div className="pb-compose-content pb-scroll flex min-h-0 flex-1 flex-col p-3">
           <div className="pb-compose-fields space-y-2">
-            <Field label="From" htmlFor="pb-from">
+            <Field label="From" htmlFor={fieldId("from")}>
               <select
-                id="pb-from"
+                id={fieldId("from")}
                 className="pb-select"
                 value={from}
                 onChange={(event) => {
@@ -539,10 +543,10 @@ export function Compose({
               </select>
             </Field>
 
-            <Field label="To" htmlFor="pb-to">
+            <Field label="To" htmlFor={fieldId("to")}>
               <div className="flex gap-2">
                 <RecipientInput
-                  id="pb-to"
+                  id={fieldId("to")}
                   label="To"
                   value={to}
                   onChange={(value) => {
@@ -555,7 +559,7 @@ export function Compose({
                   type="button"
                   className="pb-btn pb-btn-plain shrink-0"
                   aria-expanded={showCopies}
-                  aria-controls="pb-copies"
+                  aria-controls={fieldId("copies")}
                   aria-label={
                     showCopies
                       ? "Hide Cc and Bcc fields"
@@ -579,10 +583,10 @@ export function Compose({
               still sent — and still saved into the draft.
             */}
             {showCopies && (
-              <div id="pb-copies" className="space-y-2">
-                <Field label="Cc" htmlFor="pb-cc">
+              <div id={fieldId("copies")} className="space-y-2">
+                <Field label="Cc" htmlFor={fieldId("cc")}>
                   <RecipientInput
-                    id="pb-cc"
+                    id={fieldId("cc")}
                     label="Cc"
                     value={cc}
                     onChange={(value) => {
@@ -591,9 +595,9 @@ export function Compose({
                     }}
                   />
                 </Field>
-                <Field label="Bcc" htmlFor="pb-bcc">
+                <Field label="Bcc" htmlFor={fieldId("bcc")}>
                   <RecipientInput
-                    id="pb-bcc"
+                    id={fieldId("bcc")}
                     label="Bcc"
                     value={bcc}
                     onChange={(value) => {
@@ -605,9 +609,9 @@ export function Compose({
               </div>
             )}
 
-            <Field label="Subject" htmlFor="pb-subject">
+            <Field label="Subject" htmlFor={fieldId("subject")}>
               <input
-                id="pb-subject"
+                id={fieldId("subject")}
                 className="pb-input"
                 value={subject}
                 onChange={(event) => {
@@ -619,7 +623,7 @@ export function Compose({
           </div>
 
           <textarea
-            id="pb-body"
+            id={fieldId("body")}
             aria-label="Message"
             className="pb-textarea pb-compose-body mt-3"
             value={body}
@@ -657,11 +661,11 @@ export function Compose({
 
           {signatures.length > 0 && (
             <div className="mt-2 flex items-center gap-2">
-              <label htmlFor="pb-signature" className="pb-label">
+              <label htmlFor={fieldId("signature")} className="pb-label">
                 Signature
               </label>
               <select
-                id="pb-signature"
+                id={fieldId("signature")}
                 className="pb-select"
                 style={{ width: "auto" }}
                 value={signatureId}
@@ -686,9 +690,9 @@ export function Compose({
               style={{ borderColor: "var(--pb-border)", background: "var(--pb-surface-2)" }}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="flex cursor-pointer items-center gap-2" htmlFor="pb-include-original">
+                <label className="flex cursor-pointer items-center gap-2" htmlFor={fieldId("include-original")}>
                   <input
-                    id="pb-include-original"
+                    id={fieldId("include-original")}
                     type="checkbox"
                     className="h-4 w-4 accent-[var(--pb-primary)]"
                     checked={includeOriginal}
@@ -703,7 +707,7 @@ export function Compose({
                   type="button"
                   className="inline-flex items-center gap-1 underline-offset-2 hover:underline"
                   aria-expanded={previewOriginal}
-                  aria-controls="pb-original-preview"
+                  aria-controls={fieldId("original-preview")}
                   onClick={() => setPreviewOriginal((current) => !current)}
                 >
                   {previewOriginal ? "Hide preview" : "Preview original"}
@@ -716,7 +720,7 @@ export function Compose({
               </div>
               {previewOriginal && (
                 <pre
-                  id="pb-original-preview"
+                  id={fieldId("original-preview")}
                   className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words border-t pt-2 text-xs"
                   style={{ borderColor: "var(--pb-border)" }}
                 >
@@ -783,11 +787,11 @@ export function Compose({
           {showSchedule && (
             <div className="pb-compose-schedule mt-3 flex flex-wrap items-end gap-2">
               <div>
-                <label htmlFor="pb-schedule" className="pb-label">
+                <label htmlFor={fieldId("schedule")} className="pb-label">
                   Send at
                 </label>
                 <input
-                  id="pb-schedule"
+                  id={fieldId("schedule")}
                   className="pb-input mt-1"
                   type="datetime-local"
                   value={scheduleAt}
