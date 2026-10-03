@@ -48,6 +48,25 @@ function isSameMessage(detail: MessageDetail, member: ConversationMember): boole
     detail.uid_validity === member.uid_validity;
 }
 
+/** Preserve the full body, but hide plain-text historical quote blocks by default. */
+function splitPlainQuote(raw: string): { fresh: string; quoted: string } | null {
+  const lines = raw.replace(/\r\n?/g, "\n").split("\n");
+  const heading = lines.findIndex((line, i) =>
+    i > 0 && /^On .{2,250} wrote:\s*$/i.test(line) &&
+    lines.slice(i + 1, i + 3).some((later) => /^\s*>/.test(later)),
+  );
+  const block = lines.findIndex((line, i) =>
+    i > 0 && /^\s*>/.test(line) &&
+    lines.slice(i, i + 3).filter((candidate) => /^\s*>/.test(candidate)).length >= 2,
+  );
+  const candidates = [heading, block].filter((value) => value > 0);
+  if (candidates.length === 0) return null;
+  const index = Math.min(...candidates);
+  const fresh = lines.slice(0, index).join("\n").trimEnd();
+  if (!fresh.trim()) return null;
+  return { fresh, quoted: lines.slice(index).join("\n") };
+}
+
 function initials(name: string): string {
   const bits = name.replace(/[<>]/g, " ").split(/\s+/).filter(Boolean);
   return (bits.length > 1 ? bits[0][0] + bits[1][0] : (bits[0] || "?").slice(0, 2)).toUpperCase();
@@ -65,6 +84,10 @@ export function ConversationReader({
   const [readState, setReadState] = useState<Record<string, boolean>>({});
 
   const startReply = useCallback(async (member: ConversationMember, mode: ReplyMode) => {
+    if (inline) {
+      onNotice("Save or close your current reply before starting another.");
+      return;
+    }
     const key = memberKey(member);
     setPreparing(key + mode);
     try {
@@ -86,15 +109,18 @@ export function ConversationReader({
     } finally {
       setPreparing(null);
     }
-  }, [onFloatingCompose, onNotice]);
+  }, [inline, onFloatingCompose, onNotice]);
 
   const memberAction = useCallback(async (
     member: ConversationMember, action: MessageAction,
   ) => {
     try {
-      await postbox.act(action, member.folder, [member.uid], {
-        uid_validity: member.uid_validity,
-      });
+      // A logical message may exist in Inbox and Archive. Clearing its star
+      // or read state must not leave an invisible duplicate still flagged.
+      const targets = action === "unstar" ? member.copies : [member];
+      await Promise.all(targets.map((copy) => postbox.act(
+        action, copy.folder, [copy.uid], { uid_validity: copy.uid_validity },
+      )));
       if (action === "read" || action === "unread") {
         setReadState((previous) => ({
           ...previous,
@@ -154,7 +180,7 @@ export function ConversationReader({
                   }}
                   onAction={(action) => void memberAction(member, action)}
                   onReply={(mode) => void startReply(member, mode)}
-                  preparing={preparing === key + "reply" ||
+                  preparing={Boolean(inline) || preparing === key + "reply" ||
                     preparing === key + "reply-all" || preparing === key + "forward"}
                   onNotice={onNotice}
                 />
@@ -303,6 +329,7 @@ function ThreadMessageCard({
   const toggleStar = () => onAction(member.flagged ? "unstar" : "star");
   const attachments = detail?.attachments.filter((a) => !a.inline) ?? [];
   const safeHtml = detail ? resolveInlineImageReferences(detail) : "";
+  const plainQuote = detail && !safeHtml ? splitPlainQuote(detail.text) : null;
 
   return (
     <section className="pb-thread-card" data-expanded={open} data-unread={!seen}>
@@ -368,6 +395,13 @@ function ThreadMessageCard({
             )}
             <div className="pb-message-body pb-thread-mail-body">
               {safeHtml ? <div dangerouslySetInnerHTML={{ __html: safeHtml }} /> :
+                plainQuote ? <>
+                  <pre className="whitespace-pre-wrap">{plainQuote.fresh}</pre>
+                  <details className="pb-thread-quoted-history">
+                    <summary>Show quoted history</summary>
+                    <pre className="whitespace-pre-wrap">{plainQuote.quoted}</pre>
+                  </details>
+                </> :
                 <pre className="whitespace-pre-wrap">
                   {detail.text || "(This message has no readable content.)"}
                 </pre>}
