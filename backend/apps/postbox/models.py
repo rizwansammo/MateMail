@@ -808,4 +808,4 @@ class MessageLabel(models.Model):
                 name="postbox_message_label_unique",
             )
         ]
-        indexes = [models.Index(fields=["message_key"])]
+        indexes = [models.Index(fields=["message_key"], name="pb_label_msg_key_idx")]
