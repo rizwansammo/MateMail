@@ -6,6 +6,10 @@ can still delete or replace a message; the bounded label view scans live IMAP
 headers and never pretends a stale assignment is a delivered message.
 """
 import uuid
+import hashlib
+from apps.security import ratelimit
+from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX
+from rest_framework.exceptions import Throttled
 from django.db import IntegrityError, transaction
 from rest_framework import serializers
 from rest_framework.response import Response
@@ -22,9 +26,23 @@ MAX_LABEL_VIEW_MESSAGES = 5000
 MAX_LABEL_VIEW_FOLDERS = 40
 
 
+def virtual_label_key(summary):
+    """A MOVE-stable identity resistant to reused or forged Message-IDs."""
+    source = "\x1f".join([
+        _message_provenance_key(summary),
+        summary.from_address.strip().casefold(),
+        summary.subject.strip(),
+        summary.date.strip(),
+        str(summary.size),
+    ])
+    return "vlabel:" + hashlib.sha256(
+        source.encode("utf-8", "replace")
+    ).hexdigest()
+
+
 def labels_for_summaries(mailbox, summaries):
     """One DB lookup for all visible messages, scoped to the active mailbox."""
-    keys = {_message_provenance_key(item) for item in summaries}
+    keys = {virtual_label_key(item) for item in summaries}
     mapping = {key: [] for key in keys}
     if keys:
         for entry in MessageLabel.objects.filter(
@@ -40,7 +58,7 @@ def labels_for_summaries(mailbox, summaries):
 def decorate_summaries(mailbox, summaries):
     mapping = labels_for_summaries(mailbox, summaries)
     return [
-        {**_summary_payload(item), "labels": mapping[_message_provenance_key(item)]}
+        {**_summary_payload(item), "labels": mapping[virtual_label_key(item)]}
         for item in summaries
     ]
 
@@ -149,7 +167,7 @@ class LabelAssignmentView(PostBoxView):
             if {item.uid for item in summaries} != set(uids):
                 return Response({"detail": "Some messages no longer exist. Refresh."}, status=409)
 
-        keys = {_message_provenance_key(item) for item in summaries}
+        keys = {virtual_label_key(item) for item in summaries}
         if remove:
             MessageLabel.objects.filter(label=label, message_key__in=keys).delete()
         else:
@@ -188,6 +206,17 @@ class LabelMessagesView(PostBoxView):
                 "results": [],
             })
 
+        decision = ratelimit.hit(
+            POSTBOX_SEARCH_PER_MAILBOX.bucket, str(self.mailbox.pk),
+            limit=POSTBOX_SEARCH_PER_MAILBOX.limit,
+            window=POSTBOX_SEARCH_PER_MAILBOX.window,
+        )
+        if not decision.allowed:
+            raise Throttled(
+                wait=decision.retry_after,
+                detail="Too many label searches. Try again shortly.",
+            )
+
         collected = []
         seen_keys = set()
         with imap.open_mailbox(self.mailbox.email) as connection:
@@ -212,7 +241,7 @@ class LabelMessagesView(PostBoxView):
                         "detail": "This mailbox is too large for label view yet."
                     }, status=400)
                 for summary in _fetch_summaries_chunked(connection, uids):
-                    key = _message_provenance_key(summary)
+                    key = virtual_label_key(summary)
                     if key in keys and key not in seen_keys:
                         seen_keys.add(key)
                         collected.append(summary)
