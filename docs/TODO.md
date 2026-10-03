@@ -454,6 +454,8 @@ around deploys turn out to matter.
 
 ✅ **Remove duplicate Sidebar storage/appearance footer** — Settings already exposes mailbox usage and appearance. Keep the three compact Light/System/Dark controls in the avatar's account card. Implemented in `fix/postbox-sidebar-cleanup-theme-profile`.
 
-⬜ **Thread-view Original / full headers download parity** — Each expanded conversation message must expose its *own* Original (.eml) action using its exact folder + UID + UIDVALIDITY (no download of another member's headers). Preserve the existing Single Message action.
+✅ **Thread-view Original / full headers download parity** — Every expanded message now has its own original MIME download using its exact folder + UID + UIDVALIDITY; Single Message unchanged. Implemented in `fix/postbox-thread-original-profile-dismiss`.
 
-⬜ **Avatar profile card dismiss behavior** — Clicking outside should close the card; Escape should also close it. Clicking controls inside must not prematurely dismiss it. Preserve account switching and keyboard accessibility. This is a separate pending issue; not part of the Sidebar footer change.
+✅ **Avatar profile card dismiss behavior** — Outside pointer and Escape dismiss the menu; internal controls keep working, and Escape restores focus. Implemented in `fix/postbox-thread-original-profile-dismiss`.
+
+✅ **Clean Sidebar navigation** — Remove duplicate Contacts and Settings links from Sidebar; Contacts moves to avatar Profile Card while Settings and top Appearance shortcut remain available. Implemented in `fix/postbox-thread-original-profile-dismiss`.
