@@ -129,6 +129,8 @@ export interface Preferences {
   theme: "light" | "dark" | "system";
   density: "comfortable" | "compact";
   reading_pane: "right" | "bottom" | "off";
+  list_view: "conversations" | "messages";
+  reader_view: "thread" | "single";
   load_remote_images: boolean;
   messages_per_page: number;
   timezone_name: string;
