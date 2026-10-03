@@ -147,9 +147,9 @@ class VirtualLabelTest(TestCase):
     def test_label_view_uses_live_imap_and_keeps_original_folder(self):
         label = MailLabel.objects.create(mailbox=self.alice, name="Finance")
         summary = self.message(folder="Archive")
-        from apps.postbox.views_mail import _message_provenance_key
+        from apps.postbox.views_labels import virtual_label_key
         MessageLabel.objects.create(
-            label=label, message_key=_message_provenance_key(summary),
+            label=label, message_key=virtual_label_key(summary),
         )
         fake = mock.MagicMock()
         fake.list_folders.return_value = [
