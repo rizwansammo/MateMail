@@ -190,7 +190,9 @@ class ComposeContractTest(SimpleTestCase):
     def test_cc_bcc_toggles_both_ways(self):
         self.assertIn("setShowCopies((current) => !current)", self.source)
         self.assertIn("aria-expanded={showCopies}", self.source)
-        self.assertIn('aria-controls="pb-copies"', self.source)
+        self.assertIn('aria-controls={fieldId("copies")}', self.source)
+        self.assertIn('id={fieldId("copies")}', self.source)
+        self.assertIn('inline ? "pb-thread-" : "pb-"', self.source)
 
     def test_collapsing_cc_bcc_does_not_clear_the_values(self):
         """
@@ -239,8 +241,8 @@ class ComposeContractTest(SimpleTestCase):
         """
         code = code_only(self.source)
         self.assertNotIn('aria-modal="true"', code)
-        self.assertIn('role="dialog"', code)
-        self.assertIn('aria-label="Compose message"', code)
+        self.assertIn('role={inline ? "region" : "dialog"}', code)
+        self.assertIn('aria-label={inline ? "Inline reply editor" : "Compose message"}', code)
 
     def test_the_backdrop_is_styled_by_class_not_by_aria_label(self):
         self.assertIn("pb-compose-backdrop", self.source)
@@ -529,11 +531,16 @@ class PostBoxComposeAndImageRenderingRegressionTest(SimpleTestCase):
 
     def test_reader_resolves_safe_cid_images_through_preview_endpoint(self):
         page = read("app", "postbox", "(app)", "page.tsx")
-        self.assertIn("function resolveInlineImageReferences", page)
-        self.assertIn("attachment.content_id", page)
-        self.assertIn("attachment.previewable", page)
-        self.assertIn("postbox.attachmentPreviewUrl", page)
+        conversation = read("components", "postbox", "conversation-reader.tsx")
+        resolver = read("lib", "postbox-inline-images.ts")
+        self.assertIn("export function resolveInlineImageReferences", resolver)
+        self.assertIn("attachment.content_id", resolver)
+        self.assertIn("attachment.previewable", resolver)
+        self.assertIn("postbox.attachmentPreviewUrl", resolver)
+        self.assertIn("import { resolveInlineImageReferences }", page)
+        self.assertIn("import { resolveInlineImageReferences }", conversation)
         self.assertIn("dangerouslySetInnerHTML={{ __html: renderedHtml }}", page)
+        self.assertIn("dangerouslySetInnerHTML={{ __html: safeHtml }}", conversation)
 
     def test_external_image_privacy_controls_remain_visible_when_blocked(self):
         page = read("app", "postbox", "(app)", "page.tsx")
