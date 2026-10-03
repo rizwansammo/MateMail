@@ -39,6 +39,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Star,
+  Tag,
   Trash2,
   X,
 } from "lucide-react";
@@ -53,6 +54,8 @@ import {
   formatMessageDate,
   postbox,
   type Folder,
+  type MailLabel,
+  type MessageLabel,
   type ConversationDetail,
   type ConversationPage,
   type ConversationSummary,
@@ -87,6 +90,7 @@ function Mailbox() {
   const { preferences } = usePostBox();
 
   const folder = params.get("folder") || "INBOX";
+  const labelId = params.get("label");
   const starredOnly = params.get("starred") === "true";
   const requestedFilter = params.get("filter");
   const filterMode: "all" | "unread" | "starred" =
@@ -119,7 +123,7 @@ function Mailbox() {
   // One key for "which list am I looking at". Paging and selection both reset
   // when it changes, and both derive that from the key rather than having an
   // effect write it — a reset is a consequence of the key, not an event.
-  const listKey = `${folder}|${search}|${filterMode}|${searchScope}|${sortMode}|${params.get("view") || "conversations"}`;
+  const listKey = `${folder}|${labelId || ""}|${search}|${filterMode}|${searchScope}|${sortMode}|${params.get("view") || "conversations"}`;
 
   const [pageState, setPageState] = useState({ key: listKey, page: 1 });
   const pageNumber = pageState.key === listKey ? pageState.page : 1;
@@ -205,7 +209,13 @@ function Mailbox() {
 
   const list = useAsyncData<MessagePage>(
     () =>
-      postbox.messages({
+      labelId ? postbox.labeledMessages(labelId, {
+        page: pageNumber,
+        q: search || undefined,
+        sort: sortMode,
+        unread: unreadOnly ? "true" : undefined,
+        starred: filteredStarredOnly ? "true" : undefined,
+      }) : postbox.messages({
         folder,
         page: pageNumber,
         q: search || undefined,
@@ -218,6 +228,7 @@ function Mailbox() {
         starred: filteredStarredOnly ? "true" : undefined,
       }),
     [
+      labelId,
       folder,
       pageNumber,
       search,
@@ -235,23 +246,32 @@ function Mailbox() {
   const loadList = list.reload;
 
   const directory = useAsyncData(
-    () => Promise.all([postbox.identities(), postbox.signatures(), postbox.folders()]),
+    () => Promise.all([postbox.identities(), postbox.signatures(), postbox.folders(), postbox.labels()]),
     [],
     "",
   );
   const identities = directory.data?.[0]?.results ?? [];
   const signatures = directory.data?.[1]?.results ?? [];
+  const mailLabels: MailLabel[] = directory.data?.[3]?.results ?? [];
   const mailFolders = useMemo(
     () => directory.data?.[2]?.results ?? [],
     [directory.data],
   );
+
+  useEffect(() => {
+    const refreshLabels = () => void directory.reload();
+    window.addEventListener("postbox:labels-changed", refreshLabels);
+    return () => window.removeEventListener("postbox:labels-changed", refreshLabels);
+    // The directory hook retains the reload callback for the active mailbox.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Inbox defaults to conversations. Searches, filtered views and other
   // folders retain the existing precise per-message interface.
   const conversationEligible =
     (folder.toUpperCase() === "INBOX" ||
       mailFolders.some((item) => item.name === folder && item.role === "inbox")) &&
-    !search && !unreadOnly && !filteredStarredOnly &&
+    !labelId && !search && !unreadOnly && !filteredStarredOnly &&
     sortMode === "newest" && searchScope === "folder";
   const conversationMode = conversationEligible && params.get("view") !== "messages";
   const conversations = useAsyncData<ConversationPage>(
@@ -407,6 +427,24 @@ function Mailbox() {
     [loadList, mailFolders, conversationMode],
   );
 
+  const applyLabel = async (labelIdToApply: string, remove: boolean, uids: number[], sourceFolder: string, uidValidity: number) => {
+    if (!uidValidity || !uids.length) return;
+    setBusy(true);
+    try {
+      await postbox.assignLabel({ label_id: labelIdToApply, folder: sourceFolder,
+        uids, uid_validity: uidValidity, remove });
+      setSelected(new Set());
+      if (detail && uids.includes(detail.uid) && detail.folder === sourceFolder) {
+        const updated = await postbox.message(detail.folder, detail.uid, false, detail.uid_validity);
+        setDetail(updated);
+      }
+      await Promise.all([loadList(), conversations.reload()]);
+      setNotice(null);
+    } catch (caught) {
+      setNotice(describePostBoxError(caught, "Could not update labels."));
+    } finally { setBusy(false); }
+  };
+
   const act = useCallback(
     async (
       action: Parameters<typeof postbox.act>[0],
@@ -560,7 +598,7 @@ function Mailbox() {
 
   const rows = page?.results ?? [];
   const isCrossFolderView =
-    searchScope !== "folder" && (Boolean(search) || filteredStarredOnly);
+    Boolean(labelId) || (searchScope !== "folder" && (Boolean(search) || filteredStarredOnly));
   const allSelected =
     !isCrossFolderView && rows.length > 0 && selected.size === rows.length;
   const paneRight = preferences.reading_pane === "right";
@@ -648,6 +686,8 @@ function Mailbox() {
                 disabled={busy}
                 onMove={(destination) => void act("move", undefined, { destination })}
               />
+              <LabelMenu labels={mailLabels} disabled={busy}
+                onApply={(id) => void applyLabel(id, false, Array.from(selected), folder, page?.uid_validity || 0)} />
               {folderIsSpam ? (
                 <ToolbarButton label="Not spam" icon={ShieldCheck} busy={busy}
                   onClick={() => void act("not-spam")} />
@@ -901,6 +941,7 @@ function Mailbox() {
                         </span>
                         <span className="pb-thread-list-subject">
                           {conversation.subject || "(no subject)"}
+                          <MessageLabelBadges labels={conversation.latest.labels} />
                           {conversation.unread_count > 0 && (
                             <span className="ml-2 pb-premium-unread-dot"
                               aria-label={conversation.unread_count + " unread"} />
@@ -1004,6 +1045,7 @@ function Mailbox() {
                       <span className="pb-premium-row-copy">
                         <span className="pb-row-subject">
                           {row.subject || "(no subject)"}
+                          <MessageLabelBadges labels={row.labels} />
                         </span>
                       </span>
                       <span className="pb-premium-row-indicators">
@@ -1101,6 +1143,10 @@ function Mailbox() {
               onTrustRemote={() => void trustRemoteSender()}
               onReply={openReply}
               folders={mailFolders}
+              labels={mailLabels}
+              onApplyLabel={(id, remove) =>
+                void applyLabel(id, remove, [detail.uid], detail.folder, detail.uid_validity)
+              }
               scheduledRow={activeScheduled}
               onRescheduleScheduled={rescheduleScheduled}
               onCancelScheduled={cancelScheduled}
@@ -1146,6 +1192,8 @@ function Reader({
   onTrustRemote,
   onReply,
   folders,
+  labels,
+  onApplyLabel,
   scheduledRow,
   onRescheduleScheduled,
   onCancelScheduled,
@@ -1161,6 +1209,8 @@ function Reader({
   onTrustRemote: () => void;
   onReply: (mode: "reply" | "reply-all" | "forward") => void;
   folders: Folder[];
+  labels: MailLabel[];
+  onApplyLabel: (id: string, remove: boolean) => void;
   scheduledRow: ScheduledRow | null;
   onRescheduleScheduled: (row: ScheduledRow, scheduledAt: string) => Promise<void>;
   onCancelScheduled: (row: ScheduledRow) => Promise<void>;
@@ -1212,6 +1262,8 @@ function Reader({
           currentFolder={detail.folder}
           onMove={onMove}
         />
+        <LabelMenu labels={labels} currentLabels={detail.labels}
+          onApply={onApplyLabel} />
         {isTrash && (
           <ToolbarButton label="Restore" icon={RotateCcw} onClick={() => onAction("restore")} />
         )}
@@ -1479,6 +1531,54 @@ function toLocalDateTimeInput(value: string): string {
   if (Number.isNaN(date.getTime())) return "";
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
+}
+
+function MessageLabelBadges({ labels }: { labels?: MessageLabel[] }) {
+  if (!labels?.length) return null;
+  return (
+    <span className="pb-message-labels">
+      {labels.map((item) => <span key={item.id} className="pb-message-label">
+        <Tag size={10} aria-hidden="true" /><span>{item.name}</span>
+      </span>)}
+    </span>
+  );
+}
+
+function LabelMenu({
+  labels, currentLabels = [], onApply, disabled = false,
+}: {
+  labels: MailLabel[];
+  currentLabels?: MessageLabel[];
+  onApply: (id: string, remove: boolean) => void;
+  disabled?: boolean;
+}) {
+  const active = new Set(currentLabels.map((label) => label.id));
+  return (
+    <details className="pb-label-menu">
+      <summary className="pb-btn pb-btn-plain" aria-label="Add label"
+        aria-disabled={disabled}
+        onClick={(event) => { if (disabled) event.preventDefault(); }}>
+        <Tag size={16} aria-hidden="true" />
+        <span className="hidden sm:inline">Add Label</span>
+      </summary>
+      <div className="pb-label-panel">
+        <p className="pb-subtle text-xs p-2">Add or remove labels</p>
+        {labels.length === 0 && <p className="pb-subtle text-xs p-2">
+          Use + in the Labels sidebar to create one.
+        </p>}
+        {labels.map((item) => (
+          <button type="button" key={item.id} onClick={(event) => {
+            event.currentTarget.closest("details")!.open = false;
+            onApply(item.id, active.has(item.id));
+          }}>
+            <Tag size={14} />
+            {item.name}
+            {active.has(item.id) && <CheckCircle2 size={14} aria-label="Applied" />}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
 }
 
 function MoveMenu({
