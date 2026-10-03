@@ -616,7 +616,7 @@ function Mailbox() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="pb-premium-mail-toolbar">
+      {!detail && <div className="pb-premium-mail-toolbar">
           {!isCrossFolderView && !conversationMode && (
             <input
               className="pb-premium-select-all"
@@ -737,7 +737,7 @@ function Mailbox() {
               </div>
             </details>
           </div>
-        </div>
+        </div>}
 
       {/* ── toolbar ────────────────────────────────────────────────────── */}
       <div
@@ -1066,6 +1066,7 @@ function Mailbox() {
               onBack={() => {
                 openRequestId.current += 1;
                 setThread(null);
+                setShowSingle(false);
                 setDetail(null);
               }}
               onSingle={() => setShowSingle(true)}
@@ -1087,8 +1088,10 @@ function Mailbox() {
               onBack={() => {
                 openRequestId.current += 1;
                 setThread(null);
+                setShowSingle(false);
                 setDetail(null);
               }}
+              onThread={thread && showSingle ? () => setShowSingle(false) : undefined}
               onLoadRemote={() =>
                 void openMessage(
                   { ...detail, seen: true } as unknown as MessageSummary,
@@ -1138,6 +1141,7 @@ function Reader({
   summary,
   showRemote,
   onBack,
+  onThread,
   onLoadRemote,
   onTrustRemote,
   onReply,
@@ -1152,6 +1156,7 @@ function Reader({
   summary: MessageSummary | null;
   showRemote: boolean;
   onBack: () => void;
+  onThread?: () => void;
   onLoadRemote: () => void;
   onTrustRemote: () => void;
   onReply: (mode: "reply" | "reply-all" | "forward") => void;
@@ -1212,6 +1217,10 @@ function Reader({
           <ToolbarButton label="Restore" icon={RotateCcw} onClick={() => onAction("restore")} />
         )}
         <span className="flex-1" />
+        {onThread && (
+          <button type="button" className="pb-btn pb-btn-ghost" onClick={onThread}
+            aria-label="Return to email thread">Email Thread</button>
+        )}
         <a
           className="pb-btn pb-btn-plain"
           href={postbox.rawUrl(detail.folder, detail.uid, detail.uid_validity)}
