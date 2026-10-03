@@ -47,6 +47,7 @@ import {
 
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
 import { ConversationReader } from "@/components/postbox/conversation-reader";
+import { MessageHeaders } from "@/components/postbox/message-headers";
 import { resolveInlineImageReferences } from "@/lib/postbox-inline-images";
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
@@ -1371,6 +1372,10 @@ function Reader({
             </details>
           </div>
           <time>{formatMessageDate(detail.date)}</time>
+        </div>
+        <div className="pb-single-source-actions">
+          <MessageHeaders key={detail.folder + ":" + detail.uid_validity + ":" + detail.uid}
+            folder={detail.folder} uid={detail.uid} uidValidity={detail.uid_validity} />
         </div>
 
         {detail.remote_images_blocked && !showRemote && (
