@@ -53,6 +53,7 @@ from .views_settings import (
     RuleDetailView,
     RuleListView,
     SignatureDetailView,
+    SignatureHtmlImageView,
     SignatureImageView,
     SignatureListView,
     VacationView,
@@ -115,6 +116,14 @@ urlpatterns = [
         "signatures/<uuid:pk>/image/",
         SignatureImageView.as_view(),
         name="postbox-signature-image",
+    ),
+    # The https images an HTML signature references, fetched by MateMail for
+    # the native app's preview (which never loads remote images itself). By
+    # index into the stored signature: never a URL from the client.
+    path(
+        "signatures/<uuid:pk>/html-images/<int:index>/",
+        SignatureHtmlImageView.as_view(),
+        name="postbox-signature-html-image",
     ),
 
     path("contacts/", ContactListView.as_view(), name="postbox-contacts"),

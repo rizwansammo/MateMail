@@ -274,6 +274,44 @@ class SignatureImageView(PostBoxView):
         return Response(status=204)
 
 
+class SignatureHtmlImageView(PostBoxView):
+    """
+    GET the [index]th https image of this mailbox's own HTML signature, for
+    the native app's preview, which never loads remote images itself.
+
+    Only images already in the STORED, sanitised signature can be named -
+    the client sends an index, never a URL - and the fetch is SSRF-safe and
+    bounded (`signature_images`). Read-only, signatures only; the webmail and
+    every other endpoint are unchanged.
+    """
+
+    def get(self, request, pk, index: int):
+        from . import signature_images
+        from .models import SignatureKind
+
+        signature = MailSignature.objects.for_mailbox(self.mailbox).filter(pk=pk).first()
+        if signature is None or signature.kind != SignatureKind.HTML:
+            return Response({"detail": "Not found."}, status=404)
+        sources = signature_images.https_sources(signature.html)
+        if index >= len(sources):
+            return Response({"detail": "Not found."}, status=404)
+        try:
+            image = signature_images.cached_fetch(signature, index, sources[index])
+        except signature_images.SignatureImageError as exc:
+            logger.warning(
+                "PostBox signature image not served: mailbox=%s signature=%s "
+                "index=%d reason=%s",
+                self.mailbox.pk, signature.pk, index, exc.code,
+            )
+            return Response({"detail": "That image couldn't be loaded."}, status=502)
+
+        response = HttpResponse(image.data, content_type=image.content_type)
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        response["Cache-Control"] = "private, max-age=3600"
+        return response
+
+
 def _image_size(payload: bytes) -> tuple[int, int] | None:
     """
     (width, height) read from the header, or None if it cannot be read.
