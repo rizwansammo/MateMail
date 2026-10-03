@@ -558,7 +558,8 @@ class MessageRawView(PostBoxView):
         from django.http import HttpResponse
 
         with imap.open_mailbox(self.mailbox.email) as connection:
-            connection.select(folder, readonly=True)
+            info = connection.select(folder, readonly=True)
+            _assert_uid_validity(request, info.uid_validity)
             raw = connection.fetch_raw(uid)
 
         # text/plain, not message/rfc822: the browser should display it, not
@@ -583,7 +584,8 @@ class AttachmentView(PostBoxView):
         from urllib.parse import quote
 
         with imap.open_mailbox(self.mailbox.email) as connection:
-            connection.select(folder, readonly=True)
+            info = connection.select(folder, readonly=True)
+            _assert_uid_validity(request, info.uid_validity)
             raw = connection.fetch_raw(uid)
 
         try:
@@ -621,7 +623,8 @@ class AttachmentPreviewView(PostBoxView):
         from urllib.parse import quote
 
         with imap.open_mailbox(self.mailbox.email) as connection:
-            connection.select(folder, readonly=True)
+            info = connection.select(folder, readonly=True)
+            _assert_uid_validity(request, info.uid_validity)
             raw = connection.fetch_raw(uid)
 
         try:
