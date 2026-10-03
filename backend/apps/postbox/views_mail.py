@@ -237,6 +237,9 @@ class MessageListView(PostBoxView):
                 status=400,
             )
 
+        # Imported lazily: virtual-label views reuse the bounded IMAP helpers here.
+        from .views_labels import decorate_summaries
+
         criteria = _search_criteria(request.query_params)
         has_attachments = _attachment_filter(request.query_params)
         is_search = criteria != ["ALL"] or scope != "folder" or has_attachments is not None
@@ -285,7 +288,7 @@ class MessageListView(PostBoxView):
                     "page_size": size,
                     "total": total,
                     "has_next": start + size < total,
-                    "results": [_summary_payload(item) for item in summaries],
+                    "results": decorate_summaries(self.mailbox, summaries),
                 })
 
             folders = [
@@ -336,7 +339,7 @@ class MessageListView(PostBoxView):
             "page_size": size,
             "total": total,
             "has_next": start + size < total,
-            "results": [_summary_payload(item) for item in window],
+            "results": decorate_summaries(self.mailbox, window),
         })
 
 
@@ -448,6 +451,8 @@ class MessageDetailView(PostBoxView):
             info = connection.select(folder, readonly=True)
             _assert_uid_validity(request, info.uid_validity)
             raw = connection.fetch_raw(uid)
+            # Header identity survives a MOVE, unlike IMAP folder/UID.
+            label_summaries = connection.fetch_summaries([uid])
             parsed = mime.parse_message(raw, load_remote_images=show_remote)
 
             # A per-sender decision survives reloads and devices. Parse once
@@ -482,10 +487,15 @@ class MessageDetailView(PostBoxView):
             else (None, False)
         )
 
+        from .views_labels import labels_for_summaries
+        message_labels = labels_for_summaries(self.mailbox, label_summaries)
+        labels = (message_labels.get(_message_provenance_key(label_summaries[0]), [])
+                  if label_summaries else [])
         return Response({
             "uid": uid,
             "uid_validity": info.uid_validity,
             "folder": folder,
+            "labels": labels,
             "subject": parsed.subject,
             "from": {"name": parsed.from_name, "address": parsed.from_address},
             "to": parsed.to,
