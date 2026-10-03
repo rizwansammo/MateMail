@@ -61,6 +61,15 @@ import {
  * folders were falling through to the custom branch, which hardcoded
  * `Archive` for everything.
  */
+const FOLDER_COLOR_DEFAULT = "#2563eb";
+const LABEL_COLOR_DEFAULT = "#9333ea";
+const ORGANIZE_COLORS = [
+  ["#64748b", "Slate"], ["#2563eb", "Blue"], ["#0891b2", "Cyan"],
+  ["#059669", "Green"], ["#65a30d", "Lime"], ["#d97706", "Amber"],
+  ["#ea580c", "Orange"], ["#dc2626", "Red"], ["#9333ea", "Purple"],
+  ["#db2777", "Pink"], ["#0d9488", "Teal"],
+] as const;
+
 const PINNED: Array<{
   role: string;
   label: string;
@@ -172,9 +181,10 @@ function PremiumPostBoxShell({
   const [accountMenuError, setAccountMenuError] = useState<string | null>(null);
   const [labels, setLabels] = useState<MailLabel[]>([]);
   const [editor, setEditor] = useState<{
-    kind: "folder" | "label"; original?: string; id?: string;
+    kind: "folder" | "label"; original?: string; id?: string; colorOnly?: boolean;
   } | null>(null);
   const [entryName, setEntryName] = useState("");
+  const [entryColor, setEntryColor] = useState(FOLDER_COLOR_DEFAULT);
   const [editorError, setEditorError] = useState("");
   const [saving, setSaving] = useState(false);
   const refreshLabels = useCallback(() =>
@@ -185,9 +195,13 @@ function PremiumPostBoxShell({
     return () => window.removeEventListener("postbox:labels-changed", refreshLabels);
   }, [mailbox.id, refreshLabels]);
 
-  const openEditor = (kind: "folder" | "label", original?: string, id?: string) => {
-    setEditor({ kind, original, id });
+  const openEditor = (
+    kind: "folder" | "label", original?: string, id?: string,
+    color?: string | null, colorOnly = false,
+  ) => {
+    setEditor({ kind, original, id, colorOnly });
     setEntryName(original || "");
+    setEntryColor(color || (kind === "folder" ? FOLDER_COLOR_DEFAULT : LABEL_COLOR_DEFAULT));
     setEditorError("");
   };
 
@@ -198,15 +212,24 @@ function PremiumPostBoxShell({
     setEditorError("");
     try {
       if (editor.kind === "folder") {
-        if (editor.original) await postbox.renameFolder(editor.original, entryName.trim());
-        else await postbox.createFolder(entryName.trim());
+        if (editor.original) {
+          if (editor.colorOnly) await postbox.colorFolder(editor.original, entryColor);
+          else await postbox.renameFolder(editor.original, entryName.trim(), entryColor);
+        } else {
+          await postbox.createFolder(entryName.trim(), entryColor);
+        }
         await refreshFolders();
-        if (editor.original && new URLSearchParams(window.location.search).get("folder") === editor.original) {
+        if (editor.original && !editor.colorOnly &&
+            new URLSearchParams(window.location.search).get("folder") === editor.original) {
           router.push("/postbox?folder=" + encodeURIComponent(entryName.trim()));
         }
       } else {
-        if (editor.id) await postbox.renameLabel(editor.id, entryName.trim());
-        else await postbox.createLabel(entryName.trim());
+        if (editor.id) {
+          if (editor.colorOnly) await postbox.colorLabel(editor.id, entryColor);
+          else await postbox.renameLabel(editor.id, entryName.trim(), entryColor);
+        } else {
+          await postbox.createLabel(entryName.trim(), entryColor);
+        }
         await refreshLabels();
         window.dispatchEvent(new Event("postbox:labels-changed"));
       }
@@ -594,22 +617,46 @@ function PremiumPostBoxShell({
           <form className="pb-organize-dialog" onSubmit={(event) => void saveEntry(event)}
             role="dialog" aria-modal="true" aria-labelledby="pb-organize-heading">
             <h2 id="pb-organize-heading">
-              {editor.original ? "Rename " : "Create "}
+              {editor.colorOnly ? "Change " : editor.original ? "Edit " : "Create "}
               {editor.kind === "folder" ? "Folder" : "Label"}
+              {editor.colorOnly ? " Color" : ""}
             </h2>
-            <label htmlFor="pb-organize-name">Name</label>
-            <input id="pb-organize-name" autoFocus maxLength={editor.kind === "label" ? 80 : 200}
-              value={entryName} onChange={(event) => setEntryName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && !saving) setEditor(null);
-              }}
-              placeholder={editor.kind === "folder" ? "e.g. Finance" : "e.g. Important"}
-              required />
+            {!editor.colorOnly && (
+              <>
+                <label htmlFor="pb-organize-name">Name</label>
+                <input id="pb-organize-name" autoFocus maxLength={editor.kind === "label" ? 80 : 200}
+                  value={entryName} onChange={(event) => setEntryName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape" && !saving) setEditor(null);
+                  }}
+                  placeholder={editor.kind === "folder" ? "e.g. Finance" : "e.g. Important"}
+                  required />
+              </>
+            )}
+            <fieldset className="pb-organize-color-field">
+              <legend>Color</legend>
+              <div className="pb-organize-swatches">
+                {ORGANIZE_COLORS.map(([hex, label]) => (
+                  <button key={hex} type="button" title={label} aria-label={label + " color"}
+                    aria-pressed={entryColor === hex} className="pb-organize-color-swatch"
+                    style={{ backgroundColor: hex }}
+                    onClick={() => setEntryColor(hex)}>
+                    {entryColor === hex && <span aria-hidden="true">✓</span>}
+                  </button>
+                ))}
+                <label className="pb-organize-custom-color" title="Custom color">
+                  <span aria-hidden="true" style={{ backgroundColor: entryColor }} />
+                  <input type="color" aria-label="Pick a custom color" value={entryColor}
+                    onChange={(event) => setEntryColor(event.target.value)} />
+                  Custom
+                </label>
+              </div>
+            </fieldset>
             {editorError && <p className="pb-organize-error" role="alert">{editorError}</p>}
             <div className="pb-organize-dialog-actions">
               <button type="button" disabled={saving} onClick={() => setEditor(null)}>Cancel</button>
               <button type="submit" disabled={saving || !entryName.trim()}>
-                {saving ? "Saving…" : editor.original ? "Save" : "Create"}
+                {saving ? "Saving…" : editor.colorOnly ? "Apply" : editor.original ? "Save" : "Create"}
               </button>
             </div>
           </form>
@@ -737,7 +784,10 @@ function PremiumFolderNavigation({
   custom: Folder[];
   labels: MailLabel[];
   onNavigate: () => void;
-  onCreate: (kind: "folder" | "label", name?: string, id?: string) => void;
+  onCreate: (
+    kind: "folder" | "label", name?: string, id?: string,
+    color?: string | null, colorOnly?: boolean,
+  ) => void;
   onDelete: (kind: "folder" | "label", name: string, id?: string) => void;
 }) {
   const pathname = usePathname();
@@ -794,7 +844,7 @@ function PremiumFolderNavigation({
                 onNavigate();
                 window.dispatchEvent(new Event("postbox:return-to-list"));
               }}>
-              <FolderIcon size={17} aria-hidden="true" />
+              <FolderIcon size={17} aria-hidden="true" style={{ color: folder.color || FOLDER_COLOR_DEFAULT }} />
               <span className="truncate">{folder.name}</span>
               {folder.unseen ? <span className="pb-premium-nav-count">{folder.unseen}</span> : null}
             </Link>
@@ -804,8 +854,12 @@ function PremiumFolderNavigation({
               <div>
                 <button type="button" onClick={(event) => {
                   event.currentTarget.closest("details")!.open = false;
-                  onCreate("folder", folder.name);
-                }}>Rename</button>
+                  onCreate("folder", folder.name, undefined, folder.color);
+                }}>Edit</button>
+                <button type="button" onClick={(event) => {
+                  event.currentTarget.closest("details")!.open = false;
+                  onCreate("folder", folder.name, undefined, folder.color, true);
+                }}>Change Color</button>
                 <button type="button" onClick={(event) => {
                   event.currentTarget.closest("details")!.open = false;
                   onDelete("folder", folder.name);
@@ -834,7 +888,7 @@ function PremiumFolderNavigation({
               onNavigate();
               window.dispatchEvent(new Event("postbox:return-to-list"));
             }}>
-            <Tag size={17} aria-hidden="true" />
+            <Tag size={17} aria-hidden="true" style={{ color: label.color || LABEL_COLOR_DEFAULT }} />
             <span className="truncate">{label.name}</span>
           </Link>
           <details className="pb-organize-item-menu">
@@ -843,8 +897,12 @@ function PremiumFolderNavigation({
             <div>
               <button type="button" onClick={(event) => {
                 event.currentTarget.closest("details")!.open = false;
-                onCreate("label", label.name, label.id);
-              }}>Rename</button>
+                onCreate("label", label.name, label.id, label.color);
+              }}>Edit</button>
+              <button type="button" onClick={(event) => {
+                event.currentTarget.closest("details")!.open = false;
+                onCreate("label", label.name, label.id, label.color, true);
+              }}>Change Color</button>
               <button type="button" onClick={(event) => {
                 event.currentTarget.closest("details")!.open = false;
                 onDelete("label", label.name, label.id);
