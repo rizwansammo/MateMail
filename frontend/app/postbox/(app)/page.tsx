@@ -13,7 +13,7 @@
  * before it was sent. Nothing is cleaned here — a second, weaker sanitiser in
  * the browser would be the one people trusted.
  */
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
@@ -27,6 +27,7 @@ import {
   Download,
   Eye,
   Forward,
+  Folder as FolderIcon,
   ImageOff,
   Loader2,
   Mail,
@@ -1559,7 +1560,8 @@ function MessageLabelBadges({ labels }: { labels?: MessageLabel[] }) {
   if (!labels?.length) return null;
   return (
     <span className="pb-message-labels">
-      {labels.map((item) => <span key={item.id} className="pb-message-label">
+      {labels.map((item) => <span key={item.id} className="pb-message-label"
+        style={{ "--pb-label-color": item.color || "#9333ea" } as CSSProperties}>
         <Tag size={10} aria-hidden="true" /><span>{item.name}</span>
       </span>)}
     </span>
@@ -1593,7 +1595,7 @@ function LabelMenu({
             event.currentTarget.closest("details")!.open = false;
             onApply(item.id, active.has(item.id));
           }}>
-            <Tag size={14} />
+            <Tag size={14} className="pb-colored-tag" style={{ color: item.color || "#9333ea" }} />
             {item.name}
             {active.has(item.id) && <CheckCircle2 size={14} aria-label="Applied" />}
           </button>
@@ -1647,6 +1649,7 @@ function MoveMenu({
               onMove(item.name);
             }}
           >
+            {item.color && <FolderIcon size={14} style={{ color: item.color }} />}
             {item.name}
           </button>
         ))}
