@@ -438,7 +438,21 @@ function Mailbox() {
         const updated = await postbox.message(detail.folder, detail.uid, false, detail.uid_validity);
         setDetail(updated);
       }
-      await Promise.all([loadList(), conversations.reload()]);
+      // A thread holds its own message snapshot, separate from the list.
+      // Refresh it so an applied/removed label is visible immediately.
+      if (thread && detail) {
+        try {
+          setThread(await postbox.conversationForMessage(
+            detail.folder, detail.uid, detail.uid_validity,
+          ));
+        } catch {
+          // Label change is already saved. A stale thread must not turn that
+          // successful operation into a misleading error.
+          setThread(null);
+        }
+      }
+      loadList();
+      conversations.reload();
       setNotice(null);
     } catch (caught) {
       setNotice(describePostBoxError(caught, "Could not update labels."));
