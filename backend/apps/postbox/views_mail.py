@@ -605,6 +605,27 @@ class MessageRemoteImageTrustView(PostBoxView):
         )
 
 
+class MessageHeadersView(PostBoxView):
+    """Original, unmodified message headers for either reading layout."""
+
+    def get(self, request, folder: str, uid: int):
+        with imap.open_mailbox(self.mailbox.email) as connection:
+            info = connection.select(folder, readonly=True)
+            _assert_uid_validity(request, info.uid_validity)
+            raw_headers = connection.fetch_headers(uid)
+
+        # Never deliver MIME body or render untrusted header values as HTML.
+        # A maliciously large header must not exhaust browser memory.
+        if len(raw_headers) > 64 * 1024:
+            return Response(
+                {"detail": "This message has headers too large to display. Use Original."},
+                status=413,
+            )
+        result = Response({"headers": raw_headers.decode("utf-8", errors="replace")})
+        result["Cache-Control"] = "private, no-store"
+        return result
+
+
 class MessageRawView(PostBoxView):
     """The original message source, for "show original"."""
 
