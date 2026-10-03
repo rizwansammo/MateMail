@@ -137,6 +137,17 @@ export interface Preferences {
   default_identity: string;
 }
 
+export interface MailLabel {
+  id: string;
+  name: string;
+  count: number;
+}
+
+export interface MessageLabel {
+  id: string;
+  name: string;
+}
+
 export interface Folder {
   name: string;
   role: string;
@@ -149,6 +160,7 @@ export interface MessageSummary {
   uid_validity: number;
   folder: string;
   message_id: string;
+  labels?: MessageLabel[];
   subject: string;
   from: { name: string; address: string };
   to: string[];
@@ -247,6 +259,7 @@ export interface MessageDetail {
   reply_to: string;
   date: string;
   message_id: string;
+  labels?: MessageLabel[];
   in_reply_to: string;
   references: string[];
   text: string;
@@ -428,6 +441,27 @@ export const postbox = {
     }),
   deleteFolder: (name: string) =>
     request<void>(`/folders/${encodeFolder(name)}/`, { method: "DELETE" }),
+
+  // Virtual labels are PostBox metadata, not additional IMAP copies.
+  labels: () => request<{ results: MailLabel[] }>("/labels/"),
+  createLabel: (name: string) =>
+    request<MailLabel>("/labels/", {
+      method: "POST", body: JSON.stringify({ name }),
+    }),
+  renameLabel: (id: string, name: string) =>
+    request<MailLabel>(`/labels/${id}/`, {
+      method: "PATCH", body: JSON.stringify({ name }),
+    }),
+  deleteLabel: (id: string) =>
+    request<void>(`/labels/${id}/`, { method: "DELETE" }),
+  assignLabel: (body: {
+    label_id: string; folder: string; uids: number[];
+    uid_validity: number; remove?: boolean;
+  }) => request<{ label: MailLabel; count: number }>("/labels/assign/", {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  labeledMessages: (id: string, params: Record<string, string | number | boolean | undefined>) =>
+    request<MessagePage>(`/labels/${id}/messages/${qs(params)}`),
 
   // Phase 2 conversation engine; opt-in UI integration comes in Phase 3.
   conversations: (params: {
