@@ -128,6 +128,10 @@ export function ConversationReader({
   const memberAction = useCallback(async (
     member: ConversationMember, action: MessageAction,
   ) => {
+    if (inline) {
+      onNotice("Save or close your inline reply before changing this conversation.");
+      return;
+    }
     try {
       // A logical message may exist in Inbox and Archive. Clearing its star
       // or read state must not leave an invisible duplicate still flagged.
@@ -145,7 +149,7 @@ export function ConversationReader({
     } catch (error) {
       onNotice(describePostBoxError(error, "The message could not be updated."));
     }
-  }, [onChanged, onNotice]);
+  }, [inline, onChanged, onNotice]);
 
   const unreadCount = conversation.messages.reduce(
     (count, member) => count + (
