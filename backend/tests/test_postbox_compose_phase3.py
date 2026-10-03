@@ -312,7 +312,7 @@ class PostBoxComposePhase3Test(TestCase):
             from_address="riley@example.net",
             to=[self.mailbox.email],
             subject="Conversation",
-            text="Hi Alice,\\nLet's test the thread.",
+            text="Hi Alice,\nLet's test the thread.",
             message_id="<source@example.net>",
             in_reply_to="<earlier@example.net>",
         )
@@ -335,7 +335,7 @@ class PostBoxComposePhase3Test(TestCase):
         self.assertIn("<source@example.net>", data["references"])
 
     def test_reply_without_opt_in_sends_only_new_text_and_thread_headers(self):
-        with mock.patch("apps.postbox.imap.open_mailbox") as opener, \\
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener, \
              mock.patch("apps.postbox.sending.submit") as submit:
             self._connection(opener)
             response = self.api.post(
@@ -356,8 +356,8 @@ class PostBoxComposePhase3Test(TestCase):
         self.assertIn("<source@example.net>", parsed.references)
 
     def test_opt_in_quote_follows_signature_in_both_mime_alternatives(self):
-        quote = "On Saturday, Riley wrote:\\n> Hi Alice\\n> Checking the thread."
-        with mock.patch("apps.postbox.imap.open_mailbox") as opener, \\
+        quote = "On Saturday, Riley wrote:\n> Hi Alice\n> Checking the thread."
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener, \
              mock.patch("apps.postbox.sending.submit") as submit:
             self._connection(opener)
             response = self.api.post(
@@ -381,7 +381,7 @@ class PostBoxComposePhase3Test(TestCase):
         self.assertIsNone(sent[mime.DRAFT_QUOTE_SHA_HEADER])
 
     def test_quoted_draft_reopens_with_clean_editable_body(self):
-        quote = "On Saturday, Riley wrote:\\n> Hello\\n> Test"
+        quote = "On Saturday, Riley wrote:\n> Hello\n> Test"
         with mock.patch("apps.postbox.imap.open_mailbox") as opener:
             connection = self._connection(opener)
             response = self.api.post(
@@ -413,12 +413,12 @@ class PostBoxComposePhase3Test(TestCase):
         self.assertIn("Changed", body)
 
     def test_scheduled_opt_in_reply_keeps_signature_before_quote(self):
-        quote = "On Saturday, Riley wrote:\\n> Hi Alice"
+        quote = "On Saturday, Riley wrote:\n> Hi Alice"
         source = mime.build_message(
             from_address=self.mailbox.email,
             to=["client@example.net"],
             subject="Re: Later",
-            text="My scheduled reply.\\n\\n" + quote,
+            text="My scheduled reply.\n\n" + quote,
             in_reply_to="<source@example.net>",
             keep_bcc=True,
             draft_signature_id=str(self.signature.id),
