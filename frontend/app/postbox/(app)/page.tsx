@@ -150,9 +150,11 @@ function Mailbox() {
   const [showSingle, setShowSingle] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
+  const openRequestId = useRef(0);
 
   useEffect(() => {
     const returnToList = () => {
+      openRequestId.current += 1;
       setDetail(null);
       setThread(null);
       setShowSingle(false);
@@ -293,10 +295,16 @@ function Mailbox() {
 
   const openMessage = useCallback(
     async (summary: MessageSummary, remote = false) => {
+      const requestId = ++openRequestId.current;
       setDetailLoading(true);
+      if (!remote) {
+        setThread(null);
+        setShowSingle(false);
+      }
       setShowRemote(remote);
       try {
         const data = await postbox.message(summary.folder, summary.uid, remote);
+        if (requestId !== openRequestId.current) return;
         const role = mailFolders.find((item) => item.name === summary.folder)?.role;
 
         if (role === "drafts") {
@@ -336,13 +344,36 @@ function Mailbox() {
           await postbox.act("read", summary.folder, [summary.uid]);
           void loadList();
         }
+        if (!remote &&
+            !["drafts", "scheduled", "trash", "junk"].includes(role || "") &&
+            !/(^|[./_-])(spam|junk|trash|scheduled)($|[./_-])/i.test(summary.folder)) {
+          try {
+            const grouped = await postbox.conversationForMessage(
+              data.folder, data.uid, data.uid_validity,
+            );
+            if (requestId === openRequestId.current) setThread(grouped);
+          } catch (caught) {
+            // A mailbox over the header-scan cap stays fully usable through
+            // its original reader. Never claim a partial thread is complete.
+            if (requestId === openRequestId.current) {
+              setThread(null);
+              if (conversationMode) {
+                setNotice(describePostBoxError(
+                  caught, "Conversation view unavailable. Showing this message instead.",
+                ));
+              }
+            }
+          }
+        }
       } catch (caught) {
-        setNotice(describePostBoxError(caught, "That message could not be opened."));
+        if (requestId === openRequestId.current) {
+          setNotice(describePostBoxError(caught, "That message could not be opened."));
+        }
       } finally {
-        setDetailLoading(false);
+        if (requestId === openRequestId.current) setDetailLoading(false);
       }
     },
-    [loadList, mailFolders],
+    [loadList, mailFolders, conversationMode],
   );
 
   const act = useCallback(
@@ -443,6 +474,23 @@ function Mailbox() {
     },
     [detail],
   );
+
+  const refreshConversation = useCallback(async () => {
+    if (!detail) return;
+    try {
+      const updated = await postbox.conversationForMessage(
+        detail.folder, detail.uid, detail.uid_validity,
+      );
+      setThread(updated);
+    } catch {
+      // The anchor may have been moved or deleted. Returning to the mailbox
+      // is safer than rendering a stale conversation after that action.
+      setThread(null);
+      setDetail(null);
+    }
+    conversations.reload();
+    loadList();
+  }, [detail, conversations.reload, loadList]);
 
   const rescheduleScheduled = useCallback(
     async (row: ScheduledRow, scheduledAt: string) => {
