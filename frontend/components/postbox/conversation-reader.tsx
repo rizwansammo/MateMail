@@ -68,7 +68,7 @@ export function ConversationReader({
     const key = memberKey(member);
     setPreparing(key + mode);
     try {
-      const context = await postbox.replyContext(member.folder, member.uid, mode);
+      const context = await postbox.replyContext(member.folder, member.uid, mode, member.uid_validity);
       const initial: ComposeInitial = {
         mode, to: context.to, cc: context.cc, from_address: context.from_address,
         subject: context.subject, text: context.text,
@@ -92,7 +92,9 @@ export function ConversationReader({
     member: ConversationMember, action: MessageAction,
   ) => {
     try {
-      await postbox.act(action, member.folder, [member.uid]);
+      await postbox.act(action, member.folder, [member.uid], {
+        uid_validity: member.uid_validity,
+      });
       if (action === "read" || action === "unread") {
         setReadState((previous) => ({
           ...previous,
@@ -231,7 +233,7 @@ function ThreadMessageCard({
     const load = async () => {
       setLoading(true);
       try {
-        const result = await postbox.message(member.folder, member.uid);
+        const result = await postbox.message(member.folder, member.uid, false, member.uid_validity);
         if (!current) return;
         if (result.uid_validity !== member.uid_validity) {
           onNotice("This folder changed. Refresh the conversation before opening this message.");
@@ -255,7 +257,11 @@ function ThreadMessageCard({
     let current = true;
     const mark = async () => {
       try {
-        await postbox.act("read", member.folder, [member.uid]);
+        await Promise.all(member.copies.filter((copy) => !copy.seen).map((copy) =>
+          postbox.act("read", copy.folder, [copy.uid], {
+            uid_validity: copy.uid_validity,
+          }),
+        ));
         if (current) onSeen();
       } catch (error) {
         if (current) onNotice(describePostBoxError(error, "Could not mark that message as read."));
@@ -272,7 +278,7 @@ function ThreadMessageCard({
       if (trust) {
         await postbox.trustRemoteImages(detail.folder, detail.uid, detail.uid_validity);
       }
-      const result = await postbox.message(detail.folder, detail.uid, !trust);
+      const result = await postbox.message(detail.folder, detail.uid, !trust, member.uid_validity);
       if (result.uid_validity !== member.uid_validity) {
         onNotice("This folder changed. Refresh the conversation before loading images.");
         return;
