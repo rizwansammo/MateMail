@@ -9,7 +9,7 @@
  * Its drafts, signature, attachments, scheduling and send error handling
  * therefore remain identical to the floating composer.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Archive, ArrowLeft, ChevronDown, ChevronUp, Download, Eye, Forward,
   ImageOff, Loader2, Mail, Paperclip, ShieldAlert, Star, Trash2,
@@ -224,8 +224,13 @@ function ThreadMessageCard({
   const [detail, setDetail] = useState<MessageDetail | null>(initialDetail);
   const [loading, setLoading] = useState(false);
   const [remote, setRemote] = useState(false);
-  const [starred, setStarred] = useState(member.flagged);
   const [working, setWorking] = useState(false);
+  const marking = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!open || detail) return;
@@ -253,8 +258,8 @@ function ThreadMessageCard({
   // A card is read only when the person explicitly expands it. This is not a
   // background "mark all read" when the thread's metadata is loaded.
   useEffect(() => {
-    if (!open || !detail || seen) return;
-    let current = true;
+    if (!open || !detail || seen || marking.current) return;
+    marking.current = true;
     const mark = async () => {
       try {
         await Promise.all(member.copies.filter((copy) => !copy.seen).map((copy) =>
@@ -262,14 +267,17 @@ function ThreadMessageCard({
             uid_validity: copy.uid_validity,
           }),
         ));
-        if (current) onSeen();
+        if (mounted.current) onSeen();
       } catch (error) {
-        if (current) onNotice(describePostBoxError(error, "Could not mark that message as read."));
+        if (mounted.current) {
+          onNotice(describePostBoxError(error, "Could not mark that message as read."));
+        }
+      } finally {
+        marking.current = false;
       }
     };
     void mark();
-    return () => { current = false; };
-  }, [open, detail, seen, member.folder, member.uid, onSeen, onNotice]);
+  }, [open, detail, seen, member.copies, onSeen, onNotice]);
 
   const reloadImages = async (trust: boolean) => {
     if (!detail) return;
@@ -292,10 +300,7 @@ function ThreadMessageCard({
     }
   };
 
-  const toggleStar = () => {
-    setStarred((current) => !current);
-    onAction(starred ? "unstar" : "star");
-  };
+  const toggleStar = () => onAction(member.flagged ? "unstar" : "star");
   const attachments = detail?.attachments.filter((a) => !a.inline) ?? [];
   const safeHtml = detail ? resolveInlineImageReferences(detail) : "";
 
@@ -323,10 +328,10 @@ function ThreadMessageCard({
             <ChevronDown className="h-4 w-4" aria-hidden="true" />}
         </button>
         <button type="button" className="pb-thread-card-star"
-          aria-label={starred ? "Unstar message" : "Star message"}
-          aria-pressed={starred} onClick={toggleStar}>
+          aria-label={member.flagged ? "Unstar message" : "Star message"}
+          aria-pressed={member.flagged} onClick={toggleStar}>
           <Star className="h-4 w-4" aria-hidden="true"
-            fill={starred ? "currentColor" : "none"} />
+            fill={member.flagged ? "currentColor" : "none"} />
         </button>
       </div>
       {open && (
