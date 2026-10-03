@@ -335,6 +335,122 @@ class PostBoxComposePhase3Test(TestCase):
         self.assertIn("<earlier@example.net>", data["references"])
         self.assertIn("<source@example.net>", data["references"])
 
+    def test_replying_to_own_sent_message_targets_original_recipients(self):
+        """Newest card may be our Sent reply; never open an empty recipient."""
+        original = mime.build_message(
+            from_address=self.mailbox.email,
+            to=["riley@example.net", "jordan@example.org"],
+            cc=["alex@example.org", self.mailbox.email],
+            subject="Re: Project",
+            text="Our previous reply.",
+            message_id="<own-sent@example.com>",
+            in_reply_to="<gmail-source@mail.gmail.com>",
+            references=["<gmail-source@mail.gmail.com>"],
+        )
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.fetch_raw.return_value = original.as_bytes()
+            reply = self.api.get(
+                "/api/postbox/messages/Sent/17/reply-context/"
+                "?mode=reply&uid_validity=7"
+            )
+            reply_all = self.api.get(
+                "/api/postbox/messages/Sent/17/reply-context/"
+                "?mode=reply-all&uid_validity=7"
+            )
+        self.assertEqual(200, reply.status_code)
+        self.assertEqual(["riley@example.net"], reply.json()["to"])
+        self.assertEqual([], reply.json()["cc"])
+        self.assertEqual("", reply.json()["text"])
+        self.assertEqual(200, reply_all.status_code)
+        self.assertEqual(["riley@example.net"], reply_all.json()["to"])
+        self.assertEqual(
+            ["jordan@example.org", "alex@example.org"], reply_all.json()["cc"]
+        )
+        self.assertNotIn(self.mailbox.email, reply_all.json()["cc"])
+        self.assertEqual("<own-sent@example.com>", reply_all.json()["in_reply_to"])
+        self.assertIn("<gmail-source@mail.gmail.com>", reply_all.json()["references"])
+
+    def test_realistic_gmail_and_outlook_style_mime_thread_roundtrip(self):
+        """Representative RFC fixtures, NOT live Gmail/Outlook delivery tests."""
+        fixtures = [
+            {
+                "provider": "Gmail-style",
+                "message_id": "<CAA7+gmail123@mail.gmail.com>",
+                "reply_to": "team@example.net",
+                "sender": "alice.sender@gmail.com",
+                "date": "Sat, 03 Oct 2026 11:15:40 +0000",
+            },
+            {
+                "provider": "Outlook-style",
+                "message_id": "<PH7PR13MB9999000@example.outlook.com>",
+                "reply_to": "office@example.net",
+                "sender": "jordan.sender@outlook.com",
+                "date": "Sat, 03 Oct 2026 11:15:40 +0000",
+            },
+        ]
+        for fixture in fixtures:
+            with self.subTest(provider=fixture["provider"]):
+                raw_message = email.message.EmailMessage()
+                raw_message["From"] = fixture["sender"]
+                raw_message["Reply-To"] = fixture["reply_to"]
+                raw_message["To"] = self.mailbox.email
+                raw_message["Subject"] = "Re: Shared project"
+                raw_message["Date"] = fixture["date"]
+                raw_message["Message-ID"] = fixture["message_id"]
+                raw_message["References"] = (
+                    "<root@example.net> <second@example.net>"
+                )
+                raw_message["In-Reply-To"] = "<second@example.net>"
+                raw_message.set_content("New content before the quote.")
+                raw_message.add_alternative(
+                    "<p>New content before the quote.</p>"
+                    "<blockquote>Historical content</blockquote>",
+                    subtype="html",
+                )
+                with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+                    connection = self._connection(opener)
+                    connection.fetch_raw.return_value = raw_message.as_bytes()
+                    response = self.api.get(
+                        "/api/postbox/messages/INBOX/17/reply-context/"
+                        "?mode=reply-all&uid_validity=7"
+                    )
+                self.assertEqual(200, response.status_code)
+                data = response.json()
+                self.assertEqual([fixture["reply_to"]], data["to"])
+                self.assertEqual([], data["cc"])
+                self.assertEqual("", data["text"])
+                self.assertEqual("", data["html"])
+                self.assertIn("New content", data["quoted_text"])
+                self.assertEqual(fixture["message_id"], data["in_reply_to"])
+                self.assertEqual(
+                    ["<root@example.net>", "<second@example.net>",
+                     fixture["message_id"]],
+                    data["references"],
+                )
+                # Reply without opt-in cannot silently echo the entire
+                # original; it still must retain cross-client RFC headers.
+                with mock.patch("apps.postbox.imap.open_mailbox") as opener, \
+                     mock.patch("apps.postbox.sending.submit") as submit:
+                    self._connection(opener)
+                    sent = self.api.post(
+                        "/api/postbox/compose/send/",
+                        self._compose_payload(
+                            to=data["to"], cc=data["cc"],
+                            subject=data["subject"],
+                            text="Only the new response.",
+                            in_reply_to=data["in_reply_to"],
+                            references=data["references"],
+                            quoted_text="",
+                        ),
+                        format="json",
+                    )
+                self.assertEqual(200, sent.status_code)
+                parsed = mime.parse_message(submit.call_args.args[0].as_bytes())
+                self.assertEqual("Only the new response.", parsed.text)
+                self.assertEqual(fixture["message_id"], parsed.in_reply_to)
+                self.assertEqual(data["references"], parsed.references)
+
     def test_reply_context_rejects_stale_uidvalidity_before_reading(self):
         with mock.patch("apps.postbox.imap.open_mailbox") as opener:
             connection = self._connection(opener)
