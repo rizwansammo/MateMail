@@ -151,9 +151,17 @@ function Mailbox() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
   const openRequestId = useRef(0);
+  const threadInlineActive = useRef(false);
+  const reportInlineState = useCallback((active: boolean) => {
+    threadInlineActive.current = active;
+  }, []);
 
   useEffect(() => {
     const returnToList = () => {
+      if (threadInlineActive.current) {
+        setNotice("Save or close your inline reply before navigating.");
+        return;
+      }
       openRequestId.current += 1;
       setDetail(null);
       setThread(null);
@@ -163,6 +171,23 @@ function Mailbox() {
     window.addEventListener("postbox:return-to-list", returnToList);
     return () =>
       window.removeEventListener("postbox:return-to-list", returnToList);
+  }, []);
+
+  useEffect(() => {
+    // Next.js Link navigations do not trigger beforeunload. Intercept them
+    // while a full inline composer is open so unsaved reply text is retained.
+    const protectInlineDraft = (event: MouseEvent) => {
+      if (!threadInlineActive.current || !(event.target instanceof Element)) return;
+      const anchor = event.target.closest("a[href]") as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = new URL(anchor.href, window.location.href);
+      if (href.origin !== window.location.origin || !href.pathname.startsWith("/postbox")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setNotice("Save or close your inline reply before navigating.");
+    };
+    document.addEventListener("click", protectInlineDraft, true);
+    return () => document.removeEventListener("click", protectInlineDraft, true);
   }, []);
 
   const [explicitCompose, setExplicitCompose] = useState<ComposeInitial | null>(null);
@@ -295,6 +320,10 @@ function Mailbox() {
 
   const openMessage = useCallback(
     async (summary: MessageSummary, remote = false) => {
+      if (threadInlineActive.current) {
+        setNotice("Save or close your inline reply before switching messages.");
+        return;
+      }
       const requestId = ++openRequestId.current;
       setDetailLoading(true);
       if (!remote) {
@@ -552,6 +581,10 @@ function Mailbox() {
       : null;
 
   const changeConversationMode = (mode: "conversations" | "messages") => {
+    if (threadInlineActive.current) {
+      setNotice("Save or close your inline reply before changing views.");
+      return;
+    }
     const next = new URLSearchParams(params.toString());
     if (mode === "messages") next.set("view", "messages");
     else next.delete("view");
@@ -1036,6 +1069,7 @@ function Mailbox() {
                 setDetail(null);
               }}
               onSingle={() => setShowSingle(true)}
+              onInlineChange={reportInlineState}
               onChanged={refreshConversation}
               onNotice={setNotice}
               onSuccess={(message) => {
