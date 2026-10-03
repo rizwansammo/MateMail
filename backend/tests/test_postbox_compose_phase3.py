@@ -306,3 +306,131 @@ class PostBoxComposePhase3Test(TestCase):
         self.assertTrue(parsed.draft_state)
         self.assertEqual(["hidden@example.net"], parsed.bcc)
         self.assertEqual(str(self.signature.id), parsed.draft_signature_id)
+
+    def test_reply_context_starts_clean_and_preserves_thread_headers(self):
+        original = mime.build_message(
+            from_address="riley@example.net",
+            to=[self.mailbox.email],
+            subject="Conversation",
+            text="Hi Alice,\\nLet's test the thread.",
+            message_id="<source@example.net>",
+            in_reply_to="<earlier@example.net>",
+        )
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.fetch_raw.return_value = original.as_bytes()
+            response = self.api.get(
+                "/api/postbox/messages/INBOX/17/reply-context/?mode=reply"
+            )
+
+        self.assertEqual(200, response.status_code)
+        data = response.json()
+        self.assertEqual("", data["text"])
+        self.assertEqual("", data["html"])
+        self.assertIn("Hi Alice", data["quoted_text"])
+        self.assertIn("> Let's test the thread.", data["quoted_text"])
+        self.assertEqual(["riley@example.net"], data["to"])
+        self.assertEqual("<source@example.net>", data["in_reply_to"])
+        self.assertIn("<earlier@example.net>", data["references"])
+        self.assertIn("<source@example.net>", data["references"])
+
+    def test_reply_without_opt_in_sends_only_new_text_and_thread_headers(self):
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener, \\
+             mock.patch("apps.postbox.sending.submit") as submit:
+            self._connection(opener)
+            response = self.api.post(
+                "/api/postbox/compose/send/",
+                self._compose_payload(
+                    subject="Re: Conversation",
+                    text="Only my new reply.",
+                    in_reply_to="<source@example.net>",
+                    references=["<earlier@example.net>", "<source@example.net>"],
+                ),
+                format="json",
+            )
+        self.assertEqual(200, response.status_code)
+        sent = submit.call_args.args[0]
+        parsed = mime.parse_message(sent.as_bytes())
+        self.assertEqual("Only my new reply.", parsed.text)
+        self.assertEqual("<source@example.net>", parsed.in_reply_to)
+        self.assertIn("<source@example.net>", parsed.references)
+
+    def test_opt_in_quote_follows_signature_in_both_mime_alternatives(self):
+        quote = "On Saturday, Riley wrote:\\n> Hi Alice\\n> Checking the thread."
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener, \\
+             mock.patch("apps.postbox.sending.submit") as submit:
+            self._connection(opener)
+            response = self.api.post(
+                "/api/postbox/compose/send/",
+                self._compose_payload(
+                    text="My new reply.",
+                    quoted_text=quote,
+                    signature_id=str(self.signature.id),
+                    in_reply_to="<source@example.net>",
+                ),
+                format="json",
+            )
+        self.assertEqual(200, response.status_code)
+        sent = submit.call_args.args[0]
+        parsed = mime.parse_message(sent.as_bytes(), load_remote_images=True)
+        self.assertLess(parsed.text.index("My new reply."), parsed.text.index("Regards,"))
+        self.assertLess(parsed.text.index("Regards,"), parsed.text.index("On Saturday"))
+        self.assertIn("<blockquote", parsed.html)
+        self.assertIn("Hi Alice", parsed.html)
+        self.assertNotIn("&gt; Hi Alice", parsed.html)
+        self.assertIsNone(sent[mime.DRAFT_QUOTE_SHA_HEADER])
+
+    def test_quoted_draft_reopens_with_clean_editable_body(self):
+        quote = "On Saturday, Riley wrote:\\n> Hello\\n> Test"
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            response = self.api.post(
+                "/api/postbox/drafts/",
+                self._compose_payload(text="Draft reply.", quoted_text=quote),
+                format="json",
+            )
+            self.assertEqual(200, response.status_code)
+            saved = connection.append.call_args.args[1]
+            connection.fetch_raw.return_value = saved
+            connection.select.return_value = imap.FolderInfo(
+                name="Drafts", role="drafts", uid_validity=9
+            )
+            detail = self.api.get("/api/postbox/messages/Drafts/41/")
+
+        self.assertEqual(200, detail.status_code)
+        data = detail.json()
+        self.assertEqual("Draft reply.", data["text"])
+        self.assertEqual(quote, data["quoted_text"])
+        parsed = mime.parse_message(saved)
+        self.assertIn(quote, parsed.text)
+        self.assertTrue(parsed.draft_state)
+        self.assertTrue(parsed.draft_quote_sha)
+
+        # If another IMAP client edits the body, never silently delete its text.
+        altered = mime.parse_message(saved.replace(b"> Hello", b"> Changed"))
+        body, recovered_quote = mime.split_draft_reply_quote(altered)
+        self.assertEqual("", recovered_quote)
+        self.assertIn("Changed", body)
+
+    def test_scheduled_opt_in_reply_keeps_signature_before_quote(self):
+        quote = "On Saturday, Riley wrote:\\n> Hi Alice"
+        source = mime.build_message(
+            from_address=self.mailbox.email,
+            to=["client@example.net"],
+            subject="Re: Later",
+            text="My scheduled reply.\\n\\n" + quote,
+            in_reply_to="<source@example.net>",
+            keep_bcc=True,
+            draft_signature_id=str(self.signature.id),
+            draft_quoted_text=quote,
+        )
+        message, from_address, recipients = tasks._scheduled_message_for_delivery(
+            self.mailbox, source.as_bytes()
+        )
+        parsed = mime.parse_message(message.as_bytes())
+        self.assertLess(parsed.text.index("My scheduled"), parsed.text.index("Regards,"))
+        self.assertLess(parsed.text.index("Regards,"), parsed.text.index("On Saturday"))
+        self.assertEqual("<source@example.net>", parsed.in_reply_to)
+        self.assertIsNone(message[mime.DRAFT_QUOTE_SHA_HEADER])
+        self.assertEqual(self.mailbox.email, from_address)
+        self.assertEqual(["client@example.net"], recipients)
