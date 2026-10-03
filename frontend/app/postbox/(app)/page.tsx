@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
+import { ConversationReader } from "@/components/postbox/conversation-reader";
 import { resolveInlineImageReferences } from "@/lib/postbox-inline-images";
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
@@ -52,6 +53,9 @@ import {
   formatMessageDate,
   postbox,
   type Folder,
+  type ConversationDetail,
+  type ConversationPage,
+  type ConversationSummary,
   type MessageDetail,
   type MessagePage,
   type MessageSummary,
@@ -115,7 +119,7 @@ function Mailbox() {
   // One key for "which list am I looking at". Paging and selection both reset
   // when it changes, and both derive that from the key rather than having an
   // effect write it — a reset is a consequence of the key, not an event.
-  const listKey = `${folder}|${search}|${filterMode}|${searchScope}|${sortMode}`;
+  const listKey = `${folder}|${search}|${filterMode}|${searchScope}|${sortMode}|${params.get("view") || "conversations"}`;
 
   const [pageState, setPageState] = useState({ key: listKey, page: 1 });
   const pageNumber = pageState.key === listKey ? pageState.page : 1;
@@ -142,12 +146,16 @@ function Mailbox() {
     [listKey],
   );
   const [detail, setDetail] = useState<MessageDetail | null>(null);
+  const [thread, setThread] = useState<ConversationDetail | null>(null);
+  const [showSingle, setShowSingle] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
 
   useEffect(() => {
     const returnToList = () => {
       setDetail(null);
+      setThread(null);
+      setShowSingle(false);
       setShowRemote(false);
     };
     window.addEventListener("postbox:return-to-list", returnToList);
@@ -209,6 +217,25 @@ function Mailbox() {
   const mailFolders = useMemo(
     () => directory.data?.[2]?.results ?? [],
     [directory.data],
+  );
+
+  // Inbox defaults to conversations. Searches, filtered views and other
+  // folders retain the existing precise per-message interface.
+  const conversationEligible =
+    (folder.toUpperCase() === "INBOX" ||
+      mailFolders.some((item) => item.name === folder && item.role === "inbox")) &&
+    !search && !unreadOnly && !filteredStarredOnly &&
+    sortMode === "newest" && searchScope === "folder";
+  const conversationMode = conversationEligible && params.get("view") !== "messages";
+  const conversations = useAsyncData<ConversationPage>(
+    () => conversationMode
+      ? postbox.conversations({ scope: "inbox", page: pageNumber, page_size: Math.min(100, preferences.messages_per_page || 25) })
+      : Promise.resolve({
+          scope: "inbox" as const, page: 1, page_size: 25, total: 0,
+          has_next: false, results: [],
+        }),
+    [conversationMode, pageNumber, preferences.messages_per_page],
+    "Conversation view is unavailable. Switch to Messages.",
   );
 
   const scheduledData = useAsyncData(
