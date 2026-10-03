@@ -699,3 +699,36 @@ class ThreadReadingLayoutRegressionTest(SimpleTestCase):
         self.assertIn("border-top:0 !important;", css)
         self.assertIn("pb-compose-quote-toggle", composer)
         self.assertIn('className={inline ? "pb-thread-compose-host"', composer)
+
+
+class SidebarThemeRelocationTest(SimpleTestCase):
+    """Storage/appearance remain in Settings; compact themes move to avatar card."""
+
+    def test_sidebar_has_no_redundant_storage_or_theme_footer(self):
+        layout = read("app", "postbox", "(app)", "layout.tsx")
+        css = read("app", "globals.css")
+        self.assertNotIn('className="pb-premium-sidebar-footer"', layout)
+        self.assertNotIn('className="pb-premium-storage"', layout)
+        self.assertNotIn('account?.storage', layout)
+        self.assertNotIn('postbox\n      .account()', layout)
+        self.assertNotIn(".pb-premium-sidebar-footer {", css)
+        self.assertNotIn(".pb-premium-storage {", css)
+
+    def test_avatar_has_accessible_compact_theme_controls(self):
+        layout = read("app", "postbox", "(app)", "layout.tsx")
+        css = read("app", "globals.css")
+        self.assertIn('className="pb-premium-account-appearance"', layout)
+        self.assertIn('className="pb-premium-account-appearance-label">Theme', layout)
+        self.assertIn('aria-label="Colour theme"', layout)
+        self.assertIn('aria-pressed={preferences.theme === value}', layout)
+        self.assertIn('onClick={() => void updatePreferences({ theme: value })}', layout)
+        for theme in ('"light"', '"system"', '"dark"'):
+            self.assertIn('value: ' + theme, layout)
+        self.assertIn(".pb-premium-account-appearance .pb-premium-theme-row", css)
+        self.assertIn(".pb-premium-account-appearance .pb-premium-theme:focus-visible", css)
+
+    def test_settings_and_account_switch_remain_available(self):
+        layout = read("app", "postbox", "(app)", "layout.tsx")
+        self.assertIn('href="/postbox/settings"', layout)
+        self.assertIn('href="/postbox/settings?section=appearance"', layout)
+        self.assertIn('postbox.switchAccount(item.session_id)', layout)
