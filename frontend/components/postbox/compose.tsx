@@ -77,12 +77,14 @@ export function Compose({
   signatures,
   onClose,
   onSent,
+  inline = false,
 }: {
   initial: ComposeInitial;
   identities: Identity[];
   signatures: Signature[];
   onClose: () => void;
   onSent: (message: string) => void;
+  inline?: boolean;
 }) {
   const primary =
     initial.from_address ||
@@ -402,6 +404,7 @@ export function Compose({
   }, [draftUid, onClose]);
 
   useEffect(() => {
+    if (inline) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !busy && !saving) {
         void saveDraftNow(true);
@@ -409,7 +412,7 @@ export function Compose({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [busy, onClose, saveDraftNow, saving]);
+  }, [busy, inline, onClose, saveDraftNow, saving]);
 
   const totalBytes =
     attachments.reduce((sum, attachment) => sum + attachment.size, 0) +
