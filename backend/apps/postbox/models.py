@@ -774,6 +774,7 @@ class FolderAppearance(models.Model):
     Folder names and message contents remain owned by IMAP/Dovecot.
     """
 
+    id = models.BigAutoField(primary_key=True)
     mailbox = models.ForeignKey(
         "mailboxes.Mailbox", on_delete=models.CASCADE,
         related_name="postbox_folder_appearances",
