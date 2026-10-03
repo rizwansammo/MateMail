@@ -134,7 +134,7 @@ class LabelAssignmentView(PostBoxView):
         validity = request.data.get("uid_validity")
         remove = request.data.get("remove", False)
         if (not isinstance(folder, str) or not folder or not isinstance(uids, list)
-                or not uids or len(uids) > 500 or isinstance(remove, (str, int))
+                or not uids or len(uids) > 500 or type(remove) is not bool
                 or not all(type(uid) is int and uid > 0 for uid in uids)):
             return Response({"detail": "Choose up to 500 valid messages."}, status=400)
         # No stale UID can silently assign a label to a different message.
