@@ -418,6 +418,20 @@ export function Compose({
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, inline, onClose, saveDraftNow, saving]);
 
+  useEffect(() => {
+    // Hard refresh, tab closure and cross-origin navigation must warn if
+    // the inline reply has edits not yet confirmed by the draft API.
+    // Same-app link navigation is guarded by the PostBox mailbox component.
+    if (!inline) return;
+    const protectUnsavedDraft = (event: BeforeUnloadEvent) => {
+      if (!dirty.current && !saving) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectUnsavedDraft);
+    return () => window.removeEventListener("beforeunload", protectUnsavedDraft);
+  }, [inline, saving]);
+
   const totalBytes =
     attachments.reduce((sum, attachment) => sum + attachment.size, 0) +
     existingAttachments.reduce((sum, attachment) => sum + attachment.size, 0);
