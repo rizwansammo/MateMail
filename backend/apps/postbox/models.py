@@ -26,6 +26,7 @@ import uuid
 from datetime import timedelta
 
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
@@ -765,3 +766,46 @@ class PostBoxPushEvent(models.Model):
                 state=self.State.DISPATCHED, dispatched_at=timezone.now()
             )
         )
+
+
+class MailLabel(models.Model):
+    """Mailbox-private virtual label; never creates another IMAP message."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    mailbox = models.ForeignKey(
+        "mailboxes.Mailbox", on_delete=models.CASCADE, related_name="postbox_labels"
+    )
+    name = models.CharField(max_length=80)
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = MailboxScopedQuerySet.as_manager()
+
+    class Meta:
+        db_table = "postbox_label"
+        ordering = ["name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower("name"), "mailbox",
+                name="postbox_label_mailbox_name_ci",
+            )
+        ]
+
+
+class MessageLabel(models.Model):
+    """Stable message identity, independent of an IMAP folder/UID after MOVE."""
+
+    id = models.BigAutoField(primary_key=True)
+    label = models.ForeignKey(
+        MailLabel, on_delete=models.CASCADE, related_name="assignments"
+    )
+    message_key = models.CharField(max_length=80)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "postbox_message_label"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["label", "message_key"],
+                name="postbox_message_label_unique",
+            )
+        ]
+        indexes = [models.Index(fields=["message_key"], name="pb_label_msg_key_idx")]

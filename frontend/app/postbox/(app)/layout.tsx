@@ -16,6 +16,10 @@ import {
   Clock,
   FileText,
   Folder as FolderIcon,
+  Tag,
+  Plus,
+  MoreHorizontal,
+  ChevronRight,
   Inbox,
   Loader2,
   LogOut,
@@ -32,8 +36,8 @@ import {
   Sun,
   User,
   UserPlus,
-  Trash2,
   Users,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -41,6 +45,7 @@ import { usePostBox } from "@/contexts/postbox-context";
 import {
   postbox,
   type Folder,
+  type MailLabel,
   type SavedPostBoxAccount,
 } from "@/lib/postbox-api";
 
@@ -85,6 +90,7 @@ export default function PostBoxAppLayout({
 
   const [folders, setFolders] = useState<Folder[]>([]);
   const [railOpen, setRailOpen] = useState(false);
+  const refreshFolders = useCallback(() => postbox.folders().then((data) => setFolders(data.results)), []);
 
   useEffect(() => {
     if (!isLoading && !mailbox) router.replace("/postbox/login");
@@ -121,6 +127,7 @@ export default function PostBoxAppLayout({
   return (
     <PremiumPostBoxShell
       folders={folders}
+      refreshFolders={refreshFolders}
       mailbox={mailbox}
       preferences={preferences}
       railOpen={railOpen}
@@ -137,6 +144,7 @@ export default function PostBoxAppLayout({
 function PremiumPostBoxShell({
   children,
   folders,
+  refreshFolders,
   mailbox,
   preferences,
   railOpen,
@@ -147,6 +155,7 @@ function PremiumPostBoxShell({
 }: {
   children: React.ReactNode;
   folders: Folder[];
+  refreshFolders: () => Promise<void>;
   mailbox: NonNullable<ReturnType<typeof usePostBox>["mailbox"]>;
   preferences: ReturnType<typeof usePostBox>["preferences"];
   railOpen: boolean;
@@ -161,6 +170,78 @@ function PremiumPostBoxShell({
   const [savedAccounts, setSavedAccounts] = useState<SavedPostBoxAccount[]>([]);
   const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
   const [accountMenuError, setAccountMenuError] = useState<string | null>(null);
+  const [labels, setLabels] = useState<MailLabel[]>([]);
+  const [editor, setEditor] = useState<{
+    kind: "folder" | "label"; original?: string; id?: string;
+  } | null>(null);
+  const [entryName, setEntryName] = useState("");
+  const [editorError, setEditorError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const refreshLabels = useCallback(() =>
+    postbox.labels().then((value) => setLabels(value.results)), []);
+  useEffect(() => {
+    void refreshLabels().catch(() => setLabels([]));
+    window.addEventListener("postbox:labels-changed", refreshLabels);
+    return () => window.removeEventListener("postbox:labels-changed", refreshLabels);
+  }, [mailbox.id, refreshLabels]);
+
+  const openEditor = (kind: "folder" | "label", original?: string, id?: string) => {
+    setEditor({ kind, original, id });
+    setEntryName(original || "");
+    setEditorError("");
+  };
+
+  const saveEntry = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editor || !entryName.trim() || saving) return;
+    setSaving(true);
+    setEditorError("");
+    try {
+      if (editor.kind === "folder") {
+        if (editor.original) await postbox.renameFolder(editor.original, entryName.trim());
+        else await postbox.createFolder(entryName.trim());
+        await refreshFolders();
+        if (editor.original && new URLSearchParams(window.location.search).get("folder") === editor.original) {
+          router.push("/postbox?folder=" + encodeURIComponent(entryName.trim()));
+        }
+      } else {
+        if (editor.id) await postbox.renameLabel(editor.id, entryName.trim());
+        else await postbox.createLabel(entryName.trim());
+        await refreshLabels();
+        window.dispatchEvent(new Event("postbox:labels-changed"));
+      }
+      setEditor(null);
+    } catch (caught) {
+      setEditorError(caught instanceof Error ? caught.message : "Could not save. Try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteEntry = async (kind: "folder" | "label", name: string, id?: string) => {
+    const message = kind === "folder"
+      ? "Delete folder " + name + "? Its messages will move to Inbox. Rules targeting it will be disabled."
+      : "Delete label " + name + "? No emails will be deleted.";
+    if (!window.confirm(message)) return;
+    try {
+      if (kind === "folder") {
+        await postbox.deleteFolder(name);
+        await refreshFolders();
+        if (new URLSearchParams(window.location.search).get("folder") === name) {
+          router.push("/postbox?folder=INBOX");
+        }
+      } else if (id) {
+        await postbox.deleteLabel(id);
+        await refreshLabels();
+        window.dispatchEvent(new Event("postbox:labels-changed"));
+        if (new URLSearchParams(window.location.search).get("label") === id) {
+          router.push("/postbox?folder=INBOX");
+        }
+      }
+    } catch (caught) {
+      window.alert(caught instanceof Error ? caught.message : "Delete failed.");
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -205,6 +286,30 @@ function PremiumPostBoxShell({
   useEffect(() => {
     if (accountMenuRef.current) accountMenuRef.current.open = false;
   }, [pathname]);
+
+  useEffect(() => {
+    // The same outside-click behavior as the profile card. Native details
+    // do not dismiss themselves when the user clicks elsewhere.
+    const selector = "details.pb-organize-item-menu[open], details.pb-label-menu[open], details.pb-premium-move-menu[open]";
+    const dismiss = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      document.querySelectorAll<HTMLDetailsElement>(selector).forEach((menu) => {
+        if (!menu.contains(event.target as Node)) menu.open = false;
+      });
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      document.querySelectorAll<HTMLDetailsElement>(selector).forEach((menu) => {
+        menu.open = false;
+      });
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, []);
 
   const byRole = new Map(folders.map((folder) => [folder.role, folder]));
   const custom = folders.filter((folder) => !PINNED_ROLES.has(folder.role));
@@ -287,7 +392,10 @@ function PremiumPostBoxShell({
               folders={folders}
               byRole={byRole}
               custom={custom}
+              labels={labels}
               onNavigate={closeRail}
+              onCreate={openEditor}
+              onDelete={deleteEntry}
             />
           </Suspense>
         </nav>
@@ -479,6 +587,34 @@ function PremiumPostBoxShell({
 
         <div className="pb-premium-content">{children}</div>
       </main>
+      {editor && (
+        <div className="pb-organize-dialog-backdrop" onPointerDown={(event) => {
+          if (event.target === event.currentTarget && !saving) setEditor(null);
+        }}>
+          <form className="pb-organize-dialog" onSubmit={(event) => void saveEntry(event)}
+            role="dialog" aria-modal="true" aria-labelledby="pb-organize-heading">
+            <h2 id="pb-organize-heading">
+              {editor.original ? "Rename " : "Create "}
+              {editor.kind === "folder" ? "Folder" : "Label"}
+            </h2>
+            <label htmlFor="pb-organize-name">Name</label>
+            <input id="pb-organize-name" autoFocus maxLength={editor.kind === "label" ? 80 : 200}
+              value={entryName} onChange={(event) => setEntryName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !saving) setEditor(null);
+              }}
+              placeholder={editor.kind === "folder" ? "e.g. Finance" : "e.g. Important"}
+              required />
+            {editorError && <p className="pb-organize-error" role="alert">{editorError}</p>}
+            <div className="pb-organize-dialog-actions">
+              <button type="button" disabled={saving} onClick={() => setEditor(null)}>Cancel</button>
+              <button type="submit" disabled={saving || !entryName.trim()}>
+                {saving ? "Saving…" : editor.original ? "Save" : "Create"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -594,51 +730,42 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function PremiumFolderNavigation({
-  byRole,
-  custom,
-  onNavigate,
+  byRole, custom, labels, onNavigate, onCreate, onDelete,
 }: {
   folders: Folder[];
   byRole: Map<string, Folder>;
   custom: Folder[];
+  labels: MailLabel[];
   onNavigate: () => void;
+  onCreate: (kind: "folder" | "label", name?: string, id?: string) => void;
+  onDelete: (kind: "folder" | "label", name: string, id?: string) => void;
 }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const selectedFolder = params.get("folder") || "INBOX";
+  const selectedLabel = params.get("label");
   const starred = params.get("starred") === "true";
+  const [foldersOpen, setFoldersOpen] = useState(true);
+  const [labelsOpen, setLabelsOpen] = useState(true);
 
   return (
     <>
       {PINNED.map(({ role, label, icon: Icon, href }) => {
         const folder = byRole.get(role);
         if (!href && !folder) return null;
-
-        const target =
-          href ?? `/postbox?folder=${encodeURIComponent(folder!.name)}`;
-        const active =
-          role === "starred"
-            ? pathname === "/postbox" && starred
-            : pathname === "/postbox" && !starred && folder?.name === selectedFolder;
-        const count =
-          role === "drafts" || role === "scheduled"
-            ? folder?.messages
-            : role === "starred"
-              ? undefined
-              : folder?.unseen;
-
+        const target = href ?? "/postbox?folder=" + encodeURIComponent(folder!.name);
+        const active = role === "starred"
+          ? pathname === "/postbox" && starred && !selectedLabel
+          : pathname === "/postbox" && !starred && !selectedLabel && folder?.name === selectedFolder;
+        const count = role === "drafts" || role === "scheduled"
+          ? folder?.messages : role === "starred" ? undefined : folder?.unseen;
         return (
-          <Link
-            key={role}
-            href={target}
-            className="pb-premium-nav-link"
-            data-role={role}
-            aria-current={active ? "page" : undefined}
+          <Link key={role} href={target} className="pb-premium-nav-link"
+            data-role={role} aria-current={active ? "page" : undefined}
             onClick={() => {
               onNavigate();
               window.dispatchEvent(new Event("postbox:return-to-list"));
-            }}
-          >
+            }}>
             <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
             <span className="truncate">{label}</span>
             {count ? <span className="pb-premium-nav-count">{count}</span> : null}
@@ -646,31 +773,86 @@ function PremiumFolderNavigation({
         );
       })}
 
-      {custom.length > 0 && (
-        <>
-          <div className="pb-premium-folder-label">YOUR FOLDERS</div>
-          {custom.map((folder) => {
-            const active =
-              pathname === "/postbox" && !starred && folder.name === selectedFolder;
-            return (
-              <Link
-                key={folder.name}
-                href={`/postbox?folder=${encodeURIComponent(folder.name)}`}
-                className="pb-premium-nav-link"
-                aria-current={active ? "page" : undefined}
-                onClick={() => {
-                  onNavigate();
-                  window.dispatchEvent(new Event("postbox:return-to-list"));
-                }}
-              >
-                <FolderIcon className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
-                <span className="truncate">{folder.name}</span>
-                {folder.unseen ? <span className="pb-premium-nav-count">{folder.unseen}</span> : null}
-              </Link>
-            );
-          })}
-        </>
-      )}
+      <div className="pb-organize-section-header">
+        <button type="button" aria-expanded={foldersOpen}
+          aria-label={foldersOpen ? "Collapse folders" : "Expand folders"}
+          onClick={() => setFoldersOpen(!foldersOpen)}>
+          {foldersOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          <span>FOLDERS</span>
+        </button>
+        <button type="button" aria-label="Create folder" title="Create folder"
+          onClick={() => onCreate("folder")}><Plus size={17} /></button>
+      </div>
+      {foldersOpen && custom.map((folder) => {
+        const active = pathname === "/postbox" && !selectedLabel &&
+          !starred && folder.name === selectedFolder;
+        return (
+          <div className="pb-organize-nav-row" key={folder.name}>
+            <Link href={"/postbox?folder=" + encodeURIComponent(folder.name)}
+              className="pb-premium-nav-link" aria-current={active ? "page" : undefined}
+              onClick={() => {
+                onNavigate();
+                window.dispatchEvent(new Event("postbox:return-to-list"));
+              }}>
+              <FolderIcon size={17} aria-hidden="true" />
+              <span className="truncate">{folder.name}</span>
+              {folder.unseen ? <span className="pb-premium-nav-count">{folder.unseen}</span> : null}
+            </Link>
+            <details className="pb-organize-item-menu">
+              <summary aria-label={"Manage folder " + folder.name}
+                title={"Manage folder " + folder.name}><MoreHorizontal size={17} /></summary>
+              <div>
+                <button type="button" onClick={(event) => {
+                  event.currentTarget.closest("details")!.open = false;
+                  onCreate("folder", folder.name);
+                }}>Rename</button>
+                <button type="button" onClick={(event) => {
+                  event.currentTarget.closest("details")!.open = false;
+                  onDelete("folder", folder.name);
+                }}>Delete</button>
+              </div>
+            </details>
+          </div>
+        );
+      })}
+
+      <div className="pb-organize-section-header">
+        <button type="button" aria-expanded={labelsOpen}
+          aria-label={labelsOpen ? "Collapse labels" : "Expand labels"}
+          onClick={() => setLabelsOpen(!labelsOpen)}>
+          {labelsOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          <span>LABELS</span>
+        </button>
+        <button type="button" aria-label="Create label" title="Create label"
+          onClick={() => onCreate("label")}><Plus size={17} /></button>
+      </div>
+      {labelsOpen && labels.map((label) => (
+        <div className="pb-organize-nav-row" key={label.id}>
+          <Link href={"/postbox?label=" + label.id} className="pb-premium-nav-link"
+            aria-current={selectedLabel === label.id ? "page" : undefined}
+            onClick={() => {
+              onNavigate();
+              window.dispatchEvent(new Event("postbox:return-to-list"));
+            }}>
+            <Tag size={17} aria-hidden="true" />
+            <span className="truncate">{label.name}</span>
+          </Link>
+          <details className="pb-organize-item-menu">
+            <summary aria-label={"Manage label " + label.name}
+              title={"Manage label " + label.name}><MoreHorizontal size={17} /></summary>
+            <div>
+              <button type="button" onClick={(event) => {
+                event.currentTarget.closest("details")!.open = false;
+                onCreate("label", label.name, label.id);
+              }}>Rename</button>
+              <button type="button" onClick={(event) => {
+                event.currentTarget.closest("details")!.open = false;
+                onDelete("label", label.name, label.id);
+              }}>Delete</button>
+            </div>
+          </details>
+        </div>
+      ))}
 
     </>
   );
