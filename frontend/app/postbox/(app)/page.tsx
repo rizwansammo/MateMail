@@ -1180,7 +1180,7 @@ function Reader({
         <span className="flex-1" />
         <a
           className="pb-btn pb-btn-plain"
-          href={postbox.rawUrl(detail.folder, detail.uid)}
+          href={postbox.rawUrl(detail.folder, detail.uid, detail.uid_validity)}
           target="_blank"
           rel="noopener noreferrer"
           title="Download original message"
@@ -1295,6 +1295,7 @@ function Reader({
                           detail.folder,
                           detail.uid,
                           attachment.part_id,
+                          detail.uid_validity,
                         )}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -1309,6 +1310,7 @@ function Reader({
                         detail.folder,
                         detail.uid,
                         attachment.part_id,
+                        detail.uid_validity,
                       )}
                       download={attachment.filename}
                       aria-label={`Download ${attachment.filename}`}
