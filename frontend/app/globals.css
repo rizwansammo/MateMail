@@ -5718,3 +5718,164 @@ body {
     padding:10px 13px 16px !important;
   }
 }
+
+
+/* PostBox folder + virtual-label management: one scrolling nav, fixed compose. */
+.pb-organize-section-header {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin:20px 7px 7px;
+  color:var(--pb-subtle);
+  font-size:11px;
+  letter-spacing:.09em;
+  font-weight:700;
+}
+.pb-organize-section-header button {
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  border:0;
+  border-radius:7px;
+  padding:7px;
+  background:transparent;
+  color:inherit;
+  cursor:pointer;
+}
+.pb-organize-section-header button:hover,
+.pb-organize-item-menu summary:hover {
+  background:var(--pb-surface-2);
+  color:var(--pb-fg);
+}
+.pb-organize-nav-row { position:relative; display:flex; align-items:center; }
+.pb-organize-nav-row > a { flex:1; min-width:0; padding-right:34px; }
+.pb-organize-item-menu { position:absolute; right:7px; top:7px; z-index:5; }
+.pb-organize-item-menu summary {
+  display:grid;
+  width:27px;
+  height:27px;
+  place-items:center;
+  border-radius:6px;
+  color:var(--pb-muted);
+  cursor:pointer;
+  list-style:none;
+}
+.pb-organize-item-menu summary::-webkit-details-marker { display:none; }
+.pb-organize-item-menu > div {
+  position:absolute;
+  top:100%;
+  right:0;
+  z-index:70;
+  min-width:110px;
+  border:1px solid var(--pb-border);
+  border-radius:9px;
+  padding:5px;
+  background:var(--pb-surface);
+  box-shadow:0 8px 30px rgb(0 0 0 / .15);
+}
+.pb-organize-item-menu > div button {
+  display:block;
+  width:100%;
+  border:0;
+  border-radius:5px;
+  padding:8px 12px;
+  background:transparent;
+  color:var(--pb-fg);
+  text-align:left;
+  font-size:13px;
+}
+.pb-organize-item-menu > div button:hover { background:var(--pb-surface-2); }
+.pb-organize-dialog-backdrop {
+  position:fixed;
+  inset:0;
+  z-index:1500;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  background:rgb(10 20 30 / .47);
+}
+.pb-organize-dialog {
+  display:flex;
+  flex-direction:column;
+  gap:13px;
+  width:min(100%,390px);
+  border:1px solid var(--pb-border);
+  border-radius:15px;
+  padding:25px;
+  background:var(--pb-surface);
+  box-shadow:0 24px 80px rgb(0 0 0 / .24);
+}
+.pb-organize-dialog h2 { font-size:19px; font-weight:700; color:var(--pb-fg); }
+.pb-organize-dialog label { font-size:13px; font-weight:600; color:var(--pb-fg); }
+.pb-organize-dialog input {
+  width:100%;
+  border:1px solid var(--pb-border);
+  border-radius:9px;
+  padding:11px 13px;
+  background:var(--pb-bg);
+  color:var(--pb-fg);
+}
+.pb-organize-dialog input:focus { outline:2px solid var(--pb-accent); outline-offset:1px; }
+.pb-organize-dialog-actions { display:flex; justify-content:flex-end; gap:8px; padding-top:4px; }
+.pb-organize-dialog-actions button {
+  border:1px solid var(--pb-border);
+  border-radius:9px;
+  padding:9px 17px;
+  font-size:13px;
+  font-weight:650;
+  color:var(--pb-fg);
+}
+.pb-organize-dialog-actions button[type=submit] {
+  border-color:var(--pb-accent);
+  background:var(--pb-accent);
+  color:white;
+}
+.pb-organize-dialog-actions button:disabled { opacity:.5; cursor:not-allowed; }
+.pb-organize-error { color:#db4545; font-size:12px; }
+.pb-message-labels { display:inline-flex; flex-wrap:wrap; gap:4px; margin-left:6px; }
+.pb-message-label {
+  display:inline-flex;
+  align-items:center;
+  max-width:120px;
+  border:1px solid var(--pb-border);
+  border-radius:5px;
+  padding:1px 6px;
+  color:var(--pb-muted);
+  background:var(--pb-surface-2);
+  font-size:10px;
+  line-height:17px;
+  font-weight:600;
+}
+.pb-message-label > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pb-label-menu { position:relative; }
+.pb-label-menu > summary { list-style:none; }
+.pb-label-menu > summary::-webkit-details-marker { display:none; }
+.pb-label-panel {
+  position:absolute;
+  z-index:70;
+  left:0;
+  top:calc(100% + 7px);
+  min-width:190px;
+  max-height:240px;
+  overflow-y:auto;
+  border:1px solid var(--pb-border);
+  border-radius:9px;
+  padding:9px;
+  background:var(--pb-surface);
+  box-shadow:0 14px 35px rgb(0 0 0 / .18);
+}
+.pb-label-panel button {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  padding:8px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--pb-fg);
+  text-align:left;
+  font-size:13px;
+}
+.pb-label-panel button:hover { background:var(--pb-surface-2); }
