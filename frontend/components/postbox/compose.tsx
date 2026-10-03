@@ -700,7 +700,7 @@ export function Compose({
 
           {Boolean(initial.quoted_text) && (
             <div
-              className="mt-3 shrink-0 rounded-lg border px-3 py-2 text-sm"
+              className="pb-compose-quote-toggle mt-3 shrink-0 rounded-lg border px-3 py-2 text-sm"
               style={{ borderColor: "var(--pb-border)", background: "var(--pb-surface-2)" }}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">

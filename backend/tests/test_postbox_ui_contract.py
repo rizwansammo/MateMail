@@ -84,11 +84,14 @@ class ResponsiveDisplayTest(SimpleTestCase):
         self.assertIn('aria-label="Close folders"', source)
         self.assertNotIn('className="pb-btn pb-btn-plain md:hidden"', source)
 
-    def test_the_reader_back_button_is_wrapped(self):
+    def test_the_reader_back_button_is_available_on_desktop_and_mobile(self):
         source = read("app", "postbox", "(app)", "page.tsx")
-        reader = source.split('className="pb-premium-reader-toolbar"', 1)[1][:700]
-        self.assertIn('<div className="md:hidden">', reader)
+        reader = source.split('className="pb-premium-reader-toolbar"', 1)[1][:850]
+        # The reader now needs Back at every viewport, not a mobile-only
+        # wrapper: Single Message must be navigable after opening a thread.
+        self.assertNotIn('<div className="md:hidden">', reader)
         self.assertIn('aria-label="Back to mailbox"', reader)
+        self.assertIn('<span>Back</span>', reader)
 
 
 class FolderPresentationTest(SimpleTestCase):
@@ -661,3 +664,38 @@ class Phase4ThreadSecurityAndAccessibilityContractTest(SimpleTestCase):
         self.assertIn("qs({ uid_validity: uidValidity })", api)
         self.assertIn("detail.uid_validity", resolver)
         self.assertIn("detail.uid_validity", thread)
+
+
+class ThreadReadingLayoutRegressionTest(SimpleTestCase):
+    """Prevent regressions in the real inline composer / reader CSS cascade."""
+
+    def test_mailbox_bulk_toolbar_only_appears_on_list(self):
+        page = read("app", "postbox", "(app)", "page.tsx")
+        self.assertIn('{!detail && <div className="pb-premium-mail-toolbar">', page)
+        self.assertIn('aria-label="Select all visible messages"', page)
+        self.assertIn('aria-label="Mailbox layout"', page)
+
+    def test_single_message_can_return_to_existing_conversation(self):
+        page = read("app", "postbox", "(app)", "page.tsx")
+        thread = read("components", "postbox", "conversation-reader.tsx")
+        self.assertIn('onSingle={() => setShowSingle(true)}', page)
+        self.assertIn('onThread={thread && showSingle ? () => setShowSingle(false) : undefined}', page)
+        self.assertIn('onThread?: () => void;', page)
+        self.assertIn('aria-label="Return to email thread"', page)
+        self.assertIn('guardNavigation(onSingle)', thread)
+
+    def test_inline_reply_and_message_cards_share_full_width_without_fixed_height(self):
+        css = read("app", "globals.css")
+        composer = read("components", "postbox", "compose.tsx")
+        self.assertIn('width:100%;max-width:none;min-width:0;', css)
+        self.assertIn(
+            ".pb-thread-scroll .pb-thread-compose-host .pb-premium-compose-shell.pb-thread-inline-panel",
+            css,
+        )
+        self.assertIn("width:100% !important;", css)
+        self.assertIn("height:auto !important;", css)
+        self.assertIn("max-height:none !important;", css)
+        self.assertIn(".pb-thread-compose-host .pb-premium-compose-shell .pb-compose-footer", css)
+        self.assertIn("border-top:0 !important;", css)
+        self.assertIn("pb-compose-quote-toggle", composer)
+        self.assertIn('className={inline ? "pb-thread-compose-host"', composer)

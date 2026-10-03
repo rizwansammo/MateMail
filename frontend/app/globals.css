@@ -5506,7 +5506,7 @@ body {
 }
 .pb-premium-shell .pb-thread-cards {
   display:flex;flex-direction:column;gap:10px;list-style:none;
-  padding:0;margin:0;max-width:1100px;
+  padding:0;margin:0;width:100%;max-width:none;min-width:0;
 }
 .pb-premium-shell .pb-thread-card {
   border:1px solid var(--pb-border);border-radius:12px;
@@ -5589,7 +5589,7 @@ body {
 }
 .pb-premium-shell .pb-thread-card-actions button {font-size:12px;}
 .pb-premium-shell .pb-thread-inline-anchor {
-  margin-top:18px;max-width:1100px;
+  margin-top:18px;width:100%;max-width:none;min-width:0;
 }
 .pb-premium-shell .pb-thread-reply-prompt {
   display:flex;gap:12px;align-items:center;justify-content:space-between;
@@ -5636,4 +5636,71 @@ body {
 .pb-premium-shell .pb-thread-quoted-history pre {
   margin-top:12px;border-left:2px solid var(--pb-border-strong);
   padding-left:14px;line-height:1.5;white-space:pre-wrap;word-break:break-word;
+}
+
+/* Thread card layout fix: the inline editor is not the 720px/810px floating
+   Compose dialog. Higher specificity plus !important are required because the
+   desktop and mobile floating Compose sizing rules themselves use !important. */
+.pb-premium-shell .pb-thread-scroll .pb-thread-cards > li,
+.pb-premium-shell .pb-thread-scroll .pb-thread-card,
+.pb-premium-shell .pb-thread-scroll .pb-thread-inline-anchor,
+.pb-premium-shell .pb-thread-scroll .pb-thread-compose-host {
+  width:100%;max-width:none;min-width:0;box-sizing:border-box;
+}
+.pb-premium-shell .pb-thread-scroll .pb-thread-compose-host .pb-premium-compose-shell.pb-thread-inline-panel {
+  width:100% !important;
+  max-width:none !important;
+  min-width:0 !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  box-shadow:none !important;
+  border:1px solid var(--pb-border);
+  border-radius:12px;
+  box-sizing:border-box;
+  overflow:hidden;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-premium-compose-shell .pb-compose-head {
+  background:var(--pb-bg) !important;
+  border-bottom:1px solid var(--pb-border) !important;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-premium-compose-shell .pb-compose-content {
+  flex:0 0 auto !important;
+  max-height:none !important;
+  min-height:0;
+  overflow:visible !important;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-premium-compose-shell .pb-compose-body {
+  flex:0 0 auto !important;
+  height:164px;
+  min-height:148px !important;
+  max-height:45dvh;
+  resize:vertical;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-premium-compose-shell .pb-compose-signature {
+  max-width:none;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-premium-compose-shell .pb-compose-footer {
+  border-top:0 !important;
+  background:transparent;
+  padding:10px 22px 16px !important;
+  min-height:0;
+  gap:9px;
+}
+.pb-premium-shell .pb-thread-compose-host .pb-compose-quote-toggle {
+  border:0 !important;
+  border-top:1px solid var(--pb-border) !important;
+  border-radius:0;
+  background:transparent !important;
+  padding:12px 0 4px;
+  margin-left:24px;
+  margin-right:24px;
+}
+@media (max-width:639px) {
+  .pb-premium-shell .pb-thread-compose-host .pb-compose-quote-toggle {
+    margin-left:16px;margin-right:16px;
+  }
+  .pb-premium-shell .pb-thread-compose-host .pb-premium-compose-shell .pb-compose-footer {
+    padding:10px 13px 16px !important;
+  }
 }
