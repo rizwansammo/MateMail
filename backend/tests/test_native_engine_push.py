@@ -50,13 +50,13 @@ def code_only(text: str, comment: str) -> str:
 
 class DovecotPushHookTest(unittest.TestCase):
 
-    def test_the_hook_loads_for_lmtp_only_and_only_with_its_secret(self):
+    def test_the_hook_loads_for_lmtp_and_imap_only_with_its_secret(self):
         conf = code_only(DOVECOT_CONF, "#")
         # `_try`: config ships before the image that renders it, and a missing
         # optional include must cost the push, not Dovecot (measured).
         self.assertIn("!include_try engine-push.conf", conf)
         self.assertNotRegex(conf, r"!include\s+engine-push\.conf")
-        # The global plugin list is unchanged: nothing push-related outside LMTP.
+        # The global plugin list is unchanged: push is protocol-scoped.
         global_plugins = re.search(r"^mail_plugins \{(.*?)\}", conf, re.S | re.M).group(1)
         self.assertNotIn("push_notification", global_plugins)
         self.assertNotIn("lua", global_plugins)
@@ -65,6 +65,7 @@ class DovecotPushHookTest(unittest.TestCase):
         rendered = entry.split('if [ -n "${NATIVE_DOVECOT_PUSH_SECRET:-}" ]; then', 1)[1]
         rendered, disabled = rendered.split("\nelse\n", 1)
         self.assertLess(rendered.index('echo "protocol lmtp {"'), rendered.index("push_notification = yes"))
+        self.assertIn('echo "protocol imap {"', rendered)
         for plugin in ("notify", "push_notification", "mail_lua", "push_notification_lua"):
             self.assertIn(f'echo "    {plugin} = yes"', rendered)
         # The boolean-list form ADDS to the global list (quota stays loaded for
@@ -81,13 +82,13 @@ class DovecotPushHookTest(unittest.TestCase):
 
     def test_the_script_reads_the_message_identity_and_nothing_of_its_content(self):
         code = code_only(LUA, "--")
-        self.assertEqual({"mailbox", "uid_validity", "uid"}, set(re.findall(r"\bevent\.(\w+)", code)) - {"folder"})
+        self.assertEqual({"mailbox", "uid_validity", "uid", "event"}, set(re.findall(r"\bevent\.(\w+)", code)) - {"folder"})
         for content in ("subject", "snippet", "from_address", "to_address", "message_id",
                         "event.from", "event.to", "from_display_name"):
             self.assertNotIn(content, code)
-        # Only the four identity fields are ever encoded.
+        # Only event kind plus the four identity fields are ever encoded.
         payload = re.search(r"json\.encode\(\{(.*?)\}\)", code, re.S).group(1)
-        self.assertEqual({"mailbox", "folder", "uid_validity", "uid"},
+        self.assertEqual({"event", "mailbox", "folder", "uid_validity", "uid"},
                          set(re.findall(r"(\w+)\s*=", payload)))
         # No shell, file or process access from inside LMTP.
         for dangerous in ("os.execute", "io.open", "io.popen", "require(\"posix\")"):
@@ -101,9 +102,15 @@ class DovecotPushHookTest(unittest.TestCase):
         self.assertRegex(code, r"function dovecot_lua_notify_end_txn\(ctx, success\)\s+if not success")
         self.assertIn("pcall(send", code, "a failure is caught, never raised into LMTP")
         self.assertIn('"X-Native-Push-Secret"', code)
-        # Only MessageNew: appends, flag changes and expunges are not handled.
         handlers = set(re.findall(r"function (dovecot_lua_notify_event_\w+)", code))
-        self.assertEqual({"dovecot_lua_notify_event_message_new"}, handlers)
+        self.assertEqual({
+            "dovecot_lua_notify_event_message_new",
+            "dovecot_lua_notify_event_flags_set",
+            "dovecot_lua_notify_event_flags_clear",
+            "dovecot_lua_notify_event_message_append",
+            "dovecot_lua_notify_event_message_trash",
+            "dovecot_lua_notify_event_message_expunge",
+        }, handlers)
 
 
 class DovecotPushIsolationTest(unittest.TestCase):
@@ -199,6 +206,15 @@ class NativeApiPushTest(unittest.TestCase):
                     engine_push.new_mail_event(self.report(**bad))
         with self.assertRaises(ValidationError):
             engine_push.new_mail_event({"mailbox": "alice@acme.test", "folder": "INBOX"})
+        with self.assertRaises(ValidationError):
+            engine_push.mailbox_event(self.report(event="not-a-real-event"))
+
+        # The same message may change state repeatedly, so mailbox-change ids
+        # must not be de-duplicated by message identity.
+        first = engine_push.mailbox_event(self.report(event="mailbox_changed"))
+        second = engine_push.mailbox_event(self.report(event="mailbox_changed"))
+        self.assertEqual("mailbox_changed", first["event"])
+        self.assertNotEqual(first["event_id"], second["event_id"])
 
     def test_the_relay_never_blocks_retries_only_silence_and_forwards_only_the_event(self):
         event = engine_push.new_mail_event(self.report())

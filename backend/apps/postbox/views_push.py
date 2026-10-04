@@ -28,7 +28,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import auth as postbox_auth
-from . import push
+from . import push, realtime
 from .models import PostBoxPushDevice, PostBoxPushEvent, PushPlatform, PushProvider, PushTokenType
 from .push_providers import FCM_TOKEN_RE, is_wns_channel
 
@@ -168,7 +168,7 @@ class PushEventSerializer(serializers.Serializer):
     """
 
     event_id = serializers.UUIDField()
-    event = serializers.ChoiceField(choices=PostBoxPushEvent.Kind.choices)
+    event = serializers.ChoiceField(choices=("new_mail", "mailbox_changed"))
     mailbox = serializers.EmailField(max_length=254)
     folder = serializers.CharField(max_length=255, trim_whitespace=False)
     uid_validity = serializers.IntegerField(
@@ -233,6 +233,24 @@ class PushEventIngestView(APIView):
         if mailbox is None:
             return Response({"detail": "Unknown mailbox."}, status=404)
 
+        # Mailbox-state changes are ephemeral browser wake-ups. They are not
+        # remote mobile notifications and therefore do not need a retained
+        # PostBoxPushEvent row. New-mail keeps the existing durable push path.
+        if data["event"] == "mailbox_changed":
+            event_id = str(data["event_id"])
+            realtime.publish(
+                mailbox,
+                event_id=event_id,
+                kind="mailbox_changed",
+                folder=data["folder"],
+                uid_validity=data.get("uid_validity"),
+                uid=data.get("uid"),
+            )
+            return Response(
+                {"accepted": True, "event_id": event_id, "duplicate": False},
+                status=202,
+            )
+
         with transaction.atomic():
             event, created = push.ingest(
                 mailbox=mailbox,
@@ -247,6 +265,17 @@ class PushEventIngestView(APIView):
             # happen by accident, so it is refused rather than merged.
             logger.warning("PostBox push: event %s conflicts with a stored event", event.event_id)
             return Response({"detail": "Conflict."}, status=409)
+
+        # Wake active web clients independently of FCM/WNS delivery. Redis is
+        # only a transient signal; the clients re-read IMAP as the authority.
+        realtime.publish(
+            mailbox,
+            event_id=str(event.event_id),
+            kind="new_mail",
+            folder=event.folder,
+            uid_validity=event.uid_validity,
+            uid=event.uid,
+        )
         return Response(
             {"accepted": True, "event_id": str(event.event_id), "duplicate": not created},
             status=202,

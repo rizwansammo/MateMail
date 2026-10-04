@@ -49,6 +49,7 @@ import { Compose, type ComposeInitial } from "@/components/postbox/compose";
 import { ConversationReader } from "@/components/postbox/conversation-reader";
 import { MessageHeaders } from "@/components/postbox/message-headers";
 import { resolveInlineImageReferences } from "@/lib/postbox-inline-images";
+import { POSTBOX_MAILBOX_EVENT } from "@/lib/postbox-realtime";
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
 import {
@@ -318,6 +319,23 @@ function Mailbox() {
     "",
   );
   const scheduledRows = scheduledData.data?.results ?? [];
+
+  useEffect(() => {
+    let timer: number | null = null;
+    const refreshMailboxView = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        void loadList();
+        if (conversationMode) void conversations.reload();
+      }, 80);
+    };
+    window.addEventListener(POSTBOX_MAILBOX_EVENT, refreshMailboxView);
+    return () => {
+      window.removeEventListener(POSTBOX_MAILBOX_EVENT, refreshMailboxView);
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [loadList, conversationMode, conversations.reload]);
 
   // Query-driven compose supports both the sidebar Compose link and
   // Contacts -> Send message. Keep this declarative so route navigation does
@@ -810,7 +828,11 @@ function Mailbox() {
               aria-label="Refresh mailbox"
               title="Refresh mailbox"
               disabled={loading || (conversationMode && conversations.loading)}
-              onClick={() => { loadList(); if (conversationMode) conversations.reload(); }}
+              onClick={() => {
+                loadList();
+                if (conversationMode) conversations.reload();
+                window.dispatchEvent(new Event("postbox:refresh-folders"));
+              }}
             >
               <RefreshCw className={`h-[18px] w-[18px] ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
             </button>
@@ -854,7 +876,10 @@ function Mailbox() {
           type="button"
           className="pb-btn pb-btn-plain"
           aria-label="Refresh"
-          onClick={() => void loadList()}
+          onClick={() => {
+            void loadList();
+            window.dispatchEvent(new Event("postbox:refresh-folders"));
+          }}
         >
           <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
         </button>

@@ -33,6 +33,7 @@ from .views_labels import (
     LabelListView, LabelDetailView, LabelAssignmentView, LabelMessagesView,
 )
 from .views_push import DeviceDetailView, DeviceListView
+from .views_realtime import RealtimeEventView
 from .views_mail import (
     AttachmentPreviewView,
     AttachmentView,
@@ -153,6 +154,7 @@ urlpatterns = [
     path("vacation/", VacationView.as_view(), name="postbox-vacation"),
 
     # ── native push registrations ───────────────────────────────────────────
+    path("events/", RealtimeEventView.as_view(), name="postbox-realtime-events"),
     path("devices/", DeviceListView.as_view(), name="postbox-devices"),
     path("devices/<uuid:device_id>/", DeviceDetailView.as_view(), name="postbox-device"),
 

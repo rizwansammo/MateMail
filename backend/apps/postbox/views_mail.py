@@ -28,7 +28,7 @@ from rest_framework.views import APIView
 from apps.security import ratelimit
 from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX, POSTBOX_SEND_PER_MAILBOX
 
-from . import imap, mime, sending
+from . import imap, mime, sending, realtime
 from .auth import PostBoxSessionAuthentication
 from .models import FolderAppearance, MailRule, MessageMoveProvenance, PostBoxPreference, RemoteImageSenderTrust
 from .appearance import DEFAULT_FOLDER_COLOR, validate_color
@@ -1045,5 +1045,14 @@ class MessageActionView(PostBoxView):
         logger.info(
             "PostBox %s: mailbox=%s folder=%s count=%d",
             action, self.mailbox.pk, data["folder"], len(uids),
+        )
+        # Notify every active PostBox web session after the IMAP mutation has
+        # succeeded. The event contains no mail content and Redis failure never
+        # changes the result of the mailbox operation.
+        realtime.publish(
+            self.mailbox,
+            kind="mailbox_changed",
+            folder=data["folder"],
+            action=action,
         )
         return Response({"action": action, "count": len(uids)})

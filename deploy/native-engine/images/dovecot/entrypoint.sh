@@ -159,8 +159,16 @@ if [ -n "${NATIVE_DOVECOT_PUSH_SECRET:-}" ]; then
     esac
     {
         echo "# Generated at container start by images/dovecot/entrypoint.sh."
-        echo "# Holds one secret. PostBox new-mail events, for LMTP only."
+        echo "# Holds one secret. PostBox mailbox events for LMTP and IMAP."
         echo "protocol lmtp {"
+        echo "  mail_plugins {"
+        echo "    notify = yes"
+        echo "    push_notification = yes"
+        echo "    mail_lua = yes"
+        echo "    push_notification_lua = yes"
+        echo "  }"
+        echo "}"
+        echo "protocol imap {"
         echo "  mail_plugins {"
         echo "    notify = yes"
         echo "    push_notification = yes"

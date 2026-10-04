@@ -66,7 +66,8 @@ EVENT_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://matemail.online/ns/pos
 #: IMAP UIDs and UIDVALIDITY are non-zero unsigned 32-bit numbers (RFC 9051).
 _UINT32_MAX = 4_294_967_295
 MAX_FOLDER_LENGTH = 255
-FIELDS = frozenset({"mailbox", "folder", "uid_validity", "uid"})
+FIELDS = frozenset({"event", "mailbox", "folder", "uid_validity", "uid"})
+EVENTS = frozenset({"new_mail", "mailbox_changed"})
 
 QUEUE_SIZE = 1000
 RELAY_TIMEOUT_SECONDS = 3
@@ -100,25 +101,44 @@ def _folder(value) -> str:
 
 
 def event_id(mailbox: str, folder: str, uid_validity: int, uid: int) -> str:
-    """The stable id of one saved message. Identity only, never content."""
+    """Stable id for a delivery so a relay retry cannot announce it twice."""
     return str(uuid.uuid5(EVENT_NAMESPACE, f"new_mail\n{mailbox}\n{folder}\n{uid_validity}\n{uid}"))
 
 
-def new_mail_event(body) -> dict:
-    """Dovecot's report, validated, as the event MateMail ingests."""
-    validation.payload(body, allowed=set(FIELDS), required=set(FIELDS))
+def mailbox_event(body) -> dict:
+    """Validate one Dovecot mailbox event without accepting message content."""
+    validation.payload(
+        body,
+        allowed=set(FIELDS),
+        required={"mailbox", "folder", "uid_validity", "uid"},
+    )
+    kind = body.get("event", "new_mail")
+    if kind not in EVENTS:
+        raise ValidationError("event is not supported", "event")
     mailbox = validation.email_address(body["mailbox"], field="mailbox")
     folder = _folder(body["folder"])
     uid_validity = _identifier(body["uid_validity"], "uid_validity")
     uid = _identifier(body["uid"], "uid")
+    identifier = (
+        event_id(mailbox, folder, uid_validity, uid)
+        if kind == "new_mail"
+        else str(uuid.uuid4())
+    )
     return {
-        "event_id": event_id(mailbox, folder, uid_validity, uid),
-        "event": "new_mail",
+        "event_id": identifier,
+        "event": kind,
         "mailbox": mailbox,
         "folder": folder,
         "uid_validity": uid_validity,
         "uid": uid,
     }
+
+
+def new_mail_event(body) -> dict:
+    """Backwards-compatible helper for the delivery-only caller contract."""
+    body = dict(body)
+    body.setdefault("event", "new_mail")
+    return mailbox_event(body)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
