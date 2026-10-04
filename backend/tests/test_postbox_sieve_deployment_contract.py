@@ -15,8 +15,13 @@ class SieveDeploymentContractTest(SimpleTestCase):
         dovecot = source("deploy", "native-engine", "dovecot", "dovecot.conf")
         self.assertIn("protocols = imap lmtp sieve", dovecot)
         self.assertIn("sieve_script personal {", dovecot)
-        self.assertIn("path = ~/sieve", dovecot)
-        self.assertIn("active_path = ~/.dovecot.sieve", dovecot)
+        self.assertIn("path = /var/vmail/.sieve/%{user | domain}/%{user | username}/scripts", dovecot)
+        self.assertIn("active_path = /var/vmail/.sieve/%{user | domain}/%{user | username}/active.sieve", dovecot)
+        self.assertIn("mail_path = ~/", dovecot)
+        # Sieve state must not be inside per-user Maildir or the disposable
+        # index volume. The vmail volume is included in backup/restore.
+        self.assertNotIn("path = ~/sieve", dovecot)
+        self.assertNotIn("active_path = ~/.dovecot.sieve", dovecot)
         self.assertIn("protocol lmtp {", dovecot)
         self.assertIn("sieve = yes", dovecot)
         self.assertIn("service managesieve-login {", dovecot)
