@@ -202,6 +202,10 @@ def compile_rules(rules, vacation=None, *, valid_folders: set[str] | None = None
 
         conditions = _rule_conditions(rule)
         actions = _rule_actions(rule)
+        supported_actions = {"move", "copy", "archive", "star", "mark_read", "mark_unread", "delete"}
+        if not actions or any(item.get("action") not in supported_actions for item in actions):
+            logger.warning("PostBox: skipping rule %s with an unknown action", getattr(rule, "pk", None))
+            continue
         tests: list[str] = []
         condition_requires: set[str] = set()
         invalid = False
