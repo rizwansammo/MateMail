@@ -5827,11 +5827,28 @@ body {
   color:var(--pb-fg);
 }
 .pb-organize-dialog-actions button[type=submit] {
-  border-color:var(--pb-accent);
-  background:var(--pb-accent);
-  color:white;
+  /* The accent token is a pale selection highlight, not an action color. */
+  border-color:var(--pb-primary);
+  background:var(--pb-primary);
+  color:var(--pb-primary-fg);
+  box-shadow:0 2px 6px color-mix(in srgb,var(--pb-primary) 16%,transparent);
+  transition:filter 140ms ease,box-shadow 140ms ease;
+}
+.pb-organize-dialog-actions button[type=submit]:hover:not(:disabled) {
+  filter:brightness(.94);
+  box-shadow:0 4px 11px color-mix(in srgb,var(--pb-primary) 24%,transparent);
+}
+.pb-organize-dialog-actions button[type=submit]:focus-visible {
+  outline:2px solid var(--pb-primary);
+  outline-offset:3px;
 }
 .pb-organize-dialog-actions button:disabled { opacity:.5; cursor:not-allowed; }
+.pb-organize-dialog-actions button[type=submit]:disabled {
+  border-color:var(--pb-border);
+  background:var(--pb-surface-2);
+  color:var(--pb-muted);
+  box-shadow:none;
+}
 .pb-organize-error { color:#db4545; font-size:12px; }
 .pb-message-labels { display:inline-flex; flex-wrap:wrap; gap:4px; margin-left:6px; }
 .pb-message-label {
