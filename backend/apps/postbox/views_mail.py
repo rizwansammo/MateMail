@@ -68,6 +68,11 @@ class PostBoxView(APIView):
         if isinstance(exc, sending.SendFailed):
             logger.warning("PostBox send: %s", exc.log_message)
             return Response({"detail": exc.customer_message}, status=400)
+        from .sieve import SieveError
+
+        if isinstance(exc, SieveError):
+            logger.warning("PostBox filters: %s", exc.log_message)
+            return Response({"detail": exc.customer_message}, status=503)
         return super().handle_exception(exc)
 
     @property
@@ -111,6 +116,33 @@ class FolderListView(PostBoxView):
             mailbox=self.mailbox, name=name, defaults={"color": color}
         )
         return Response({"name": name, "color": color}, status=201)
+
+
+class FolderDeleteCheckView(PostBoxView):
+    """Preview a destructive action using live IMAP state (never cached counts)."""
+
+    def post(self, request):
+        name = request.data.get("name")
+        if not isinstance(name, str) or not name:
+            return Response({"detail": "Choose a folder."}, status=400)
+        with imap.open_mailbox(self.mailbox.email) as connection:
+            folder = FolderDetailView._folder(connection, name)
+            if folder is None:
+                return Response({"detail": "That folder could not be found."}, status=404)
+            if folder.role:
+                return Response({"detail": "Standard mail folders cannot be deleted."}, status=400)
+            # This is for the warning UI; DELETE independently rechecks.
+            count, _ = connection.folder_counts(name)
+
+        active_rules = MailRule.objects.for_mailbox(self.mailbox).filter(
+            action=MailRule.Action.MOVE, action_folder=name, enabled=True,
+        ).count()
+        return Response({
+            "name": name,
+            "message_count": count,
+            "active_rule_count": active_rules,
+            "can_delete": count == 0 and active_rules == 0,
+        })
 
 
 class FolderDetailView(PostBoxView):
@@ -180,8 +212,8 @@ class FolderDetailView(PostBoxView):
         return Response({"name": new_name, "color": applied_color})
 
     def delete(self, request, name: str):
-        from .views_settings import _sync_sieve
-
+        # Never silently move or destroy a message during folder deletion.
+        # A separate preview improves UX, but DELETE itself is authoritative.
         with imap.open_mailbox(self.mailbox.email) as connection:
             folder = self._folder(connection, name)
             if folder is None:
@@ -193,24 +225,43 @@ class FolderDetailView(PostBoxView):
                 )
 
             connection.select(name)
-            uids = connection.search_uids(["ALL"])
-            if uids:
-                connection.move(uids, "INBOX")
+            if connection.search_uids(["ALL"]):
+                return Response({
+                    "code": "folder_not_empty",
+                    "detail": "Folder Contains Emails. Move all emails to Inbox or another folder first.",
+                }, status=409)
 
-            # Disable rules before deleting their target so Dovecot never has
-            # an active fileinto rule pointing at a mailbox that no longer
-            # exists.  Preserve the folder name in the rule so the user can
-            # see why it is disabled and retarget it later.
-            MailRule.objects.for_mailbox(self.mailbox).filter(
+            # Do not silently disable filters. Their owner should disable or
+            # retarget them first, which will sync the new script to Dovecot.
+            if MailRule.objects.for_mailbox(self.mailbox).filter(
                 action=MailRule.Action.MOVE,
                 action_folder=name,
-            ).update(enabled=False)
-            MessageMoveProvenance.objects.for_mailbox(self.mailbox).filter(
-                original_folder=name
-            ).update(original_folder="INBOX")
-            _sync_sieve(self.mailbox)
+                enabled=True,
+            ).exists():
+                return Response({
+                    "code": "folder_has_rules",
+                    "detail": "An active Mail Rule uses this folder. Disable or retarget it in Settings before deleting.",
+                }, status=409)
+
+            # An IMAP server may refuse STATUS or DELETE on the currently
+            # selected mailbox. Switch to INBOX before the final live count
+            # and deletion, then refuse if a message has arrived.
+            connection.select("INBOX")
+            # There is no atomic IMAP delete-if-empty primitive. Rechecking
+            # immediately beforehand narrows that unavoidable race.
+            count, _ = connection.folder_counts(name)
+            if count:
+                return Response({
+                    "code": "folder_not_empty",
+                    "detail": "Folder Contains Emails. Move all emails to Inbox or another folder first.",
+                }, status=409)
             connection.delete_folder(name)
 
+        # Safe cleanup AFTER the IMAP delete succeeds. No ManageSieve call is
+        # necessary: active rules targeting the folder were explicitly blocked.
+        MessageMoveProvenance.objects.for_mailbox(self.mailbox).filter(
+            original_folder=name,
+        ).update(original_folder="INBOX")
         FolderAppearance.objects.for_mailbox(self.mailbox).filter(name=name).delete()
         return Response(status=204)
 

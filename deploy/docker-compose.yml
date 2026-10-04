@@ -86,6 +86,8 @@ x-backend-env: &backend_env
   POSTBOX_IMAP_PORT: ${POSTBOX_IMAP_PORT:-993}
   POSTBOX_SIEVE_HOST: ${POSTBOX_SIEVE_HOST:-mx.matemail.online}
   POSTBOX_SIEVE_PORT: ${POSTBOX_SIEVE_PORT:-4190}
+  POSTBOX_SIEVE_STARTTLS: ${POSTBOX_SIEVE_STARTTLS:-True}
+  POSTBOX_SIEVE_TLS_SERVER_NAME: ${POSTBOX_SIEVE_TLS_SERVER_NAME:-mx.matemail.online}
   # The Dovecot master identity. A mailbox user still signs in with their own
   # password; this is how the server keeps reading that one mailbox afterwards
   # without MateMail storing what they typed. Required: every path that needs

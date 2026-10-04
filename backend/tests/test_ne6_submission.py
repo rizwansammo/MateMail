@@ -106,29 +106,29 @@ def test_the_private_path_is_not_reachable_from_outside():
     assert compose()["networks"]["matemail_engine_link"]["external"] is True
 
 
-def test_the_gateway_forwards_only_the_two_intended_ports():
+def test_the_gateway_forwards_only_the_three_authenticated_ports():
     """
     The gateway is the whole of MateMail's reach into the mail path, so what it
     listens on IS the security boundary.
 
-    Two listeners, deliberately:
+    Exactly three private listeners, deliberately:
 
-      587  submission, since NE6. MateMail's outbound mail.
-      993  IMAPS, since P11. PostBox reads the mail store through this rather
-           than Dovecot joining the link network — which would also have handed
-           the application LMTP on 24, where mail can be injected into any
-           mailbox WITHOUT AUTHENTICATION, and the doveadm API on 8080.
+      587  authenticated submission for outbound mail.
+      993  authenticated IMAPS for PostBox mailbox reading.
+     4190  authenticated ManageSieve for PostBox filters, requiring end-to-end
+           STARTTLS to Dovecot before any master credentials are transmitted.
 
-    Both upstreams authenticate every connection they accept. A third listener,
-    or either of these pointed somewhere else, fails here.
+    Dovecot must never join the link network: it would expose unauthenticated
+    LMTP on 24 and the administrative doveadm HTTP API on 8080.
+    Any fourth listener or wrong upstream is a security regression.
     """
     cfg = GATEWAY_CFG.read_text(encoding="utf-8")
 
     binds = sorted(re.findall(r"^\s*bind\s+:(\d+)", cfg, re.M))
-    assert binds == ["587", "993"], f"gateway listens on {binds}"
+    assert binds == ["4190", "587", "993"], f"gateway listens on {binds}"
 
     servers = sorted(re.findall(r"^\s*server\s+\S+\s+(\S+)", cfg, re.M))
-    assert servers == ["dovecot:993", "postfix:587"], f"gateway forwards to {servers}"
+    assert servers == ["dovecot:4190", "dovecot:993", "postfix:587"], f"gateway forwards to {servers}"
 
     # Neither upstream may be an engine port that does not authenticate.
     for forbidden, why in (

@@ -363,6 +363,7 @@ POSTBOX_IMAP_VERIFY = env.bool("POSTBOX_IMAP_VERIFY", default=True)
 POSTBOX_SIEVE_HOST = env("POSTBOX_SIEVE_HOST", default=POSTBOX_IMAP_HOST)
 POSTBOX_SIEVE_PORT = env.int("POSTBOX_SIEVE_PORT", default=4190)
 POSTBOX_SIEVE_STARTTLS = env.bool("POSTBOX_SIEVE_STARTTLS", default=False)
+POSTBOX_SIEVE_TLS_SERVER_NAME = env("POSTBOX_SIEVE_TLS_SERVER_NAME", default=POSTBOX_SIEVE_HOST)
 
 # The Dovecot master identity PostBox reads mailboxes with. A mailbox user
 # still signs in with their OWN password; this is how the server keeps reading

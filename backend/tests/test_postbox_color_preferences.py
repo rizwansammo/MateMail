@@ -185,6 +185,7 @@ class PostBoxAppearanceTest(TestCase):
             fake.list_folders.return_value = [
                 SimpleNamespace(name="Invoices", role="", selectable=True),
             ]
+            fake.folder_counts.return_value = (0, 0)
             deleted = self.client.delete("/api/postbox/folders/Invoices/")
             self.assertEqual(deleted.status_code, 204)
             self.assertFalse(FolderAppearance.objects.filter(

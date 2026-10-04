@@ -90,8 +90,9 @@ class MailboxScopedListView(PostBoxView):
     def post(self, request):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
-        instance = serializer.save(mailbox=self.mailbox)
-        self.after_change(instance)
+        with transaction.atomic():
+            instance = serializer.save(mailbox=self.mailbox)
+            self.after_change(instance)
         return Response(self.serializer_class(instance).data, status=201)
 
     def after_change(self, instance) -> None:
@@ -117,16 +118,18 @@ class MailboxScopedDetailView(PostBoxView):
             return Response({"detail": "Not found."}, status=404)
         serializer = self.serializer_class(instance, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        self.after_change(instance)
+        with transaction.atomic():
+            serializer.save()
+            self.after_change(instance)
         return Response(serializer.data)
 
     def delete(self, request, pk):
         instance = self.instance(pk)
         if instance is None:
             return Response({"detail": "Not found."}, status=404)
-        instance.delete()
-        self.after_change(None)
+        with transaction.atomic():
+            instance.delete()
+            self.after_change(None)
         return Response(status=204)
 
     def after_change(self, instance) -> None:
@@ -448,8 +451,9 @@ class VacationView(PostBoxView):
         responder, _ = VacationResponder.objects.get_or_create(mailbox=self.mailbox)
         serializer = VacationSerializer(responder, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        _sync_sieve(self.mailbox)
+        with transaction.atomic():
+            serializer.save()
+            _sync_sieve(self.mailbox)
         return Response(serializer.data)
 
 

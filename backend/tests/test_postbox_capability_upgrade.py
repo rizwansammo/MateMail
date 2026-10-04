@@ -333,7 +333,7 @@ class PostBoxCapabilityUpgradeTest(TestCase):
         self.assertEqual("Client Work", provenance.original_folder)
         sync.assert_called_once_with(self.alice)
 
-    def test_custom_folder_delete_moves_mail_to_inbox_and_disables_rules(self):
+    def test_custom_folder_delete_refuses_messages_without_disabling_rules(self):
         rule = MailRule.objects.create(
             mailbox=self.alice,
             name="Project rule",
@@ -366,15 +366,16 @@ class PostBoxCapabilityUpgradeTest(TestCase):
 
             response = self.api.delete("/api/postbox/folders/Projects/")
 
-        self.assertEqual(204, response.status_code)
-        connection.move.assert_called_once_with([4, 3], "INBOX")
-        connection.delete_folder.assert_called_once_with("Projects")
+        self.assertEqual(409, response.status_code)
+        self.assertEqual(response.data["code"], "folder_not_empty")
+        connection.move.assert_not_called()
+        connection.delete_folder.assert_not_called()
         rule.refresh_from_db()
         provenance.refresh_from_db()
-        self.assertFalse(rule.enabled)
+        self.assertTrue(rule.enabled)
         self.assertEqual("Projects", rule.action_folder)
-        self.assertEqual("INBOX", provenance.original_folder)
-        sync.assert_called_once_with(self.alice)
+        self.assertEqual("Projects", provenance.original_folder)
+        sync.assert_not_called()
 
 
     def test_trusted_remote_image_senders_can_be_listed_and_removed(self):
