@@ -70,7 +70,7 @@ class SafeFolderDeletionTest(TestCase):
         fake = self.imap_mock(count=2, uids=[7, 9])
         with mock.patch("apps.postbox.views_mail.imap.open_mailbox") as opened:
             opened.return_value.__enter__.return_value = fake
-            preview = self.client.post("/api/postbox/folders/delete-check/",
+            preview = self.client.post("/api/postbox/folder-delete-check/",
                                        {"name": "Finance"}, format="json")
             self.assertEqual(preview.status_code, 200, preview.data)
             self.assertEqual(preview.data["message_count"], 2)
@@ -85,7 +85,7 @@ class SafeFolderDeletionTest(TestCase):
         fake = self.imap_mock()
         with mock.patch("apps.postbox.views_mail.imap.open_mailbox") as opened:
             opened.return_value.__enter__.return_value = fake
-            before = self.client.post("/api/postbox/folders/delete-check/",
+            before = self.client.post("/api/postbox/folder-delete-check/",
                                       {"name": "Finance"}, format="json")
             self.assertTrue(before.data["can_delete"])
             fake.folder_counts.return_value = (1, 0)
@@ -99,7 +99,7 @@ class SafeFolderDeletionTest(TestCase):
         with mock.patch("apps.postbox.views_mail.imap.open_mailbox") as opened, \
              mock.patch("apps.postbox.views_settings._sync_sieve") as synced:
             opened.return_value.__enter__.return_value = fake
-            preview = self.client.post("/api/postbox/folders/delete-check/",
+            preview = self.client.post("/api/postbox/folder-delete-check/",
                                        {"name": "Finance"}, format="json")
             self.assertEqual(preview.data["active_rule_count"], 1)
             self.assertFalse(preview.data["can_delete"])
@@ -111,7 +111,7 @@ class SafeFolderDeletionTest(TestCase):
             fake.delete_folder.assert_not_called()
             synced.assert_not_called()
             # A different mailbox cannot see this user's active rules.
-            other = self.other.post("/api/postbox/folders/delete-check/",
+            other = self.other.post("/api/postbox/folder-delete-check/",
                                     {"name": "Finance"}, format="json")
             self.assertEqual(other.data["active_rule_count"], 0)
 
@@ -135,7 +135,7 @@ class SafeFolderDeletionTest(TestCase):
         fake = self.imap_mock()
         with mock.patch("apps.postbox.views_mail.imap.open_mailbox") as opened:
             opened.return_value.__enter__.return_value = fake
-            self.assertEqual(self.client.post("/api/postbox/folders/delete-check/",
+            self.assertEqual(self.client.post("/api/postbox/folder-delete-check/",
                 {"name": "INBOX"}, format="json").status_code, 400)
             self.assertEqual(self.client.delete("/api/postbox/folders/INBOX/").status_code, 400)
             fake.delete_folder.assert_not_called()
