@@ -335,6 +335,26 @@ class PushIngestTest(PushTestCase):
         )
         delay.assert_called_once_with(body["event_id"])
 
+    def test_mailbox_changes_wake_web_clients_without_becoming_mobile_push_rows(self):
+        with mock.patch("apps.postbox.views_push.realtime.publish") as publish, \
+             mock.patch.object(tasks.dispatch_push_event, "delay") as delay:
+            response, body = self.report(event="mailbox_changed")
+        self.assertEqual(202, response.status_code, response.data)
+        self.assertEqual(
+            {"accepted": True, "event_id": body["event_id"], "duplicate": False},
+            response.data,
+        )
+        self.assertFalse(PostBoxPushEvent.objects.exists())
+        delay.assert_not_called()
+        publish.assert_called_once_with(
+            self.alice,
+            event_id=body["event_id"],
+            kind="mailbox_changed",
+            folder="INBOX",
+            uid_validity=1790364354,
+            uid=7,
+        )
+
     def test_the_same_event_reported_twice_is_one_event(self):
         event_id = str(uuid.uuid4())
         with mock.patch.object(tasks.dispatch_push_event, "delay") as delay:
