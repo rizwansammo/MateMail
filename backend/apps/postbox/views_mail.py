@@ -243,9 +243,12 @@ class FolderDetailView(PostBoxView):
                     "detail": "An active Mail Rule uses this folder. Disable or retarget it in Settings before deleting.",
                 }, status=409)
 
-            # Catch a fresh arrival between the select and the delete. There is
-            # no atomic IMAP delete-if-empty primitive: rules may not target
-            # this folder and we recheck immediately before the operation.
+            # An IMAP server may refuse STATUS or DELETE on the currently
+            # selected mailbox. Switch to INBOX before the final live count
+            # and deletion, then refuse if a message has arrived.
+            connection.select("INBOX")
+            # There is no atomic IMAP delete-if-empty primitive. Rechecking
+            # immediately beforehand narrows that unavoidable race.
             count, _ = connection.folder_counts(name)
             if count:
                 return Response({
