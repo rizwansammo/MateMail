@@ -819,16 +819,110 @@ function SignatureEditor({
   );
 }
 
+type RuleCondition = MailRule["conditions"][number];
+type RuleAction = MailRule["actions"][number];
+type RuleDraft = Partial<MailRule> & {
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+};
+
+const RULE_FIELDS: Array<[RuleCondition["field"], string]> = [
+  ["from", "From address"],
+  ["sender_domain", "Sender domain"],
+  ["to", "To or Cc"],
+  ["subject", "Subject"],
+  ["mailing_list", "Mailing list (List-ID)"],
+  ["body", "Message body"],
+  ["message_size", "Message size"],
+  ["has_attachment", "Has attachment"],
+  ["attachment_name", "Attachment name"],
+];
+
+const TEXT_MATCHES: Array<[RuleCondition["match"], string]> = [
+  ["contains", "Contains"],
+  ["is", "Is exactly"],
+  ["not_contains", "Does not contain"],
+  ["not_is", "Is not exactly"],
+];
+
+function defaultCondition(field: RuleCondition["field"] = "from"): RuleCondition {
+  if (field === "message_size") return { field, match: "over", value: "1024" };
+  if (field === "has_attachment") return { field, match: "is", value: "yes" };
+  if (field === "body") return { field, match: "contains", value: "" };
+  return { field, match: "contains", value: "" };
+}
+
+function defaultAction(folder: string): RuleAction {
+  return { action: "move", folder };
+}
+
+function normalizeRuleConditions(rule: Partial<MailRule>): RuleCondition[] {
+  if (rule.conditions?.length) return rule.conditions.map((condition) => ({ ...condition }));
+  return [{
+    field: rule.field ?? "from",
+    match: rule.match ?? "contains",
+    value: rule.value ?? "",
+  }];
+}
+
+function normalizeRuleActions(rule: Partial<MailRule>, fallbackFolder = "INBOX"): RuleAction[] {
+  if (rule.actions?.length) return rule.actions.map((action) => ({ ...action }));
+  const action = rule.action ?? "move";
+  return [{
+    action,
+    ...(["move", "copy"].includes(action)
+      ? { folder: rule.action_folder || fallbackFolder }
+      : {}),
+  }];
+}
+
+function ruleFieldLabel(field: RuleCondition["field"]): string {
+  return RULE_FIELDS.find(([value]) => value === field)?.[1] ?? field;
+}
+
+function ruleMatchLabel(match: RuleCondition["match"]): string {
+  if (match === "not_contains") return "does not contain";
+  if (match === "not_is") return "is not exactly";
+  if (match === "over") return "is over";
+  if (match === "under") return "is under";
+  return match === "is" ? "is exactly" : "contains";
+}
+
+function ruleConditionLabel(condition: RuleCondition): string {
+  if (condition.field === "has_attachment") {
+    return condition.value === "no" ? "has no attachment" : "has an attachment";
+  }
+  if (condition.field === "message_size") {
+    return "message size " + ruleMatchLabel(condition.match) + " " + condition.value + " KB";
+  }
+  return ruleFieldLabel(condition.field) + " " + ruleMatchLabel(condition.match) + " “" + condition.value + "”";
+}
+
+function ruleActionLabel(action: RuleAction): string {
+  if (action.action === "move") return "move to " + action.folder;
+  if (action.action === "copy") return "copy to " + action.folder;
+  if (action.action === "archive") return "archive";
+  if (action.action === "mark_read") return "mark as read";
+  if (action.action === "mark_unread") return "mark as unread";
+  if (action.action === "star") return "star";
+  return "move to Trash";
+}
+
 function RulesSection() {
   const rules = useAsyncData(() => postbox.rules(), [], "Rules could not be loaded.");
   const folders = useAsyncData(() => postbox.folders(), [], "Folders could not be loaded.");
-  const [editing, setEditing] = useState<Partial<MailRule> | null>(null);
+  const [editing, setEditing] = useState<RuleDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const rows = useMemo(
     () => [...(rules.data?.results ?? [])].sort((a, b) => a.position - b.position),
     [rules.data],
   );
+
+  const defaultFolder =
+    (folders.data?.results ?? []).find(
+      (folder) => !["sent", "drafts", "scheduled", "junk", "trash"].includes(folder.role),
+    )?.name ?? "INBOX";
 
   const saveToggle = async (rule: MailRule, enabled: boolean) => {
     setError(null);
@@ -841,7 +935,7 @@ function RulesSection() {
   };
 
   const remove = async (rule: MailRule) => {
-    if (!window.confirm(`Delete “${rule.name}”? Existing messages will not be changed.`)) return;
+    if (!window.confirm("Delete “" + rule.name + "”? Existing messages will not be changed.")) return;
     setError(null);
     try {
       await postbox.deleteRule(rule.id);
@@ -878,12 +972,14 @@ function RulesSection() {
               name: "",
               position: rows.length ? Math.max(...rows.map((row) => row.position)) + 1 : 0,
               enabled: true,
+              condition_mode: "all",
+              conditions: [defaultCondition()],
+              actions: [defaultAction(defaultFolder)],
               field: "from",
               match: "contains",
               value: "",
               action: "move",
-              action_folder:
-                (folders.data?.results ?? []).find((folder) => !["sent", "drafts", "scheduled"].includes(folder.role))?.name ?? "INBOX",
+              action_folder: defaultFolder,
               stop_processing: false,
             })
           }
@@ -897,73 +993,90 @@ function RulesSection() {
         <SettingsLoading />
       ) : rows.length ? (
         <div className="pb-rule-list">
-          {rows.map((rule, index) => (
-            <article key={rule.id} className="pb-rule-card">
-              <div className="pb-rule-order">{index + 1}</div>
-              <div className="pb-rule-body">
-                <div className="pb-rule-title">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={rule.enabled}
-                      onChange={(event) => void saveToggle(rule, event.target.checked)}
-                    />
-                    <strong>{rule.name}</strong>
-                  </label>
-                  <span className={rule.enabled ? "enabled" : ""}>
-                    {rule.enabled ? "Enabled" : "Disabled"}
-                  </span>
+          {rows.map((rule, index) => {
+            const conditions = normalizeRuleConditions(rule);
+            const actions = normalizeRuleActions(rule);
+            return (
+              <article key={rule.id} className="pb-rule-card">
+                <div className="pb-rule-order">{index + 1}</div>
+                <div className="pb-rule-body">
+                  <div className="pb-rule-title">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        onChange={(event) => void saveToggle(rule, event.target.checked)}
+                      />
+                      <strong>{rule.name}</strong>
+                    </label>
+                    <span className={rule.enabled ? "enabled" : ""}>
+                      {rule.enabled ? "Enabled" : "Disabled"}
+                    </span>
+                  </div>
+                  <p>
+                    If{" "}
+                    <b>
+                      {conditions
+                        .map(ruleConditionLabel)
+                        .join(rule.condition_mode === "any" ? " OR " : " AND ")}
+                    </b>
+                  </p>
+                  <p>
+                    Then <b>{actions.map(ruleActionLabel).join(" · ")}</b>
+                    {rule.stop_processing ? " · stop processing later rules" : ""}
+                  </p>
+                  <div className="pb-rule-actions">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditing({
+                          ...rule,
+                          conditions: normalizeRuleConditions(rule),
+                          actions: normalizeRuleActions(rule, defaultFolder),
+                        })
+                      }
+                    >
+                      <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> Edit
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Move rule up"
+                      disabled={index === 0}
+                      onClick={() => void move(index, -1)}
+                    >
+                      <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Move rule down"
+                      disabled={index === rows.length - 1}
+                      onClick={() => void move(index, 1)}
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <button type="button" aria-label={"Delete " + rule.name} onClick={() => void remove(rule)}>
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
                 </div>
-                <p>
-                  If <b>{rule.field}</b> {rule.match === "is" ? "is exactly" : "contains"}{" "}
-                  <b>“{rule.value}”</b>
-                </p>
-                <p>
-                  Then <b>{ruleActionLabel(rule)}</b>
-                  {rule.stop_processing ? " · stop processing later rules" : ""}
-                </p>
-                <div className="pb-rule-actions">
-                  <button type="button" onClick={() => setEditing(rule)}>
-                    <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> Edit
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Move rule up"
-                    disabled={index === 0}
-                    onClick={() => void move(index, -1)}
-                  >
-                    <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Move rule down"
-                    disabled={index === rows.length - 1}
-                    onClick={() => void move(index, 1)}
-                  >
-                    <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                  <button type="button" aria-label={`Delete ${rule.name}`} onClick={() => void remove(rule)}>
-                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       ) : (
         <EmptyState
           title="A more organized inbox"
-          copy="Create a rule to move, star, mark as read, or delete matching incoming mail."
+          copy="Create server-side rules with multiple conditions and actions for new incoming mail."
         />
       )}
 
       <div className="pb-info-box">
         <ListFilter className="h-5 w-5" aria-hidden="true" />
         <div>
-          <strong>Rules apply to incoming mail</strong>
+          <strong>Rules apply to new incoming mail</strong>
           <p>
-            PostBox does not pretend to “apply to existing Inbox” because the backend does not
-            expose that operation. New messages are filtered by the real server-side Sieve rules.
+            Rules are executed by the mail server even when PostBox is closed. External forwarding
+            stays organization-managed in MateMail Hub for account-security and abuse protection.
           </p>
         </div>
       </div>
@@ -984,25 +1097,26 @@ function RulesSection() {
   );
 }
 
-function ruleActionLabel(rule: MailRule): string {
-  if (rule.action === "move") return `move to ${rule.action_folder}`;
-  if (rule.action === "mark_read") return "mark as read";
-  if (rule.action === "star") return "star";
-  return "move to Trash";
-}
-
 function RuleEditor({
   rule,
   folders,
   onClose,
   onSaved,
 }: {
-  rule: Partial<MailRule>;
+  rule: RuleDraft;
   folders: Folder[];
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const [form, setForm] = useState<Partial<MailRule>>({ ...rule });
+  const fallbackFolder =
+    folders.find((folder) => !["sent", "drafts", "scheduled", "junk", "trash"].includes(folder.role))?.name
+    ?? "INBOX";
+  const [form, setForm] = useState<RuleDraft>({
+    ...rule,
+    condition_mode: rule.condition_mode ?? "all",
+    conditions: normalizeRuleConditions(rule),
+    actions: normalizeRuleActions(rule, fallbackFolder),
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1010,23 +1124,84 @@ function RuleEditor({
     (folder) => !["sent", "drafts", "scheduled", "junk", "trash"].includes(folder.role),
   );
 
+  const updateCondition = (index: number, next: RuleCondition) => {
+    const conditions = [...form.conditions];
+    conditions[index] = next;
+    setForm({ ...form, conditions });
+  };
+
+  const changeConditionField = (index: number, field: RuleCondition["field"]) => {
+    const previous = form.conditions[index];
+    const next = defaultCondition(field);
+    if (!["message_size", "has_attachment"].includes(field)) {
+      next.value = previous?.value ?? "";
+    }
+    updateCondition(index, next);
+  };
+
+  const removeCondition = (index: number) => {
+    if (form.conditions.length <= 1) return;
+    setForm({ ...form, conditions: form.conditions.filter((_, item) => item !== index) });
+  };
+
+  const updateAction = (index: number, next: RuleAction) => {
+    const actions = [...form.actions];
+    actions[index] = next;
+    setForm({ ...form, actions });
+  };
+
+  const removeAction = (index: number) => {
+    if (form.actions.length <= 1) return;
+    setForm({ ...form, actions: form.actions.filter((_, item) => item !== index) });
+  };
+
   const save = async () => {
-    if (!form.name?.trim() || !form.value?.trim()) {
-      setError("Enter a rule name and a value to match.");
+    if (!form.name?.trim()) {
+      setError("Enter a rule name.");
       return;
     }
-    if (form.action === "move" && !form.action_folder) {
-      setError("Choose a destination folder.");
+    if (!form.conditions.length || form.conditions.some((condition) =>
+      condition.field !== "has_attachment" && !condition.value.trim()
+    )) {
+      setError("Complete every condition.");
       return;
     }
+    if (!form.actions.length || form.actions.some((action) =>
+      ["move", "copy"].includes(action.action) && !action.folder
+    )) {
+      setError("Complete every action.");
+      return;
+    }
+    const terminal = form.actions.filter((action) =>
+      ["move", "archive", "delete"].includes(action.action)
+    ).length;
+    if (terminal > 1) {
+      setError("Use only one final filing action: Move, Archive, or Move to Trash.");
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
-      const payload = {
+      const firstCondition = form.conditions[0];
+      const firstAction = form.actions[0];
+      const payload: Partial<MailRule> = {
         ...form,
         name: form.name.trim(),
-        value: form.value.trim(),
-        action_folder: form.action === "move" ? form.action_folder : "",
+        condition_mode: form.conditions.length > 1 ? (form.condition_mode ?? "all") : "all",
+        conditions: form.conditions.map((condition) => ({
+          ...condition,
+          value: condition.value.trim(),
+        })),
+        actions: form.actions.map((action) => ({
+          action: action.action,
+          ...(action.folder ? { folder: action.folder } : {}),
+        })),
+        field: firstCondition.field,
+        match: firstCondition.match,
+        value: firstCondition.value.trim(),
+        action: firstAction.action,
+        action_folder: firstAction.folder ?? "",
       };
       if (form.id) await postbox.updateRule(form.id, payload);
       else await postbox.createRule(payload);
@@ -1047,60 +1222,187 @@ function RuleEditor({
           autoFocus
         />
       </Field>
-      <h3 className="pb-form-subheading">When an incoming message matches</h3>
-      <div className="pb-form-grid">
-        <Field label="Field">
+
+      <div className="pb-rule-editor-heading">
+        <div>
+          <h3 className="pb-form-subheading">When an incoming message matches</h3>
+          <p className="pb-subtle">Use up to 8 conditions. The server evaluates them before delivery.</p>
+        </div>
+        {form.conditions.length > 1 && (
           <select
-            value={form.field}
-            onChange={(event) => setForm({ ...form, field: event.target.value as MailRule["field"] })}
+            aria-label="Condition mode"
+            value={form.condition_mode ?? "all"}
+            onChange={(event) =>
+              setForm({ ...form, condition_mode: event.target.value as "all" | "any" })
+            }
           >
-            <option value="from">From</option>
-            <option value="to">To or Cc</option>
-            <option value="subject">Subject</option>
+            <option value="all">Match ALL conditions</option>
+            <option value="any">Match ANY condition</option>
           </select>
-        </Field>
-        <Field label="Matching">
-          <select
-            value={form.match}
-            onChange={(event) => setForm({ ...form, match: event.target.value as MailRule["match"] })}
-          >
-            <option value="contains">Contains</option>
-            <option value="is">Is exactly</option>
-          </select>
-        </Field>
-      </div>
-      <Field label="Value">
-        <input
-          value={form.value ?? ""}
-          onChange={(event) => setForm({ ...form, value: event.target.value })}
-        />
-      </Field>
-      <h3 className="pb-form-subheading">Do this</h3>
-      <div className="pb-form-grid">
-        <Field label="Action">
-          <select
-            value={form.action}
-            onChange={(event) => setForm({ ...form, action: event.target.value as MailRule["action"] })}
-          >
-            <option value="move">Move to folder</option>
-            <option value="star">Star</option>
-            <option value="mark_read">Mark as read</option>
-            <option value="delete">Move to Trash</option>
-          </select>
-        </Field>
-        {form.action === "move" && (
-          <Field label="Destination">
-            <select
-              value={form.action_folder}
-              onChange={(event) => setForm({ ...form, action_folder: event.target.value })}
-            >
-              {destinations.map((folder) => (
-                <option key={folder.name} value={folder.name}>{folder.name}</option>
-              ))}
-            </select>
-          </Field>
         )}
       </div>
+
+      <div className="pb-rule-editor-stack">
+        {form.conditions.map((condition, index) => {
+          const isSize = condition.field === "message_size";
+          const isAttachment = condition.field === "has_attachment";
+          const isBody = condition.field === "body";
+          const matches = isSize
+            ? ([["over", "Is over"], ["under", "Is under"]] as Array<[RuleCondition["match"], string]>)
+            : isBody
+              ? TEXT_MATCHES.filter(([value]) => ["contains", "not_contains"].includes(value))
+              : TEXT_MATCHES;
+          return (
+            <div className="pb-rule-editor-row" key={"condition-" + index}>
+              <span className="pb-rule-editor-index">{index + 1}</span>
+              <Field label="Field">
+                <select
+                  value={condition.field}
+                  onChange={(event) =>
+                    changeConditionField(index, event.target.value as RuleCondition["field"])
+                  }
+                >
+                  {RULE_FIELDS.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </Field>
+
+              {isAttachment ? (
+                <Field label="State">
+                  <select
+                    value={condition.value}
+                    onChange={(event) =>
+                      updateCondition(index, { ...condition, match: "is", value: event.target.value })
+                    }
+                  >
+                    <option value="yes">Has an attachment</option>
+                    <option value="no">Has no attachment</option>
+                  </select>
+                </Field>
+              ) : (
+                <>
+                  <Field label="Matching">
+                    <select
+                      value={condition.match}
+                      onChange={(event) =>
+                        updateCondition(index, {
+                          ...condition,
+                          match: event.target.value as RuleCondition["match"],
+                        })
+                      }
+                    >
+                      {matches.map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label={isSize ? "Size (KB)" : "Value"}>
+                    <input
+                      type={isSize ? "number" : "text"}
+                      min={isSize ? 1 : undefined}
+                      value={condition.value}
+                      placeholder={
+                        condition.field === "sender_domain" ? "example.com"
+                          : condition.field === "attachment_name" ? ".pdf or invoice"
+                            : condition.field === "mailing_list" ? "list.example.com"
+                              : undefined
+                      }
+                      onChange={(event) =>
+                        updateCondition(index, { ...condition, value: event.target.value })
+                      }
+                    />
+                  </Field>
+                </>
+              )}
+              <button
+                type="button"
+                className="pb-rule-editor-remove"
+                aria-label={"Remove condition " + (index + 1)}
+                disabled={form.conditions.length === 1}
+                onClick={() => removeCondition(index)}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        className="pb-settings-secondary pb-rule-editor-add"
+        disabled={form.conditions.length >= 8}
+        onClick={() => setForm({ ...form, conditions: [...form.conditions, defaultCondition()] })}
+      >
+        <Plus className="h-4 w-4" aria-hidden="true" /> Add condition
+      </button>
+
+      <div className="pb-rule-editor-heading">
+        <div>
+          <h3 className="pb-form-subheading">Do this</h3>
+          <p className="pb-subtle">Combine up to 8 safe server-side actions.</p>
+        </div>
+      </div>
+
+      <div className="pb-rule-editor-stack">
+        {form.actions.map((action, index) => (
+          <div className="pb-rule-editor-row pb-rule-action-row" key={"action-" + index}>
+            <span className="pb-rule-editor-index">{index + 1}</span>
+            <Field label="Action">
+              <select
+                value={action.action}
+                onChange={(event) => {
+                  const kind = event.target.value as RuleAction["action"];
+                  updateAction(index, {
+                    action: kind,
+                    ...(["move", "copy"].includes(kind) ? { folder: fallbackFolder } : {}),
+                  });
+                }}
+              >
+                <option value="move">Move to folder</option>
+                <option value="copy">Copy to folder</option>
+                <option value="archive">Archive</option>
+                <option value="star">Star</option>
+                <option value="mark_read">Mark as read</option>
+                <option value="mark_unread">Mark as unread</option>
+                <option value="delete">Move to Trash</option>
+              </select>
+            </Field>
+            {["move", "copy"].includes(action.action) && (
+              <Field label="Destination">
+                <select
+                  value={action.folder ?? fallbackFolder}
+                  onChange={(event) => updateAction(index, { ...action, folder: event.target.value })}
+                >
+                  {destinations.map((folder) => (
+                    <option key={folder.name} value={folder.name}>{folder.name}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            <button
+              type="button"
+              className="pb-rule-editor-remove"
+              aria-label={"Remove action " + (index + 1)}
+              disabled={form.actions.length === 1}
+              onClick={() => removeAction(index)}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        className="pb-settings-secondary pb-rule-editor-add"
+        disabled={form.actions.length >= 8}
+        onClick={() => setForm({ ...form, actions: [...form.actions, { action: "star" }] })}
+      >
+        <Plus className="h-4 w-4" aria-hidden="true" /> Add action
+      </button>
+
       <ToggleForm
         label="Enable this rule"
         checked={form.enabled ?? true}
@@ -1108,10 +1410,11 @@ function RuleEditor({
       />
       <ToggleForm
         label="Stop processing additional rules"
-        description="Skip later rules after this one matches."
+        description="Skip later rules after this rule matches."
         checked={form.stop_processing ?? false}
         onChange={(stop_processing) => setForm({ ...form, stop_processing })}
       />
+
       <InlineError message={error} />
       <div className="pb-modal-footer">
         <button type="button" className="pb-settings-secondary" onClick={onClose}>Cancel</button>

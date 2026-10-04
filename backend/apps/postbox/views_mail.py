@@ -134,9 +134,11 @@ class FolderDeleteCheckView(PostBoxView):
             # This is for the warning UI; DELETE independently rechecks.
             count, _ = connection.folder_counts(name)
 
-        active_rules = MailRule.objects.for_mailbox(self.mailbox).filter(
-            action=MailRule.Action.MOVE, action_folder=name, enabled=True,
-        ).count()
+        active_rules = sum(
+            1
+            for rule in MailRule.objects.for_mailbox(self.mailbox).filter(enabled=True)
+            if rule.references_folder(name)
+        )
         return Response({
             "name": name,
             "message_count": count,
@@ -186,9 +188,9 @@ class FolderDetailView(PostBoxView):
                 connection.rename_folder(name, new_name)
 
         if new_name != name:
-            MailRule.objects.for_mailbox(self.mailbox).filter(
-                action=MailRule.Action.MOVE, action_folder=name
-            ).update(action_folder=new_name)
+            for rule in MailRule.objects.for_mailbox(self.mailbox):
+                if rule.retarget_folder(name, new_name):
+                    rule.save(update_fields=["actions", "action", "action_folder", "updated_at"])
             MessageMoveProvenance.objects.for_mailbox(self.mailbox).filter(
                 original_folder=name
             ).update(original_folder=new_name)
@@ -233,11 +235,10 @@ class FolderDetailView(PostBoxView):
 
             # Do not silently disable filters. Their owner should disable or
             # retarget them first, which will sync the new script to Dovecot.
-            if MailRule.objects.for_mailbox(self.mailbox).filter(
-                action=MailRule.Action.MOVE,
-                action_folder=name,
-                enabled=True,
-            ).exists():
+            if any(
+                rule.references_folder(name)
+                for rule in MailRule.objects.for_mailbox(self.mailbox).filter(enabled=True)
+            ):
                 return Response({
                     "code": "folder_has_rules",
                     "detail": "An active Mail Rule uses this folder. Disable or retarget it in Settings before deleting.",

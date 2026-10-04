@@ -4779,6 +4779,87 @@ body {
   gap:5px;
   padding:0 7px;
 }
+.pb-premium-shell .pb-rule-editor-heading {
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:14px;
+  margin-top:18px;
+}
+.pb-premium-shell .pb-rule-editor-heading .pb-form-subheading {
+  margin-bottom:3px;
+}
+.pb-premium-shell .pb-rule-editor-heading select {
+  width:auto;
+  min-width:170px;
+}
+.pb-premium-shell .pb-rule-editor-stack {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:9px;
+}
+.pb-premium-shell .pb-rule-editor-row {
+  display:grid;
+  grid-template-columns:28px minmax(130px,1fr) minmax(130px,1fr) minmax(150px,1.2fr) 34px;
+  align-items:end;
+  gap:8px;
+  padding:10px;
+  border:1px solid var(--pb-border);
+  border-radius:9px;
+  background:var(--pb-bg);
+}
+.pb-premium-shell .pb-rule-action-row {
+  grid-template-columns:28px minmax(190px,1fr) minmax(190px,1fr) 34px;
+}
+.pb-premium-shell .pb-rule-editor-index {
+  display:inline-flex;
+  width:24px;
+  height:24px;
+  align-items:center;
+  justify-content:center;
+  align-self:center;
+  border-radius:999px;
+  background:var(--pb-accent);
+  color:var(--pb-primary);
+  font-size:10px;
+  font-weight:700;
+}
+.pb-premium-shell .pb-rule-editor-remove {
+  width:32px;
+  height:32px;
+  align-self:end;
+  border:1px solid var(--pb-border);
+  border-radius:7px;
+  background:var(--pb-surface);
+  color:var(--pb-muted);
+}
+.pb-premium-shell .pb-rule-editor-remove:hover:not(:disabled) {
+  color:var(--pb-danger);
+  border-color:var(--pb-danger);
+}
+.pb-premium-shell .pb-rule-editor-remove:disabled { opacity:.35; cursor:not-allowed; }
+.pb-premium-shell .pb-rule-editor-add {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin-top:8px;
+}
+@media (max-width: 820px) {
+  .pb-premium-shell .pb-rule-editor-row,
+  .pb-premium-shell .pb-rule-action-row {
+    grid-template-columns:26px 1fr;
+    align-items:end;
+  }
+  .pb-premium-shell .pb-rule-editor-row > .pb-settings-field,
+  .pb-premium-shell .pb-rule-editor-remove {
+    grid-column:2;
+  }
+  .pb-premium-shell .pb-rule-editor-heading {
+    align-items:flex-start;
+    flex-direction:column;
+  }
+}
 .pb-premium-shell .pb-forward-status {
   display:flex;
   align-items:center;

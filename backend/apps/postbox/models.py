@@ -375,6 +375,43 @@ class MailSignature(models.Model):
             ),
         ]
 
+    def normalized_conditions(self) -> list[dict]:
+        if isinstance(self.conditions, list) and self.conditions:
+            return [item for item in self.conditions if isinstance(item, dict)]
+        return [{"field": self.field, "match": self.match, "value": self.value}]
+
+    def normalized_actions(self) -> list[dict]:
+        if isinstance(self.actions, list) and self.actions:
+            return [item for item in self.actions if isinstance(item, dict)]
+        item = {"action": self.action}
+        if self.action_folder:
+            item["folder"] = self.action_folder
+        return [item]
+
+    def references_folder(self, name: str) -> bool:
+        return any(
+            item.get("action") in {self.Action.MOVE, self.Action.COPY}
+            and item.get("folder") == name
+            for item in self.normalized_actions()
+        )
+
+    def retarget_folder(self, old_name: str, new_name: str) -> bool:
+        changed = False
+        updated = []
+        for item in self.normalized_actions():
+            item = dict(item)
+            if item.get("action") in {self.Action.MOVE, self.Action.COPY} and item.get("folder") == old_name:
+                item["folder"] = new_name
+                changed = True
+            updated.append(item)
+        if not changed:
+            return False
+        self.actions = updated
+        first = updated[0]
+        self.action = first.get("action", self.action)
+        self.action_folder = first.get("folder", "") if self.action in {self.Action.MOVE, self.Action.COPY} else ""
+        return True
+
     def __str__(self):
         return f"{self.name} ({self.mailbox_id})"
 
@@ -436,16 +473,33 @@ class MailRule(models.Model):
         FROM = "from", "From"
         TO = "to", "To or Cc"
         SUBJECT = "subject", "Subject"
+        SENDER_DOMAIN = "sender_domain", "Sender domain"
+        MAILING_LIST = "mailing_list", "Mailing list"
+        BODY = "body", "Message body"
+        MESSAGE_SIZE = "message_size", "Message size"
+        HAS_ATTACHMENT = "has_attachment", "Has attachment"
+        ATTACHMENT_NAME = "attachment_name", "Attachment name"
 
     class Match(models.TextChoices):
         CONTAINS = "contains", "contains"
         IS = "is", "is exactly"
+        NOT_CONTAINS = "not_contains", "does not contain"
+        NOT_IS = "not_is", "is not exactly"
+        OVER = "over", "is over"
+        UNDER = "under", "is under"
 
     class Action(models.TextChoices):
         MOVE = "move", "Move to folder"
+        COPY = "copy", "Copy to folder"
+        ARCHIVE = "archive", "Archive"
         STAR = "star", "Star"
         MARK_READ = "mark_read", "Mark as read"
+        MARK_UNREAD = "mark_unread", "Mark as unread"
         DELETE = "delete", "Move to Trash"
+
+    class ConditionMode(models.TextChoices):
+        ALL = "all", "Match all conditions"
+        ANY = "any", "Match any condition"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     mailbox = models.ForeignKey(
@@ -456,11 +510,23 @@ class MailRule(models.Model):
     position = models.PositiveSmallIntegerField(default=0)
     enabled = models.BooleanField(default=True)
 
+    # Legacy/primary condition fields are retained for backwards-compatible
+    # clients and are mirrored from the first structured condition.
     field = models.CharField(max_length=16, choices=Field.choices)
     match = models.CharField(max_length=16, choices=Match.choices, default=Match.CONTAINS)
     value = models.CharField(max_length=300)
 
+    condition_mode = models.CharField(
+        max_length=3, choices=ConditionMode.choices, default=ConditionMode.ALL,
+    )
+    # Structured, bounded data only. Raw Sieve is never accepted.
+    # [{"field": "from", "match": "is", "value": "person@example.com"}, ...]
+    conditions = models.JSONField(default=list, blank=True)
+
+    # Legacy/primary action mirrors the first structured action.
     action = models.CharField(max_length=16, choices=Action.choices)
+    # [{"action": "star"}, {"action": "move", "folder": "Finance"}, ...]
+    actions = models.JSONField(default=list, blank=True)
     #: Only meaningful for MOVE. Validated against the mailbox's real folder
     #: list before compilation — a rule naming a folder that does not exist is
     #: mail silently going nowhere.
@@ -478,6 +544,51 @@ class MailRule(models.Model):
         db_table = "postbox_rule"
         ordering = ["position", "created_at"]
         indexes = [models.Index(fields=["mailbox", "position"])]
+
+    def normalized_conditions(self) -> list[dict]:
+        if isinstance(self.conditions, list) and self.conditions:
+            return [item for item in self.conditions if isinstance(item, dict)]
+        return [{"field": self.field, "match": self.match, "value": self.value}]
+
+    def normalized_actions(self) -> list[dict]:
+        if isinstance(self.actions, list) and self.actions:
+            return [item for item in self.actions if isinstance(item, dict)]
+        item = {"action": self.action}
+        if self.action_folder:
+            item["folder"] = self.action_folder
+        return [item]
+
+    def references_folder(self, name: str) -> bool:
+        return any(
+            item.get("action") in {self.Action.MOVE, self.Action.COPY}
+            and item.get("folder") == name
+            for item in self.normalized_actions()
+        )
+
+    def retarget_folder(self, old_name: str, new_name: str) -> bool:
+        changed = False
+        updated = []
+        for item in self.normalized_actions():
+            item = dict(item)
+            if (
+                item.get("action") in {self.Action.MOVE, self.Action.COPY}
+                and item.get("folder") == old_name
+            ):
+                item["folder"] = new_name
+                changed = True
+            updated.append(item)
+        if not changed:
+            return False
+
+        self.actions = updated
+        first = updated[0]
+        self.action = first.get("action", self.action)
+        self.action_folder = (
+            first.get("folder", "")
+            if self.action in {self.Action.MOVE, self.Action.COPY}
+            else ""
+        )
+        return True
 
     def __str__(self):
         return f"{self.name} ({self.mailbox_id})"
