@@ -940,6 +940,11 @@ def _all_sent_origin(mailbox, summaries) -> bool:
     return len(_sent_origin_keys(mailbox, summaries)) == len(summaries)
 
 
+def _any_sent_origin(mailbox, summaries) -> bool:
+    summaries = list(summaries)
+    return bool(summaries and _sent_origin_keys(mailbox, summaries))
+
+
 def _clear_message_origins(mailbox, summaries) -> None:
     keys = [_message_origin_key(summary) for summary in summaries]
     if keys:
@@ -1037,15 +1042,24 @@ class MessageActionView(PostBoxView):
             junk = roles.get("junk", "Junk")
 
             # Sent is not an inbox. Read/unread, Archive and Spam make sense for
-            # received mail but are misleading for outgoing mail. Enforce this
-            # server-side as well as hiding the controls in PostBox.
-            if source_role == "sent" and action in {
+            # received mail but are misleading for outgoing mail. The same
+            # semantic protection follows a sent message into a custom archive
+            # folder via MessageOrigin.
+            blocked_for_sent = {
                 "read", "unread", "archive", "spam", "not-spam", "restore",
-            }:
-                return Response(
-                    {"detail": "That action is not available for Sent messages."},
-                    status=400,
-                )
+            }
+            if action in blocked_for_sent:
+                sent_semantic = source_role == "sent"
+                if not sent_semantic and source_role == "":
+                    sent_semantic = _any_sent_origin(
+                        self.mailbox,
+                        connection.fetch_summaries(uids),
+                    )
+                if sent_semantic:
+                    return Response(
+                        {"detail": "That action is not available for Sent messages."},
+                        status=400,
+                    )
 
             if action == "read":
                 connection.mark_seen(uids, True)
@@ -1101,26 +1115,36 @@ class MessageActionView(PostBoxView):
                     )
 
                 summaries = connection.fetch_summaries(uids)
+                origin_keys = _sent_origin_keys(self.mailbox, summaries)
+                has_sent_origin = bool(origin_keys)
+                all_sent_origin = len(origin_keys) == len(summaries) if summaries else False
+                sent_semantic = source_role == "sent" or has_sent_origin
 
-                if source_role == "sent":
-                    # Sent may be filed only into an ordinary user-created
-                    # folder. Inbox/Archive/Spam/Drafts/Scheduled are semantic
-                    # system folders; Trash has its own explicit action.
-                    if destination_info.role:
+                if sent_semantic:
+                    # Sent may live in Sent itself or in an ordinary user-created
+                    # archive folder. It must never become Inbox/Archive/Spam/
+                    # Drafts/Scheduled simply because it was filed elsewhere.
+                    if destination_info.role and destination_info.role != "sent":
                         return Response(
-                            {"detail": "Sent messages can only be moved to a custom folder."},
+                            {"detail": "Sent messages can only be moved to a custom folder or back to Sent."},
                             status=400,
                         )
-                    _record_sent_origin(self.mailbox, summaries)
-                elif destination_info.role == "sent":
-                    # Never let an inbound message become a Sent message merely
-                    # because a client asked for that destination. Only messages
-                    # PostBox previously moved out of Sent have this marker.
-                    if not _all_sent_origin(self.mailbox, summaries):
+                    if destination_info.role == "sent" and not (
+                        source_role == "sent" or all_sent_origin
+                    ):
                         return Response(
                             {"detail": "Only messages originally filed in Sent can be moved back to Sent."},
                             status=400,
                         )
+                    if source_role == "sent":
+                        _record_sent_origin(self.mailbox, summaries)
+                elif destination_info.role == "sent":
+                    # Never let an inbound message become a Sent message merely
+                    # because a client asked for that destination.
+                    return Response(
+                        {"detail": "Only messages originally filed in Sent can be moved back to Sent."},
+                        status=400,
+                    )
 
                 connection.move(uids, destination)
 
