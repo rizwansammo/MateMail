@@ -193,7 +193,8 @@ class ManageSieveStartTlsTest(SimpleTestCase):
         with mock.patch("apps.postbox.sieve.socket.create_connection", return_value=plain):
             with self.assertRaises(sieve.SieveError):
                 sieve.install_script("alice@example.test", "keep;")
-        self.assertEqual(plain.writes, [b"STARTTLS\r\n"])
+        self.assertEqual(plain.writes[0], b"STARTTLS\r\n")
+        self.assertFalse(any(b"AUTHENTICATE" in write for write in plain.writes))
 
     @override_settings(POSTBOX_SIEVE_STARTTLS=False)
     def test_production_refuses_plaintext_master_authentication(self):
