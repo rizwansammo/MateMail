@@ -40,7 +40,7 @@ class PreferenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = PostBoxPreference
         fields = [
-            "theme", "density", "reading_pane",
+            "theme", "density", "reading_pane", "list_view", "reader_view",
             "load_remote_images", "messages_per_page", "timezone_name",
             "notify_in_app", "notify_sound", "default_identity",
         ]

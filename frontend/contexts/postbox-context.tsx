@@ -33,6 +33,8 @@ const DEFAULT_PREFERENCES: Preferences = {
   theme: "system",
   density: "comfortable",
   reading_pane: "right",
+  list_view: "conversations",
+  reader_view: "thread",
   load_remote_images: false,
   messages_per_page: 50,
   timezone_name: "UTC",

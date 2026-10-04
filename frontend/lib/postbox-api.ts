@@ -129,6 +129,8 @@ export interface Preferences {
   theme: "light" | "dark" | "system";
   density: "comfortable" | "compact";
   reading_pane: "right" | "bottom" | "off";
+  list_view: "conversations" | "messages";
+  reader_view: "thread" | "single";
   load_remote_images: boolean;
   messages_per_page: number;
   timezone_name: string;
@@ -509,6 +511,10 @@ export const postbox = {
       method: "DELETE",
       body: JSON.stringify({ sender }),
     }),
+  headers: (folder: string, uid: number, uidValidity: number) =>
+    request<{ headers: string }>(
+      `/messages/${encodeFolder(folder)}/${uid}/headers/${qs({ uid_validity: uidValidity })}`,
+    ),
   rawUrl: (folder: string, uid: number, uidValidity?: number) =>
     `${BASE}/messages/${encodeFolder(folder)}/${uid}/raw/${qs({ uid_validity: uidValidity })}`,
   attachmentUrl: (folder: string, uid: number, partId: string, uidValidity?: number) =>

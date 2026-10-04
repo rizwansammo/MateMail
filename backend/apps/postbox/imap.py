@@ -530,6 +530,16 @@ class MailboxConnection:
         # Returned in the order asked for, which is the order the caller paged.
         return [summaries[u] for u in uids if u in summaries]
 
+    def fetch_headers(self, uid: int) -> bytes:
+        """Fetch original RFC 5322 header bytes only, without the MIME body."""
+        status, data = self._imap.uid("FETCH", str(uid), "(BODY.PEEK[HEADER])")
+        if status != "OK" or not data:
+            raise MailAccessError("That message could not be read.", f"FETCH headers -> {status}")
+        for part in data:
+            if isinstance(part, tuple) and len(part) > 1 and isinstance(part[1], bytes):
+                return part[1]
+        raise MailAccessError("That message could not be read.", "FETCH headers -> no literal")
+
     def fetch_raw(self, uid: int) -> bytes:
         status, data = self._imap.uid("FETCH", str(uid), "(BODY.PEEK[])")
         if status != "OK" or not data or not data[0]:

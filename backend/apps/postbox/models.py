@@ -175,6 +175,15 @@ class PostBoxPreference(models.Model):
     reading_pane = models.CharField(
         max_length=8, choices=ReadingPane.choices, default=ReadingPane.RIGHT
     )
+    # Mailbox-wide choices; list grouping and the opened reader are independent.
+    list_view = models.CharField(
+        max_length=13, choices=[("conversations", "Conversations"), ("messages", "Messages")],
+        default="conversations",
+    )
+    reader_view = models.CharField(
+        max_length=6, choices=[("thread", "Conversation"), ("single", "Single message")],
+        default="thread",
+    )
     #: Blocked by default. A remote image in an email is a tracking pixel until
     #: proven otherwise, and loading one tells the sender the address is live
     #: and reveals the reader's IP.

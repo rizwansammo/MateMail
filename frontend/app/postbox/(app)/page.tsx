@@ -47,6 +47,7 @@ import {
 
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
 import { ConversationReader } from "@/components/postbox/conversation-reader";
+import { MessageHeaders } from "@/components/postbox/message-headers";
 import { resolveInlineImageReferences } from "@/lib/postbox-inline-images";
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
@@ -88,10 +89,15 @@ function CentredSpinner() {
 function Mailbox() {
   const router = useRouter();
   const params = useSearchParams();
-  const { preferences } = usePostBox();
+  const { preferences, updatePreferences } = usePostBox();
 
   const folder = params.get("folder") || "INBOX";
   const labelId = params.get("label");
+  // Backwards-compatible ?view= links can override the saved list preference.
+  // The opened reader has an independent mailbox-level choice.
+  const urlListView = params.get("view");
+  const listView = urlListView === "messages" || urlListView === "conversations"
+    ? urlListView : preferences.list_view;
   const starredOnly = params.get("starred") === "true";
   const requestedFilter = params.get("filter");
   const filterMode: "all" | "unread" | "starred" =
@@ -124,7 +130,7 @@ function Mailbox() {
   // One key for "which list am I looking at". Paging and selection both reset
   // when it changes, and both derive that from the key rather than having an
   // effect write it — a reset is a consequence of the key, not an event.
-  const listKey = `${folder}|${labelId || ""}|${search}|${filterMode}|${searchScope}|${sortMode}|${params.get("view") || "conversations"}`;
+  const listKey = `${folder}|${labelId || ""}|${search}|${filterMode}|${searchScope}|${sortMode}|${listView}`;
 
   const [pageState, setPageState] = useState({ key: listKey, page: 1 });
   const pageNumber = pageState.key === listKey ? pageState.page : 1;
@@ -152,7 +158,6 @@ function Mailbox() {
   );
   const [detail, setDetail] = useState<MessageDetail | null>(null);
   const [thread, setThread] = useState<ConversationDetail | null>(null);
-  const [showSingle, setShowSingle] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showRemote, setShowRemote] = useState(false);
   const openRequestId = useRef(0);
@@ -170,7 +175,6 @@ function Mailbox() {
       openRequestId.current += 1;
       setDetail(null);
       setThread(null);
-      setShowSingle(false);
       setShowRemote(false);
     };
     window.addEventListener("postbox:return-to-list", returnToList);
@@ -274,7 +278,7 @@ function Mailbox() {
       mailFolders.some((item) => item.name === folder && item.role === "inbox")) &&
     !labelId && !search && !unreadOnly && !filteredStarredOnly &&
     sortMode === "newest" && searchScope === "folder";
-  const conversationMode = conversationEligible && params.get("view") !== "messages";
+  const conversationMode = conversationEligible && listView === "conversations";
   const conversations = useAsyncData<ConversationPage>(
     () => conversationMode
       ? postbox.conversations({ scope: "inbox", page: pageNumber, page_size: Math.min(100, preferences.messages_per_page || 25) })
@@ -349,8 +353,7 @@ function Mailbox() {
       setDetailLoading(true);
       if (!remote) {
         setThread(null);
-        setShowSingle(false);
-      }
+        }
       setShowRemote(remote);
       try {
         const data = await postbox.message(summary.folder, summary.uid, remote, summary.uid_validity);
@@ -638,11 +641,26 @@ function Mailbox() {
       setNotice("Save or close your inline reply before changing views.");
       return;
     }
-    const next = new URLSearchParams(params.toString());
-    if (mode === "messages") next.set("view", "messages");
-    else next.delete("view");
+    // Do not touch reader_view: a Message list can open a full Conversation.
     setSelected(new Set());
-    router.push("/postbox?" + next.toString());
+    const next = new URLSearchParams(params.toString());
+    next.delete("view"); // migrate URL-only choice to saved mailbox preference
+    void updatePreferences({ list_view: mode }).then(() => {
+      router.replace(next.toString() ? "/postbox?" + next.toString() : "/postbox");
+    }).catch((error) => {
+      setNotice(describePostBoxError(error, "Could not save your mailbox list preference."));
+    });
+  };
+
+  const changeReaderView = (mode: "thread" | "single") => {
+    if (threadInlineActive.current) {
+      setNotice("Save or close your inline reply before changing views.");
+      return;
+    }
+    // Opened-message choice never changes the surrounding mailbox list.
+    void updatePreferences({ reader_view: mode }).catch((error) => {
+      setNotice(describePostBoxError(error, "Could not save your message view preference."));
+    });
   };
 
   const applyFilter = (nextFilter: "all" | "unread" | "starred") => {
@@ -1113,7 +1131,7 @@ function Mailbox() {
               title="No message selected"
               detail="Choose a message to read it here."
             />
-          ) : thread && !showSingle ? (
+          ) : thread && preferences.reader_view === "thread" ? (
             <ConversationReader
               key={thread.id + ":" + detail.folder + ":" + detail.uid}
               conversation={thread}
@@ -1131,10 +1149,9 @@ function Mailbox() {
               onBack={() => {
                 openRequestId.current += 1;
                 setThread(null);
-                setShowSingle(false);
-                setDetail(null);
+                          setDetail(null);
               }}
-              onSingle={() => setShowSingle(true)}
+              onSingle={() => changeReaderView("single")}
               onInlineChange={reportInlineState}
               onChanged={refreshConversation}
               onNotice={setNotice}
@@ -1153,10 +1170,9 @@ function Mailbox() {
               onBack={() => {
                 openRequestId.current += 1;
                 setThread(null);
-                setShowSingle(false);
-                setDetail(null);
+                          setDetail(null);
               }}
-              onThread={thread && showSingle ? () => setShowSingle(false) : undefined}
+              onThread={thread && preferences.reader_view === "single" ? () => changeReaderView("thread") : undefined}
               onLoadRemote={() =>
                 void openMessage(
                   { ...detail, seen: true } as unknown as MessageSummary,
@@ -1356,6 +1372,10 @@ function Reader({
             </details>
           </div>
           <time>{formatMessageDate(detail.date)}</time>
+        </div>
+        <div className="pb-single-source-actions">
+          <MessageHeaders key={detail.folder + ":" + detail.uid_validity + ":" + detail.uid}
+            folder={detail.folder} uid={detail.uid} uidValidity={detail.uid_validity} />
         </div>
 
         {detail.remote_images_blocked && !showRemote && (

@@ -40,6 +40,7 @@ from .views_mail import (
     FolderListView,
     MessageActionView,
     MessageDetailView,
+    MessageHeadersView,
     MessageListView,
     MessageRawView,
     MessageRemoteImageTrustView,
@@ -90,6 +91,8 @@ urlpatterns = [
     # Before the generic message route, so "action" is never read as a folder.
     path("messages/action/<str:action>/", MessageActionView.as_view(),
          name="postbox-message-action"),
+    path("messages/<path:folder>/<int:uid>/headers/", MessageHeadersView.as_view(),
+         name="postbox-message-headers"),
     path("messages/<path:folder>/<int:uid>/raw/", MessageRawView.as_view(),
          name="postbox-message-raw"),
     path("messages/<path:folder>/<int:uid>/attachments/<str:part_id>/",
