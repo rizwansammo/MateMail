@@ -286,6 +286,45 @@ class MessageMoveProvenance(models.Model):
         return f"{self.message_key} -> {self.original_folder} for {self.mailbox_id}"
 
 
+class MessageOrigin(models.Model):
+    """
+    Stable semantic origin for messages that PostBox itself moved out of Sent.
+
+    IMAP folders describe where a message is now, not what kind of message it
+    originally was. Keeping this tiny content-free marker lets a sent message
+    live in a custom archive folder while PostBox still renders it as outgoing
+    and can safely offer "Move back to Sent" only for that message.
+    """
+
+    class Role(models.TextChoices):
+        SENT = "sent", "Sent"
+
+    mailbox = models.ForeignKey(
+        "mailboxes.Mailbox",
+        on_delete=models.CASCADE,
+        related_name="postbox_message_origins",
+    )
+    message_key = models.CharField(max_length=80)
+    origin_role = models.CharField(max_length=16, choices=Role.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = MailboxScopedQuerySet.as_manager()
+
+    class Meta:
+        db_table = "postbox_message_origin"
+        ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mailbox", "message_key"],
+                name="postbox_message_origin_unique",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.message_key} ({self.origin_role}) for {self.mailbox_id}"
+
+
 class SignatureKind(models.TextChoices):
     """
     What a signature IS, stated rather than guessed.
