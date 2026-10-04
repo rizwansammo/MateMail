@@ -187,6 +187,12 @@ function PremiumPostBoxShell({
   const [entryColor, setEntryColor] = useState(FOLDER_COLOR_DEFAULT);
   const [editorError, setEditorError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState<{
+    name: string; kind: "checking" | "ready" | "error";
+    messageCount: number; activeRules: number; error?: string;
+  } | null>(null);
+  const [deletingFolder, setDeletingFolder] = useState(false);
+
   const refreshLabels = useCallback(() =>
     postbox.labels().then((value) => setLabels(value.results)), []);
   useEffect(() => {
@@ -242,27 +248,66 @@ function PremiumPostBoxShell({
   };
 
   const deleteEntry = async (kind: "folder" | "label", name: string, id?: string) => {
-    const message = kind === "folder"
-      ? "Delete folder " + name + "? Its messages will move to Inbox. Rules targeting it will be disabled."
-      : "Delete label " + name + "? No emails will be deleted.";
-    if (!window.confirm(message)) return;
+    if (kind === "folder") {
+      setDeleteDialog({ name, kind: "checking", messageCount: 0, activeRules: 0 });
+      try {
+        const info = await postbox.folderDeleteCheck(name);
+        setDeleteDialog({
+          name, kind: "ready", messageCount: info.message_count,
+          activeRules: info.active_rule_count,
+        });
+      } catch (caught) {
+        setDeleteDialog({
+          name, kind: "error", messageCount: 0, activeRules: 0,
+          error: caught instanceof Error ? caught.message : "Could not inspect this folder.",
+        });
+      }
+      return;
+    }
+    if (!window.confirm("Delete label " + name + "? No emails will be deleted.")) return;
+    if (!id) return;
     try {
-      if (kind === "folder") {
-        await postbox.deleteFolder(name);
-        await refreshFolders();
-        if (new URLSearchParams(window.location.search).get("folder") === name) {
-          router.push("/postbox?folder=INBOX");
-        }
-      } else if (id) {
-        await postbox.deleteLabel(id);
-        await refreshLabels();
-        window.dispatchEvent(new Event("postbox:labels-changed"));
-        if (new URLSearchParams(window.location.search).get("label") === id) {
-          router.push("/postbox?folder=INBOX");
-        }
+      await postbox.deleteLabel(id);
+      await refreshLabels();
+      window.dispatchEvent(new Event("postbox:labels-changed"));
+      if (new URLSearchParams(window.location.search).get("label") === id) {
+        router.push("/postbox?folder=INBOX");
       }
     } catch (caught) {
       window.alert(caught instanceof Error ? caught.message : "Delete failed.");
+    }
+  };
+
+  const confirmFolderDelete = async () => {
+    if (!deleteDialog || deleteDialog.kind !== "ready" ||
+        deleteDialog.messageCount || deleteDialog.activeRules || deletingFolder) return;
+    const name = deleteDialog.name;
+    setDeletingFolder(true);
+    try {
+      // The backend re-checks the live mailbox, including emails arriving
+      // after the preview. No messages are moved or deleted by this action.
+      await postbox.deleteFolder(name);
+      setDeleteDialog(null);
+      await refreshFolders();
+      if (new URLSearchParams(window.location.search).get("folder") === name) {
+        router.push("/postbox?folder=INBOX");
+      }
+    } catch (caught) {
+      try {
+        const info = await postbox.folderDeleteCheck(name);
+        setDeleteDialog({
+          name, kind: "ready", messageCount: info.message_count,
+          activeRules: info.active_rule_count,
+          error: caught instanceof Error ? caught.message : "Folder deletion failed.",
+        });
+      } catch {
+        setDeleteDialog({
+          name, kind: "error", messageCount: 0, activeRules: 0,
+          error: caught instanceof Error ? caught.message : "Folder deletion failed.",
+        });
+      }
+    } finally {
+      setDeletingFolder(false);
     }
   };
 
@@ -660,6 +705,68 @@ function PremiumPostBoxShell({
               </button>
             </div>
           </form>
+        </div>
+      )}
+      {deleteDialog && (
+        <div className="pb-organize-dialog-backdrop" onPointerDown={(event) => {
+          if (event.target === event.currentTarget && !deletingFolder) setDeleteDialog(null);
+        }}>
+          <section className="pb-organize-dialog pb-folder-delete-dialog" role="alertdialog"
+            aria-modal="true" aria-labelledby="pb-folder-delete-title"
+            aria-describedby="pb-folder-delete-description"
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !deletingFolder) setDeleteDialog(null);
+            }}>
+            <div className="pb-folder-delete-heading">
+              <ShieldAlert size={22} aria-hidden="true" />
+              <h2 id="pb-folder-delete-title">
+                {deleteDialog.kind === "checking" ? "Checking folder…" :
+                  deleteDialog.messageCount ? "Folder Contains Emails" :
+                  deleteDialog.activeRules ? "Folder Has Active Rules" :
+                  deleteDialog.kind === "error" ? "Folder Unavailable" : "Delete Folder?"}
+              </h2>
+            </div>
+            <div id="pb-folder-delete-description">
+              <p className="pb-folder-delete-name">{deleteDialog.name}</p>
+              {deleteDialog.kind === "checking" ? (
+                <p>Checking current emails and mail rules…</p>
+              ) : deleteDialog.messageCount > 0 ? (
+                <p>This folder contains {deleteDialog.messageCount} email{deleteDialog.messageCount === 1 ? "" : "s"} and cannot be deleted.
+                  Please manually move all emails to your Inbox or another folder first.</p>
+              ) : deleteDialog.activeRules > 0 ? (
+                <p>{deleteDialog.activeRules} active Mail Rule{deleteDialog.activeRules === 1 ? "" : "s"} use this folder.
+                  Disable or retarget {deleteDialog.activeRules === 1 ? "it" : "them"} in Settings before deleting.</p>
+              ) : deleteDialog.kind === "error" ? (
+                <p>We could not safely check this folder. Nothing was deleted.</p>
+              ) : (
+                <p>This folder is empty and has no active rules. Delete it? This will not delete any emails.</p>
+              )}
+              {deleteDialog.error && <p className="pb-organize-error" role="status">{deleteDialog.error}</p>}
+            </div>
+            <div className="pb-organize-dialog-actions">
+              <button type="button" disabled={deletingFolder} onClick={() => setDeleteDialog(null)}>Cancel</button>
+              {deleteDialog.kind === "ready" && deleteDialog.messageCount > 0 && (
+                <button type="button" className="pb-folder-delete-primary"
+                  onClick={() => {
+                    const name = deleteDialog.name;
+                    setDeleteDialog(null);
+                    router.push("/postbox?folder=" + encodeURIComponent(name));
+                  }}>Open Folder</button>
+              )}
+              {deleteDialog.kind === "ready" && !deleteDialog.messageCount && deleteDialog.activeRules > 0 && (
+                <button type="button" className="pb-folder-delete-primary"
+                  onClick={() => { setDeleteDialog(null); router.push("/postbox/settings?section=rules"); }}>
+                  Go to Rules
+                </button>
+              )}
+              {deleteDialog.kind === "ready" && !deleteDialog.messageCount && !deleteDialog.activeRules && (
+                <button type="button" className="pb-folder-delete-danger" disabled={deletingFolder}
+                  onClick={() => void confirmFolderDelete()}>
+                  {deletingFolder ? "Deleting…" : "Delete Folder"}
+                </button>
+              )}
+            </div>
+          </section>
         </div>
       )}
     </div>
