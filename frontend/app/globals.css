@@ -6120,3 +6120,68 @@ body {
 .pb-folder-delete-dialog .pb-organize-dialog-actions button:focus-visible {
   outline:2px solid var(--pb-primary); outline-offset:3px;
 }
+
+
+/* Sent mailbox rows: keep the compact one-line list, but make the recipient
+   the primary identity. Saved PostBox contacts enrich the address with a name. */
+.pb-premium-shell .pb-premium-message-row[data-sent="true"] .pb-row-from {
+  width:clamp(180px,23vw,300px);
+  flex:0 1 clamp(180px,23vw,300px);
+  min-width:0;
+}
+.pb-premium-shell .pb-row-recipient {
+  display:flex;
+  min-width:0;
+  width:100%;
+  align-items:baseline;
+  gap:5px;
+  overflow:hidden;
+  white-space:nowrap;
+}
+.pb-premium-shell .pb-row-recipient-prefix {
+  flex:0 0 auto;
+  color:var(--pb-subtle);
+  font-size:11px;
+  font-weight:600;
+}
+.pb-premium-shell .pb-row-recipient-name {
+  min-width:0;
+  max-width:42%;
+  flex:0 1 auto;
+  overflow:hidden;
+  color:var(--pb-fg);
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.pb-premium-shell .pb-row-recipient-separator {
+  flex:0 0 auto;
+  color:var(--pb-subtle);
+}
+.pb-premium-shell .pb-row-recipient-email {
+  min-width:0;
+  flex:1 1 auto;
+  overflow:hidden;
+  color:var(--pb-muted);
+  font-size:12px;
+  font-weight:400;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.pb-premium-shell .pb-row-recipient-more {
+  flex:0 0 auto;
+  color:var(--pb-subtle);
+  font-size:11px;
+  font-weight:600;
+}
+@media (max-width:1250px) and (min-width:768px) {
+  .pb-premium-shell .pb-premium-message-row[data-sent="true"] .pb-row-from {
+    width:clamp(160px,22vw,220px);
+    flex-basis:clamp(160px,22vw,220px);
+  }
+}
+@media (max-width:767px) {
+  .pb-premium-shell .pb-premium-message-row[data-sent="true"] .pb-row-from {
+    width:auto;
+    flex-basis:auto;
+  }
+}
