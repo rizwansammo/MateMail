@@ -77,7 +77,7 @@ urlpatterns = [
 
     # ── mail ────────────────────────────────────────────────────────────────
     path("folders/", FolderListView.as_view(), name="postbox-folders"),
-    path("folders/delete-check/", FolderDeleteCheckView.as_view(), name="postbox-folder-delete-check"),
+    path("folder-delete-check/", FolderDeleteCheckView.as_view(), name="postbox-folder-delete-check"),
     path("folders/<path:name>/", FolderDetailView.as_view(), name="postbox-folder"),
     path("labels/", LabelListView.as_view(), name="postbox-labels"),
     path("labels/assign/", LabelAssignmentView.as_view(), name="postbox-label-assign"),
