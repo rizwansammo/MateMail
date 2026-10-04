@@ -279,15 +279,36 @@ def install_script(address: str, body: str) -> None:
 
     client = ManageSieveClient(sock)
     try:
-        client._read_line()  # greeting and capabilities
-        if getattr(settings, "POSTBOX_SIEVE_STARTTLS", False):
+        # Greeting may carry multiple capabilities; await terminal OK
+        # before issuing STARTTLS, or TLS gets confused by plaintext bytes.
+        status, greeting = client._read_response()
+        if status != "OK":
+            raise SieveError("Filters are temporarily unavailable.",
+                             f"ManageSieve greeting -> {greeting}")
+
+        use_tls = getattr(settings, "POSTBOX_SIEVE_STARTTLS", False)
+        if not use_tls and not getattr(settings, "DEBUG", False):
+            raise SieveError(
+                "Filters require a secure server connection.",
+                "Refusing plaintext ManageSieve authentication in production",
+            )
+        if use_tls:
             client._send(b"STARTTLS\r\n")
-            client._read_response()
+            status, result = client._read_response()
+            if status != "OK":
+                raise SieveError(
+                    "Your filters could not be saved securely.",
+                    f"ManageSieve refused STARTTLS -> {result}",
+                )
+            tls_hostname = getattr(settings, "POSTBOX_SIEVE_TLS_SERVER_NAME", "") or host
             sock = ssl.create_default_context().wrap_socket(
-                sock, server_hostname=host
+                sock, server_hostname=tls_hostname,
             )
             client = ManageSieveClient(sock)
-            client._read_line()
+            status, greeting = client._read_response()
+            if status != "OK":
+                raise SieveError("Filters are temporarily unavailable.",
+                                 f"ManageSieve TLS greeting -> {greeting}")
 
         client.authenticate(address, master_user, master_password)
         client.put_script(SCRIPT_NAME, body)
@@ -298,7 +319,17 @@ def install_script(address: str, body: str) -> None:
             # Deactivate rather than delete, so the empty script is visible
             # evidence that PostBox owns this slot.
             client._send(b'SETACTIVE ""\r\n')
-            client._read_response()
+            status, result = client._read_response()
+            if status != "OK":
+                raise SieveError(
+                    "Your filters could not be disabled.",
+                    f"ManageSieve deactivate -> {result}",
+                )
+    except (ssl.SSLError, OSError) as exc:
+        raise SieveError(
+            "Filters could not establish a secure connection to the mail server.",
+            f"ManageSieve TLS/session failure: {exc!r}",
+        ) from exc
     finally:
         client.logout()
         try:
