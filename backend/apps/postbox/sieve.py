@@ -68,29 +68,126 @@ def _quote(value: str) -> str:
     return '"' + cleaned.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-#: Rule field → Sieve header. `to` covers Cc as well, because "sent to me"
-#: is what a person means by it, and a rule that ignored Cc would quietly miss
-#: half the mail it was written for.
-_HEADERS = {
-    "from": ["From"],
-    "to": ["To", "Cc"],
-    "subject": ["Subject"],
+#: Text comparisons. Negative matches are compiled as Sieve's `not`
+#: wrapper, keeping raw code generation inside this module's fixed vocabulary.
+_MATCH = {
+    "contains": (":contains", False),
+    "is": (":is", False),
+    "not_contains": (":contains", True),
+    "not_is": (":is", True),
 }
 
-_MATCH = {
-    "contains": ":contains",
-    "is": ":is",
-}
+
+def _rule_conditions(rule) -> list[dict]:
+    raw = getattr(rule, "conditions", None)
+    if isinstance(raw, list) and raw:
+        return [item for item in raw if isinstance(item, dict)]
+    return [{
+        "field": getattr(rule, "field", ""),
+        "match": getattr(rule, "match", ""),
+        "value": getattr(rule, "value", ""),
+    }]
+
+
+def _rule_actions(rule) -> list[dict]:
+    raw = getattr(rule, "actions", None)
+    if isinstance(raw, list) and raw:
+        return [item for item in raw if isinstance(item, dict)]
+    item = {"action": getattr(rule, "action", "")}
+    folder = getattr(rule, "action_folder", "")
+    if folder:
+        item["folder"] = folder
+    return [item]
+
+
+def _text_test(kind: str, header_list: str, match: str, value: str) -> str | None:
+    spec = _MATCH.get(match)
+    if spec is None:
+        return None
+    comparator, negate = spec
+    test = f"{kind} {comparator} [{header_list}] {_quote(value)}"
+    return f"not {test}" if negate else test
+
+
+def _condition_test(condition: dict) -> tuple[str | None, set[str]]:
+    field = condition.get("field")
+    match = condition.get("match")
+    value = str(condition.get("value", ""))
+    requires: set[str] = set()
+
+    if field == "from":
+        return _text_test("address", _quote("From"), match, value), requires
+    if field == "to":
+        headers = ", ".join((_quote("To"), _quote("Cc")))
+        return _text_test("address", headers, match, value), requires
+    if field == "sender_domain":
+        spec = _MATCH.get(match)
+        if spec is None:
+            return None, requires
+        comparator, negate = spec
+        test = f"address :domain {comparator} [{_quote('From')}] {_quote(value)}"
+        return (f"not {test}" if negate else test), requires
+    if field == "subject":
+        return _text_test("header", _quote("Subject"), match, value), requires
+    if field == "mailing_list":
+        return _text_test("header", _quote("List-ID"), match, value), requires
+    if field == "body":
+        spec = _MATCH.get(match)
+        if spec is None:
+            return None, requires
+        requires.add("body")
+        comparator, negate = spec
+        test = f"body {comparator} {_quote(value)}"
+        return (f"not {test}" if negate else test), requires
+    if field == "message_size":
+        if match not in {"over", "under"}:
+            return None, requires
+        try:
+            size_kb = int(value)
+        except (TypeError, ValueError):
+            return None, requires
+        return f"size :{match} {size_kb}K", requires
+    if field == "has_attachment":
+        requires.add("mime")
+        test = (
+            "anyof("
+            "header :mime :anychild :contains [\"Content-Disposition\"] \"attachment\", "
+            "header :mime :anychild :contains [\"Content-Disposition\"] \"filename=\", "
+            "header :mime :anychild :contains [\"Content-Type\"] \"name=\""
+            ")"
+        )
+        return (f"not {test}" if value.lower() == "no" else test), requires
+    if field == "attachment_name":
+        spec = _MATCH.get(match)
+        if spec is None:
+            return None, requires
+        requires.add("mime")
+        comparator, negate = spec
+        headers = ", ".join((_quote("Content-Disposition"), _quote("Content-Type")))
+        test = f"header :mime :anychild {comparator} [{headers}] {_quote(value)}"
+        return (f"not {test}" if negate else test), requires
+    return None, requires
+
+
+def _folder_for_action(action: dict) -> str:
+    kind = action.get("action")
+    if kind in {"move", "copy"}:
+        return str(action.get("folder", "")).strip()
+    if kind == "archive":
+        return "Archive"
+    if kind == "delete":
+        return "Trash"
+    return ""
 
 
 def compile_rules(rules, vacation=None, *, valid_folders: set[str] | None = None) -> CompiledScript:
     """
-    Render the mailbox's rules, in order, plus the vacation responder.
+    Render ordered Rules v2 plus the vacation responder.
 
-    `valid_folders` is the mailbox's real folder list. A rule naming a folder
-    that does not exist is mail going nowhere, so such a rule is skipped and
-    logged rather than compiled — `fileinto` into a missing mailbox is a
-    runtime error in Sieve, which would break every rule after it too.
+    Each rule is a bounded boolean expression (ALL/ANY, max enforced by the
+    serializer) and a bounded action list. The browser never sends Sieve.
+    Folder actions are all-or-nothing: if any destination vanished, the whole
+    rule is skipped rather than partially doing something the user did not ask.
     """
     requires: set[str] = set()
     lines: list[str] = [
@@ -103,41 +200,75 @@ def compile_rules(rules, vacation=None, *, valid_folders: set[str] | None = None
         if not rule.enabled:
             continue
 
-        headers = _HEADERS.get(rule.field)
-        match = _MATCH.get(rule.match)
-        if not headers or not match:
-            logger.warning("PostBox: skipping rule %s with unknown field/match", rule.pk)
+        conditions = _rule_conditions(rule)
+        actions = _rule_actions(rule)
+        tests: list[str] = []
+        condition_requires: set[str] = set()
+        invalid = False
+        for condition in conditions:
+            test, needed = _condition_test(condition)
+            condition_requires.update(needed)
+            if not test:
+                invalid = True
+                break
+            tests.append(test)
+        if invalid or not tests or not actions:
+            logger.warning("PostBox: skipping malformed rule %s", getattr(rule, "pk", None))
             continue
 
-        if rule.action == "move":
-            folder = (rule.action_folder or "").strip()
-            if valid_folders is not None and folder not in valid_folders:
+        for action in actions:
+            folder = _folder_for_action(action)
+            if folder and valid_folders is not None and folder not in valid_folders:
                 logger.warning(
-                    "PostBox: rule %s targets missing folder %r — skipped", rule.pk, folder
+                    "PostBox: rule %s targets missing folder %r — skipped",
+                    getattr(rule, "pk", None), folder,
                 )
-                continue
+                invalid = True
+                break
+        if invalid:
+            continue
 
-        header_list = ", ".join(_quote(h) for h in headers)
+        requires.update(condition_requires)
+        mode = getattr(rule, "condition_mode", "all")
+        if len(tests) == 1:
+            expression = tests[0]
+        else:
+            operator = "anyof" if mode == "any" else "allof"
+            expression = f"{operator}({', '.join(tests)})"
+
         lines.append(f"# {rule.name}")
-        # From/To/Cc are address-bearing headers. RFC 5228 "address"
-        # compares the mailbox address (not "Display Name <mailbox@...>").
-        # Subject is ordinary text and must continue using "header".
-        test = "address" if rule.field in ("from", "to") else "header"
-        lines.append(f"if {test} {match} [{header_list}] {_quote(rule.value)}")
+        lines.append(f"if {expression}")
         lines.append("{")
 
-        if rule.action == "move":
-            requires.add("fileinto")
-            lines.append(f"    fileinto {_quote(rule.action_folder)};")
-        elif rule.action == "star":
-            requires.add("imap4flags")
-            lines.append('    addflag "\\\\Flagged";')
-        elif rule.action == "mark_read":
-            requires.add("imap4flags")
-            lines.append('    addflag "\\\\Seen";')
-        elif rule.action == "delete":
-            requires.add("fileinto")
-            lines.append('    fileinto "Trash";')
+        for action in actions:
+            kind = action.get("action")
+            if kind == "move":
+                requires.add("fileinto")
+                lines.append(f"    fileinto {_quote(_folder_for_action(action))};")
+            elif kind == "copy":
+                requires.update({"fileinto", "copy"})
+                lines.append(f"    fileinto :copy {_quote(_folder_for_action(action))};")
+            elif kind == "archive":
+                requires.add("fileinto")
+                lines.append('    fileinto "Archive";')
+            elif kind == "star":
+                requires.add("imap4flags")
+                lines.append('    addflag "\\\\Flagged";')
+            elif kind == "mark_read":
+                requires.add("imap4flags")
+                lines.append('    addflag "\\\\Seen";')
+            elif kind == "mark_unread":
+                requires.add("imap4flags")
+                lines.append('    removeflag "\\\\Seen";')
+            elif kind == "delete":
+                requires.add("fileinto")
+                lines.append('    fileinto "Trash";')
+            else:
+                logger.warning(
+                    "PostBox: rule %s has unknown action %r — skipped at compile",
+                    getattr(rule, "pk", None), kind,
+                )
+                continue
 
         if rule.stop_processing:
             lines.append("    stop;")
