@@ -178,7 +178,7 @@ export default function PostBoxAppLayout({
         folderRefreshTimer.current = null;
       }
     };
-  }, [mailbox?.id, scheduleFolderRefresh]);
+  }, [mailbox, scheduleFolderRefresh]);
 
   const closeRail = useCallback(() => setRailOpen(false), []);
 
