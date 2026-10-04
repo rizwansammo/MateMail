@@ -310,16 +310,43 @@ export interface Contact {
   notes: string;
 }
 
+export type MailRuleField =
+  | "from" | "to" | "subject" | "sender_domain" | "mailing_list"
+  | "body" | "message_size" | "has_attachment" | "attachment_name";
+
+export type MailRuleMatch =
+  | "contains" | "is" | "not_contains" | "not_is" | "over" | "under";
+
+export type MailRuleActionType =
+  | "move" | "copy" | "archive" | "star" | "mark_read" | "mark_unread" | "delete";
+
+export interface MailRuleCondition {
+  field: MailRuleField;
+  match: MailRuleMatch;
+  value: string;
+}
+
+export interface MailRuleAction {
+  action: MailRuleActionType;
+  folder?: string;
+}
+
 export interface MailRule {
   id: string;
   name: string;
   position: number;
   enabled: boolean;
-  field: "from" | "to" | "subject";
-  match: "contains" | "is";
+
+  // Primary mirrors retained for backwards-compatible clients.
+  field: MailRuleField;
+  match: MailRuleMatch;
   value: string;
-  action: "move" | "star" | "mark_read" | "delete";
+  action: MailRuleActionType;
   action_folder: string;
+
+  condition_mode: "all" | "any";
+  conditions: MailRuleCondition[];
+  actions: MailRuleAction[];
   stop_processing: boolean;
 }
 
