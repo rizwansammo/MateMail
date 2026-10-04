@@ -6015,3 +6015,27 @@ body {
 }
 .pb-message-headers-content [role="alert"] { color: var(--pb-warn); }
 .pb-single-source-actions { padding: 2px 0 10px; }
+
+
+/* Destructive folder guard: separate from create/edit, compatible with both themes. */
+.pb-folder-delete-dialog .pb-folder-delete-heading {
+  display:flex; align-items:center; gap:10px; color:var(--pb-danger);
+}
+.pb-folder-delete-heading h2 { margin:0; color:var(--pb-fg); }
+.pb-folder-delete-name {
+  margin:0 0 5px; font-size:13px; font-weight:700; color:var(--pb-fg);
+  overflow-wrap:anywhere;
+}
+.pb-folder-delete-dialog #pb-folder-delete-description p:not(.pb-folder-delete-name) {
+  font-size:13px; line-height:1.55; color:var(--pb-muted);
+}
+.pb-folder-delete-dialog .pb-organize-dialog-actions .pb-folder-delete-primary {
+  background:var(--pb-primary); border-color:var(--pb-primary);
+  color:var(--pb-primary-fg);
+}
+.pb-folder-delete-dialog .pb-organize-dialog-actions .pb-folder-delete-danger {
+  background:var(--pb-danger); border-color:var(--pb-danger); color:#fff;
+}
+.pb-folder-delete-dialog .pb-organize-dialog-actions button:focus-visible {
+  outline:2px solid var(--pb-primary); outline-offset:3px;
+}
