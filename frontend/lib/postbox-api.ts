@@ -13,6 +13,8 @@
  *   automatically and the request follows whichever host the console is on.
  */
 
+import { announcePostBoxMailboxChange } from "@/lib/postbox-realtime";
+
 export class PostBoxError extends Error {
   constructor(
     public status: number,
@@ -561,16 +563,29 @@ export const postbox = {
       attachments: ComposeAttachmentRef[];
     }>(`/messages/${encodeFolder(folder)}/${uid}/reply-context/${qs({ mode, uid_validity: uidValidity })}`),
 
-  act: (
+  act: async (
     action: MessageAction,
     folder: string,
     uids: number[],
     extra: Record<string, unknown> = {},
-  ) =>
-    request<{ action: string; count: number }>(`/messages/action/${action}/`, {
-      method: "POST",
-      body: JSON.stringify({ folder, uids, ...extra }),
-    }),
+  ) => {
+    const result = await request<{ action: string; count: number }>(
+      `/messages/action/${action}/`,
+      {
+        method: "POST",
+        body: JSON.stringify({ folder, uids, ...extra }),
+      },
+    );
+    // Backend success is the point at which sibling tabs may update. The
+    // authoritative server SSE event follows as reconciliation, but this local
+    // wake-up makes the UI react without waiting for that round trip.
+    announcePostBoxMailboxChange({
+      kind: "mailbox_changed",
+      folder,
+      action,
+    });
+    return result;
+  },
 
   // composing
   send: (payload: ComposePayload) =>
