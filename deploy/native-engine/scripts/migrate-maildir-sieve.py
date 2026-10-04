@@ -21,6 +21,8 @@ def migrate(volume: Path, home: Path, address: str, apply: bool) -> str:
         raise ValueError("Supply a valid mailbox address")
     local, domain = address.lower().rsplit("@", 1)
     root = volume.resolve(strict=True)
+    if home.is_symlink():
+        raise ValueError("Refusing a symlinked mailbox home")
     mailbox_home = home.resolve(strict=True)
     if root not in mailbox_home.parents or mailbox_home == root:
         raise ValueError("Mailbox home must belong to the existing vmail volume")
