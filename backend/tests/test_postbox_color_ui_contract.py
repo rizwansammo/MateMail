@@ -39,3 +39,17 @@ class PostBoxColorUiTest(SimpleTestCase):
         self.assertIn("colorFolder:", api)
         self.assertIn("colorLabel:", api)
         self.assertIn("color: string | null;", api)
+
+    def test_create_and_save_button_uses_the_theme_primary_not_pale_accent(self):
+        css = read("app", "globals.css")
+        layout = read("app", "postbox", "(app)", "layout.tsx")
+        active = css.split(".pb-organize-dialog-actions button[type=submit] {", 1)[1].split("}", 1)[0]
+        disabled = css.split(".pb-organize-dialog-actions button[type=submit]:disabled {", 1)[1].split("}", 1)[0]
+
+        # Both brand/theme variants supply primary foreground/background tokens.
+        self.assertIn("background:var(--pb-primary)", active)
+        self.assertIn("color:var(--pb-primary-fg)", active)
+        self.assertNotIn("background:var(--pb-accent)", active)
+        self.assertIn("background:var(--pb-surface-2)", disabled)
+        self.assertIn("color:var(--pb-muted)", disabled)
+        self.assertIn('disabled={saving || !entryName.trim()}', layout)
