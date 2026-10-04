@@ -7,6 +7,8 @@ whatever field somebody adds next.
 """
 from __future__ import annotations
 
+import re
+
 from django.db import transaction
 from rest_framework import serializers
 
@@ -223,31 +225,224 @@ class ContactSerializer(serializers.ModelSerializer):
 
 
 class MailRuleSerializer(serializers.ModelSerializer):
+    MAX_CONDITIONS = 8
+    MAX_ACTIONS = 8
+    TEXT_MATCHES = {
+        MailRule.Match.CONTAINS, MailRule.Match.IS,
+        MailRule.Match.NOT_CONTAINS, MailRule.Match.NOT_IS,
+    }
+    FIELD_MATCHES = {
+        MailRule.Field.FROM: TEXT_MATCHES,
+        MailRule.Field.TO: TEXT_MATCHES,
+        MailRule.Field.SUBJECT: TEXT_MATCHES,
+        MailRule.Field.SENDER_DOMAIN: TEXT_MATCHES,
+        MailRule.Field.MAILING_LIST: TEXT_MATCHES,
+        MailRule.Field.BODY: {MailRule.Match.CONTAINS, MailRule.Match.NOT_CONTAINS},
+        MailRule.Field.ATTACHMENT_NAME: TEXT_MATCHES,
+        MailRule.Field.MESSAGE_SIZE: {MailRule.Match.OVER, MailRule.Match.UNDER},
+        MailRule.Field.HAS_ATTACHMENT: {MailRule.Match.IS},
+    }
+
     class Meta:
         model = MailRule
         fields = [
-            "id", "name", "position", "enabled", "field", "match", "value",
-            "action", "action_folder", "stop_processing",
-            "created_at", "updated_at",
+            "id", "name", "position", "enabled",
+            "field", "match", "value",
+            "condition_mode", "conditions",
+            "action", "action_folder", "actions",
+            "stop_processing", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
-    def validate(self, attrs):
-        action = attrs.get("action", getattr(self.instance, "action", None))
-        folder = attrs.get("action_folder", getattr(self.instance, "action_folder", ""))
-        if action == MailRule.Action.MOVE and not (folder or "").strip():
+    @staticmethod
+    def _clean_text(value, *, maximum=300, label="Value") -> str:
+        if not isinstance(value, str):
+            raise serializers.ValidationError(f"{label} must be text.")
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError(f"{label} cannot be empty.")
+        if len(cleaned) > maximum:
+            raise serializers.ValidationError(f"{label} is too long.")
+        return cleaned
+
+    def _validate_conditions(self, raw) -> list[dict]:
+        if not isinstance(raw, list) or not raw:
+            raise serializers.ValidationError("Add at least one condition.")
+        if len(raw) > self.MAX_CONDITIONS:
             raise serializers.ValidationError(
-                {"action_folder": "Choose a folder to move messages into."}
+                f"A rule can have at most {self.MAX_CONDITIONS} conditions."
             )
+
+        cleaned: list[dict] = []
+        for index, item in enumerate(raw, start=1):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(f"Condition {index} is invalid.")
+            field = item.get("field")
+            match = item.get("match")
+            if field not in MailRule.Field.values:
+                raise serializers.ValidationError(f"Condition {index} has an unknown field.")
+            allowed = self.FIELD_MATCHES.get(field, set())
+            if match not in allowed:
+                raise serializers.ValidationError(
+                    f"Condition {index} uses a match type that is not valid for that field."
+                )
+
+            value = item.get("value", "")
+            if field == MailRule.Field.HAS_ATTACHMENT:
+                value = str(value or "yes").strip().lower()
+                if value not in {"yes", "no"}:
+                    raise serializers.ValidationError(
+                        f"Condition {index}: attachment value must be yes or no."
+                    )
+            elif field == MailRule.Field.MESSAGE_SIZE:
+                try:
+                    size_kb = int(str(value).strip())
+                except (TypeError, ValueError):
+                    raise serializers.ValidationError(
+                        f"Condition {index}: message size must be a whole number of KB."
+                    )
+                if not 1 <= size_kb <= 10_485_760:
+                    raise serializers.ValidationError(
+                        f"Condition {index}: message size must be between 1 KB and 10 TB."
+                    )
+                value = str(size_kb)
+            elif field == MailRule.Field.SENDER_DOMAIN:
+                value = self._clean_text(value, maximum=253, label=f"Condition {index} domain")
+                value = value.lower().lstrip("@")
+                if (
+                    "." not in value
+                    or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", value)
+                    or ".." in value
+                ):
+                    raise serializers.ValidationError(
+                        f"Condition {index}: enter a domain such as example.com."
+                    )
+            elif field == MailRule.Field.ATTACHMENT_NAME:
+                value = self._clean_text(
+                    value, maximum=200, label=f"Condition {index} attachment name"
+                )
+            else:
+                value = self._clean_text(
+                    value, maximum=300, label=f"Condition {index} value"
+                )
+            cleaned.append({"field": field, "match": match, "value": value})
+        return cleaned
+
+    def _validate_actions(self, raw) -> list[dict]:
+        if not isinstance(raw, list) or not raw:
+            raise serializers.ValidationError("Add at least one action.")
+        if len(raw) > self.MAX_ACTIONS:
+            raise serializers.ValidationError(
+                f"A rule can have at most {self.MAX_ACTIONS} actions."
+            )
+
+        cleaned: list[dict] = []
+        seen: set[tuple[str, str]] = set()
+        terminal = 0
+        for index, item in enumerate(raw, start=1):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(f"Action {index} is invalid.")
+            action = item.get("action")
+            if action in {"forward", "redirect"}:
+                raise serializers.ValidationError(
+                    "External forwarding is managed by your organization in MateMail Hub."
+                )
+            if action not in MailRule.Action.values:
+                raise serializers.ValidationError(f"Action {index} is not supported.")
+
+            folder = ""
+            if action in {MailRule.Action.MOVE, MailRule.Action.COPY}:
+                folder = self._clean_text(
+                    item.get("folder", ""), maximum=200, label=f"Action {index} folder"
+                )
+            if action in {MailRule.Action.MOVE, MailRule.Action.ARCHIVE, MailRule.Action.DELETE}:
+                terminal += 1
+
+            key = (action, folder)
+            if key in seen:
+                raise serializers.ValidationError(f"Action {index} is duplicated.")
+            seen.add(key)
+            row = {"action": action}
+            if folder:
+                row["folder"] = folder
+            cleaned.append(row)
+
+        if terminal > 1:
+            raise serializers.ValidationError(
+                "Use only one final filing action: Move, Archive, or Move to Trash."
+            )
+        return cleaned
+
+    def validate(self, attrs):
+        instance = self.instance
+
+        legacy_condition_changed = any(
+            key in attrs for key in ("field", "match", "value")
+        )
+        if "conditions" in attrs:
+            conditions = self._validate_conditions(attrs["conditions"])
+        elif legacy_condition_changed or instance is None:
+            existing = instance.normalized_conditions() if instance is not None else []
+            first = {
+                "field": attrs.get(
+                    "field", getattr(instance, "field", MailRule.Field.FROM)
+                ),
+                "match": attrs.get(
+                    "match", getattr(instance, "match", MailRule.Match.CONTAINS)
+                ),
+                "value": attrs.get("value", getattr(instance, "value", "")),
+            }
+            conditions = self._validate_conditions([first, *existing[1:]])
+        else:
+            conditions = instance.normalized_conditions()
+
+        legacy_action_changed = any(
+            key in attrs for key in ("action", "action_folder")
+        )
+        if "actions" in attrs:
+            actions = self._validate_actions(attrs["actions"])
+        elif legacy_action_changed or instance is None:
+            existing_actions = instance.normalized_actions() if instance is not None else []
+            action = attrs.get(
+                "action", getattr(instance, "action", MailRule.Action.MOVE)
+            )
+            folder = attrs.get(
+                "action_folder", getattr(instance, "action_folder", "")
+            )
+            first = {"action": action}
+            if action in {MailRule.Action.MOVE, MailRule.Action.COPY}:
+                first["folder"] = folder
+            actions = self._validate_actions([first, *existing_actions[1:]])
+        else:
+            actions = instance.normalized_actions()
+
+        mode = attrs.get(
+            "condition_mode",
+            getattr(instance, "condition_mode", MailRule.ConditionMode.ALL),
+        )
+        if mode not in MailRule.ConditionMode.values:
+            raise serializers.ValidationError({"condition_mode": "Choose Match all or Match any."})
+        if len(conditions) == 1:
+            mode = MailRule.ConditionMode.ALL
+
+        first_condition = conditions[0]
+        first_action = actions[0]
+        attrs["conditions"] = conditions
+        attrs["condition_mode"] = mode
+        attrs["field"] = first_condition["field"]
+        attrs["match"] = first_condition["match"]
+        attrs["value"] = first_condition["value"]
+        attrs["actions"] = actions
+        attrs["action"] = first_action["action"]
+        attrs["action_folder"] = (
+            first_action.get("folder", "")
+            if first_action["action"] in {MailRule.Action.MOVE, MailRule.Action.COPY}
+            else ""
+        )
         return attrs
 
     def validate_value(self, value: str) -> str:
-        cleaned = (value or "").strip()
-        if not cleaned:
-            raise serializers.ValidationError("Enter something to match on.")
-        if len(cleaned) > 300:
-            raise serializers.ValidationError("That is too long.")
-        return cleaned
+        return self._clean_text(value)
 
 
 class VacationSerializer(serializers.ModelSerializer):
