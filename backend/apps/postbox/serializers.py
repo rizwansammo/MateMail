@@ -253,6 +253,15 @@ class MailRuleSerializer(serializers.ModelSerializer):
             "stop_processing", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+        extra_kwargs = {
+            "field": {"required": False},
+            "match": {"required": False},
+            "value": {"required": False},
+            "action": {"required": False},
+            "action_folder": {"required": False},
+            "conditions": {"required": False},
+            "actions": {"required": False},
+        }
 
     @staticmethod
     def _clean_text(value, *, maximum=300, label="Value") -> str:
