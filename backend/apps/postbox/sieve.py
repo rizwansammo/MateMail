@@ -119,7 +119,11 @@ def compile_rules(rules, vacation=None, *, valid_folders: set[str] | None = None
 
         header_list = ", ".join(_quote(h) for h in headers)
         lines.append(f"# {rule.name}")
-        lines.append(f"if header {match} [{header_list}] {_quote(rule.value)}")
+        # From/To/Cc are address-bearing headers. RFC 5228 "address"
+        # compares the mailbox address (not "Display Name <mailbox@...>").
+        # Subject is ordinary text and must continue using "header".
+        test = "address" if rule.field in ("from", "to") else "header"
+        lines.append(f"if {test} {match} [{header_list}] {_quote(rule.value)}")
         lines.append("{")
 
         if rule.action == "move":
