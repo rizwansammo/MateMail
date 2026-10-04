@@ -349,7 +349,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(403, {"error": "unauthorized"})
             return
         try:
-            event = push.new_mail_event(self._body())
+            event = push.mailbox_event(self._body())
         except ValidationError as exc:
             self._send(400, {"error": exc.message, "field": exc.field})
             return
