@@ -262,6 +262,28 @@ function Mailbox() {
     () => directory.data?.[2]?.results ?? [],
     [directory.data],
   );
+  const contacts = useAsyncData(
+    () => postbox.contacts(),
+    [],
+    "",
+  );
+  const contactNameByEmail = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const contact of contacts.data?.results ?? []) {
+      const email = contact.email.trim().toLowerCase();
+      const name = contact.name.trim();
+      if (email && name) names.set(email, name);
+    }
+    return names;
+  }, [contacts.data]);
+  const sentFolderNames = useMemo(
+    () => new Set(
+      mailFolders
+        .filter((item) => item.role === "sent")
+        .map((item) => item.name),
+    ),
+    [mailFolders],
+  );
 
   useEffect(() => {
     const refreshLabels = () => void directory.reload();
@@ -1022,17 +1044,42 @@ function Mailbox() {
             />
           ) : (
             <>
-              {rows.map((row) => (
+              {rows.map((row) => {
+                const rowIsSent =
+                  sentFolderNames.has(row.folder) || row.folder.toUpperCase() === "SENT";
+                const recipientAddresses = row.to.length ? row.to : row.cc;
+                const recipientPrefix = row.to.length ? "To:" : row.cc.length ? "Cc:" : "To:";
+                const primaryRecipient = recipientAddresses[0] ?? "";
+                const recipientName = primaryRecipient
+                  ? contactNameByEmail.get(primaryRecipient.trim().toLowerCase()) ?? ""
+                  : "";
+                const recipientCount = Math.max(recipientAddresses.length - 1, 0);
+                const recipientTitle = recipientAddresses.length
+                  ? recipientAddresses.map((address) => {
+                      const knownName = contactNameByEmail.get(address.trim().toLowerCase());
+                      return knownName ? `${knownName} <${address}>` : address;
+                    }).join(", ")
+                  : "Undisclosed recipients";
+                const avatarSource = rowIsSent
+                  ? recipientName || primaryRecipient || "To"
+                  : row.from.name || row.from.address;
+
+                return (
                   <div
                     key={`${row.uid_validity}-${row.uid}`}
                     className="pb-row pb-premium-message-row"
                     data-unread={!row.seen}
                     data-selected={detail?.uid === row.uid}
+                    data-sent={rowIsSent}
                   >
                     {!isCrossFolderView && (
                       <input
                         type="checkbox"
-                        aria-label={`Select message from ${row.from.address}`}
+                        aria-label={
+                          rowIsSent
+                            ? `Select message to ${primaryRecipient || "recipient"}`
+                            : `Select message from ${row.from.address}`
+                        }
                         checked={selected.has(row.uid)}
                         onChange={(event) => {
                           const next = new Set(selected);
@@ -1070,10 +1117,36 @@ function Mailbox() {
                       onClick={() => void openMessage(row)}
                     >
                       <span className="pb-premium-row-avatar" aria-hidden="true">
-                        {senderInitials(row.from.name || row.from.address)}
+                        {senderInitials(avatarSource)}
                       </span>
-                      <span className="pb-row-from">
-                        {row.from.name || row.from.address || "(unknown sender)"}
+                      <span
+                        className="pb-row-from"
+                        title={rowIsSent ? `${recipientPrefix} ${recipientTitle}` : row.from.address}
+                      >
+                        {rowIsSent ? (
+                          <span className="pb-row-recipient">
+                            <span className="pb-row-recipient-prefix">{recipientPrefix}</span>
+                            {recipientName && (
+                              <>
+                                <span className="pb-row-recipient-name">{recipientName}</span>
+                                <span className="pb-row-recipient-separator" aria-hidden="true">·</span>
+                              </>
+                            )}
+                            <span className="pb-row-recipient-email">
+                              {primaryRecipient || "Undisclosed recipients"}
+                            </span>
+                            {recipientCount > 0 && (
+                              <span
+                                className="pb-row-recipient-more"
+                                aria-label={`${recipientCount} more recipient${recipientCount === 1 ? "" : "s"}`}
+                              >
+                                +{recipientCount}
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          row.from.name || row.from.address || "(unknown sender)"
+                        )}
                       </span>
                       <span className="pb-premium-row-copy">
                         <span className="pb-row-subject">
@@ -1090,8 +1163,8 @@ function Mailbox() {
                       {!row.seen && <span className="pb-premium-unread-dot" aria-hidden="true" />}
                     </button>
                   </div>
-
-              ))}
+                );
+              })}
 
               {page && page.total > page.page_size && (
                 <div className="flex items-center justify-between px-3 py-2 text-xs pb-subtle">
