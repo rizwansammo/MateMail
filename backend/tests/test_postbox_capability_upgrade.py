@@ -8,8 +8,8 @@ from rest_framework.test import APIClient
 from apps.domains.models import Domain
 from apps.mailboxes.models import Mailbox, MailboxStatus
 from apps.postbox import imap
-from apps.postbox.models import MailRule, MessageMoveProvenance, RemoteImageSenderTrust
-from apps.postbox.views_mail import _message_provenance_key
+from apps.postbox.models import MailRule, MessageMoveProvenance, MessageOrigin, RemoteImageSenderTrust
+from apps.postbox.views_mail import _message_origin_key, _message_provenance_key
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
     disable_throttling,
@@ -170,6 +170,185 @@ class PostBoxCapabilityUpgradeTest(TestCase):
         )
         selected_folders = [call.args[0] for call in connection.select.call_args_list]
         self.assertEqual(["INBOX", "Sent"], selected_folders)
+
+    def test_sent_blocks_inbox_style_actions_but_keeps_star_and_trash(self):
+        sent = summary(31, "Sent", message_id="<sent-guard@example.com>")
+        folders = [
+            imap.FolderInfo("INBOX", role="inbox"),
+            imap.FolderInfo("Sent", role="sent"),
+            imap.FolderInfo("Archive", role="archive"),
+            imap.FolderInfo("Junk", role="junk"),
+            imap.FolderInfo("Trash", role="trash"),
+            imap.FolderInfo("Old Outreach"),
+        ]
+
+        for action in ("read", "unread", "archive", "spam"):
+            with self.subTest(action=action), mock.patch(
+                "apps.postbox.imap.open_mailbox"
+            ) as opener:
+                connection = self._connection(opener)
+                connection.select.return_value = imap.FolderInfo(
+                    name="Sent", role="sent", uid_validity=7,
+                )
+                connection.list_folders.return_value = folders
+                connection.fetch_summaries.return_value = [sent]
+                response = self.api.post(
+                    f"/api/postbox/messages/action/{action}/",
+                    {"folder": "Sent", "uids": [31]},
+                    format="json",
+                )
+            self.assertEqual(400, response.status_code)
+            connection.move.assert_not_called()
+            connection.mark_seen.assert_not_called()
+
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.select.return_value = imap.FolderInfo(
+                name="Sent", role="sent", uid_validity=7,
+            )
+            connection.list_folders.return_value = folders
+            response = self.api.post(
+                "/api/postbox/messages/action/star/",
+                {"folder": "Sent", "uids": [31]},
+                format="json",
+            )
+        self.assertEqual(200, response.status_code)
+        connection.mark_flagged.assert_called_once_with([31], True)
+
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.select.return_value = imap.FolderInfo(
+                name="Sent", role="sent", uid_validity=7,
+            )
+            connection.list_folders.return_value = folders
+            connection.fetch_summaries.return_value = [sent]
+            response = self.api.post(
+                "/api/postbox/messages/action/trash/",
+                {"folder": "Sent", "uids": [31]},
+                format="json",
+            )
+        self.assertEqual(200, response.status_code)
+        connection.move.assert_called_once_with([31], "Trash")
+        self.assertTrue(
+            MessageOrigin.objects.filter(
+                mailbox=self.alice,
+                message_key=_message_origin_key(sent),
+                origin_role=MessageOrigin.Role.SENT,
+            ).exists()
+        )
+
+    def test_sent_moves_only_to_custom_folders_and_can_move_back(self):
+        sent = summary(41, "Sent", message_id="<file-sent@example.com>")
+        folders = [
+            imap.FolderInfo("INBOX", role="inbox"),
+            imap.FolderInfo("Sent", role="sent"),
+            imap.FolderInfo("Archive", role="archive"),
+            imap.FolderInfo("Trash", role="trash"),
+            imap.FolderInfo("Old Outreach"),
+        ]
+
+        # System destinations such as Inbox are refused.
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.select.return_value = imap.FolderInfo(
+                name="Sent", role="sent", uid_validity=7,
+            )
+            connection.list_folders.return_value = folders
+            connection.fetch_summaries.return_value = [sent]
+            response = self.api.post(
+                "/api/postbox/messages/action/move/",
+                {"folder": "Sent", "uids": [41], "destination": "INBOX"},
+                format="json",
+            )
+        self.assertEqual(400, response.status_code)
+        connection.move.assert_not_called()
+
+        # A user-created folder is a valid archive location and records semantic origin.
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.select.return_value = imap.FolderInfo(
+                name="Sent", role="sent", uid_validity=7,
+            )
+            connection.list_folders.return_value = folders
+            connection.fetch_summaries.return_value = [sent]
+            response = self.api.post(
+                "/api/postbox/messages/action/move/",
+                {"folder": "Sent", "uids": [41], "destination": "Old Outreach"},
+                format="json",
+            )
+        self.assertEqual(200, response.status_code)
+        connection.move.assert_called_once_with([41], "Old Outreach")
+        self.assertTrue(
+            MessageOrigin.objects.filter(
+                mailbox=self.alice,
+                message_key=_message_origin_key(sent),
+                origin_role=MessageOrigin.Role.SENT,
+            ).exists()
+        )
+
+        archived = summary(91, "Old Outreach", message_id="<file-sent@example.com>")
+        # Preserve all origin-key metadata that participates in the stable key.
+        archived.subject = sent.subject
+        archived.from_address = sent.from_address
+        archived.date = sent.date
+        archived.size = sent.size
+
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.select.return_value = imap.FolderInfo(
+                name="Old Outreach", uid_validity=8,
+            )
+            connection.list_folders.return_value = folders
+            connection.fetch_summaries.return_value = [archived]
+            response = self.api.post(
+                "/api/postbox/messages/action/move/",
+                {"folder": "Old Outreach", "uids": [91], "destination": "Sent"},
+                format="json",
+            )
+        self.assertEqual(200, response.status_code)
+        connection.move.assert_called_once_with([91], "Sent")
+
+    def test_regular_mail_can_never_be_moved_into_sent(self):
+        incoming = summary(51, "INBOX", message_id="<incoming@example.com>")
+        folders = [
+            imap.FolderInfo("INBOX", role="inbox"),
+            imap.FolderInfo("Sent", role="sent"),
+        ]
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.select.return_value = imap.FolderInfo(
+                name="INBOX", role="inbox", uid_validity=7,
+            )
+            connection.list_folders.return_value = folders
+            connection.fetch_summaries.return_value = [incoming]
+            response = self.api.post(
+                "/api/postbox/messages/action/move/",
+                {"folder": "INBOX", "uids": [51], "destination": "Sent"},
+                format="json",
+            )
+        self.assertEqual(400, response.status_code)
+        connection.move.assert_not_called()
+
+    def test_sent_origin_follows_a_message_into_a_custom_folder_list(self):
+        archived = summary(61, "Old Outreach", message_id="<sent-list@example.com>")
+        MessageOrigin.objects.create(
+            mailbox=self.alice,
+            message_key=_message_origin_key(archived),
+            origin_role=MessageOrigin.Role.SENT,
+        )
+        with mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            connection = self._connection(opener)
+            connection.select.return_value = imap.FolderInfo(
+                name="Old Outreach", uid_validity=7,
+            )
+            connection.search_uids.return_value = [61]
+            connection.fetch_summaries.return_value = [archived]
+            response = self.api.get(
+                "/api/postbox/messages/?folder=Old%20Outreach"
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertTrue(response.json()["results"][0]["sent_origin"])
 
     def test_trash_then_restore_returns_to_the_original_folder(self):
         original = summary(

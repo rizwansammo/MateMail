@@ -15,11 +15,11 @@ from rest_framework import serializers
 from rest_framework.response import Response
 
 from . import imap
-from .models import MailLabel, MessageLabel
+from .models import MailLabel, MessageLabel, MessageOrigin
 from .appearance import DEFAULT_LABEL_COLOR, validate_color
 from .views_mail import (
     PostBoxView, _fetch_summaries_chunked, _global_message_sort_key,
-    _message_provenance_key, _summary_payload,
+    _message_origin_key, _message_provenance_key, _summary_payload,
     _assert_uid_validity,
 )
 
@@ -58,9 +58,21 @@ def labels_for_summaries(mailbox, summaries):
 
 
 def decorate_summaries(mailbox, summaries):
+    summaries = list(summaries)
     mapping = labels_for_summaries(mailbox, summaries)
+    origin_keys = {_message_origin_key(item) for item in summaries}
+    sent_origins = set(
+        MessageOrigin.objects.for_mailbox(mailbox).filter(
+            message_key__in=origin_keys,
+            origin_role=MessageOrigin.Role.SENT,
+        ).values_list("message_key", flat=True)
+    ) if origin_keys else set()
     return [
-        {**_summary_payload(item), "labels": mapping[virtual_label_key(item)]}
+        {
+            **_summary_payload(item),
+            "labels": mapping[virtual_label_key(item)],
+            "sent_origin": _message_origin_key(item) in sent_origins,
+        }
         for item in summaries
     ]
 

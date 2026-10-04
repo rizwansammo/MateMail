@@ -433,7 +433,7 @@ function Mailbox() {
         setDetail(data);
         // Marking read is a separate, explicit call — the list does not mark
         // things seen as it scrolls past them.
-        if (!summary.seen) {
+        if (!summary.seen && role !== "sent" && !summary.sent_origin) {
           await postbox.act("read", summary.folder, [summary.uid], {
             uid_validity: summary.uid_validity,
           });
@@ -663,6 +663,10 @@ function Mailbox() {
   const paneOff = preferences.reading_pane === "off";
   const folderIsSpam = /(^|[./_-])(spam|junk)($|[./_-])/i.test(folder);
   const folderIsTrash = /(^|[./_-])trash($|[./_-])/i.test(folder);
+  const folderIsSent = sentFolderNames.has(folder) || folder.toUpperCase() === "SENT";
+  const selectedRows = rows.filter((row) => selected.has(row.uid));
+  const selectionHasSentMessage =
+    folderIsSent || selectedRows.some((row) => Boolean(row.sent_origin));
   const activeSummary =
     detail
       ? rows.find(
@@ -745,29 +749,36 @@ function Mailbox() {
           {selected.size > 0 ? (
             <div className="pb-premium-selection-actions">
               <span>{selected.size} selected</span>
-              <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
-                onClick={() => void act("read")} />
-              <ToolbarButton label="Mark unread" icon={Mail} busy={busy}
-                onClick={() => void act("unread")} />
+              {!selectionHasSentMessage && (
+                <>
+                  <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
+                    onClick={() => void act("read")} />
+                  <ToolbarButton label="Mark unread" icon={Mail} busy={busy}
+                    onClick={() => void act("unread")} />
+                </>
+              )}
               <ToolbarButton label="Star" icon={Star} busy={busy}
                 onClick={() => void act("star")} />
-              <ToolbarButton label="Archive" icon={Archive} busy={busy}
-                onClick={() => void act("archive")} />
+              {!selectionHasSentMessage && (
+                <ToolbarButton label="Archive" icon={Archive} busy={busy}
+                  onClick={() => void act("archive")} />
+              )}
               <MoveMenu
                 folders={mailFolders}
                 currentFolder={folder}
+                sentMessage={selectionHasSentMessage}
                 disabled={busy}
                 onMove={(destination) => void act("move", undefined, { destination })}
               />
               <LabelMenu labels={mailLabels} disabled={busy}
                 onApply={(id) => void applyLabel(id, false, Array.from(selected), folder, page?.uid_validity || 0)} />
-              {folderIsSpam ? (
+              {!selectionHasSentMessage && (folderIsSpam ? (
                 <ToolbarButton label="Not spam" icon={ShieldCheck} busy={busy}
                   onClick={() => void act("not-spam")} />
               ) : (
                 <ToolbarButton label="Spam" icon={ShieldAlert} busy={busy}
                   onClick={() => void act("spam")} />
-              )}
+              ))}
               {folderIsTrash ? (
                 <ToolbarButton label="Restore" icon={RotateCcw} busy={busy}
                   onClick={() => void act("restore")} />
@@ -787,7 +798,10 @@ function Mailbox() {
             </div>
           ) : (
             <div className="pb-premium-mail-tabs" role="tablist" aria-label="Mailbox filter">
-              {(["all", "unread", "starred"] as const).map((mode) => (
+              {(folderIsSent
+                ? (["all", "starred"] as const)
+                : (["all", "unread", "starred"] as const)
+              ).map((mode) => (
                 <button
                   key={mode}
                   type="button"
@@ -841,7 +855,7 @@ function Mailbox() {
                 <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
               </summary>
               <div className="pb-premium-mail-menu">
-                {!isCrossFolderView && !conversationMode && (
+                {!isCrossFolderView && !conversationMode && !folderIsSent && (
                   <button
                     type="button"
                     disabled={rows.length === 0}
@@ -886,14 +900,20 @@ function Mailbox() {
 
         {selected.size > 0 && (
           <div className="flex flex-wrap items-center gap-1">
-            <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
-              onClick={() => void act("read")} />
+            {!selectionHasSentMessage && (
+              <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
+                onClick={() => void act("read")} />
+            )}
             <ToolbarButton label="Star" icon={Star} busy={busy}
               onClick={() => void act("star")} />
-            <ToolbarButton label="Archive" icon={Archive} busy={busy}
-              onClick={() => void act("archive")} />
-            <ToolbarButton label="Spam" icon={ShieldAlert} busy={busy}
-              onClick={() => void act("spam")} />
+            {!selectionHasSentMessage && (
+              <>
+                <ToolbarButton label="Archive" icon={Archive} busy={busy}
+                  onClick={() => void act("archive")} />
+                <ToolbarButton label="Spam" icon={ShieldAlert} busy={busy}
+                  onClick={() => void act("spam")} />
+              </>
+            )}
             <ToolbarButton label="Delete" icon={Trash2} busy={busy}
               onClick={() => void act("trash")} />
             <span className="ml-1 text-xs pb-subtle pb-num">
@@ -1071,7 +1091,9 @@ function Mailbox() {
             <>
               {rows.map((row) => {
                 const rowIsSent =
-                  sentFolderNames.has(row.folder) || row.folder.toUpperCase() === "SENT";
+                  Boolean(row.sent_origin) ||
+                  sentFolderNames.has(row.folder) ||
+                  row.folder.toUpperCase() === "SENT";
                 const recipientAddresses = row.to.length ? row.to : row.cc;
                 const recipientPrefix = row.to.length ? "To:" : row.cc.length ? "Cc:" : "To:";
                 const primaryRecipient = recipientAddresses[0] ?? "";
@@ -1093,7 +1115,7 @@ function Mailbox() {
                   <div
                     key={`${row.uid_validity}-${row.uid}`}
                     className="pb-row pb-premium-message-row"
-                    data-unread={!row.seen}
+                    data-unread={!row.seen && !rowIsSent}
                     data-selected={detail?.uid === row.uid}
                     data-sent={rowIsSent}
                   >
@@ -1185,7 +1207,7 @@ function Mailbox() {
                         )}
                       </span>
                       <time>{formatMessageDate(row.date)}</time>
-                      {!row.seen && <span className="pb-premium-unread-dot" aria-hidden="true" />}
+                      {!row.seen && !rowIsSent && <span className="pb-premium-unread-dot" aria-hidden="true" />}
                     </button>
                   </div>
                 );
@@ -1264,6 +1286,7 @@ function Mailbox() {
             <Reader
               detail={detail}
               summary={activeSummary}
+              sentMessage={folderIsSent || Boolean(activeSummary?.sent_origin)}
               showRemote={showRemote}
               onBack={() => {
                 openRequestId.current += 1;
@@ -1322,6 +1345,7 @@ function Mailbox() {
 function Reader({
   detail,
   summary,
+  sentMessage,
   showRemote,
   onBack,
   onThread,
@@ -1339,6 +1363,7 @@ function Reader({
 }: {
   detail: MessageDetail;
   summary: MessageSummary | null;
+  sentMessage: boolean;
   showRemote: boolean;
   onBack: () => void;
   onThread?: () => void;
@@ -1378,7 +1403,9 @@ function Reader({
           <span>Back</span>
         </button>
         <span className="pb-premium-toolbar-divider" aria-hidden="true" />
-        <ToolbarButton label="Archive" icon={Archive} onClick={() => onAction("archive")} />
+        {!sentMessage && (
+          <ToolbarButton label="Archive" icon={Archive} onClick={() => onAction("archive")} />
+        )}
         <ToolbarButton
           label={isTrash ? "Permanently delete" : "Move to Trash"}
           icon={Trash2}
@@ -1388,15 +1415,20 @@ function Reader({
             }
           }}
         />
-        <ToolbarButton
-          label={isSpam ? "Not spam" : "Mark as spam"}
-          icon={isSpam ? ShieldCheck : ShieldAlert}
-          onClick={() => onAction(isSpam ? "not-spam" : "spam")}
-        />
-        <ToolbarButton label="Mark unread" icon={Mail} onClick={() => onAction("unread")} />
+        {!sentMessage && (
+          <ToolbarButton
+            label={isSpam ? "Not spam" : "Mark as spam"}
+            icon={isSpam ? ShieldCheck : ShieldAlert}
+            onClick={() => onAction(isSpam ? "not-spam" : "spam")}
+          />
+        )}
+        {!sentMessage && (
+          <ToolbarButton label="Mark unread" icon={Mail} onClick={() => onAction("unread")} />
+        )}
         <MoveMenu
           folders={folders}
           currentFolder={detail.folder}
+          sentMessage={sentMessage}
           onMove={onMove}
         />
         <LabelMenu labels={labels} currentLabels={detail.labels}
@@ -1727,18 +1759,25 @@ function MoveMenu({
   folders,
   currentFolder,
   onMove,
+  sentMessage = false,
   disabled = false,
 }: {
   folders: Folder[];
   currentFolder: string;
   onMove: (destination: string) => void;
+  sentMessage?: boolean;
   disabled?: boolean;
 }) {
-  const destinations = folders.filter(
-    (item) =>
-      item.name !== currentFolder &&
-      !new Set(["sent", "drafts", "scheduled"]).has(item.role),
-  );
+  const destinations = folders.filter((item) => {
+    if (item.name === currentFolder) return false;
+    if (sentMessage) {
+      // Outgoing mail may be filed in ordinary user folders and, once filed,
+      // moved back to the real Sent folder. It never moves into Inbox,
+      // Archive, Spam/Junk, Drafts or Scheduled.
+      return !item.role || item.role === "sent";
+    }
+    return !new Set(["sent", "drafts", "scheduled"]).has(item.role);
+  });
   if (destinations.length === 0) return null;
 
   return (
