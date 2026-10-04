@@ -545,6 +545,51 @@ class MailRule(models.Model):
         ordering = ["position", "created_at"]
         indexes = [models.Index(fields=["mailbox", "position"])]
 
+    def normalized_conditions(self) -> list[dict]:
+        if isinstance(self.conditions, list) and self.conditions:
+            return [item for item in self.conditions if isinstance(item, dict)]
+        return [{"field": self.field, "match": self.match, "value": self.value}]
+
+    def normalized_actions(self) -> list[dict]:
+        if isinstance(self.actions, list) and self.actions:
+            return [item for item in self.actions if isinstance(item, dict)]
+        item = {"action": self.action}
+        if self.action_folder:
+            item["folder"] = self.action_folder
+        return [item]
+
+    def references_folder(self, name: str) -> bool:
+        return any(
+            item.get("action") in {self.Action.MOVE, self.Action.COPY}
+            and item.get("folder") == name
+            for item in self.normalized_actions()
+        )
+
+    def retarget_folder(self, old_name: str, new_name: str) -> bool:
+        changed = False
+        updated = []
+        for item in self.normalized_actions():
+            item = dict(item)
+            if (
+                item.get("action") in {self.Action.MOVE, self.Action.COPY}
+                and item.get("folder") == old_name
+            ):
+                item["folder"] = new_name
+                changed = True
+            updated.append(item)
+        if not changed:
+            return False
+
+        self.actions = updated
+        first = updated[0]
+        self.action = first.get("action", self.action)
+        self.action_folder = (
+            first.get("folder", "")
+            if self.action in {self.Action.MOVE, self.Action.COPY}
+            else ""
+        )
+        return True
+
     def __str__(self):
         return f"{self.name} ({self.mailbox_id})"
 
