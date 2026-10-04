@@ -312,7 +312,7 @@ class MailRuleSerializer(serializers.ModelSerializer):
                     )
                 if not 1 <= size_kb <= 10_485_760:
                     raise serializers.ValidationError(
-                        f"Condition {index}: message size must be between 1 KB and 10 TB."
+                        f"Condition {index}: message size must be between 1 KB and 10 GB."
                     )
                 value = str(size_kb)
             elif field == MailRule.Field.SENDER_DOMAIN:
