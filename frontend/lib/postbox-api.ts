@@ -448,6 +448,11 @@ export const postbox = {
     request<{ name: string; color: string }>(`/folders/${encodeFolder(name)}/`, {
       method: "PATCH", body: JSON.stringify({ color }),
     }),
+  folderDeleteCheck: (name: string) =>
+    request<{ name: string; message_count: number; active_rule_count: number; can_delete: boolean }>(
+      "/folders/delete-check/",
+      { method: "POST", body: JSON.stringify({ name }) },
+    ),
   deleteFolder: (name: string) =>
     request<void>(`/folders/${encodeFolder(name)}/`, { method: "DELETE" }),
 
