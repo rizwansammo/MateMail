@@ -51,9 +51,15 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=5 \
     CMD curl -fsS http://127.0.0.1:8000/api/health/ || exit 1
 
+# gthread keeps ordinary Django requests isolated while allowing the
+# authenticated PostBox SSE endpoint to hold lightweight Redis subscriptions.
+# Four workers x 25 threads gives headroom for active PostBox tabs without
+# dedicating one whole sync worker to every EventSource connection.
 CMD ["gunicorn", "config.wsgi:application", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "4", \
+     "--worker-class", "gthread", \
+     "--threads", "25", \
      "--timeout", "120", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]
