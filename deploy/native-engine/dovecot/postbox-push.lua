@@ -52,13 +52,40 @@ function dovecot_lua_notify_begin_txn(user)
   return { mailbox = user.username, events = {} }
 end
 
-function dovecot_lua_notify_event_message_new(ctx, event)
+local function queue_event(ctx, event, kind)
   ctx.events[#ctx.events + 1] = {
+    event = kind,
     folder = event.mailbox,
     -- Pushed as Lua numbers (1.0); the API accepts integers only.
     uid_validity = math.tointeger(event.uid_validity),
     uid = math.tointeger(event.uid),
   }
+end
+
+function dovecot_lua_notify_event_message_new(ctx, event)
+  queue_event(ctx, event, "new_mail")
+end
+
+-- IMAP mutations from PostBox or any other client. Identity only: the web
+-- client wakes and re-reads authoritative mailbox state.
+function dovecot_lua_notify_event_flags_set(ctx, event)
+  queue_event(ctx, event, "mailbox_changed")
+end
+
+function dovecot_lua_notify_event_flags_clear(ctx, event)
+  queue_event(ctx, event, "mailbox_changed")
+end
+
+function dovecot_lua_notify_event_message_append(ctx, event)
+  queue_event(ctx, event, "mailbox_changed")
+end
+
+function dovecot_lua_notify_event_message_trash(ctx, event)
+  queue_event(ctx, event, "mailbox_changed")
+end
+
+function dovecot_lua_notify_event_message_expunge(ctx, event)
+  queue_event(ctx, event, "mailbox_changed")
 end
 
 local function send(mailbox, event)
@@ -71,6 +98,7 @@ local function send(mailbox, event)
   request:add_header("Content-Type", "application/json")
   request:add_header("X-Native-Push-Secret", settings.secret)
   request:set_payload(json.encode({
+    event = event.event,
     mailbox = mailbox,
     folder = event.folder,
     uid_validity = event.uid_validity,
