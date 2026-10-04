@@ -450,7 +450,7 @@ export const postbox = {
     }),
   folderDeleteCheck: (name: string) =>
     request<{ name: string; message_count: number; active_rule_count: number; can_delete: boolean }>(
-      "/folders/delete-check/",
+      "/folder-delete-check/",
       { method: "POST", body: JSON.stringify({ name }) },
     ),
   deleteFolder: (name: string) =>
