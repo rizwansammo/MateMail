@@ -43,6 +43,12 @@ import {
 
 import { usePostBox } from "@/contexts/postbox-context";
 import {
+  POSTBOX_MAILBOX_EVENT,
+  announcePostBoxMailboxChange,
+  installPostBoxCrossTabSync,
+  type PostBoxMailboxChange,
+} from "@/lib/postbox-realtime";
+import {
   postbox,
   type Folder,
   type MailLabel,
@@ -99,7 +105,23 @@ export default function PostBoxAppLayout({
 
   const [folders, setFolders] = useState<Folder[]>([]);
   const [railOpen, setRailOpen] = useState(false);
-  const refreshFolders = useCallback(() => postbox.folders().then((data) => setFolders(data.results)), []);
+  const folderRefreshTimer = useRef<number | null>(null);
+  const refreshFolders = useCallback(
+    () => postbox.folders().then((data) => setFolders(data.results)),
+    [],
+  );
+  const scheduleFolderRefresh = useCallback(() => {
+    if (folderRefreshTimer.current !== null) {
+      window.clearTimeout(folderRefreshTimer.current);
+    }
+    folderRefreshTimer.current = window.setTimeout(() => {
+      folderRefreshTimer.current = null;
+      void refreshFolders().catch(() => {
+        // Realtime is supplementary. A transient IMAP/API failure must not
+        // replace the last known sidebar state with an empty one.
+      });
+    }, 80);
+  }, [refreshFolders]);
 
   useEffect(() => {
     if (!isLoading && !mailbox) router.replace("/postbox/login");
@@ -120,6 +142,43 @@ export default function PostBoxAppLayout({
       cancelled = true;
     };
   }, [mailbox, pathname]);
+
+  useEffect(() => {
+    if (!mailbox) return;
+
+    const refreshFromMailboxEvent = () => scheduleFolderRefresh();
+    window.addEventListener(POSTBOX_MAILBOX_EVENT, refreshFromMailboxEvent);
+    window.addEventListener("postbox:refresh-folders", refreshFromMailboxEvent);
+
+    const stopCrossTab = installPostBoxCrossTabSync();
+    const stream = new EventSource("/api/postbox/events/");
+    const onServerEvent = (event: Event) => {
+      try {
+        const change = JSON.parse((event as MessageEvent<string>).data) as PostBoxMailboxChange;
+        if (change?.event_id && change?.kind) {
+          // Dispatch locally and mirror to sibling tabs. Consumers de-duplicate
+          // by event id, so receiving the same server event in two tabs is safe.
+          announcePostBoxMailboxChange(change);
+        }
+      } catch {
+        // A malformed wake-up is ignored; authoritative mailbox state is never
+        // carried inside the event itself.
+      }
+    };
+    stream.addEventListener("mailbox", onServerEvent);
+
+    return () => {
+      stream.removeEventListener("mailbox", onServerEvent);
+      stream.close();
+      stopCrossTab();
+      window.removeEventListener(POSTBOX_MAILBOX_EVENT, refreshFromMailboxEvent);
+      window.removeEventListener("postbox:refresh-folders", refreshFromMailboxEvent);
+      if (folderRefreshTimer.current !== null) {
+        window.clearTimeout(folderRefreshTimer.current);
+        folderRefreshTimer.current = null;
+      }
+    };
+  }, [mailbox?.id, scheduleFolderRefresh]);
 
   const closeRail = useCallback(() => setRailOpen(false), []);
 
