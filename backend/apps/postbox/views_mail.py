@@ -68,6 +68,11 @@ class PostBoxView(APIView):
         if isinstance(exc, sending.SendFailed):
             logger.warning("PostBox send: %s", exc.log_message)
             return Response({"detail": exc.customer_message}, status=400)
+        from .sieve import SieveError
+
+        if isinstance(exc, SieveError):
+            logger.warning("PostBox filters: %s", exc.log_message)
+            return Response({"detail": exc.customer_message}, status=503)
         return super().handle_exception(exc)
 
     @property
