@@ -900,14 +900,20 @@ function Mailbox() {
 
         {selected.size > 0 && (
           <div className="flex flex-wrap items-center gap-1">
-            <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
-              onClick={() => void act("read")} />
+            {!selectionHasSentMessage && (
+              <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
+                onClick={() => void act("read")} />
+            )}
             <ToolbarButton label="Star" icon={Star} busy={busy}
               onClick={() => void act("star")} />
-            <ToolbarButton label="Archive" icon={Archive} busy={busy}
-              onClick={() => void act("archive")} />
-            <ToolbarButton label="Spam" icon={ShieldAlert} busy={busy}
-              onClick={() => void act("spam")} />
+            {!selectionHasSentMessage && (
+              <>
+                <ToolbarButton label="Archive" icon={Archive} busy={busy}
+                  onClick={() => void act("archive")} />
+                <ToolbarButton label="Spam" icon={ShieldAlert} busy={busy}
+                  onClick={() => void act("spam")} />
+              </>
+            )}
             <ToolbarButton label="Delete" icon={Trash2} busy={busy}
               onClick={() => void act("trash")} />
             <span className="ml-1 text-xs pb-subtle pb-num">
