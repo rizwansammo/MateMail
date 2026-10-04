@@ -168,6 +168,7 @@ export interface MessageSummary {
   folder: string;
   message_id: string;
   labels?: MessageLabel[];
+  sent_origin?: boolean;
   subject: string;
   from: { name: string; address: string };
   to: string[];
