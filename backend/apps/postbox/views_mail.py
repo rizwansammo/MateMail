@@ -30,7 +30,7 @@ from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX, POSTBOX_SEND_PER_MA
 
 from . import imap, mime, sending, realtime
 from .auth import PostBoxSessionAuthentication
-from .models import FolderAppearance, MailRule, MessageMoveProvenance, PostBoxPreference, RemoteImageSenderTrust
+from .models import FolderAppearance, MailRule, MessageMoveProvenance, MessageOrigin, PostBoxPreference, RemoteImageSenderTrust
 from .appearance import DEFAULT_FOLDER_COLOR, validate_color
 
 logger = logging.getLogger(__name__)
@@ -892,6 +892,62 @@ def _message_provenance_key(summary: imap.MessageSummary) -> str:
     return "msg:" + hashlib.sha256(source.encode("utf-8", "replace")).hexdigest()
 
 
+def _message_origin_key(summary: imap.MessageSummary) -> str:
+    """
+    MOVE-stable identity for semantic origin.
+
+    Message-ID alone is intentionally not enough here: an incoming message can
+    choose its own Message-ID. Mixing in visible immutable header metadata and
+    size prevents a forged duplicate id from inheriting Sent privileges.
+    """
+    source = "\x1f".join([
+        _message_provenance_key(summary),
+        summary.from_address.strip().casefold(),
+        summary.subject.strip(),
+        summary.date.strip(),
+        str(summary.size),
+    ])
+    return "origin:" + hashlib.sha256(
+        source.encode("utf-8", "replace")
+    ).hexdigest()
+
+
+def _record_sent_origin(mailbox, summaries) -> None:
+    for summary in summaries:
+        MessageOrigin.objects.update_or_create(
+            mailbox=mailbox,
+            message_key=_message_origin_key(summary),
+            defaults={"origin_role": MessageOrigin.Role.SENT},
+        )
+
+
+def _sent_origin_keys(mailbox, summaries) -> set[str]:
+    keys = {_message_origin_key(summary) for summary in summaries}
+    if not keys:
+        return set()
+    return set(
+        MessageOrigin.objects.for_mailbox(mailbox).filter(
+            message_key__in=keys,
+            origin_role=MessageOrigin.Role.SENT,
+        ).values_list("message_key", flat=True)
+    )
+
+
+def _all_sent_origin(mailbox, summaries) -> bool:
+    summaries = list(summaries)
+    if not summaries:
+        return False
+    return len(_sent_origin_keys(mailbox, summaries)) == len(summaries)
+
+
+def _clear_message_origins(mailbox, summaries) -> None:
+    keys = [_message_origin_key(summary) for summary in summaries]
+    if keys:
+        MessageOrigin.objects.for_mailbox(mailbox).filter(
+            message_key__in=keys
+        ).delete()
+
+
 def _record_move_provenance(mailbox, summaries, original_folder: str) -> None:
     for summary in summaries:
         MessageMoveProvenance.objects.update_or_create(
@@ -971,7 +1027,25 @@ class MessageActionView(PostBoxView):
         with imap.open_mailbox(self.mailbox.email) as connection:
             info = connection.select(data["folder"])
             _assert_uid_validity(request, info.uid_validity)
-            roles = {f.role: f.name for f in connection.list_folders() if f.role}
+            folders = [item for item in connection.list_folders() if item.selectable]
+            roles = {item.role: item.name for item in folders if item.role}
+            by_name = {item.name: item for item in folders}
+            source = by_name.get(data["folder"])
+            source_role = source.role if source is not None else ""
+            sent = roles.get("sent", "Sent")
+            trash = roles.get("trash", "Trash")
+            junk = roles.get("junk", "Junk")
+
+            # Sent is not an inbox. Read/unread, Archive and Spam make sense for
+            # received mail but are misleading for outgoing mail. Enforce this
+            # server-side as well as hiding the controls in PostBox.
+            if source_role == "sent" and action in {
+                "read", "unread", "archive", "spam", "not-spam", "restore",
+            }:
+                return Response(
+                    {"detail": "That action is not available for Sent messages."},
+                    status=400,
+                )
 
             if action == "read":
                 connection.mark_seen(uids, True)
@@ -984,10 +1058,10 @@ class MessageActionView(PostBoxView):
             elif action == "archive":
                 connection.move(uids, roles.get("archive", "Archive"))
             elif action in {"trash", "spam"}:
-                trash = roles.get("trash", "Trash")
-                junk = roles.get("junk", "Junk")
                 destination = trash if action == "trash" else junk
                 summaries = connection.fetch_summaries(uids)
+                if source_role == "sent":
+                    _record_sent_origin(self.mailbox, summaries)
                 connection.move(uids, destination)
                 if data["folder"] not in {trash, junk}:
                     _record_move_provenance(
@@ -997,11 +1071,7 @@ class MessageActionView(PostBoxView):
                     )
             elif action in {"not-spam", "restore"}:
                 summaries = connection.fetch_summaries(uids)
-                valid_folders = {
-                    item.name
-                    for item in connection.list_folders()
-                    if item.selectable
-                }
+                valid_folders = {item.name for item in folders}
                 valid_folders.add("INBOX")
                 destinations = _restore_destinations(
                     self.mailbox,
@@ -1018,10 +1088,42 @@ class MessageActionView(PostBoxView):
                         {"detail": "Choose a destination folder."},
                         status=400,
                     )
+                destination_info = by_name.get(destination)
+                if destination_info is None:
+                    return Response(
+                        {"detail": "That destination folder could not be found."},
+                        status=400,
+                    )
+                if destination == data["folder"]:
+                    return Response(
+                        {"detail": "That message is already in this folder."},
+                        status=400,
+                    )
+
                 summaries = connection.fetch_summaries(uids)
+
+                if source_role == "sent":
+                    # Sent may be filed only into an ordinary user-created
+                    # folder. Inbox/Archive/Spam/Drafts/Scheduled are semantic
+                    # system folders; Trash has its own explicit action.
+                    if destination_info.role:
+                        return Response(
+                            {"detail": "Sent messages can only be moved to a custom folder."},
+                            status=400,
+                        )
+                    _record_sent_origin(self.mailbox, summaries)
+                elif destination_info.role == "sent":
+                    # Never let an inbound message become a Sent message merely
+                    # because a client asked for that destination. Only messages
+                    # PostBox previously moved out of Sent have this marker.
+                    if not _all_sent_origin(self.mailbox, summaries):
+                        return Response(
+                            {"detail": "Only messages originally filed in Sent can be moved back to Sent."},
+                            status=400,
+                        )
+
                 connection.move(uids, destination)
-                trash = roles.get("trash", "Trash")
-                junk = roles.get("junk", "Junk")
+
                 if destination in {trash, junk} and data["folder"] not in {trash, junk}:
                     _record_move_provenance(
                         self.mailbox,
@@ -1033,7 +1135,7 @@ class MessageActionView(PostBoxView):
             elif action == "delete":
                 # Permanent, and only from Trash or Junk. Erasing from an
                 # arbitrary folder would make a mis-click unrecoverable.
-                if data["folder"] not in (roles.get("trash", "Trash"), roles.get("junk", "Junk")):
+                if data["folder"] not in (trash, junk):
                     return Response(
                         {"detail": "Messages can only be deleted permanently from Trash or Spam."},
                         status=400,
@@ -1041,6 +1143,7 @@ class MessageActionView(PostBoxView):
                 summaries = connection.fetch_summaries(uids)
                 connection.delete_permanently(uids)
                 _clear_move_provenance(self.mailbox, summaries)
+                _clear_message_origins(self.mailbox, summaries)
 
         logger.info(
             "PostBox %s: mailbox=%s folder=%s count=%d",
