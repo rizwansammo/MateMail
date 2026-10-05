@@ -2949,3 +2949,65 @@ optional feature. That was measured.
 - **Folder accuracy is unmeasured for Sieve.** It does not run on the Native
   Engine; if it is enabled, `folder` must be re-measured before a client
   relies on it.
+
+
+---
+
+## DEC-059 — Custom Hub/PostBox domains stay on host nginx + Certbot
+
+**Status:** Accepted · **Phase:** Custom Domains P1 · **Date:** 2026-10-05
+
+### Decision
+
+Customer-owned Hub and PostBox hostnames are served by MateServer's existing
+host-native nginx and receive individual Let's Encrypt certificates through the
+existing Certbot webroot mechanism.
+
+Caddy is not introduced for this feature.
+
+The application owns only the logical mapping:
+
+```
+hostname -> tenant -> surface
+```
+
+A root-owned host provisioning worker owns nginx configuration and certificate
+lifecycle. Django never receives root, the Docker socket, write access to
+`/etc/nginx` or write access to `/etc/letsencrypt`.
+
+### Why
+
+The production audit found that nginx 1.28.3 already owns ports 80/443 for
+MateMail and the rest of MateServer's production applications. Putting Caddy in
+front would therefore be a host-wide edge migration rather than a MateMail
+feature. Running Caddy behind nginx would not remove the certificate problem,
+because nginx would still terminate public TLS.
+
+The existing stack already proves the required mechanism:
+`mailadmin.netamate.com` and `postbox.netamate.com` use individual
+Let's Encrypt certificates, host-native nginx and the shared MateMail backend.
+The new feature automates that known-good pattern instead of adding another
+proxy.
+
+At the expected scale of tens to hundreds of custom hostnames, one exact nginx
+vhost and one certificate lineage per hostname is operationally reasonable.
+The application data is deliberately proxy-independent so a later edge
+migration, if ever justified, does not require changing customer mappings.
+
+### Security consequences
+
+- A custom hostname is activated only after DNS verification.
+- Customer input is strictly normalized/validated before it reaches a generated
+  nginx file.
+- Unknown Host headers are rejected by an application allowlist backed by
+  active custom-host records; static `ALLOWED_HOSTS` is not expanded and the
+  backend is not restarted for every customer.
+- Generated PostBox vhosts overwrite a trusted surface header used only for
+  frontend routing; tenant authorization still comes from the database mapping.
+- Custom Hub vhosts do not expose platform, internal or Django-admin surfaces.
+- Certbot renewal for custom lineages performs `nginx -t` before reload.
+- The browser stays on the customer hostname; no redirect to a MateMail
+  canonical hostname is used.
+
+Full architecture and phase acceptance criteria are in
+`docs/CUSTOM_DOMAINS.md`.
