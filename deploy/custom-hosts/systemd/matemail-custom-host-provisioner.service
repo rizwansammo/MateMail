@@ -1,6 +1,5 @@
 [Unit]
 Description=MateMail custom hostname nginx/Certbot provisioner
-Documentation=file:/opt/MateMail/.deploy/custom-hosts/README.md
 Wants=network-online.target
 After=network-online.target nginx.service
 Requires=nginx.service
