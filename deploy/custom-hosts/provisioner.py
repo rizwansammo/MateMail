@@ -15,6 +15,8 @@ No customer value is ever executed as shell. subprocess is always argv-based.
 """
 from __future__ import annotations
 
+import errno
+import fcntl
 import json
 import os
 import re
@@ -42,6 +44,12 @@ CERTBOT = os.environ.get("MATEMAIL_CUSTOM_HOST_CERTBOT", "/usr/bin/certbot")
 NGINX = os.environ.get("MATEMAIL_CUSTOM_HOST_NGINX", "/usr/sbin/nginx")
 SYSTEMCTL = os.environ.get("MATEMAIL_CUSTOM_HOST_SYSTEMCTL", "/usr/bin/systemctl")
 OPENSSL = os.environ.get("MATEMAIL_CUSTOM_HOST_OPENSSL", "/usr/bin/openssl")
+LOCK_PATH = Path(
+    os.environ.get(
+        "MATEMAIL_CUSTOM_HOST_LOCK",
+        "/run/lock/matemail-custom-host-provisioner.lock",
+    )
+)
 HTTP_TIMEOUT = float(os.environ.get("MATEMAIL_CUSTOM_HOST_HTTP_TIMEOUT", "10"))
 GENERATED_MARKER = "# MATEMAIL CUSTOM HOST v1"
 HOST_RE = re.compile(
@@ -418,6 +426,20 @@ def safe_error(job: dict[str, str], exc: Exception) -> None:
         )
 
 
+def _acquire_lock():
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(LOCK_PATH, "a+", encoding="utf-8")
+    os.chmod(LOCK_PATH, 0o600)
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        if exc.errno in (errno.EACCES, errno.EAGAIN):
+            return None
+        raise
+    return handle
+
+
 def main() -> int:
     if os.geteuid() != 0:
         log("custom-host: must run as root")
@@ -426,37 +448,44 @@ def main() -> int:
         log("custom-host: CUSTOM_HOST_PROVISIONER_SECRET is not configured")
         return 2
 
+    lock = _acquire_lock()
+    if lock is None:
+        log("custom-host: another provisioner instance is already running")
+        return 0
+
     try:
-        payload = api_json("GET", "pending/")
-    except ProvisioningError as exc:
-        log(f"custom-host: pending query failed: {exc}")
-        return 1
-
-    rows = payload.get("results", [])
-    if not isinstance(rows, list):
-        log("custom-host: pending query returned an invalid result list")
-        return 1
-
-    failures = 0
-    for raw in rows:
         try:
-            job = validate_job(raw)
-            provision(job)
-        except Exception as exc:
-            failures += 1
-            try:
-                job
-            except UnboundLocalError:
-                log(f"custom-host: invalid job ignored: {exc}")
-                continue
-            safe_error(job, exc)
+            payload = api_json("GET", "pending/")
+        except ProvisioningError as exc:
+            log(f"custom-host: pending query failed: {exc}")
+            return 1
 
-    if failures:
-        log(f"custom-host: completed with {failures} failed job(s)")
-        return 1
-    if rows:
-        log(f"custom-host: completed {len(rows)} job(s)")
-    return 0
+        rows = payload.get("results", [])
+        if not isinstance(rows, list):
+            log("custom-host: pending query returned an invalid result list")
+            return 1
+
+        failures = 0
+        for raw in rows:
+            job = None
+            try:
+                job = validate_job(raw)
+                provision(job)
+            except Exception as exc:
+                failures += 1
+                if job is None:
+                    log(f"custom-host: invalid job ignored: {exc}")
+                    continue
+                safe_error(job, exc)
+
+        if failures:
+            log(f"custom-host: completed with {failures} failed job(s)")
+            return 1
+        if rows:
+            log(f"custom-host: completed {len(rows)} job(s)")
+        return 0
+    finally:
+        lock.close()
 
 
 if __name__ == "__main__":
