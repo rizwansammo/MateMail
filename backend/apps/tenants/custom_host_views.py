@@ -226,6 +226,27 @@ class CustomHostnameVerifyView(APIView):
         _enforce_dns_check_limit(row)
         verified, message = verify_custom_hostname_dns(row)
 
+        # ERROR is deliberately not polled forever: repeated automatic ACME
+        # attempts can hit CA rate limits. A fresh customer/admin Verify is the
+        # explicit retry signal. Once DNS is still correct, put the durable job
+        # back into UNPROVISIONED so the host worker can retry it.
+        if (
+            verified
+            and row.provisioning_status == CustomHostnameProvisioningStatus.ERROR
+        ):
+            row.provisioning_status = CustomHostnameProvisioningStatus.UNPROVISIONED
+            row.certificate_status = CustomHostnameCertificateStatus.NOT_REQUESTED
+            row.last_error = ""
+            row.save(
+                update_fields=[
+                    "provisioning_status",
+                    "certificate_status",
+                    "last_error",
+                    "updated_at",
+                ]
+            )
+            invalidate_custom_hostname_cache(row.hostname)
+
         log_event(
             request.tenant,
             (
@@ -287,7 +308,15 @@ class CustomHostnamePendingInternalView(APIView):
         rows = (
             CustomHostname.objects.filter(
                 dns_status=CustomHostnameDNSStatus.VERIFIED,
-                provisioning_status=CustomHostnameProvisioningStatus.UNPROVISIONED,
+                # PROVISIONING is included for crash recovery. systemd never
+                # overlaps this oneshot worker, so a row left in PROVISIONING
+                # means the previous process died before reporting READY/ERROR.
+                # Re-running the idempotent bootstrap/Certbot sequence is safer
+                # than leaving the hostname stuck forever.
+                provisioning_status__in=(
+                    CustomHostnameProvisioningStatus.UNPROVISIONED,
+                    CustomHostnameProvisioningStatus.PROVISIONING,
+                ),
                 tenant__status__in=("trial", "active"),
                 tenant__approved_at__isnull=False,
             )
