@@ -23,6 +23,7 @@ SERVICE_PATH = (
     / "systemd"
     / "matemail-custom-host-provisioner.service"
 )
+DEPLOY_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "deploy.yml"
 
 spec = importlib.util.spec_from_file_location("matemail_custom_host_provisioner", WORKER_PATH)
 worker = importlib.util.module_from_spec(spec)
@@ -226,6 +227,23 @@ class HostInstallArtifactsTest(unittest.TestCase):
         self.assertNotIn('printf "%s" "$SECRET"', source)
         self.assertIn("chmod 0600", source)
         self.assertIn("--activate", source)
+
+    def test_manual_deploy_stages_worker_from_the_exact_release_sha(self):
+        source = DEPLOY_WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.assertIn('git archive "${IMAGE_TAG}" deploy/custom-hosts', source)
+        self.assertIn('custom-hosts.${IMAGE_TAG}.tar.gz', source)
+        self.assertIn('bash "$CUSTOM_HOST_DIR/install.sh"', source)
+        self.assertIn(
+            "systemctl enable --now matemail-custom-host-provisioner.timer",
+            source,
+        )
+        # A customer ACME failure is isolated from the healthy application
+        # release; it must not trigger the Compose rollback path.
+        timer = source.index(
+            "systemctl enable --now matemail-custom-host-provisioner.timer"
+        )
+        disarm = source.index("ROLLBACK_ARMED=0")
+        self.assertGreater(timer, disarm)
 
 
 if __name__ == "__main__":
