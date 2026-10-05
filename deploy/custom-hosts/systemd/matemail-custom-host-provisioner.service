@@ -1,0 +1,31 @@
+[Unit]
+Description=MateMail custom hostname nginx/Certbot provisioner
+Documentation=file:/opt/MateMail/.deploy/custom-hosts/README.md
+Wants=network-online.target
+After=network-online.target nginx.service
+Requires=nginx.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/matemail/custom-host-provisioner.env
+ExecStart=/usr/local/libexec/matemail-custom-host-provisioner
+
+# The worker must write nginx/Let's Encrypt state, and nothing broader.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+ReadWritePaths=/etc/nginx /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt /var/www/html
+
+[Install]
+WantedBy=multi-user.target
