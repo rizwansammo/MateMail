@@ -98,6 +98,8 @@ class GeneratedNginxTest(unittest.TestCase):
         self.assertIn("location ^~ /api/postbox/ { return 404; }", text)
         self.assertIn("location ^~ /api/platform/ { return 404; }", text)
         self.assertIn("location ^~ /platform { return 404; }", text)
+        self.assertIn("location ^~ /signup { return 404; }", text)
+        self.assertIn("location = /api/auth/signup/ { return 404; }", text)
         self.assertNotIn("portal.matemail.online", text)
         self.assertNotIn("postbox.matemail.online", text)
 
