@@ -298,7 +298,9 @@ class ProvisioningFlowTest(unittest.TestCase):
         self.assertEqual(
             states,
             [
+                ("state", "provisioning", "not_requested"),
                 ("state", "provisioning", "issuing"),
+                ("state", "provisioning", "active"),
                 ("state", "ready", "active"),
             ],
         )
@@ -306,6 +308,84 @@ class ProvisioningFlowTest(unittest.TestCase):
         self.assertEqual(sum(1 for item in calls if item[0] == "authorize"), 2)
 
 
+
+
+class RetryableProvisioningTest(unittest.TestCase):
+    def test_nginx_bootstrap_failure_does_not_turn_into_customer_error(self):
+        job = {
+            "id": "0a410cf7-b655-466e-929f-727ed6444309",
+            "hostname": "mail.customer.com",
+            "surface": "postbox",
+            "tenant_id": "0e40081a-b654-4901-afec-d6cb741acdf6",
+        }
+        states = []
+        originals = {
+            "authorize": worker.authorize,
+            "post_state": worker.post_state,
+            "verify_certificate": worker.verify_certificate,
+            "install_site": worker.install_site,
+        }
+        try:
+            worker.authorize = lambda value: None
+            worker.post_state = lambda job_id, state, **kw: states.append(
+                (state, kw.get("certificate_status"))
+            )
+            worker.verify_certificate = lambda hostname: (_ for _ in ()).throw(
+                worker.ProvisioningError("no certificate")
+            )
+            worker.install_site = lambda hostname, content: (_ for _ in ()).throw(
+                worker.ProvisioningError("nginx test failed")
+            )
+
+            with self.assertRaises(worker.RetryableEdgeError):
+                worker.provision(job)
+        finally:
+            for name, value in originals.items():
+                setattr(worker, name, value)
+
+        self.assertEqual(states, [("provisioning", "not_requested")])
+        self.assertNotIn(("error", "error"), states)
+
+    def test_existing_valid_certificate_is_reused_on_local_retry(self):
+        job = {
+            "id": "0a410cf7-b655-466e-929f-727ed6444309",
+            "hostname": "mail.customer.com",
+            "surface": "postbox",
+            "tenant_id": "0e40081a-b654-4901-afec-d6cb741acdf6",
+        }
+        calls = []
+        originals = {
+            "authorize": worker.authorize,
+            "post_state": worker.post_state,
+            "verify_certificate": worker.verify_certificate,
+            "install_site": worker.install_site,
+            "issue_certificate": worker.issue_certificate,
+        }
+        try:
+            worker.authorize = lambda value: None
+            worker.post_state = lambda job_id, state, **kw: calls.append(
+                ("state", state, kw.get("certificate_status"))
+            )
+            worker.verify_certificate = lambda hostname: calls.append(
+                ("certcheck", hostname)
+            )
+            worker.install_site = lambda hostname, content: calls.append(
+                ("site", "443" if "listen 443 ssl" in content else "80")
+            )
+            worker.issue_certificate = lambda hostname: calls.append(
+                ("ISSUE-SHOULD-NOT-HAPPEN", hostname)
+            )
+
+            worker.provision(job)
+        finally:
+            for name, value in originals.items():
+                setattr(worker, name, value)
+
+        self.assertFalse(
+            any(item[0] == "ISSUE-SHOULD-NOT-HAPPEN" for item in calls)
+        )
+        self.assertIn(("state", "provisioning", "active"), calls)
+        self.assertIn(("state", "ready", "active"), calls)
 
 
 class ActivationFlowTest(unittest.TestCase):
@@ -430,6 +510,7 @@ class HostInstallArtifactsTest(unittest.TestCase):
             "ReadWritePaths=/etc/nginx /etc/letsencrypt /var/lib/letsencrypt",
             source,
         )
+        self.assertIn("/var/log/nginx", source)
 
     def test_installer_never_prints_the_shared_secret(self):
         source = INSTALLER_PATH.read_text(encoding="utf-8")
