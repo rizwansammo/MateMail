@@ -340,8 +340,8 @@ jobs:
             [ -f "$CUSTOM_HOST_BUNDLE" ] || { echo "ERROR: staged custom-host bundle is missing."; exit 1; }
             rm -rf "$CUSTOM_HOST_DIR"
             tar -xzf "$CUSTOM_HOST_BUNDLE" -C "$DEPLOY_DIR/.deploy"
-            [ -x "$CUSTOM_HOST_DIR/install.sh" ] || {
-              echo "ERROR: custom-host installer is missing or not executable."
+            [ -f bash "$CUSTOM_HOST_DIR/install.sh" ] || {
+              echo "ERROR: custom-host installer is missing."
               exit 1
             }
 
