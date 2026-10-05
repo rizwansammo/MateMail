@@ -1,6 +1,6 @@
 # MateMail Custom Hub/PostBox Domains
 
-**Status:** Phase 1–2 complete; Phase 3 edge automation pending  
+**Status:** Phase 1–3 complete; Phase 4 routing/authentication pending  
 **Branch:** `feature/custom-domains-caddy`  
 **Date:** 2026-10-05
 
@@ -363,8 +363,10 @@ separate decision.
 1. ✅ **Audit + Final Architecture** — complete. No production mutation.
 2. ✅ **Custom Domain Backend** — complete: model, authorization, DNS
    verification, dynamic host allowlisting and provisioning API/state.
-3. **nginx + Certbot Automation** — host worker, bootstrap/final vhost
-   templates, certificate issuance/renewal hook. **No Caddy migration.**
+3. **nginx + Certbot Automation** — ✅ complete: root-owned host worker,
+   exact-host ACME bootstrap, individual Certbot lineage, TLS-ready staging
+   vhost, scoped renewal hook, systemd timer and exact-release deployment
+   artifacts. **No Caddy migration.**
 4. **Routing + Authentication** — custom Hub/PostBox routing, trusted surface
    header, tenant resolution, cookie/login/redirect regression tests.
 5. **Hub UI + NetaMate Pilot + Production Tests** — one-CNAME customer flow,
@@ -386,6 +388,42 @@ PASS:
 - edge technology chosen without changing production.
 
 Phase 1 deliberately changes no live server configuration.
+
+## Phase 3 implementation result
+
+Phase 3 is implemented but remains undeployed on this feature branch.
+
+The release now contains `deploy/custom-hosts/`:
+
+- a standard-library Python provisioner that polls only the loopback internal
+  API and never executes customer input as shell;
+- strict duplicate-run locking under `/run/lock`;
+- an exact-host port-80 bootstrap that serves only the ACME webroot and 503s
+  everything else;
+- one Let's Encrypt lineage per customer hostname using the existing Certbot
+  webroot;
+- certificate hostname/expiry validation before nginx is allowed to reference
+  the lineage;
+- an atomic nginx writer that refuses to overwrite operator-owned files and
+  restores the previous generated config if `nginx -t` fails;
+- a Phase-3 TLS-ready staging vhost that deliberately returns 503 rather than
+  proxying MateMail before Phase 4;
+- a certificate-scoped Certbot deploy hook that reloads nginx only for generated
+  MateMail custom-host sites and only after `nginx -t`;
+- a hardened root-owned systemd oneshot + timer;
+- an idempotent installer that establishes a separate
+  `CUSTOM_HOST_PROVISIONER_SECRET` without printing it;
+- manual deployment workflow integration that stages the worker from the exact
+  release SHA, installs it before the backend starts, then enables the timer
+  only after the backend is healthy.
+
+Crash recovery is deliberate: a row left in `PROVISIONING` by a killed worker
+is returned to the next poll and the provisioning sequence is idempotently
+resumed. A deliberate `ERROR` is not retried forever (which could hit CA rate
+limits); a fresh successful DNS Verify explicitly requeues it.
+
+The Phase 3 worker can report at most `READY`. It has no API contract that can
+mark a hostname `ACTIVE`; Phase 4 remains the activation boundary.
 
 
 ## Phase 2 acceptance result
