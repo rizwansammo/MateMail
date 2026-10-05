@@ -115,6 +115,9 @@ MIDDLEWARE = [
     # MUST remain first when CUSTOM_HOSTS_DYNAMIC_ENABLED=True: Django's
     # ALLOWED_HOSTS is then ["*"] so this becomes the real Host allowlist.
     "apps.tenants.host_middleware.CustomHostnameHostGuardMiddleware",
+    # Database-backed customer hostnames are also pinned to one application
+    # surface before auth/business logic runs.
+    "apps.tenants.surface_middleware.CustomHostnameSurfaceGuardMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
