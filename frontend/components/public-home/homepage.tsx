@@ -16,7 +16,7 @@ import {
   Sun,
   X,
 } from "lucide-react";
-import Image from "next/image";
+import { BrandMark } from "@/components/brand-mark";
 import { api, ApiError } from "@/lib/api";
 
 type ThemeChoice = "light" | "dark" | "system";
@@ -247,7 +247,7 @@ export function MateMailPublicHome() {
       <header className="mm-site-header" id="top">
         <div className="mm-shell mm-header-inner">
           <a className="mm-brand" href="#top" aria-label="MateMail home">
-            <Image src="/matemail-logo.png" alt="" width={34} height={26} priority />
+            <BrandMark size={31} className="mm-brand-mark" preload />
             <span className="mm-wordmark">MateMail</span>
           </a>
 
@@ -358,7 +358,7 @@ export function MateMailPublicHome() {
               <div className="mm-visual-frame">
                 <div className="mm-visual-rail">
                   <div className="mm-visual-brand">
-                    <Image src="/matemail-logo.png" alt="" width={28} height={21} />
+                    <BrandMark size={26} className="mm-preview-brand-mark" />
                     <span>Workspace</span>
                   </div>
                   <div className="mm-rail-item mm-active">Overview</div>
@@ -462,11 +462,11 @@ export function MateMailPublicHome() {
                 <div className="mm-card-number">01</div>
                 <div className="mm-experience-title">
                   <div className="mm-mini-brand">
-                    <Image src="/matemail-logo.png" alt="" width={32} height={24} />
+                    <BrandMark size={30} className="mm-card-brand-mark" />
                   </div>
                   <div>
                     <p>For organization owners and administrators</p>
-                    <h3>MateMail Workspace</h3>
+                    <h3><span className="mm-brand-name">MateMail</span> Workspace</h3>
                   </div>
                 </div>
                 <p>
@@ -488,11 +488,11 @@ export function MateMailPublicHome() {
                 <div className="mm-card-number">02</div>
                 <div className="mm-experience-title">
                   <div className="mm-mini-brand">
-                    <Image src="/matemail-logo.png" alt="" width={32} height={24} />
+                    <BrandMark size={30} className="mm-card-brand-mark" />
                   </div>
                   <div>
                     <p>For mailbox users</p>
-                    <h3>MateMail PostBox</h3>
+                    <h3><span className="mm-brand-name">MateMail</span> PostBox</h3>
                   </div>
                 </div>
                 <p>
@@ -708,7 +708,7 @@ export function MateMailPublicHome() {
         <div className="mm-shell mm-footer-grid">
           <div className="mm-footer-brand">
             <a className="mm-brand" href="#top">
-              <Image src="/matemail-logo.png" alt="" width={34} height={26} />
+              <BrandMark size={31} className="mm-brand-mark" />
               <span className="mm-wordmark">MateMail</span>
             </a>
             <p>Business email by NetaMate Solutions.</p>
