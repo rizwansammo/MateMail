@@ -1438,6 +1438,13 @@
   gap: 12px;
 }
 
+.portal-premium .portal-dns-setup-tip {
+  margin: -2px 0 12px;
+  color: var(--portal-muted);
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
 .portal-premium .portal-dns-record {
   padding: 15px;
   border: 1px solid var(--portal-border);
