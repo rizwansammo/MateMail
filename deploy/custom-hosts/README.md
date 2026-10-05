@@ -1,7 +1,7 @@
 # MateMail custom-host edge worker
 
-This directory implements the Phase 3 TLS provisioner and Phase 4 activation
-worker for custom Hub/PostBox hostnames.
+This directory implements the Phase 3 TLS provisioner, Phase 4 activation
+worker, and Phase 5 deactivation/pilot support for custom Hub/PostBox hostnames.
 
 The Django application never receives host privileges. A root-owned systemd
 oneshot polls the loopback backend API, re-authorizes each DNS-verified hostname,
@@ -26,6 +26,28 @@ only then reports the hostname ACTIVE.
 The shared secret is purpose-specific. It must equal
 `CUSTOM_HOST_PROVISIONER_SECRET` in `/opt/MateMail/.env` and is copied into
 the worker's root-only environment file by `install.sh`. It is never printed.
+
+## Branded pilot override
+
+Ordinary custom hostnames always proxy the canonical MateMail frontend. A
+controlled migration of a pre-existing branded deployment may set the
+root-owned worker variable:
+
+```text
+MATEMAIL_CUSTOM_HOST_FRONTEND_OVERRIDES=hostname=http://127.0.0.1:PORT
+```
+
+The parser accepts only exact customer hostnames and loopback HTTP ports
+1024–65535. The value never comes from Hub or the custom-host database. The
+NetaMate pilot uses this to preserve its existing frontend on port 3060.
+
+## Removal
+
+Customer removal moves an edge-backed row to DEACTIVATING immediately, so the
+application Host guard stops accepting it. The worker then removes only its
+marked generated nginx site, reloads after `nginx -t`, retires the per-host
+Certbot lineage, and reports INACTIVE/REVOKED. Cleanup retries even if the tenant
+has since been suspended or DNS has moved.
 
 ## Failure behavior
 
