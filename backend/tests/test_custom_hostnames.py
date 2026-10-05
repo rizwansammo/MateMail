@@ -15,6 +15,7 @@ from apps.tenants.models import (
 )
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
+    TEST_PASSWORD,
     add_member,
     auth_client,
     make_domain,
