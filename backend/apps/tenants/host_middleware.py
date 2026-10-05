@@ -56,6 +56,10 @@ class CustomHostnameHostGuardMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        # Downstream tenant/surface resolution reuses this exact decision so one
+        # request never performs two potentially different database lookups.
+        request.custom_hostname_binding = None
+
         if not getattr(settings, "CUSTOM_HOSTS_DYNAMIC_ENABLED", False):
             return self.get_response(request)
 
@@ -83,4 +87,5 @@ class CustomHostnameHostGuardMiddleware:
         if binding is None:
             return HttpResponseBadRequest("Invalid host.")
 
+        request.custom_hostname_binding = binding
         return self.get_response(request)
