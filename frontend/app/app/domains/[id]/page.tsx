@@ -56,15 +56,15 @@ function pretty(value: string) {
 }
 
 function shortDnsHost(host: string, domain: string) {
-  const cleanHost = host.trim().replace(/\\.$/, "");
-  const cleanDomain = domain.trim().replace(/\\.$/, "");
+  const cleanHost = host.trim().replace(/\.$/, "");
+  const cleanDomain = domain.trim().replace(/\.$/, "");
   if (cleanHost === cleanDomain) return "@";
   const suffix = `.${cleanDomain}`;
   return cleanHost.endsWith(suffix) ? cleanHost.slice(0, -suffix.length) : cleanHost;
 }
 
 function stripTrailingDot(value: string) {
-  return value.trim().replace(/\\.$/, "");
+  return value.trim().replace(/\.$/, "");
 }
 
 function recordLabel(record: DNSRecord) {
@@ -97,7 +97,7 @@ function displayFields(record: DNSRecord, domain: string): DisplayField[] {
   const host = shortDnsHost(record.host, domain);
 
   if (record.record_type === "MX") {
-    const [priority = "10", ...serverParts] = record.expected_value.trim().split(/\\s+/);
+    const [priority = "10", ...serverParts] = record.expected_value.trim().split(/\s+/);
     return [
       { label: "Host / Name", value: host, copyLabel: "Copy MX host" },
       { label: "Mail server / Value", value: stripTrailingDot(serverParts.join(" ")), copyLabel: "Copy mail server" },
@@ -107,7 +107,7 @@ function displayFields(record: DNSRecord, domain: string): DisplayField[] {
 
   if (record.record_type === "SRV") {
     const [priority = "0", weight = "0", port = "443", ...targetParts] =
-      record.expected_value.trim().split(/\\s+/);
+      record.expected_value.trim().split(/\s+/);
     const [service = "_autodiscover", protocol = "_tcp"] = host.split(".");
     return [
       { label: "Service", value: service, copyLabel: "Copy SRV service" },
@@ -316,7 +316,7 @@ export default function DomainDetailPage() {
         const retryHeader = response.headers.get("Retry-After");
         const headerSeconds = retryHeader ? Number.parseInt(retryHeader, 10) : Number.NaN;
         const detail = typeof data?.detail === "string" ? data.detail : "";
-        const detailMatch = detail.match(/(\\d+)\\s+seconds?/i);
+        const detailMatch = detail.match(/(\d+)\s+seconds?/i);
         const detailSeconds = detailMatch ? Number.parseInt(detailMatch[1], 10) : Number.NaN;
         const waitSeconds = Number.isFinite(headerSeconds)
           ? headerSeconds
