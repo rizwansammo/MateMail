@@ -1,0 +1,380 @@
+# MateMail Custom Hub/PostBox Domains
+
+**Status:** Phase 1 architecture accepted; implementation pending  
+**Branch:** `feature/custom-domains-caddy`  
+**Date:** 2026-10-05
+
+## Goal
+
+Allow an organization administrator to attach customer-owned hostnames to
+MateMail with a minimal setup:
+
+```
+mail.customer.example  CNAME  custom.matemail.online
+hub.customer.example   CNAME  custom.matemail.online
+```
+
+The browser must remain on the customer hostname. A custom hostname is an
+alternate HTTPS entry point to the existing MateMail Hub or PostBox surface; it
+is **not** an HTTP redirect to `portal.matemail.online` or
+`postbox.matemail.online`.
+
+This feature changes only web access. It does not alter MX, SPF, DKIM, DMARC,
+Postfix, Dovecot, Rspamd, mailbox storage or outbound reputation.
+
+## Phase 1 production audit
+
+The live MateServer was inspected read-only before choosing the edge design.
+
+Observed production state:
+
+- host-native nginx 1.28.3 owns public TCP 80 and 443;
+- the same nginx instance serves MateMail and the other production applications
+  on MateServer;
+- MateMail application upstreams are loopback-only:
+  - Django: `127.0.0.1:8020`
+  - Next.js: `127.0.0.1:3020`
+- the NetaMate dedicated frontend is currently `127.0.0.1:3060`;
+- Certbot 4.0.0 is installed and `certbot.timer` is enabled;
+- the MateMail, NetaMate Hub and NetaMate PostBox certificates all use the
+  existing `webroot` flow at `/var/www/html`;
+- `custom.matemail.online` resolves to the MateServer public IP;
+- Caddy is not installed;
+- NetaMate already proves the routing model manually:
+  `mailadmin.netamate.com` and `postbox.netamate.com` terminate TLS in
+  host nginx and proxy the original Host to the shared MateMail backend.
+
+The application already has useful foundations:
+
+- Host-bound tenant isolation exists through `DEDICATED_TENANT_HOSTS`;
+- dedicated-host login, workspace scoping, API-key scoping and PostBox mailbox
+  access already enforce the bound tenant;
+- Hub browser API calls are same-origin in production;
+- PostBox API calls are same-origin;
+- the Hub refresh cookie has no Domain attribute and is host-only;
+- PostBox uses a `__Host-` host-only session cookie;
+- nginx forwards the original `Host` header to Django.
+
+## Edge decision: keep nginx + Certbot
+
+Caddy is **not** introduced for this feature.
+
+Putting Caddy in front of MateMail would require it to own 80/443. Those ports
+are already the shared entry point for many unrelated production applications.
+Moving them behind a new proxy would turn a MateMail feature into a host-wide
+edge migration.
+
+Running Caddy behind nginx does not solve the certificate problem cleanly:
+the component terminating public TLS still needs the customer certificate.
+
+For the expected scale (tens to hundreds of custom hostnames), the existing
+nginx + Certbot stack is simpler, already proven on this server, and avoids
+changing unrelated applications.
+
+The custom-domain subsystem must nevertheless remain **edge-independent**:
+application state is only hostname -> organization -> surface. A future proxy
+migration must not require changing tenant/domain data.
+
+## Final request path
+
+### Hub
+
+```
+hub.customer.example
+        |
+        | DNS CNAME
+        v
+custom.matemail.online -> MateServer
+        |
+        | TLS: nginx + Let's Encrypt
+        v
+nginx custom-host vhost
+        |
+        +-- /api/* -> 127.0.0.1:8020
+        |
+        +-- /*     -> 127.0.0.1:3020
+                       |
+                       v
+                 MateMail Hub
+```
+
+### PostBox
+
+```
+mail.customer.example
+        |
+        | DNS CNAME
+        v
+custom.matemail.online -> MateServer
+        |
+        | TLS: nginx + Let's Encrypt
+        v
+nginx custom-host vhost
+        |
+        +-- /api/* -> 127.0.0.1:8020
+        |
+        +-- /*     -> 127.0.0.1:3020
+                       |
+                       | trusted edge header:
+                       | X-MateMail-Surface: postbox
+                       v
+                    PostBox
+```
+
+No redirect to a MateMail hostname occurs.
+
+## Source of truth
+
+Phase 2 will replace deployment-only custom-host mapping with application data.
+
+Each custom hostname has, at minimum:
+
+- organization / tenant;
+- normalized ASCII hostname;
+- surface: `hub` or `postbox`;
+- DNS status;
+- provisioning status;
+- certificate status;
+- timestamps and last error suitable for the organization administrator.
+
+A hostname is globally unique. One hostname cannot belong to two organizations
+or to both surfaces.
+
+The first version permits one active custom Hub hostname and one active custom
+PostBox hostname per organization. This keeps the customer UI and certificate
+lifecycle unambiguous; aliases can be added later without changing the model.
+
+`DEDICATED_TENANT_HOSTS` remains as a compatibility fallback until the current
+NetaMate bindings are imported and the migration is proven.
+
+## Host validation
+
+Arbitrary customer hostnames cannot be enumerated safely in Django's static
+`ALLOWED_HOSTS` environment variable, and restarting the backend for every
+customer hostname is rejected.
+
+Phase 2/4 will therefore add an application host-allowlist middleware backed by
+the custom-host table, with a short cache.
+
+Production Django may accept syntactically valid Host headers at the framework
+setting level, but the new middleware must reject every host that is neither:
+
+1. a fixed MateMail/internal hostname explicitly configured by us; nor
+2. an ACTIVE custom hostname in the database.
+
+The custom-host lookup is a security boundary, not merely routing convenience.
+Unknown hosts fail before tenant/auth business logic runs.
+
+Customer-controlled input is never written directly into nginx configuration.
+The hostname is normalized (including IDNA/punycode where supported) and
+strictly validated before it can enter provisioning state.
+
+## DNS verification
+
+Customer-facing setup is intentionally one record.
+
+Example:
+
+```
+Type:   CNAME
+Host:   mail
+Target: custom.matemail.online
+```
+
+MateMail verifies that the submitted hostname resolves through the required
+CNAME target before marking it eligible for provisioning.
+
+DNS ownership is proved by control of that hostname. This is separate from a
+customer's **mail domain** verification and does not replace any MX/SPF/DKIM/
+DMARC requirement.
+
+## Privilege boundary
+
+The Django container must never receive:
+
+- root on MateServer;
+- the Docker socket;
+- write access to `/etc/nginx`;
+- write access to `/etc/letsencrypt`;
+- permission to execute arbitrary host commands.
+
+Certificate/nginx work therefore runs in a small root-owned **host provisioning
+worker** installed by Phase 3.
+
+The worker consumes only already-approved provisioning jobs from a dedicated
+loopback/internal API protected by a purpose-specific secret. It reports
+success/failure back to the application.
+
+The worker is allowed to perform only the fixed sequence required for a
+validated hostname:
+
+1. install an exact-host HTTP bootstrap vhost;
+2. `nginx -t`;
+3. reload nginx;
+4. request one Let's Encrypt certificate with Certbot webroot;
+5. replace the bootstrap with the final HTTPS vhost;
+6. `nginx -t`;
+7. reload nginx;
+8. report status.
+
+No shell fragment supplied by a customer is ever executed.
+
+A short systemd timer/poller is preferred over granting the web application
+host privileges. A provisioning delay measured in seconds/minutes is acceptable
+for a DNS/SSL setup flow.
+
+## Certificate lifecycle
+
+Each custom hostname receives its own certificate lineage. This avoids coupling
+two independently changeable customer hostnames into one certificate.
+
+The final HTTP vhost keeps:
+
+```
+location /.well-known/acme-challenge/ {
+    root /var/www/html;
+}
+```
+
+so Certbot's existing webroot renewal mechanism remains valid.
+
+Phase 3 adds a certificate-scoped deploy hook for MateMail custom certificate
+lineages. On a successful custom-certificate renewal it runs:
+
+1. `nginx -t`;
+2. reload nginx only if the test passes.
+
+Renewal of an unrelated certificate must not trigger custom-domain state
+changes.
+
+## Frontend routing
+
+Canonical PostBox is currently identified by its known hostname. That is not
+enough for arbitrary names such as `inbox.customer.example`.
+
+Generated PostBox vhosts will overwrite, not trust, a private routing header:
+
+```
+X-MateMail-Surface: postbox
+```
+
+Next.js middleware will treat that header as authoritative only because
+host-native nginx sets it on the upstream request. A browser-supplied value is
+overwritten at the edge.
+
+Hub is the default customer console surface but will use the same explicit
+model where doing so improves clarity.
+
+The backend does **not** use this header as the tenant authorization source.
+Hostname -> tenant/surface database state remains authoritative.
+
+## Authentication and cookies
+
+The current cookie design is compatible with custom hostnames and should remain
+host-scoped.
+
+- Hub refresh cookie: host-only, HttpOnly, Secure, SameSite=Strict.
+- PostBox session: `__Host-`, host-only, HttpOnly, Secure.
+
+A login on `hub.customer.example` therefore creates a session for that host,
+not a cookie shared with `portal.matemail.online`. That is desirable isolation.
+
+Production browser API traffic stays same-origin, so a customer hostname does
+not need to be appended to a giant static CORS origin list.
+
+## Custom Hub edge restrictions
+
+A tenant Hub custom hostname must not expose operator/internal surfaces merely
+because it reaches the shared backend.
+
+The generated vhost blocks at the edge, and the application independently
+enforces, at least:
+
+- `/api/internal/`
+- `/api/platform/`
+- `/platform`
+- `/admin`
+- `/django-admin`
+- public organization signup on a tenant-bound hostname
+
+## Custom PostBox edge restrictions
+
+The generated PostBox vhost blocks operator surfaces and routes only the shared
+PostBox frontend/API behavior. It keeps the current larger request/time limits
+needed for attachments and mail operations.
+
+PostBox tenant isolation is re-checked by the backend from the hostname mapping;
+a mailbox from another organization must receive the same refusal as it does on
+the current NetaMate dedicated hostname.
+
+## Failure and removal behavior
+
+A custom hostname moves through explicit states rather than becoming live on
+submit.
+
+Suggested lifecycle:
+
+```
+PENDING_DNS
+    -> VERIFIED
+    -> PROVISIONING
+    -> ACTIVE
+
+Any provisioning error
+    -> ERROR
+
+Customer removes/changes hostname
+    -> DEACTIVATING
+    -> INACTIVE
+```
+
+Removing a hostname revokes the application mapping first, then removes the
+edge vhost/certificate material. A stale certificate must never imply that an
+old tenant mapping is still authorized.
+
+If DNS later moves away, the hostname may be marked unhealthy. Existing mail
+delivery is unaffected because this feature is web-only.
+
+## NetaMate pilot
+
+`mailadmin.netamate.com` and `postbox.netamate.com` are the first production
+pilot because they already exercise:
+
+- customer-owned DNS;
+- individual Let's Encrypt certificates;
+- host-bound tenant isolation;
+- shared MateMail backend.
+
+Phase 5 must preserve the current NetaMate frontend behavior during the pilot.
+The existing dedicated frontend on `127.0.0.1:3060` is not removed as an
+incidental part of custom-domain provisioning. Consolidating that frontend is a
+separate decision.
+
+## Revised implementation phases
+
+1. **Audit + Final Architecture** — this document. No production mutation.
+2. **Custom Domain Backend** — model, authorization, DNS verification,
+   dynamic host allowlisting, provisioning API/state.
+3. **nginx + Certbot Automation** — host worker, bootstrap/final vhost
+   templates, certificate issuance/renewal hook. **No Caddy migration.**
+4. **Routing + Authentication** — custom Hub/PostBox routing, trusted surface
+   header, tenant resolution, cookie/login/redirect regression tests.
+5. **Hub UI + NetaMate Pilot + Production Tests** — one-CNAME customer flow,
+   live NetaMate validation, failure/rollback checks.
+6. **Hub canonical rename** — `portal.matemail.online` ->
+   `hub.matemail.online`, with the old hostname retained as a permanent
+   redirect until access logs justify removal.
+
+## Phase 1 acceptance result
+
+PASS:
+
+- current 80/443 ownership verified;
+- current nginx upstream/routing verified;
+- current Certbot method and timer verified;
+- existing NetaMate custom-host pattern verified;
+- `custom.matemail.online` DNS verified;
+- cookie/auth/tenant host behavior audited in source;
+- edge technology chosen without changing production.
+
+Phase 1 deliberately changes no live server configuration.
