@@ -194,6 +194,7 @@ function isInfrastructurePath(pathname: string): boolean {
   return (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
+    pathname.startsWith("/assets/") ||
     pathname === "/icon.png" ||
     pathname === "/apple-icon.png" ||
     pathname === "/robots.txt" ||
