@@ -66,6 +66,43 @@ class WorkerValidationTest(unittest.TestCase):
             worker.validate_job(bad)
 
 
+class FrontendOverrideTest(unittest.TestCase):
+    def test_branded_frontend_override_is_loopback_only(self):
+        parsed = worker.frontend_overrides(
+            "mailadmin.netamate.com=http://127.0.0.1:3060,"
+            "postbox.netamate.com=http://127.0.0.1:3060"
+        )
+        self.assertEqual(
+            parsed["mailadmin.netamate.com"],
+            "http://127.0.0.1:3060",
+        )
+
+        for unsafe in (
+            "mail.customer.com=http://example.com:3000",
+            "mail.customer.com=http://10.0.0.5:3000",
+            "mail.customer.com=http://127.0.0.1:80",
+            "mail.customer.com=http://127.0.0.1:70000",
+            "mail.customer.com=http://127.0.0.1:3060;include /tmp/x",
+        ):
+            with self.subTest(unsafe=unsafe):
+                with self.assertRaises(worker.ProvisioningError):
+                    worker.frontend_overrides(unsafe)
+
+    def test_active_vhost_uses_branded_override_only_for_exact_host(self):
+        original = worker.FRONTEND_OVERRIDES_RAW
+        try:
+            worker.FRONTEND_OVERRIDES_RAW = (
+                "mailadmin.netamate.com=http://127.0.0.1:3060"
+            )
+            branded = worker.active_vhost("mailadmin.netamate.com", "hub")
+            ordinary = worker.active_vhost("manage.customer.com", "hub")
+        finally:
+            worker.FRONTEND_OVERRIDES_RAW = original
+
+        self.assertIn("proxy_pass             http://127.0.0.1:3060;", branded)
+        self.assertIn("proxy_pass             http://matemail_frontend;", ordinary)
+
+
 class GeneratedNginxTest(unittest.TestCase):
     def test_bootstrap_is_acme_only(self):
         text = worker.bootstrap_vhost("mail.customer.com")
