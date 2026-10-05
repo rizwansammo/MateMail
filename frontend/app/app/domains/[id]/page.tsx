@@ -244,7 +244,7 @@ export default function DomainDetailPage() {
     "DNS results stay visible while checks run and refresh automatically when new results arrive."
   );
   const [retryUntil, setRetryUntil] = useState<number | null>(null);
-  const [retrySeconds, setRetrySeconds] = useState(0);
+  const [retryClock, setRetryClock] = useState(() => Date.now());
   const [actionMessage, setActionMessage] = useState("");
   const [actionFailed, setActionFailed] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
@@ -298,20 +298,19 @@ export default function DomainDetailPage() {
     };
   }, []);
 
+  const retrySeconds = retryUntil
+    ? Math.max(0, Math.ceil((retryUntil - retryClock) / 1000))
+    : 0;
+
   useEffect(() => {
-    if (!retryUntil) {
-      setRetrySeconds(0);
-      return;
-    }
+    if (!retryUntil) return;
 
-    const updateCountdown = () => {
-      const remaining = Math.max(0, Math.ceil((retryUntil - Date.now()) / 1000));
-      setRetrySeconds(remaining);
-      if (remaining === 0) setRetryUntil(null);
-    };
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setRetryClock(now);
+      if (now >= retryUntil) window.clearInterval(timer);
+    }, 1000);
 
-    updateCountdown();
-    const timer = window.setInterval(updateCountdown, 1000);
     return () => window.clearInterval(timer);
   }, [retryUntil]);
 
@@ -346,7 +345,11 @@ export default function DomainDetailPage() {
             ? detailSeconds
             : 60;
 
-        if (waitSeconds > 0) setRetryUntil(Date.now() + waitSeconds * 1000);
+        if (waitSeconds > 0) {
+          const now = Date.now();
+          setRetryClock(now);
+          setRetryUntil(now + waitSeconds * 1000);
+        }
         setCheckMessage(
           "Manual DNS checks are temporarily paused. Current results stay visible and automatic refresh continues."
         );
