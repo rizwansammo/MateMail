@@ -339,6 +339,50 @@ class CustomHostnamePendingInternalView(APIView):
         )
 
 
+class CustomHostnameActivationPendingInternalView(APIView):
+    """
+    GET /api/internal/custom-hostnames/activation-pending/
+
+    READY rows have a certificate but still serve the Phase 3 503 staging
+    vhost. Phase 4's root-owned worker consumes this queue, installs the final
+    surface-aware proxy vhost, then advances the row to ACTIVE.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        denied = _internal_denied(request)
+        if denied:
+            return denied
+
+        rows = (
+            CustomHostname.objects.filter(
+                dns_status=CustomHostnameDNSStatus.VERIFIED,
+                provisioning_status=CustomHostnameProvisioningStatus.READY,
+                certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+                tenant__status__in=("trial", "active"),
+                tenant__approved_at__isnull=False,
+            )
+            .select_related("tenant")
+            .order_by("created_at")[:50]
+        )
+        return Response(
+            {
+                "results": [
+                    {
+                        "id": str(row.id),
+                        "hostname": row.hostname,
+                        "surface": row.surface,
+                        "tenant_id": str(row.tenant_id),
+                        "cname_target": cname_target(),
+                    }
+                    for row in rows
+                ]
+            }
+        )
+
+
 class CustomHostnameAuthorizeInternalView(APIView):
     """
     POST /api/internal/custom-hostnames/authorize/
@@ -394,9 +438,10 @@ class CustomHostnameStateInternalView(APIView):
     """
     POST /api/internal/custom-hostnames/<id>/state/
 
-    Phase 3's host worker reports only edge preparation states. It cannot mark a
-    hostname ACTIVE; Phase 4 owns that transition after application routing and
-    tenant-binding are safe.
+    The root-owned host worker owns edge lifecycle reporting. Phase 4 permits
+    READY -> ACTIVE only after the worker has installed the final nginx routing
+    for the database-declared surface. No customer-facing endpoint can perform
+    this transition.
     """
 
     permission_classes = [AllowAny]
@@ -418,6 +463,7 @@ class CustomHostnameStateInternalView(APIView):
         },
         CustomHostnameProvisioningStatus.READY: {
             CustomHostnameProvisioningStatus.READY,
+            CustomHostnameProvisioningStatus.ACTIVE,
             CustomHostnameProvisioningStatus.ERROR,
         },
     }
@@ -476,11 +522,28 @@ class CustomHostnameStateInternalView(APIView):
                     "HTTPS provisioning could not be completed. Please try again."
                 )
                 update_fields.append("last_error")
-            elif next_status == CustomHostnameProvisioningStatus.READY:
+            elif next_status in {
+                CustomHostnameProvisioningStatus.READY,
+                CustomHostnameProvisioningStatus.ACTIVE,
+            }:
                 row.last_error = ""
                 update_fields.append("last_error")
+
+            if next_status == CustomHostnameProvisioningStatus.ACTIVE:
+                row.activated_at = timezone.now()
+                row.deactivated_at = None
+                update_fields.extend(["activated_at", "deactivated_at"])
 
             row.save(update_fields=update_fields)
 
         invalidate_custom_hostname_cache(row.hostname)
+
+        if next_status == CustomHostnameProvisioningStatus.ACTIVE:
+            log_event(
+                row.tenant,
+                LogEventType.CUSTOM_HOSTNAME_ACTIVATED,
+                result="success",
+                metadata={"hostname": row.hostname, "surface": row.surface},
+            )
+
         return Response(CustomHostnameSerializer(row).data)
