@@ -135,9 +135,12 @@ function GeneralSection() {
       </Row>
       <Row label="Density" htmlFor="pb-density">
         <select id="pb-density" className="pb-select" value={preferences.density}
-          onChange={(e) => void set({ density: e.target.value as "compact" })}>
+          onChange={(e) => void set({
+            density: e.target.value as "comfortable" | "compact" | "extra_compact",
+          })}>
           <option value="comfortable">Comfortable</option>
           <option value="compact">Compact</option>
+          <option value="extra_compact">Extra Compact</option>
         </select>
       </Row>
       <Row label="Reading pane" htmlFor="pb-pane">
