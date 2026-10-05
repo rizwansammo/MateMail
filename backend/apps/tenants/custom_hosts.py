@@ -40,7 +40,7 @@ def normalize_hostname(value: str) -> str:
     value = (value or "").strip().rstrip(".").lower()
     if not value:
         raise CustomHostnameValueError("Enter a hostname.")
-    if "://" in value or "/" in value or "\" in value:
+    if "://" in value or "/" in value or "\\" in value:
         raise CustomHostnameValueError("Enter a hostname, not a URL.")
     if ":" in value:
         raise CustomHostnameValueError("Do not include a port number.")
