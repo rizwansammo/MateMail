@@ -156,6 +156,47 @@ class GeneratedNginxTest(unittest.TestCase):
                 worker.SITES_ENABLED = old_enabled
                 worker.run = old_run
 
+    def test_generated_site_can_be_removed_but_operator_site_cannot(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            available = base / "available"
+            enabled = base / "enabled"
+            available.mkdir()
+            enabled.mkdir()
+
+            old_available = worker.SITES_AVAILABLE
+            old_enabled = worker.SITES_ENABLED
+            old_run = worker.run
+            try:
+                worker.SITES_AVAILABLE = available
+                worker.SITES_ENABLED = enabled
+                host = "mail.customer.com"
+                path = worker.site_path(host)
+                link = worker.enabled_path(host)
+                path.write_text(
+                    worker.GENERATED_MARKER
+                    + "\nserver { listen 80; server_name mail.customer.com; }\n",
+                    encoding="utf-8",
+                )
+                link.symlink_to(path)
+                calls = []
+                worker.run = lambda argv, **kw: calls.append(tuple(argv))
+
+                worker.remove_generated_site(host)
+
+                self.assertFalse(path.exists())
+                self.assertFalse(link.exists())
+                self.assertIn((worker.NGINX, "-t"), calls)
+
+                path.write_text("# operator-owned\n", encoding="utf-8")
+                with self.assertRaises(worker.ProvisioningError):
+                    worker.remove_generated_site(host)
+                self.assertEqual(path.read_text(encoding="utf-8"), "# operator-owned\n")
+            finally:
+                worker.SITES_AVAILABLE = old_available
+                worker.SITES_ENABLED = old_enabled
+                worker.run = old_run
+
     def test_non_generated_nginx_file_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)
@@ -264,6 +305,73 @@ class ActivationFlowTest(unittest.TestCase):
         state_index = calls.index(("state", "active", "active"))
         self.assertLess(site_index, state_index)
         self.assertEqual(sum(1 for item in calls if item[0] == "authorize"), 2)
+
+
+class DeactivationFlowTest(unittest.TestCase):
+    def test_deactivation_removes_edge_before_marking_database_inactive(self):
+        calls = []
+        job = {
+            "id": "0a410cf7-b655-466e-929f-727ed6444309",
+            "hostname": "inbox.customer.com",
+            "surface": "postbox",
+            "tenant_id": "0e40081a-b654-4901-afec-d6cb741acdf6",
+        }
+
+        originals = {
+            "remove_generated_site": worker.remove_generated_site,
+            "retire_certificate": worker.retire_certificate,
+            "post_state": worker.post_state,
+        }
+        try:
+            worker.remove_generated_site = lambda hostname: calls.append(
+                ("site-remove", hostname)
+            )
+            worker.retire_certificate = lambda hostname: calls.append(
+                ("cert-retire", hostname)
+            )
+            worker.post_state = lambda job_id, state, **kw: calls.append(
+                ("state", state, kw.get("certificate_status"))
+            )
+
+            worker.deactivate(job)
+        finally:
+            for name, value in originals.items():
+                setattr(worker, name, value)
+
+        self.assertLess(
+            calls.index(("site-remove", "inbox.customer.com")),
+            calls.index(("cert-retire", "inbox.customer.com")),
+        )
+        self.assertLess(
+            calls.index(("cert-retire", "inbox.customer.com")),
+            calls.index(("state", "inactive", "revoked")),
+        )
+
+    def test_certificate_retirement_uses_certbot_not_manual_deletion(self):
+        old_run = worker.run
+        old_exists = Path.exists
+        calls = []
+        try:
+            # Patch Path.exists narrowly for the expected Certbot live cert.
+            def fake_exists(path):
+                if str(path).endswith(
+                    "/etc/letsencrypt/live/inbox.customer.com/cert.pem"
+                ):
+                    return True
+                return old_exists(path)
+
+            Path.exists = fake_exists
+            worker.run = lambda argv, **kw: calls.append(tuple(argv))
+            worker.retire_certificate("inbox.customer.com")
+        finally:
+            Path.exists = old_exists
+            worker.run = old_run
+
+        command = calls[0]
+        self.assertEqual(command[0], worker.CERTBOT)
+        self.assertIn("revoke", command)
+        self.assertIn("--delete-after-revoke", command)
+        self.assertIn("cessationofoperation", command)
 
 
 class HostInstallArtifactsTest(unittest.TestCase):
