@@ -280,6 +280,91 @@ def install_site(hostname: str, content: str) -> None:
     run([SYSTEMCTL, "reload", "nginx"], capture=False)
 
 
+def remove_generated_site(hostname: str) -> None:
+    """
+    Disable and remove exactly one MateMail-generated nginx vhost.
+
+    The enabled symlink is removed before the Certbot lineage so nginx never
+    references certificate files that are about to disappear. Operator-owned
+    files are never touched. A failed nginx validation restores the symlink and
+    leaves the generated source file in place for a later retry.
+    """
+    path = site_path(hostname)
+    link = enabled_path(hostname)
+
+    if path.exists():
+        _assert_generated_or_absent(path)
+
+    if link.exists() and not link.is_symlink():
+        raise ProvisioningError(
+            f"refusing to remove non-symlink nginx entry {link.name}"
+        )
+
+    if link.is_symlink():
+        try:
+            current = Path(os.readlink(link))
+        except OSError as exc:
+            raise ProvisioningError("could not inspect nginx enabled symlink") from exc
+        if not current.is_absolute():
+            current = (link.parent / current).resolve()
+        if current != path.resolve():
+            raise ProvisioningError(
+                f"refusing to remove unexpected nginx symlink {link.name}"
+            )
+
+        link.unlink()
+        try:
+            run([NGINX, "-t"])
+            run([SYSTEMCTL, "reload", "nginx"], capture=False)
+        except Exception:
+            link.symlink_to(path)
+            raise
+
+    if path.exists():
+        path.unlink()
+
+
+def retire_certificate(hostname: str) -> None:
+    """
+    Revoke and delete the per-host certificate lineage when it exists.
+
+    Certbot owns /etc/letsencrypt state; never delete those files manually.
+    --delete-after-revoke also prevents a later certbot renew from resurrecting
+    a hostname the customer has removed.
+    """
+    cert = Path("/etc/letsencrypt/live") / hostname / "cert.pem"
+    if not cert.exists():
+        return
+
+    run(
+        [
+            CERTBOT,
+            "revoke",
+            "--cert-name",
+            hostname,
+            "--reason",
+            "cessationofoperation",
+            "--delete-after-revoke",
+            "--non-interactive",
+        ],
+        capture=False,
+    )
+
+
+def deactivate(job: dict[str, str]) -> None:
+    hostname = job["hostname"]
+    log(f"custom-host: deactivating {hostname} ({job['surface']})")
+
+    # The database moved out of ACTIVE before this job became visible, so
+    # application authorization is already fail-closed. Edge cleanup is
+    # idempotent and deliberately does not require DNS or an eligible tenant:
+    # a suspended customer must still be able to relinquish their hostname.
+    remove_generated_site(hostname)
+    retire_certificate(hostname)
+    post_state(job["id"], "inactive", certificate_status="revoked")
+    log(f"custom-host: INACTIVE {hostname}")
+
+
 def bootstrap_vhost(hostname: str) -> str:
     return f"""{GENERATED_MARKER}
 # Phase 3 bootstrap: ACME only. No MateMail application traffic is served.
@@ -633,6 +718,39 @@ def main() -> int:
         return 0
 
     try:
+        failures = 0
+
+        # Removal has priority over new provisioning. The customer-facing DELETE
+        # already revoked request eligibility in the database; this queue makes
+        # the public edge and certificate catch up as quickly as possible.
+        try:
+            deactivation_payload = api_json("GET", "deactivation-pending/")
+            deactivation_rows = deactivation_payload.get("results", [])
+            if not isinstance(deactivation_rows, list):
+                raise ProvisioningError(
+                    "deactivation query returned an invalid result list"
+                )
+        except ProvisioningError as exc:
+            log(f"custom-host: deactivation query failed: {exc}")
+            failures += 1
+            deactivation_rows = []
+
+        for raw in deactivation_rows:
+            job = None
+            try:
+                job = validate_job(raw)
+                deactivate(job)
+            except Exception as exc:
+                failures += 1
+                if job is None:
+                    log(f"custom-host: invalid deactivation job ignored: {exc}")
+                else:
+                    # Leave DEACTIVATING durable. No customer traffic is
+                    # authorized while cleanup retries on a later timer tick.
+                    log(
+                        f"custom-host: DEACTIVATION ERROR {job['hostname']}: {exc}"
+                    )
+
         try:
             payload = api_json("GET", "pending/")
         except ProvisioningError as exc:
@@ -644,7 +762,6 @@ def main() -> int:
             log("custom-host: pending query returned an invalid result list")
             return 1
 
-        failures = 0
         for raw in rows:
             job = None
             try:
@@ -691,10 +808,12 @@ def main() -> int:
         if failures:
             log(f"custom-host: completed with {failures} failed job(s)")
             return 1
-        if rows or activation_rows:
+        if deactivation_rows or rows or activation_rows:
             log(
                 "custom-host: completed "
-                f"{len(rows)} provisioning and {len(activation_rows)} activation job(s)"
+                f"{len(deactivation_rows)} deactivation, "
+                f"{len(rows)} provisioning and "
+                f"{len(activation_rows)} activation job(s)"
             )
         return 0
     finally:
