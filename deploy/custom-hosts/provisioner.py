@@ -408,6 +408,8 @@ server {{
     location ^~ /platform { return 404; }
     location ^~ /admin { return 404; }
     location ^~ /postbox { return 404; }
+    location ^~ /signup { return 404; }
+    location = /api/auth/signup/ { return 404; }
 
     location /api/ {
         add_header Strict-Transport-Security "max-age=31536000" always;
