@@ -23,6 +23,31 @@
 
 ---
 
+
+## Custom Hub/PostBox Domains — current work (2026-10-05)
+
+Development lives on `feature/custom-domains-caddy` and is intentionally not
+merged or deployed until all six custom-domain phases are complete.
+
+- ✅ **Phase 1:** production edge audited; nginx + Certbot retained, Caddy
+  rejected as an unnecessary host-wide migration.
+- ✅ **Phase 2:** custom-host backend complete — tenant-owned model/state,
+  exact CNAME verification, authorization, database uniqueness constraints,
+  dynamic Host allowlist guard, audit events and the purpose-specific Phase 3
+  provisioner API.
+- ⬜ **Phase 3:** root-owned nginx/Certbot provisioning worker and automatic
+  certificate lifecycle.
+- ⬜ **Phase 4:** application routing/authentication activation.
+- ⬜ **Phase 5:** Hub setup UI and NetaMate production pilot.
+- ⬜ **Phase 6:** canonical Hub hostname migration from
+  `portal.matemail.online` to `hub.matemail.online`.
+
+The feature is **not live**. `CUSTOM_HOSTS_DYNAMIC_ENABLED=False` remains the
+production-safe default, and Phase 2 exposes no path that can mark a custom
+hostname ACTIVE.
+
+Full design and current acceptance results: `docs/CUSTOM_DOMAINS.md`.
+
 ## Architecture direction
 
 As of **DEC-011 (2026-09-10)**, MateMail is one integrated business email
