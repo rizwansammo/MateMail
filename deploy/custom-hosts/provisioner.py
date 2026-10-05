@@ -418,6 +418,9 @@ server {{
         add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'" always;
 
         proxy_pass             http://matemail_backend;
+        # Django's canonical-host HSTS includes includeSubDomains. Never let a
+        # customer custom hostname inherit policy for names we do not control.
+        proxy_hide_header      Strict-Transport-Security;
         proxy_set_header       Host                     $host;
         proxy_set_header       X-Real-IP                $remote_addr;
         proxy_set_header       X-Forwarded-For          $proxy_add_x_forwarded_for;
@@ -431,6 +434,7 @@ server {{
 
     location / {
         proxy_pass             http://matemail_frontend;
+        proxy_hide_header      Strict-Transport-Security;
         proxy_set_header       Host                     $host;
         proxy_set_header       X-Real-IP                $remote_addr;
         proxy_set_header       X-Forwarded-For          $proxy_add_x_forwarded_for;
@@ -464,6 +468,9 @@ server {{
         add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'" always;
 
         proxy_pass             http://matemail_backend;
+        # Django's canonical-host HSTS includes includeSubDomains. Never let a
+        # customer custom hostname inherit policy for names we do not control.
+        proxy_hide_header      Strict-Transport-Security;
         proxy_set_header       Host                     $host;
         proxy_set_header       X-Real-IP                $remote_addr;
         proxy_set_header       X-Forwarded-For          $proxy_add_x_forwarded_for;
@@ -481,6 +488,7 @@ server {{
 
     location / {
         proxy_pass             http://matemail_frontend;
+        proxy_hide_header      Strict-Transport-Security;
         proxy_set_header       Host                     $host;
         proxy_set_header       X-Real-IP                $remote_addr;
         proxy_set_header       X-Forwarded-For          $proxy_add_x_forwarded_for;
