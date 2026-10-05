@@ -6,6 +6,7 @@ urlpatterns = [
     path("api/health/", include("apps.health.urls")),
     path("api/auth/", include("apps.accounts.urls")),
     path("api/workspaces/", include("apps.tenants.urls")),
+    path("api/custom-hostnames/", include("apps.tenants.custom_host_urls")),
     path("api/domains/", include("apps.domains.urls")),
     path("api/mailboxes/", include("apps.mailboxes.urls")),
     path("api/aliases/", include("apps.aliases.urls")),
@@ -23,6 +24,8 @@ urlpatterns = [
     # Everything internal MUST live under /api/internal/ for that rule to apply.
     path("api/internal/smtp/", include("apps.smtp_policy.urls")),
     path("api/internal/health/", include("apps.health.internal_urls")),
+    # Root-owned nginx/Certbot provisioner. Separate purpose-specific secret.
+    path("api/internal/custom-hostnames/", include("apps.tenants.custom_host_internal_urls")),
     # The Native Engine's new-mail events for native PostBox push. Its own
     # credential (POSTBOX_PUSH_INGEST_SECRET), not INTERNAL_API_SECRET.
     path("api/internal/postbox/", include("apps.postbox.internal_urls")),
