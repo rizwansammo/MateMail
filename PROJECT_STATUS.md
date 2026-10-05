@@ -43,11 +43,12 @@ merged or deployed until all six custom-domain phases are complete.
   database-bound to one tenant/surface, final nginx routing preserves the
   customer URL, frontend PostBox routing is surface-aware, Hub/PostBox sessions
   stay host-scoped, and cross-tenant/cross-surface requests fail closed.
-- 🟡 **Phase 5:** implementation complete — Hub custom-URL UI, DNS/HTTPS
-  status flow, safe edge/certificate deactivation, read-only production smoke
-  test and guarded NetaMate adoption path are built. Live NetaMate validation
-  remains intentionally pending until the owner deploys the final merged
-  release.
+- ✅ **Phase 5:** engineering complete — Hub custom-URL UI, DNS/HTTPS status
+  flow, safe edge/certificate deactivation, guarded NetaMate adoption,
+  branded-frontend preservation, read-only smoke tooling, rollback runbook and
+  production pre-deploy baseline are complete. The live NetaMate handover is a
+  post-deploy acceptance gate because the owner will deploy only after all
+  phases are merged.
 - ⬜ **Phase 6:** canonical Hub hostname migration from
   `portal.matemail.online` to `mailhub.matemail.online`. The owner has
   already prepared DNS for `mailhub.matemail.online`.
