@@ -227,7 +227,7 @@ class CustomHostnameTenantAPITest(TestCase):
         response = self.client.delete(f"/api/custom-hostnames/{created.data['id']}/")
         self.assertEqual(response.status_code, 204)
 
-    def test_customer_cannot_remove_hostname_after_edge_work_has_started(self):
+    def test_customer_removal_after_edge_work_started_queues_safe_deactivation(self):
         row = CustomHostname.objects.create(
             tenant=self.tenant,
             hostname="mail.customer.com",
@@ -238,9 +238,16 @@ class CustomHostnameTenantAPITest(TestCase):
         )
 
         response = self.client.delete(f"/api/custom-hostnames/{row.id}/")
-        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.status_code, 202)
         row.refresh_from_db()
-        self.assertEqual(row.provisioning_status, "provisioning")
+        self.assertEqual(
+            row.provisioning_status,
+            CustomHostnameProvisioningStatus.DEACTIVATING,
+        )
+
+        # Repeating Remove is idempotent while the worker catches up.
+        repeated = self.client.delete(f"/api/custom-hostnames/{row.id}/")
+        self.assertEqual(repeated.status_code, 202)
 
 
 @override_settings(
@@ -337,6 +344,50 @@ class CustomHostnameInternalAPITest(TestCase):
         )
         self.assertEqual(response.status_code, 404)
         self.assertFalse(response.data["approved"])
+
+    def test_deactivation_queue_and_finish_do_not_require_live_dns_or_tenant(self):
+        self.row.provisioning_status = CustomHostnameProvisioningStatus.DEACTIVATING
+        self.row.certificate_status = CustomHostnameCertificateStatus.ACTIVE
+        self.row.dns_status = CustomHostnameDNSStatus.FAILED
+        self.row.save(
+            update_fields=[
+                "provisioning_status",
+                "certificate_status",
+                "dns_status",
+                "updated_at",
+            ]
+        )
+        self.tenant.status = TenantStatus.SUSPENDED
+        self.tenant.save(update_fields=["status", "updated_at"])
+        self.auth()
+
+        pending = self.client.get(
+            "/api/internal/custom-hostnames/deactivation-pending/"
+        )
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(
+            [item["hostname"] for item in pending.data["results"]],
+            ["mail.customer.com"],
+        )
+
+        response = self.client.post(
+            f"/api/internal/custom-hostnames/{self.row.id}/state/",
+            {
+                "provisioning_status": "inactive",
+                "certificate_status": "revoked",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["provisioning_status"], "inactive")
+        self.assertEqual(response.data["certificate_status"], "revoked")
+        self.assertIsNotNone(response.data["deactivated_at"])
+
+        pending = self.client.get(
+            "/api/internal/custom-hostnames/deactivation-pending/"
+        )
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(pending.data["results"], [])
 
     def test_worker_can_advance_to_ready_then_activate(self):
         self.auth()
