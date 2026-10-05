@@ -6,6 +6,7 @@ Requires=nginx.service
 
 [Service]
 Type=oneshot
+TimeoutStartSec=5min
 User=root
 Group=root
 EnvironmentFile=/etc/matemail/custom-host-provisioner.env
