@@ -1281,6 +1281,17 @@
   margin-bottom: 18px;
 }
 
+.portal-premium .portal-add-domain-form {
+  max-width: 920px;
+}
+
+.portal-premium .portal-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 14px;
+}
+
 .portal-premium .portal-form-row {
   display: flex;
   align-items: flex-start;
@@ -1432,6 +1443,7 @@
   border: 1px solid var(--portal-border);
   border-radius: 10px !important;
   background: var(--portal-surface);
+  transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
 }
 
 .portal-premium .portal-dns-record-head {
@@ -1453,17 +1465,45 @@
   font-weight: 700;
 }
 
-.portal-premium .portal-dns-record-head h3 {
+.portal-premium .portal-dns-record-title {
   min-width: 0;
   flex: 1;
+}
+
+.portal-premium .portal-dns-record-head h3 {
   color: var(--portal-text-strong);
   font-size: 12px;
   font-weight: 650;
 }
 
+.portal-premium .portal-dns-record-title p {
+  margin-top: 2px;
+  color: var(--portal-muted);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+.portal-premium .portal-dns-requirement {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 7px;
+  border: 1px solid var(--portal-border);
+  border-radius: 999px !important;
+  background: var(--portal-surface-soft);
+  color: var(--portal-muted);
+  font-size: 8.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.portal-premium .portal-dns-requirement[data-optional="true"] {
+  color: var(--portal-faint);
+}
+
 .portal-premium .portal-dns-fields {
   display: grid;
-  grid-template-columns: minmax(140px, .65fr) minmax(0, 1.6fr);
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
   gap: 10px;
   margin-top: 13px;
 }
@@ -1517,6 +1557,57 @@
 .portal-premium .portal-copy-button:hover {
   background: var(--portal-surface-hover);
   color: var(--portal-primary);
+}
+
+.portal-premium .portal-dns-provider-note {
+  margin-top: 10px;
+  color: var(--portal-muted);
+  font-size: 9.5px;
+  line-height: 1.55;
+}
+
+.portal-premium .portal-dns-provider-note code {
+  color: var(--portal-text-strong);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.portal-premium .portal-dns-advanced {
+  margin-top: 10px;
+  color: var(--portal-muted);
+  font-size: 9.5px;
+}
+
+.portal-premium .portal-dns-advanced summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--portal-muted);
+  font-weight: 650;
+}
+
+.portal-premium .portal-dns-advanced > div {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.portal-premium .portal-dns-advanced span {
+  color: var(--portal-faint);
+}
+
+.portal-premium .portal-dns-advanced code {
+  overflow-wrap: anywhere;
+  color: var(--portal-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.portal-premium .portal-dns-check-slot {
+  min-height: 48px;
+  margin-bottom: 16px;
+}
+
+.portal-premium .portal-dns-check-slot > * {
+  margin: 0;
 }
 
 .portal-premium .portal-detected {
