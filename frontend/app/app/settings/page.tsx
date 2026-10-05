@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
+import { CustomHostnamesSettings } from "@/components/workspace/custom-hostnames-settings";
 import {
   PortalButton,
   PortalCard,
@@ -316,6 +317,8 @@ export default function SettingsPage() {
           </PortalCard>
         </div>
       </div>
+
+      <CustomHostnamesSettings canEdit={canEdit} />
 
       <PortalCard
         className="mt-5"
