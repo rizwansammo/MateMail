@@ -159,10 +159,9 @@ class CustomHostnameDetailView(APIView):
         return Response(CustomHostnameSerializer(row).data)
 
     def delete(self, request, pk):
-        denied = _change_allowed(request.tenant)
-        if denied:
-            return denied
-
+        # Removal is always permitted to an authorized tenant admin. A
+        # suspended/past-due organization may not add or verify new hostnames,
+        # but it must still be able to relinquish one it already controls.
         row = self._get(request, pk)
         if not row:
             return Response({"detail": "Not found."}, status=404)
@@ -289,6 +288,8 @@ class CustomHostnamePendingInternalView(APIView):
             CustomHostname.objects.filter(
                 dns_status=CustomHostnameDNSStatus.VERIFIED,
                 provisioning_status=CustomHostnameProvisioningStatus.UNPROVISIONED,
+                tenant__status__in=("trial", "active"),
+                tenant__approved_at__isnull=False,
             )
             .select_related("tenant")
             .order_by("created_at")[:50]
@@ -340,7 +341,7 @@ class CustomHostnameAuthorizeInternalView(APIView):
             .select_related("tenant")
             .first()
         )
-        if not row:
+        if not row or not row.tenant.can_use_mail:
             return Response({"approved": False}, status=404)
 
         return Response(
@@ -396,9 +397,19 @@ class CustomHostnameStateInternalView(APIView):
         data = serializer.validated_data
 
         with transaction.atomic():
-            row = CustomHostname.objects.select_for_update().filter(pk=pk).first()
+            row = (
+                CustomHostname.objects.select_for_update()
+                .select_related("tenant")
+                .filter(pk=pk)
+                .first()
+            )
             if not row:
                 return Response({"detail": "Not found."}, status=404)
+            if not row.tenant.can_use_mail:
+                return Response(
+                    {"detail": "This organization is not eligible for custom-host provisioning."},
+                    status=409,
+                )
             if not row.is_dns_verified:
                 return Response(
                     {"detail": "DNS verification is required before provisioning."},
