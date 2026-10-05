@@ -403,6 +403,12 @@ server {{
     location ^~ /api/postbox/ { return 404; }
     location ^~ /django-admin/ { return 404; }
 
+    # Customer Hub custom hosts must not become alternate addresses for other
+    # frontend surfaces either.
+    location ^~ /platform { return 404; }
+    location ^~ /admin { return 404; }
+    location ^~ /postbox { return 404; }
+
     location /api/ {
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header X-Content-Type-Options "nosniff" always;
