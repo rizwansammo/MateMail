@@ -287,7 +287,15 @@ class ProvisioningFlowTest(unittest.TestCase):
                 ("site", "443" if "listen 443 ssl" in content else "80")
             )
             worker.issue_certificate = lambda hostname: calls.append(("certbot", hostname))
-            worker.verify_certificate = lambda hostname: calls.append(("certcheck", hostname))
+
+            cert_checks = {"count": 0}
+            def verify_certificate(hostname):
+                cert_checks["count"] += 1
+                calls.append(("certcheck", hostname))
+                if cert_checks["count"] == 1:
+                    raise worker.ProvisioningError("certificate not issued yet")
+
+            worker.verify_certificate = verify_certificate
 
             worker.provision(job)
         finally:
