@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.checks import Error, Tags, register
 
 _GUARD = "apps.tenants.host_middleware.CustomHostnameHostGuardMiddleware"
+_SURFACE_GUARD = "apps.tenants.surface_middleware.CustomHostnameSurfaceGuardMiddleware"
 
 
 @register(Tags.security)
@@ -25,6 +26,15 @@ def custom_hostname_host_guard_check(app_configs, **kwargs):
                 "Dynamic custom hosts require CustomHostnameHostGuardMiddleware first.",
                 hint=f"Put {_GUARD} at MIDDLEWARE[0].",
                 id="tenants.E020",
+            )
+        )
+
+    if len(middleware) < 2 or middleware[1] != _SURFACE_GUARD:
+        errors.append(
+            Error(
+                "Dynamic custom hosts require CustomHostnameSurfaceGuardMiddleware second.",
+                hint=f"Put {_SURFACE_GUARD} at MIDDLEWARE[1].",
+                id="tenants.E023",
             )
         )
 
