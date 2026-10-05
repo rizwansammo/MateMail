@@ -377,9 +377,8 @@ separate decision.
    The live NetaMate proof is intentionally deferred until the owner deploys the
    final merged release.
 6. **Hub canonical rename** — `portal.matemail.online` ->
-   `mailhub.matemail.online`, with the old hostname retained as a permanent
-   redirect until access logs justify removal. DNS for the new canonical name
-   has already been prepared by the owner.
+   `hub.matemail.online`, with the old hostname retained as a permanent
+   redirect until access logs justify removal.
 
 ## Phase 1 acceptance result
 
