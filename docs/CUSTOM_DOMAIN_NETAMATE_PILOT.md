@@ -32,6 +32,40 @@ the same direct CNAME contract every future customer uses, moves the database
 row to READY, and lets the root worker install the final generated vhost before
 the row becomes ACTIVE.
 
+
+## Pre-deploy production baseline — 2026-10-05
+
+A read-only MateServer check was completed before any migration.
+
+Current production facts:
+
+- branded NetaMate frontend on `127.0.0.1:3060`: HTTP 200;
+- `mailadmin.netamate.com`: A -> `169.58.114.252`, no CNAME yet;
+- `postbox.netamate.com`: A -> `169.58.114.252`, no CNAME yet;
+- both public roots return HTTP 200 with the existing trusted certificates;
+- both emit customer-safe HSTS (`max-age=31536000`, no `includeSubDomains`);
+- host nginx syntax is clean.
+
+Legacy-vhost isolation baseline:
+
+| Host | Probe | Current result | Expected after custom-host handover |
+|---|---|---:|---:|
+| MailAdmin | `/api/internal/health/` | 404 | 404 |
+| MailAdmin | `/api/platform/tenants/` | 404 | 404 |
+| MailAdmin | `/api/postbox/auth/me/` | 403 | **404** |
+| MailAdmin | `/signup` | 404 | 404 |
+| PostBox | `/api/internal/health/` | 404 | 404 |
+| PostBox | `/api/platform/tenants/` | 404 | 404 |
+| PostBox | `/api/workspaces/` | 401 | **404** |
+
+The two bold changes are intentional Phase 4 hardening: the generated exact-host
+vhosts hide the wrong application surface at nginx before authentication runs.
+
+This baseline is not the final pilot. The final smoke/manual proof below must be
+run only after the owner deploys the merged release and the two A records have
+been changed to the required CNAMEs.
+
+
 ## Pre-deploy configuration
 
 Before the release that contains this feature is deployed, add this one
