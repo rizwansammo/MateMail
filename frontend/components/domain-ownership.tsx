@@ -137,19 +137,22 @@ export function DomainOwnershipCard({
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-[var(--portal-warning)]" />
         <div>
           <strong>Verify that you own {domain.domain}</strong>
-          <p>{domain.verification_instructions}</p>
+          <p>
+            Add the TXT record below at the DNS provider for this domain, then click Verify ownership.
+          </p>
         </div>
       </div>
 
       <div className="portal-ownership-record">
         <RecordField label="Type" value={domain.verification_record_type} />
-        <RecordField label="Host / name" value={domain.verification_record_name} />
+        <RecordField label="Host / name" value={shortHost} />
         <RecordField label="Value" value={domain.verification_record_value} />
       </div>
 
       <p className="mt-2 text-[10px] leading-5 text-[var(--portal-muted)]">
-        If your DNS provider automatically appends the zone name, use{" "}
-        <code className="font-mono text-[var(--portal-text-strong)]">{shortHost}</code> as the host.
+        Most DNS providers automatically append <strong>{domain.domain}</strong>. If yours asks for
+        the full hostname, use{" "}
+        <code className="font-mono text-[var(--portal-text-strong)]">{domain.verification_record_name}</code>.
       </p>
 
       {message && (

@@ -55,55 +55,172 @@ function pretty(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function shortDnsHost(host: string, domain: string) {
+  const cleanHost = host.trim().replace(/\.$/, "");
+  const cleanDomain = domain.trim().replace(/\.$/, "");
+  if (cleanHost === cleanDomain) return "@";
+  const suffix = `.${cleanDomain}`;
+  return cleanHost.endsWith(suffix) ? cleanHost.slice(0, -suffix.length) : cleanHost;
+}
+
+function stripTrailingDot(value: string) {
+  return value.trim().replace(/\.$/, "");
+}
+
 function recordLabel(record: DNSRecord) {
-  if (record.record_type === "SRV") return "Autodiscover (SRV)";
-  if (record.record_type === "MX") return "Mail Server (MX)";
-  if (record.host.startsWith("_dmarc")) return "DMARC Policy";
-  if (record.host.includes("._domainkey")) {
-    return `DKIM (${record.host.split("._domainkey")[0]})`;
-  }
-  if (record.expected_value.startsWith("v=spf1")) return "SPF";
+  if (record.record_type === "SRV") return "Automatic mail app setup";
+  if (record.record_type === "MX") return "Mail server";
+  if (record.host.startsWith("_dmarc")) return "Domain protection (DMARC)";
+  if (record.host.includes("._domainkey")) return "Email authentication (DKIM)";
+  if (record.expected_value.startsWith("v=spf1")) return "Sender authorization (SPF)";
   return record.record_type;
 }
 
-function RecordRow({ record }: { record: DNSRecord }) {
+function recordHelp(record: DNSRecord) {
+  if (record.record_type === "SRV") {
+    return "Optional. Helps Outlook and other mail apps configure the mailbox automatically. Email still sends and receives without this record.";
+  }
+  if (record.record_type === "MX") return "Routes incoming email for this domain to MateMail.";
+  if (record.host.startsWith("_dmarc")) return "Publishes the policy receiving servers use for email authentication results.";
+  if (record.host.includes("._domainkey")) {
+    return record.expected_value.includes("<pending>")
+      ? "MateMail is preparing the DKIM value. You do not need to add this record until the value is ready."
+      : "Publishes the public key used to verify signed outgoing email.";
+  }
+  if (record.expected_value.startsWith("v=spf1")) return "Authorizes MateMail to send email for this domain.";
+  return "";
+}
+
+type DisplayField = {
+  label: string;
+  value: string;
+  copyLabel: string;
+  copy?: boolean;
+};
+
+function displayFields(record: DNSRecord, domain: string): DisplayField[] {
+  const host = shortDnsHost(record.host, domain);
+
+  if (record.record_type === "MX") {
+    const [priority = "10", ...serverParts] = record.expected_value.trim().split(/\s+/);
+    return [
+      { label: "Host / Name", value: host, copyLabel: "Copy MX host" },
+      { label: "Mail server / Value", value: stripTrailingDot(serverParts.join(" ")), copyLabel: "Copy mail server" },
+      { label: "Priority", value: priority, copyLabel: "Copy MX priority" },
+    ];
+  }
+
+  if (record.record_type === "SRV") {
+    const [priority = "0", weight = "0", port = "443", ...targetParts] =
+      record.expected_value.trim().split(/\s+/);
+    const [service = "_autodiscover", protocol = "_tcp"] = host.split(".");
+    return [
+      { label: "Service", value: service, copyLabel: "Copy SRV service" },
+      { label: "Protocol", value: protocol, copyLabel: "Copy SRV protocol" },
+      { label: "Priority", value: priority, copyLabel: "Copy SRV priority" },
+      { label: "Weight", value: weight, copyLabel: "Copy SRV weight" },
+      { label: "Port", value: port, copyLabel: "Copy SRV port" },
+      { label: "Target / Value", value: stripTrailingDot(targetParts.join(" ")), copyLabel: "Copy SRV target" },
+    ];
+  }
+
+  const dkimPending =
+    record.host.includes("._domainkey") && record.expected_value.includes("<pending>");
+
+  return [
+    { label: "Host / Name", value: host, copyLabel: `Copy ${recordLabel(record)} host` },
+    {
+      label: "Value",
+      value: dkimPending ? "MateMail is generating this value" : record.expected_value,
+      copyLabel: `Copy ${recordLabel(record)} value`,
+      copy: !dkimPending,
+    },
+  ];
+}
+
+function displayStatus(record: DNSRecord) {
+  if (record.status === "verified") return "Verified";
+  if (record.status === "failed") return "Failed";
+  return "Pending";
+}
+
+function formatWait(totalSeconds: number) {
+  const seconds = Math.max(0, Math.ceil(totalSeconds));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
+function RecordRow({ record, domain }: { record: DNSRecord; domain: string }) {
   const icon =
     record.status === "verified" ? <CheckCircle2 className="h-4 w-4 text-[var(--portal-success)]" /> :
     record.status === "failed" ? <XCircle className="h-4 w-4 text-[var(--portal-danger)]" /> :
-    record.status === "missing" ? <AlertCircle className="h-4 w-4 text-[var(--portal-warning)]" /> :
-    <Clock3 className="h-4 w-4 text-[var(--portal-warning)]" />;
+    <AlertCircle className="h-4 w-4 text-[var(--portal-warning)]" />;
+
+  const fields = displayFields(record, domain);
+  const shortHost = shortDnsHost(record.host, domain);
 
   return (
     <article className="portal-dns-record">
       <div className="portal-dns-record-head">
         {icon}
         <span className="portal-record-type">{record.record_type}</span>
-        <h3>{recordLabel(record)}</h3>
-        <PortalStatus value={pretty(record.status)} />
+        <div className="portal-dns-record-title">
+          <h3>{recordLabel(record)}</h3>
+          <p>{recordHelp(record)}</p>
+        </div>
+        <span className="portal-dns-requirement" data-optional={!record.is_scored}>
+          {record.is_scored ? "Required" : "Optional"}
+        </span>
+        <PortalStatus value={displayStatus(record)} />
       </div>
 
       <div className="portal-dns-fields">
-        <div className="portal-dns-field">
-          <span>HOST / NAME</span>
-          <div className="portal-code-field">
-            <code>{record.host}</code>
-            <PortalCopyButton value={record.host} label={`Copy ${recordLabel(record)} host`} />
+        {fields.map((field) => (
+          <div className="portal-dns-field" key={field.label}>
+            <span>{field.label.toUpperCase()}</span>
+            <div className="portal-code-field">
+              <code>{field.value}</code>
+              {field.copy !== false && (
+                <PortalCopyButton value={field.value} label={field.copyLabel} />
+              )}
+            </div>
           </div>
-        </div>
-        <div className="portal-dns-field">
-          <span>EXPECTED VALUE</span>
-          <div className="portal-code-field">
-            <code>{record.expected_value}</code>
-            <PortalCopyButton value={record.expected_value} label={`Copy ${recordLabel(record)} value`} />
-          </div>
-        </div>
+        ))}
       </div>
 
-      {record.detected_value && (
-        <p className="portal-detected">
-          <strong>Detected:</strong> <code>{record.detected_value}</code>
+      {fields.some((field) => field.value === "@") && (
+        <p className="portal-dns-provider-note">
+          <code>@</code> means the root domain. Some DNS providers display the root as your
+          full domain name or let you leave the Host field blank.
         </p>
       )}
+
+      {record.record_type === "SRV" && (
+        <p className="portal-dns-provider-note">
+          If your DNS provider has one <strong>Name / Host</strong> field instead of separate
+          Service and Protocol fields, use <code>{shortHost}</code>.
+        </p>
+      )}
+
+      <details className="portal-dns-advanced">
+        <summary>Advanced DNS details</summary>
+        <div>
+          <span>Full hostname</span>
+          <code>{record.host}</code>
+        </div>
+        <div>
+          <span>Raw record value</span>
+          <code>{record.expected_value}</code>
+        </div>
+        {record.detected_value && (
+          <div>
+            <span>Detected value</span>
+            <code>{record.detected_value}</code>
+          </div>
+        )}
+      </details>
       {record.last_checked && (
         <p className="portal-detected">
           Last checked {new Date(record.last_checked).toLocaleString()}
@@ -123,7 +240,11 @@ export default function DomainDetailPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"dns" | "details">("dns");
   const [checking, setChecking] = useState(false);
-  const [checkMessage, setCheckMessage] = useState("");
+  const [checkMessage, setCheckMessage] = useState(
+    "DNS results stay visible while checks run and refresh automatically when new results arrive."
+  );
+  const [retryUntil, setRetryUntil] = useState<number | null>(null);
+  const [retryClock, setRetryClock] = useState(() => Date.now());
   const [actionMessage, setActionMessage] = useState("");
   const [actionFailed, setActionFailed] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
@@ -177,26 +298,71 @@ export default function DomainDetailPage() {
     };
   }, []);
 
+  const retrySeconds = retryUntil
+    ? Math.max(0, Math.ceil((retryUntil - retryClock) / 1000))
+    : 0;
+
+  useEffect(() => {
+    if (!retryUntil) return;
+
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setRetryClock(now);
+      if (now >= retryUntil) window.clearInterval(timer);
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [retryUntil]);
+
   async function checkDNS() {
-    if (!canSupportAction) return;
+    if (!canSupportAction || retrySeconds > 0) return;
     setChecking(true);
-    setCheckMessage("");
+    setCheckMessage("Checking DNS now. Your current results stay visible while this runs.");
     try {
       const response = await apiRequest(`/api/domains/${params.id}/check/`, { method: "POST" });
       const data = await response.json().catch(() => null);
+
       if (response.status === 202) {
-        setCheckMessage(data?.detail ?? "DNS check started.");
+        setCheckMessage("DNS check started. New results will appear here automatically.");
         pollTimers.current.forEach(clearTimeout);
         pollTimers.current = [5000, 15000, 30000].map((delay) =>
           setTimeout(() => {
             fetchData().catch(() => {});
           }, delay)
         );
-      } else {
-        setCheckMessage(data?.detail ?? "The DNS check could not be started.");
+        return;
       }
+
+      if (response.status === 429) {
+        const retryHeader = response.headers.get("Retry-After");
+        const headerSeconds = retryHeader ? Number.parseInt(retryHeader, 10) : Number.NaN;
+        const detail = typeof data?.detail === "string" ? data.detail : "";
+        const detailMatch = detail.match(/(\d+)\s+seconds?/i);
+        const detailSeconds = detailMatch ? Number.parseInt(detailMatch[1], 10) : Number.NaN;
+        const waitSeconds = Number.isFinite(headerSeconds)
+          ? headerSeconds
+          : Number.isFinite(detailSeconds)
+            ? detailSeconds
+            : 60;
+
+        if (waitSeconds > 0) {
+          const now = Date.now();
+          setRetryClock(now);
+          setRetryUntil(now + waitSeconds * 1000);
+        }
+        setCheckMessage(
+          "Manual DNS checks are temporarily paused. Current results stay visible and automatic refresh continues."
+        );
+        return;
+      }
+
+      setCheckMessage(
+        data?.detail
+          ? `DNS check could not be started: ${data.detail}`
+          : "DNS check could not be started. Your current results are unchanged."
+      );
     } catch {
-      setCheckMessage("The DNS check could not be started. Please try again.");
+      setCheckMessage("DNS check could not be started. Your current results are unchanged.");
     } finally {
       setChecking(false);
     }
@@ -327,21 +493,37 @@ export default function DomainDetailPage() {
         </div>
 
         {canSupportAction && (
-          <PortalButton type="button" variant="secondary" onClick={checkDNS} disabled={checking}>
+          <PortalButton
+            type="button"
+            variant="secondary"
+            onClick={checkDNS}
+            disabled={checking || retrySeconds > 0}
+          >
             <RefreshCw className={"h-4 w-4 " + (checking ? "animate-spin" : "")} />
-            {checking ? "Starting…" : "Re-check DNS"}
+            {checking
+              ? "Checking…"
+              : retrySeconds > 0
+                ? `Re-check in ${formatWait(retrySeconds)}`
+                : "Re-check DNS"}
           </PortalButton>
         )}
       </div>
 
-      {checkMessage && (
-        <div className="mb-4">
-          <PortalNotice tone="info">
-            <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{checkMessage} Results refresh automatically as the worker completes.</span>
-          </PortalNotice>
-        </div>
-      )}
+      <div className="portal-dns-check-slot">
+        <PortalNotice tone={retrySeconds > 0 ? "warn" : "info"}>
+          <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {retrySeconds > 0 ? (
+              <>
+                Manual DNS checks are paused. Try again in <strong>{formatWait(retrySeconds)}</strong>.
+                {" "}Current results stay visible and automatic refresh continues.
+              </>
+            ) : (
+              checkMessage
+            )}
+          </span>
+        </PortalNotice>
+      </div>
 
       {actionMessage && (
         <div className="mb-4">
@@ -391,8 +573,8 @@ export default function DomainDetailPage() {
                 </strong>
                 <p>
                   {scoredRecords.length
-                    ? `${verifiedScored} of ${scoredRecords.length} scored DNS records are currently verified.`
-                    : "Run a DNS check to populate the current records."}
+                    ? `${verifiedScored} of ${scoredRecords.length} required DNS records are connected.`
+                    : "Run a DNS check after adding the records below."}
                 </p>
               </div>
               <div className="portal-readiness-score">
@@ -411,23 +593,26 @@ export default function DomainDetailPage() {
 
             {records.length ? (
               <>
+                <p className="portal-dns-setup-tip">
+                  Copy each field exactly as shown. For TTL, keep your DNS provider’s default or Auto value.
+                </p>
                 <div className="portal-dns-list">
                   {scoredRecords.map((record) => (
-                    <RecordRow key={record.id} record={record} />
+                    <RecordRow key={record.id} record={record} domain={domain.domain} />
                   ))}
                 </div>
 
                 {discoveryRecords.length > 0 && (
                   <div className="mt-6">
                     <div className="mb-3">
-                      <h2 className="text-[13px] font-semibold text-[var(--portal-text-strong)]">Mail client discovery</h2>
+                      <h2 className="text-[13px] font-semibold text-[var(--portal-text-strong)]">Optional mail app setup</h2>
                       <p className="mt-1 text-[10px] leading-5 text-[var(--portal-muted)]">
-                        Optional discovery records help some mail clients configure themselves. They do not affect the DNS health score.
+                        Helps Outlook and some mail apps find the right settings automatically. Email works normally without this record.
                       </p>
                     </div>
                     <div className="portal-dns-list">
                       {discoveryRecords.map((record) => (
-                        <RecordRow key={record.id} record={record} />
+                        <RecordRow key={record.id} record={record} domain={domain.domain} />
                       ))}
                     </div>
                   </div>
@@ -441,9 +626,13 @@ export default function DomainDetailPage() {
                   <p>Run a DNS check after publishing the required records at your registrar.</p>
                   {canSupportAction && (
                     <div className="mt-4">
-                      <PortalButton type="button" onClick={checkDNS} disabled={checking}>
+                      <PortalButton type="button" onClick={checkDNS} disabled={checking || retrySeconds > 0}>
                         <RefreshCw className={"h-4 w-4 " + (checking ? "animate-spin" : "")} />
-                        Run DNS check
+                        {checking
+                          ? "Checking…"
+                          : retrySeconds > 0
+                            ? `Check again in ${formatWait(retrySeconds)}`
+                            : "Run DNS check"}
                       </PortalButton>
                     </div>
                   )}
