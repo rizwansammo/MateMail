@@ -23,6 +23,43 @@
 
 ---
 
+
+## Custom Hub/PostBox Domains — current work (2026-10-05)
+
+Development lives on `feature/custom-domains-caddy` and is intentionally not
+merged or deployed until all six custom-domain phases are complete.
+
+- ✅ **Phase 1:** production edge audited; nginx + Certbot retained, Caddy
+  rejected as an unnecessary host-wide migration.
+- ✅ **Phase 2:** custom-host backend complete — tenant-owned model/state,
+  exact CNAME verification, authorization, database uniqueness constraints,
+  dynamic Host allowlist guard, audit events and the purpose-specific Phase 3
+  provisioner API.
+- ✅ **Phase 3:** root-owned nginx/Certbot edge automation complete — exact-host
+  ACME bootstrap, individual certificate lineages, TLS-ready staging vhost,
+  scoped renewal reload hook, hardened systemd timer, crash recovery and
+  exact-release deployment staging.
+- ✅ **Phase 4:** routing/authentication complete — ACTIVE custom hosts are
+  database-bound to one tenant/surface, final nginx routing preserves the
+  customer URL, frontend PostBox routing is surface-aware, Hub/PostBox sessions
+  stay host-scoped, and cross-tenant/cross-surface requests fail closed.
+- ✅ **Phase 5:** engineering complete — Hub custom-URL UI, DNS/HTTPS status
+  flow, safe edge/certificate deactivation, guarded NetaMate adoption,
+  branded-frontend preservation, read-only smoke tooling, rollback runbook and
+  production pre-deploy baseline are complete. The live NetaMate handover is a
+  post-deploy acceptance gate because the owner will deploy only after all
+  phases are merged.
+- ⬜ **Phase 6:** canonical Hub hostname migration from
+  `portal.matemail.online` to `hub.matemail.online`.
+
+The feature is **not live** because this branch is intentionally undeployed.
+The Phase 4 production release configuration enables the dynamic Host guard,
+but it accepts only fixed operator hosts or ACTIVE database-backed custom
+hostnames. READY certificate-only rows remain rejected until the internal
+activation worker installs the final routing and advances them to ACTIVE.
+
+Full design and current acceptance results: `docs/CUSTOM_DOMAINS.md`.
+
 ## Architecture direction
 
 As of **DEC-011 (2026-09-10)**, MateMail is one integrated business email

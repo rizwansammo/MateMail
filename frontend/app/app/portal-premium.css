@@ -3143,3 +3143,241 @@
 .portal-premium .portal-brand-caption {
   display: none;
 }
+
+
+/* Phase 5 — customer-owned Hub/PostBox access URLs. */
+.portal-premium .portal-custom-host-intro {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.portal-premium .portal-custom-host-intro > div {
+  padding: 13px 14px;
+  border: 1px solid var(--portal-border);
+  border-radius: 9px !important;
+  background: var(--portal-surface-soft);
+}
+
+.portal-premium .portal-custom-host-intro strong,
+.portal-premium .portal-custom-host-intro span {
+  display: block;
+}
+
+.portal-premium .portal-custom-host-intro strong {
+  color: var(--portal-text-strong);
+  font-size: 10px;
+  font-weight: 720;
+}
+
+.portal-premium .portal-custom-host-intro span {
+  margin-top: 4px;
+  color: var(--portal-muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.portal-premium .portal-custom-host-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.portal-premium .portal-custom-host {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid var(--portal-border);
+  border-radius: 11px !important;
+  background: var(--portal-surface);
+}
+
+.portal-premium .portal-custom-host-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--portal-border);
+}
+
+.portal-premium .portal-custom-host-head > div {
+  min-width: 0;
+}
+
+.portal-premium .portal-custom-host-icon {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border-radius: 9px !important;
+  background: var(--portal-primary-soft);
+  color: var(--portal-primary);
+}
+
+.portal-premium .portal-custom-host-head h3 {
+  color: var(--portal-text-strong);
+  font-size: 12px;
+  font-weight: 740;
+}
+
+.portal-premium .portal-custom-host-head p {
+  margin-top: 3px;
+  color: var(--portal-muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.portal-premium .portal-custom-host-add,
+.portal-premium .portal-custom-host-configured {
+  padding-top: 15px;
+}
+
+.portal-premium .portal-custom-host-titleline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.portal-premium .portal-custom-host-titleline > div {
+  min-width: 0;
+}
+
+.portal-premium .portal-custom-host-titleline > div > span {
+  display: block;
+  color: var(--portal-faint);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.portal-premium .portal-custom-host-titleline > div > strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--portal-text-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.portal-premium .portal-custom-host-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin: 13px 0;
+}
+
+.portal-premium .portal-custom-host-statuses > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.portal-premium .portal-custom-host-statuses > div > span:first-child {
+  color: var(--portal-faint);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.portal-premium .portal-custom-host-dns {
+  margin: 14px 0;
+  padding: 13px;
+  border: 1px solid var(--portal-border);
+  border-radius: 9px !important;
+  background: var(--portal-surface-soft);
+}
+
+.portal-premium .portal-custom-host-dns-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.portal-premium .portal-custom-host-dns-head strong,
+.portal-premium .portal-custom-host-dns-head span {
+  display: block;
+}
+
+.portal-premium .portal-custom-host-dns-head strong {
+  color: var(--portal-text-strong);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.portal-premium .portal-custom-host-dns-head > div > span {
+  margin-top: 3px;
+  color: var(--portal-muted);
+  font-size: 9px;
+}
+
+.portal-premium .portal-custom-host-verified {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 5px;
+  color: var(--portal-success);
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.portal-premium .portal-custom-host-record {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.portal-premium .portal-custom-host-record > div {
+  min-width: 0;
+}
+
+.portal-premium .portal-custom-host-record > div > span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--portal-faint);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: .06em;
+}
+
+.portal-premium .portal-custom-host .portal-notice {
+  margin-top: 12px;
+}
+
+.portal-premium .portal-custom-host code {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1000px) {
+  .portal-premium .portal-custom-host-grid,
+  .portal-premium .portal-custom-host-intro {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-premium .portal-custom-host-record {
+    grid-template-columns: 90px minmax(0, 1fr);
+  }
+
+  .portal-premium .portal-custom-host-record > div:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  .portal-premium .portal-custom-host-record {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-premium .portal-custom-host-record > div:last-child {
+    grid-column: auto;
+  }
+
+  .portal-premium .portal-custom-host-titleline,
+  .portal-premium .portal-custom-host-dns-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

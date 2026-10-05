@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll MateMail for verified custom hostnames
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+RandomizedDelaySec=15s
+Persistent=true
+Unit=matemail-custom-host-provisioner.service
+
+[Install]
+WantedBy=timers.target

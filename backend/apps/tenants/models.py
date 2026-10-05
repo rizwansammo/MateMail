@@ -1,6 +1,7 @@
 import uuid
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class TenantStatus(models.TextChoices):
@@ -126,6 +127,135 @@ class Tenant(models.Model):
         the SMTP policy bridge on every submission.
         """
         return self.can_use_mail and not self.outbound_disabled
+
+
+class CustomHostnameSurface(models.TextChoices):
+    """Which customer-facing MateMail surface a hostname serves."""
+
+    HUB = "hub", "MateMail Hub"
+    POSTBOX = "postbox", "PostBox"
+
+
+class CustomHostnameDNSStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    VERIFIED = "verified", "Verified"
+    FAILED = "failed", "Failed"
+
+
+class CustomHostnameProvisioningStatus(models.TextChoices):
+    """
+    Edge lifecycle.
+
+    READY means nginx/TLS provisioning completed but application routing has
+    not been activated yet. Keeping READY separate from ACTIVE lets Phase 3
+    issue a certificate safely before Phase 4 starts accepting tenant traffic.
+    """
+
+    UNPROVISIONED = "unprovisioned", "Unprovisioned"
+    PROVISIONING = "provisioning", "Provisioning"
+    READY = "ready", "Ready"
+    ACTIVE = "active", "Active"
+    ERROR = "error", "Error"
+    DEACTIVATING = "deactivating", "Deactivating"
+    INACTIVE = "inactive", "Inactive"
+
+
+class CustomHostnameCertificateStatus(models.TextChoices):
+    NOT_REQUESTED = "not_requested", "Not requested"
+    ISSUING = "issuing", "Issuing"
+    ACTIVE = "active", "Active"
+    ERROR = "error", "Error"
+    REVOKED = "revoked", "Revoked"
+
+
+#: Every state except INACTIVE owns the hostname and the tenant/surface slot.
+#: The database constraints below use an explicit allow-list so a new state is
+#: denied until somebody decides whether it should own those resources.
+CUSTOM_HOSTNAME_LIVE_STATES = (
+    CustomHostnameProvisioningStatus.UNPROVISIONED.value,
+    CustomHostnameProvisioningStatus.PROVISIONING.value,
+    CustomHostnameProvisioningStatus.READY.value,
+    CustomHostnameProvisioningStatus.ACTIVE.value,
+    CustomHostnameProvisioningStatus.ERROR.value,
+    CustomHostnameProvisioningStatus.DEACTIVATING.value,
+)
+
+
+class CustomHostname(models.Model):
+    """
+    A customer-owned HTTPS hostname bound to one MateMail organization surface.
+
+    This is web-access state only. It does not represent a mail domain and does
+    not participate in MX/SPF/DKIM/DMARC or Mail Engine provisioning.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="custom_hostnames",
+    )
+    hostname = models.CharField(max_length=253)
+    surface = models.CharField(max_length=16, choices=CustomHostnameSurface.choices)
+
+    dns_status = models.CharField(
+        max_length=16,
+        choices=CustomHostnameDNSStatus.choices,
+        default=CustomHostnameDNSStatus.PENDING,
+    )
+    dns_verified_at = models.DateTimeField(null=True, blank=True)
+    dns_last_checked_at = models.DateTimeField(null=True, blank=True)
+
+    provisioning_status = models.CharField(
+        max_length=20,
+        choices=CustomHostnameProvisioningStatus.choices,
+        default=CustomHostnameProvisioningStatus.UNPROVISIONED,
+    )
+    certificate_status = models.CharField(
+        max_length=20,
+        choices=CustomHostnameCertificateStatus.choices,
+        default=CustomHostnameCertificateStatus.NOT_REQUESTED,
+    )
+
+    #: Customer-safe summary of the most recent DNS/provisioning failure.
+    #: Raw resolver output and command stderr never belong here.
+    last_error = models.TextField(blank=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "tenants_custom_hostname"
+        ordering = ["surface", "created_at"]
+        constraints = [
+            # A live hostname can belong to exactly one organization/surface.
+            # INACTIVE history does not reserve the name forever.
+            models.UniqueConstraint(
+                fields=["hostname"],
+                condition=Q(provisioning_status__in=CUSTOM_HOSTNAME_LIVE_STATES),
+                name="uniq_live_custom_hostname",
+            ),
+            # First release: one live Hub hostname and one live PostBox hostname
+            # per organization. Old inactive rows are retained for audit/history.
+            models.UniqueConstraint(
+                fields=["tenant", "surface"],
+                condition=Q(provisioning_status__in=CUSTOM_HOSTNAME_LIVE_STATES),
+                name="uniq_live_custom_host_surface",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.hostname} → {self.tenant.slug}/{self.surface}"
+
+    @property
+    def is_dns_verified(self) -> bool:
+        return self.dns_status == CustomHostnameDNSStatus.VERIFIED
+
+    @property
+    def is_request_active(self) -> bool:
+        return self.provisioning_status == CustomHostnameProvisioningStatus.ACTIVE
 
 
 class MemberRole(models.TextChoices):

@@ -72,6 +72,10 @@ MUST_NOT_BE_EXECUTABLE = {
         "Dockerfile COPY --chmod=0755",
     "deploy/native-engine/images/postfix/entrypoint.sh":
         "Dockerfile COPY --chmod=0755",
+    "deploy/custom-hosts/install.sh":
+        "invoked with bash by the release workflow; it installs runtime files with explicit modes",
+    "deploy/custom-hosts/renew-hook.sh":
+        "source artifact only; install.sh places the runtime Certbot hook 0755",
 }
 
 

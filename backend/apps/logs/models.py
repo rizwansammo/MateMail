@@ -19,6 +19,11 @@ class LogEventType(models.TextChoices):
     DOMAIN_OWNERSHIP_VERIFIED = "domain_ownership_verified", "Domain Ownership Verified"
     DOMAIN_OWNERSHIP_FAILED = "domain_ownership_failed", "Domain Ownership Check Failed"
     DOMAIN_TOKEN_ROTATED = "domain_token_rotated", "Domain Verification Token Rotated"
+    CUSTOM_HOSTNAME_ADDED = "custom_hostname_added", "Custom Hostname Added"
+    CUSTOM_HOSTNAME_VERIFIED = "custom_hostname_verified", "Custom Hostname Verified"
+    CUSTOM_HOSTNAME_VERIFY_FAILED = "custom_hostname_verify_failed", "Custom Hostname Verification Failed"
+    CUSTOM_HOSTNAME_ACTIVATED = "custom_hostname_activated", "Custom Hostname Activated"
+    CUSTOM_HOSTNAME_REMOVED = "custom_hostname_removed", "Custom Hostname Removed"
     TENANT_SUSPENDED = "tenant_suspended", "Tenant Suspended"
     TENANT_REACTIVATED = "tenant_reactivated", "Tenant Reactivated"
     # Approval lifecycle (P5). A workspace being allowed to send mail is a

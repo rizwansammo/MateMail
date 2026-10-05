@@ -42,8 +42,15 @@ x-backend-env: &backend_env
   # unchanged — that is what lets the frontend middleware tell the two
   # consoles apart, so Django must accept it or every Platform API call is
   # a 400 DisallowedHost.
-  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-portal.matemail.online,postbox.matemail.online,platform.matemail.online,autodiscover.matemail.online,app.matemail.online,matemail.online,localhost,127.0.0.1}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-portal.matemail.online,postbox.matemail.online,platform.matemail.online,autodiscover.matemail.online,app.matemail.online,matemail.online,backend,localhost,127.0.0.1}
   DEDICATED_TENANT_HOSTS: ${DEDICATED_TENANT_HOSTS:-}
+  # Customer-owned Hub/PostBox hostnames. Phase 4 activates the database-backed
+  # Host/surface guards; unknown hosts remain fail-closed.
+  CUSTOM_HOSTS_DYNAMIC_ENABLED: ${CUSTOM_HOSTS_DYNAMIC_ENABLED:-True}
+  CUSTOM_HOST_CNAME_TARGET: ${CUSTOM_HOST_CNAME_TARGET:-custom.matemail.online}
+  CUSTOM_HOST_RESERVED_SUFFIXES: ${CUSTOM_HOST_RESERVED_SUFFIXES:-matemail.online}
+  CUSTOM_HOST_PROVISIONER_SECRET: ${CUSTOM_HOST_PROVISIONER_SECRET:-}
+  CUSTOM_HOST_CACHE_TTL: ${CUSTOM_HOST_CACHE_TTL:-30}
   DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:-matemail}
   REDIS_URL: redis://redis:6379/0
   INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?required}
