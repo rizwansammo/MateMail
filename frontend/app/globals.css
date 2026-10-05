@@ -2403,6 +2403,14 @@ body {
   overflow:hidden;
 }
 .pb-premium-overlay { display:none; }
+.pb-plain-text-link {
+  color:var(--pb-accent-fg);
+  text-decoration:underline;
+  text-underline-offset:2px;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.pb-plain-text-link:hover { text-decoration-thickness:2px; }
 .pb-premium-shell .pb-legacy-mail-search { display:none; }
 
 /* Premium MateMail sign-in. NetaMate uses its existing auth shell. */
