@@ -195,7 +195,15 @@ class PostBoxRemoteImageCspTest(SimpleTestCase):
 
     def test_the_policy_depends_on_the_host(self):
         self.assertIn("allowRemoteImages", self.middleware)
-        self.assertIn("buildCsp(nonce, isPostBoxHost(hostOf(request)))", self.middleware)
+        self.assertIn("buildCsp(nonce, isPostBoxRequest(request))", self.middleware)
+
+    def test_custom_postbox_surface_marker_is_used_only_for_unknown_hosts(self):
+        self.assertIn("function customSurfaceOf(request: NextRequest)", self.middleware)
+        self.assertIn('x-matemail-custom-host', self.middleware)
+        self.assertIn('x-matemail-surface', self.middleware)
+        self.assertIn('customSurfaceOf(request) === "postbox"', self.middleware)
+        # Canonical/configured hosts ignore customer-supplied surface headers.
+        self.assertIn("if (knownHost) return null;", self.middleware)
 
     def test_https_images_are_conditional_not_unconditional(self):
         """
