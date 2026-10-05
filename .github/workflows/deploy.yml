@@ -165,12 +165,32 @@ jobs:
             echo "::error::deploy/docker-compose.yml does not exist in commit ${IMAGE_TAG}."
             exit 1
           fi
+          for required in \
+            deploy/custom-hosts/install.sh \
+            deploy/custom-hosts/provisioner.py \
+            deploy/custom-hosts/renew-hook.sh \
+            deploy/custom-hosts/systemd/matemail-custom-host-provisioner.service \
+            deploy/custom-hosts/systemd/matemail-custom-host-provisioner.timer; do
+            if ! git cat-file -e "${IMAGE_TAG}:${required}" 2>/dev/null; then
+              echo "::error::${required} does not exist in commit ${IMAGE_TAG}."
+              exit 1
+            fi
+          done
 
           mkdir -p candidate
-          git show "${IMAGE_TAG}:deploy/docker-compose.yml"             > "candidate/docker-compose.${IMAGE_TAG}.yml"
+          git show "${IMAGE_TAG}:deploy/docker-compose.yml" \
+            > "candidate/docker-compose.${IMAGE_TAG}.yml"
+
+          BUNDLE_DIR="candidate/custom-hosts.${IMAGE_TAG}"
+          mkdir -p "$BUNDLE_DIR"
+          git archive "${IMAGE_TAG}" deploy/custom-hosts \
+            | tar -x -C "$BUNDLE_DIR" --strip-components=2
+          tar -C candidate -czf "candidate/custom-hosts.${IMAGE_TAG}.tar.gz" \
+            "custom-hosts.${IMAGE_TAG}"
 
           echo "Extracted from ${IMAGE_TAG}:"
           sha256sum "candidate/docker-compose.${IMAGE_TAG}.yml"
+          sha256sum "candidate/custom-hosts.${IMAGE_TAG}.tar.gz"
           wc -l "candidate/docker-compose.${IMAGE_TAG}.yml"
 
       - name: Preflight MateServer before transferring anything
@@ -256,6 +276,18 @@ jobs:
           strip_components: 1
           overwrite: true
 
+      - name: Stage the exact-revision custom-host worker on MateServer
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: candidate/custom-hosts.${{ inputs.image_tag }}.tar.gz
+          target: /opt/MateMail/.deploy/
+          strip_components: 1
+          overwrite: true
+
       - name: Deploy to MateServer
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -278,6 +310,8 @@ jobs:
             FRONTEND_IMAGE=ghcr.io/rizwansammo/matemail-frontend
             STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
             CANDIDATE="$DEPLOY_DIR/.deploy/docker-compose.${IMAGE_TAG}.yml"
+            CUSTOM_HOST_BUNDLE="$DEPLOY_DIR/.deploy/custom-hosts.${IMAGE_TAG}.tar.gz"
+            CUSTOM_HOST_DIR="$DEPLOY_DIR/.deploy/custom-hosts.${IMAGE_TAG}"
             COMPOSE_BACKUP="$DEPLOY_DIR/backups/docker-compose.${STAMP}.yml"
             ENV_BACKUP="$DEPLOY_DIR/.env.bak.${STAMP}"
 
@@ -303,6 +337,13 @@ jobs:
             # Docker daemon and the engine-link network were all verified in the
             # preflight step, before anything was transferred.
             [ -f "$CANDIDATE" ] || { echo "ERROR: staged candidate $CANDIDATE is missing."; exit 1; }
+            [ -f "$CUSTOM_HOST_BUNDLE" ] || { echo "ERROR: staged custom-host bundle is missing."; exit 1; }
+            rm -rf "$CUSTOM_HOST_DIR"
+            tar -xzf "$CUSTOM_HOST_BUNDLE" -C "$DEPLOY_DIR/.deploy"
+            [ -x "$CUSTOM_HOST_DIR/install.sh" ] || {
+              echo "ERROR: custom-host installer is missing or not executable."
+              exit 1
+            }
 
             # ── 1. Validate the candidate BEFORE it replaces anything ────────
             #
@@ -448,6 +489,13 @@ jobs:
               | gzip > "/opt/MateMail/backups/pre-deploy-$(date -u +%Y%m%dT%H%M%SZ).sql.gz" \
               || echo "WARNING: pre-deploy dump failed (first deploy, or postgres not yet running)"
 
+            echo "▸ Preparing custom-host edge worker..."
+            # Installs files and establishes the purpose-specific secret in
+            # .env, but does NOT enable a previously-disabled timer yet. The
+            # backend started below therefore receives the same secret before
+            # the worker is allowed to poll it.
+            "$CUSTOM_HOST_DIR/install.sh"
+
             echo "▸ Pulling images..."
             docker compose pull
 
@@ -518,6 +566,15 @@ jobs:
             # failure in reporting cannot tear down a healthy stack.
             ROLLBACK_ARMED=0
             trap - ERR
+
+            echo "▸ Enabling custom-host provisioning timer..."
+            systemctl enable --now matemail-custom-host-provisioner.timer
+            # A pending customer's DNS/ACME problem must not roll back an
+            # otherwise healthy MateMail release. Run once for fast pickup, but
+            # leave failures to the timer/journal and the row's ERROR state.
+            if ! systemctl start matemail-custom-host-provisioner.service; then
+              echo "WARNING: custom-host provisioner reported a job failure; MateMail deployment remains healthy."
+            fi
 
             echo "══ Deployment complete ══"
 
