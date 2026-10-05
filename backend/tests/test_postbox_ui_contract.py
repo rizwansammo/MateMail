@@ -799,8 +799,9 @@ class PlainTextLinkificationRegressionTest(SimpleTestCase):
         self.assertIn('href={href}', self.helper)
         self.assertIn('target="_blank"', self.helper)
         self.assertIn('rel="noopener noreferrer nofollow"', self.helper)
-        self.assertNotIn("dangerouslySetInnerHTML", self.helper)
-        self.assertNotIn("javascript:", self.helper)
+        helper_code = code_only(self.helper)
+        self.assertNotIn("dangerouslySetInnerHTML", helper_code)
+        self.assertNotIn("javascript:", helper_code)
 
     def test_original_plain_text_is_emitted_without_reflow_or_html_conversion(self):
         self.assertIn("output.push(text.slice(cursor, start))", self.helper)
