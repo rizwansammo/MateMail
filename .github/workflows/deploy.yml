@@ -494,7 +494,7 @@ jobs:
             # .env, but does NOT enable a previously-disabled timer yet. The
             # backend started below therefore receives the same secret before
             # the worker is allowed to poll it.
-            "$CUSTOM_HOST_DIR/install.sh"
+            bash "$CUSTOM_HOST_DIR/install.sh"
 
             echo "▸ Pulling images..."
             docker compose pull
