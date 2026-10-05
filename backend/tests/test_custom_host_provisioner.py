@@ -436,6 +436,7 @@ class HostInstallArtifactsTest(unittest.TestCase):
         self.assertNotIn('printf "%s" "$SECRET"', source)
         self.assertIn("chmod 0600", source)
         self.assertIn("--activate", source)
+        self.assertIn("MATEMAIL_CUSTOM_HOST_FRONTEND_OVERRIDES", source)
 
     def test_manual_deploy_stages_worker_from_the_exact_release_sha(self):
         source = DEPLOY_WORKFLOW_PATH.read_text(encoding="utf-8")
