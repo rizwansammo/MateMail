@@ -1,16 +1,14 @@
 import logging
 
 from django.conf import settings
-from django.core.cache import cache
 from django.core.exceptions import DisallowedHost
 from django.http import HttpResponseBadRequest
 
 from .custom_hosts import (
     CustomHostnameValueError,
-    custom_hostname_cache_key,
+    active_custom_hostname_binding,
     normalize_hostname,
 )
-from .models import CustomHostname, CustomHostnameProvisioningStatus
 
 logger = logging.getLogger(__name__)
 
@@ -74,26 +72,15 @@ class CustomHostnameHostGuardMiddleware:
         if hostname in fixed:
             return self.get_response(request)
 
-        key = custom_hostname_cache_key(hostname)
-        allowed = cache.get(key)
-        if allowed is None:
-            try:
-                allowed = CustomHostname.objects.filter(
-                    hostname=hostname,
-                    provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
-                ).exists()
-            except Exception:
-                # An unknown host must never become accepted because the
-                # allowlist datastore is unavailable.
-                logger.exception("Custom hostname allowlist lookup failed")
-                allowed = False
-            cache.set(
-                key,
-                bool(allowed),
-                timeout=getattr(settings, "CUSTOM_HOST_CACHE_TTL", 30),
-            )
+        try:
+            binding = active_custom_hostname_binding(hostname)
+        except Exception:
+            # An unknown host must never become accepted because the
+            # allowlist datastore is unavailable.
+            logger.exception("Custom hostname allowlist lookup failed")
+            binding = None
 
-        if not allowed:
+        if binding is None:
             return HttpResponseBadRequest("Invalid host.")
 
         return self.get_response(request)
