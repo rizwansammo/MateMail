@@ -172,12 +172,12 @@ class CustomHostnameCertificateStatus(models.TextChoices):
 #: The database constraints below use an explicit allow-list so a new state is
 #: denied until somebody decides whether it should own those resources.
 CUSTOM_HOSTNAME_LIVE_STATES = (
-    CustomHostnameProvisioningStatus.UNPROVISIONED,
-    CustomHostnameProvisioningStatus.PROVISIONING,
-    CustomHostnameProvisioningStatus.READY,
-    CustomHostnameProvisioningStatus.ACTIVE,
-    CustomHostnameProvisioningStatus.ERROR,
-    CustomHostnameProvisioningStatus.DEACTIVATING,
+    CustomHostnameProvisioningStatus.UNPROVISIONED.value,
+    CustomHostnameProvisioningStatus.PROVISIONING.value,
+    CustomHostnameProvisioningStatus.READY.value,
+    CustomHostnameProvisioningStatus.ACTIVE.value,
+    CustomHostnameProvisioningStatus.ERROR.value,
+    CustomHostnameProvisioningStatus.DEACTIVATING.value,
 )
 
 
