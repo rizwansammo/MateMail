@@ -73,19 +73,28 @@ class CustomHostnameHostGuardMiddleware:
             for value in getattr(settings, "CUSTOM_HOST_FIXED_HOSTS", ())
             if value
         }
-        if hostname in fixed:
-            return self.get_response(request)
 
         try:
             binding = active_custom_hostname_binding(hostname)
         except Exception:
-            # An unknown host must never become accepted because the
-            # allowlist datastore is unavailable.
+            # For a truly dynamic hostname, datastore failure must deny the
+            # request. A fixed operator hostname remains usable so an outage in
+            # the custom-host table/cache cannot take down canonical MateMail.
             logger.exception("Custom hostname allowlist lookup failed")
             binding = None
+            if hostname not in fixed:
+                return HttpResponseBadRequest("Invalid host.")
 
-        if binding is None:
-            return HttpResponseBadRequest("Invalid host.")
+        if binding is not None:
+            # ACTIVE database state wins even if an operator accidentally left
+            # this name in DJANGO_ALLOWED_HOSTS. That prevents a custom hostname
+            # from becoming an unscoped shared surface through configuration
+            # drift, and also gives Phase 5 a safe path to migrate NetaMate from
+            # DEDICATED_TENANT_HOSTS into the normal table.
+            request.custom_hostname_binding = binding
+            return self.get_response(request)
 
-        request.custom_hostname_binding = binding
-        return self.get_response(request)
+        if hostname in fixed:
+            return self.get_response(request)
+
+        return HttpResponseBadRequest("Invalid host.")
