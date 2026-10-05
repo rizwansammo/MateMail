@@ -71,10 +71,10 @@ class CustomHostnameInternalStateSerializer(serializers.Serializer):
     """
 
     provisioning_status = serializers.ChoiceField(
-        choices=("provisioning", "ready", "active", "error")
+        choices=("provisioning", "ready", "active", "error", "inactive")
     )
     certificate_status = serializers.ChoiceField(
-        choices=("not_requested", "issuing", "active", "error"),
+        choices=("not_requested", "issuing", "active", "error", "revoked"),
         required=False,
     )
     last_error = serializers.CharField(
@@ -88,6 +88,12 @@ class CustomHostnameInternalStateSerializer(serializers.Serializer):
             if attrs.get("certificate_status") != "active":
                 raise serializers.ValidationError(
                     "READY/ACTIVE requires certificate_status=active."
+                )
+            attrs["last_error"] = ""
+        if attrs["provisioning_status"] == "inactive":
+            if attrs.get("certificate_status") != "revoked":
+                raise serializers.ValidationError(
+                    "INACTIVE requires certificate_status=revoked."
                 )
             attrs["last_error"] = ""
         return attrs
