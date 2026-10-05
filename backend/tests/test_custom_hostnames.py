@@ -10,6 +10,7 @@ from apps.tenants.models import (
     CustomHostnameDNSStatus,
     CustomHostnameProvisioningStatus,
     MemberRole,
+    TenantStatus,
 )
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
@@ -175,6 +176,15 @@ class CustomHostnameTenantAPITest(TestCase):
             response.data["custom_hostname"]["provisioning_status"],
             "unprovisioned",
         )
+
+    def test_suspended_workspace_can_still_relinquish_an_unprovisioned_hostname(self):
+        created = self.create("mail.customer.com")
+        self.assertEqual(created.status_code, 201)
+        self.tenant.status = TenantStatus.SUSPENDED
+        self.tenant.save(update_fields=["status", "updated_at"])
+
+        response = self.client.delete(f"/api/custom-hostnames/{created.data['id']}/")
+        self.assertEqual(response.status_code, 204)
 
     def test_customer_cannot_remove_hostname_after_edge_work_has_started(self):
         row = CustomHostname.objects.create(
