@@ -33,7 +33,7 @@ HOOK=/etc/letsencrypt/renewal-hooks/deploy/matemail-custom-host-nginx.sh
 SERVICE=/etc/systemd/system/matemail-custom-host-provisioner.service
 TIMER=/etc/systemd/system/matemail-custom-host-provisioner.timer
 
-for bin in python3 nginx certbot systemctl docker install; do
+for bin in python3 nginx certbot systemctl docker install curl; do
   command -v "$bin" >/dev/null 2>&1 || {
     echo "ERROR: required command '$bin' is missing." >&2
     exit 1
