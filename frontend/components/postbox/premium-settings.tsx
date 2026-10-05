@@ -292,14 +292,18 @@ function AppearanceSection() {
         </SettingRow>
         <SettingRow label="Density" description="Change how much vertical space each message row uses.">
           <div className="pb-segmented">
-            {(["comfortable", "compact"] as const).map((density) => (
+            {([
+              { value: "comfortable", label: "Comfortable" },
+              { value: "compact", label: "Compact" },
+              { value: "extra_compact", label: "Extra Compact" },
+            ] as const).map(({ value, label }) => (
               <button
-                key={density}
+                key={value}
                 type="button"
-                className={preferences.density === density ? "active" : ""}
-                onClick={() => void save({ density })}
+                className={preferences.density === value ? "active" : ""}
+                onClick={() => void save({ density: value })}
               >
-                {density === "comfortable" ? "Comfortable" : "Compact"}
+                {label}
               </button>
             ))}
           </div>
