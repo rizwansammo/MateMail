@@ -1,6 +1,6 @@
 # MateMail Custom Hub/PostBox Domains
 
-**Status:** Phase 1–3 complete; Phase 4 routing/authentication pending  
+**Status:** Phase 1–4 complete; Phase 5 Hub UI/pilot pending  
 **Branch:** `feature/custom-domains-caddy`  
 **Date:** 2026-10-05
 
@@ -331,10 +331,12 @@ Removal
     -> INACTIVE
 ```
 
-`READY` is deliberate: Phase 3 may have installed nginx and a valid
-certificate, but the application must still refuse the hostname until Phase 4
-has made routing and tenant binding safe. The Phase 2 provisioning API cannot
-set `ACTIVE`.
+`READY` is deliberate: nginx/TLS exists, but the application still refuses
+the hostname. Phase 4's internal activation queue then installs the final
+surface-aware vhost and only afterwards advances the row to `ACTIVE`.
+A crash between those two operations fails closed: the Host guard still rejects
+the hostname and the READY queue retries the idempotent activation on its next
+poll.
 
 Removing a hostname revokes the application mapping first, then removes the
 edge vhost/certificate material. A stale certificate must never imply that an
@@ -367,8 +369,9 @@ separate decision.
    exact-host ACME bootstrap, individual Certbot lineage, TLS-ready staging
    vhost, scoped renewal hook, systemd timer and exact-release deployment
    artifacts. **No Caddy migration.**
-4. **Routing + Authentication** — custom Hub/PostBox routing, trusted surface
-   header, tenant resolution, cookie/login/redirect regression tests.
+4. ✅ **Routing + Authentication** — complete: ACTIVE database bindings now
+   drive tenant resolution, exact-host nginx routing and frontend surface
+   selection; Hub/PostBox auth and cookies remain host-isolated.
 5. **Hub UI + NetaMate Pilot + Production Tests** — one-CNAME customer flow,
    live NetaMate validation, failure/rollback checks.
 6. **Hub canonical rename** — `portal.matemail.online` ->
@@ -471,3 +474,111 @@ The branch passed the repository's complete quality gates after implementation:
 No production nginx, certificate, database or application deployment was
 changed by Phase 2. `CUSTOM_HOSTS_DYNAMIC_ENABLED` remains `False` until
 Phase 4.
+
+
+## Phase 4 implementation result
+
+Phase 4 is implemented on the feature branch and remains undeployed.
+
+### Request and tenant binding
+
+Dynamic customer-host acceptance is now enabled in the production release
+configuration. Django's static `ALLOWED_HOSTS` opens only so the first
+middleware can perform the real allowlist decision; an unknown hostname still
+fails closed.
+
+For an accepted custom hostname, that exact ACTIVE database binding is attached
+to the request and reused by downstream tenant/surface resolution. The request
+therefore has one authoritative decision rather than separate Host checks that
+could disagree.
+
+The existing dedicated-host authorization mechanisms now work for dynamic
+custom hostnames too:
+
+- Hub login selects only membership in the hostname-bound organization;
+- workspace listing/switching cannot leave that organization;
+- JWT refresh rejects a token whose `tenant_id` belongs to another
+  organization;
+- API keys for another organization are rejected;
+- PostBox login, retained-account switching and every authenticated mailbox
+  request re-check the mailbox's organization against the hostname binding.
+
+### Surface isolation
+
+A custom hostname belongs to exactly one customer surface.
+
+For a Hub hostname, nginx and application middleware deny internal/platform,
+Django-admin and PostBox routes. For a PostBox hostname, nginx exposes only the
+PostBox API (plus health) and the application middleware independently refuses
+Workspace authentication/administration APIs.
+
+This is deliberate defense in depth: a future nginx edit must not turn a
+customer hostname into an alternate Platform or cross-surface address.
+
+### Browser routing
+
+The final generated nginx vhost preserves the customer Host header and proxies
+same-origin to the existing loopback services. There is no redirect to
+`portal.matemail.online` or `postbox.matemail.online`.
+
+Arbitrary PostBox names cannot be identified by a compiled hostname list, so the
+generated exact-host vhost overwrites:
+
+```
+X-MateMail-Custom-Host: 1
+X-MateMail-Surface: postbox
+```
+
+The Next.js middleware uses these only for frontend presentation/routing.
+Configured canonical hosts ignore them even if a browser supplies them. Backend
+tenant authorization never trusts these headers; it resolves the Host from the
+database.
+
+### Cookies, CORS and CSRF
+
+Browser APIs remain relative/same-origin on every custom hostname, so no
+customer domains are appended to a growing static CORS origin list.
+
+Authentication credentials remain host-scoped:
+
+- Hub refresh: HttpOnly, host-only, Secure in production,
+  `SameSite=Strict`, path `/api/auth/`;
+- PostBox active and saved-account sessions: `__Host-` cookies, host-only,
+  Secure, HttpOnly and path `/`.
+
+Therefore a session created on one customer's hostname is not sent to canonical
+MateMail or another customer's hostname.
+
+The Hub API still authenticates ordinary requests with the bearer access token;
+the refresh cookie is consumed only by the same-origin refresh endpoint.
+PostBox has its separate mailbox-session authentication. No wildcard CSRF/CORS
+trust is introduced.
+
+Account recovery, email verification and team-invite email URLs intentionally
+remain on the canonical MateMail Hub rather than being built from an incoming
+Host header. That prevents Host-header poisoning and keeps a recovery link
+usable even after a customer changes or removes its custom hostname.
+
+### HSTS on customer-owned names
+
+Django's canonical production policy carries `includeSubDomains`, which is
+appropriate for MateMail-owned domains but not for a customer-owned hostname.
+Generated custom vhosts therefore hide any upstream HSTS header and emit only:
+
+```
+Strict-Transport-Security: max-age=31536000
+```
+
+MateMail never asserts HSTS policy over subdomains it does not own.
+
+### Activation ordering
+
+The worker has two durable queues:
+
+1. DNS-verified hostname -> certificate provisioning -> `READY`;
+2. `READY` + active certificate -> final surface vhost -> `ACTIVE`.
+
+The state update to ACTIVE happens only after `nginx -t`, nginx reload,
+certificate validation and a fresh backend authorization check. The application
+cache is invalidated on transition so the new binding becomes request-eligible
+without a process restart.
