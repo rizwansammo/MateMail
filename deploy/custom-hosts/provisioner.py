@@ -348,6 +348,169 @@ server {{
 """
 
 
+def active_vhost(hostname: str, surface: str) -> str:
+    """
+    Final Phase 4 proxy vhost.
+
+    The browser-facing hostname remains unchanged. nginx supplies two private
+    routing markers to the shared Next.js process; the frontend trusts them
+    only for hosts that are not one of its configured canonical hosts. Django
+    never uses these headers for tenant authorization — it resolves the ACTIVE
+    hostname from the database.
+    """
+    common_http = f"""{GENERATED_MARKER}
+# ACTIVE MateMail custom hostname. surface={surface}
+server {{
+    listen 80;
+    listen [::]:80;
+    server_name {hostname};
+
+    location /.well-known/acme-challenge/ {{
+        root {WEBROOT};
+        allow all;
+    }}
+
+    location / {{
+        return 301 https://$host$request_uri;
+    }}
+}}
+
+server {{
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name {hostname};
+
+    ssl_certificate     /etc/letsencrypt/live/{hostname}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{hostname}/privkey.pem;
+    include             /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam         /etc/letsencrypt/ssl-dhparams.pem;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+
+"""
+
+    if surface == "hub":
+        body = """    client_max_body_size 25m;
+
+    location ^~ /api/internal/ { return 404; }
+    location ^~ /api/platform/ { return 404; }
+    location ^~ /api/postbox/ { return 404; }
+    location ^~ /django-admin/ { return 404; }
+
+    location /api/ {
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'" always;
+
+        proxy_pass             http://matemail_backend;
+        proxy_set_header       Host                     $host;
+        proxy_set_header       X-Real-IP                $remote_addr;
+        proxy_set_header       X-Forwarded-For          $proxy_add_x_forwarded_for;
+        proxy_set_header       X-Forwarded-Proto        https;
+        proxy_set_header       X-MateMail-Custom-Host   1;
+        proxy_set_header       X-MateMail-Surface       hub;
+        proxy_read_timeout     120s;
+        proxy_http_version     1.1;
+        proxy_set_header       Connection               "";
+    }
+
+    location / {
+        proxy_pass             http://matemail_frontend;
+        proxy_set_header       Host                     $host;
+        proxy_set_header       X-Real-IP                $remote_addr;
+        proxy_set_header       X-Forwarded-For          $proxy_add_x_forwarded_for;
+        proxy_set_header       X-Forwarded-Proto        https;
+        proxy_set_header       X-MateMail-Custom-Host   1;
+        proxy_set_header       X-MateMail-Surface       hub;
+        proxy_http_version     1.1;
+        proxy_set_header       Upgrade                  $http_upgrade;
+        proxy_set_header       Connection               "upgrade";
+        proxy_read_timeout     60s;
+    }
+}
+"""
+        return common_http + body
+
+    if surface == "postbox":
+        body = """    client_max_body_size 40m;
+
+    location ^~ /api/internal/ { return 404; }
+    location ^~ /api/platform/ { return 404; }
+    location ^~ /django-admin/ { return 404; }
+
+    # PostBox custom hosts expose only the mailbox API. Workspace authentication
+    # and tenant administration do not exist on this hostname.
+    location ^~ /api/postbox/ {
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'" always;
+
+        proxy_pass             http://matemail_backend;
+        proxy_set_header       Host                     $host;
+        proxy_set_header       X-Real-IP                $remote_addr;
+        proxy_set_header       X-Forwarded-For          $proxy_add_x_forwarded_for;
+        proxy_set_header       X-Forwarded-Proto        https;
+        proxy_set_header       X-MateMail-Custom-Host   1;
+        proxy_set_header       X-MateMail-Surface       postbox;
+        proxy_read_timeout     180s;
+        proxy_send_timeout     180s;
+        proxy_http_version     1.1;
+        proxy_set_header       Connection               "";
+        proxy_buffering        off;
+    }
+
+    location ^~ /api/ { return 404; }
+
+    location / {
+        proxy_pass             http://matemail_frontend;
+        proxy_set_header       Host                     $host;
+        proxy_set_header       X-Real-IP                $remote_addr;
+        proxy_set_header       X-Forwarded-For          $proxy_add_x_forwarded_for;
+        proxy_set_header       X-Forwarded-Proto        https;
+        proxy_set_header       X-MateMail-Custom-Host   1;
+        proxy_set_header       X-MateMail-Surface       postbox;
+        proxy_read_timeout     120s;
+        proxy_http_version     1.1;
+        proxy_set_header       Connection               "";
+    }
+}
+"""
+        return common_http + body
+
+    raise ProvisioningError("refusing to generate nginx for an unknown surface")
+
+
+def activate(job: dict[str, str]) -> None:
+    """
+    Install final Phase 4 routing and only then make the DB mapping ACTIVE.
+
+    The order is deliberate. A crash after the nginx write but before the state
+    update leaves Django rejecting the hostname, which fails closed. The READY
+    activation queue retries idempotently on the next timer tick.
+    """
+    authorize(job)
+    verify_certificate(job["hostname"])
+    install_site(
+        job["hostname"],
+        active_vhost(job["hostname"], job["surface"]),
+    )
+    authorize(job)
+    post_state(job["id"], "active", certificate_status="active")
+    log(f"custom-host: ACTIVE {job['hostname']} ({job['surface']})")
+
+
 def issue_certificate(hostname: str) -> None:
     run(
         [
@@ -478,11 +641,45 @@ def main() -> int:
                     continue
                 safe_error(job, exc)
 
+        # Activation is a separate durable queue. That makes READY a real
+        # crash boundary: if the process dies after ACME, the next timer tick
+        # installs the final route without reissuing the certificate.
+        try:
+            activation_payload = api_json("GET", "activation-pending/")
+            activation_rows = activation_payload.get("results", [])
+            if not isinstance(activation_rows, list):
+                raise ProvisioningError(
+                    "activation query returned an invalid result list"
+                )
+        except ProvisioningError as exc:
+            log(f"custom-host: activation query failed: {exc}")
+            failures += 1
+            activation_rows = []
+
+        for raw in activation_rows:
+            job = None
+            try:
+                job = validate_job(raw)
+                activate(job)
+            except Exception as exc:
+                failures += 1
+                if job is None:
+                    log(f"custom-host: invalid activation job ignored: {exc}")
+                else:
+                    # Leave the row READY. No CA request is repeated and the
+                    # staging vhost remains safe; this queue may retry next tick.
+                    log(
+                        f"custom-host: ACTIVATION ERROR {job['hostname']}: {exc}"
+                    )
+
         if failures:
             log(f"custom-host: completed with {failures} failed job(s)")
             return 1
-        if rows:
-            log(f"custom-host: completed {len(rows)} job(s)")
+        if rows or activation_rows:
+            log(
+                "custom-host: completed "
+                f"{len(rows)} provisioning and {len(activation_rows)} activation job(s)"
+            )
         return 0
     finally:
         lock.close()
