@@ -35,8 +35,10 @@ merged or deployed until all six custom-domain phases are complete.
   exact CNAME verification, authorization, database uniqueness constraints,
   dynamic Host allowlist guard, audit events and the purpose-specific Phase 3
   provisioner API.
-- ⬜ **Phase 3:** root-owned nginx/Certbot provisioning worker and automatic
-  certificate lifecycle.
+- ✅ **Phase 3:** root-owned nginx/Certbot edge automation complete — exact-host
+  ACME bootstrap, individual certificate lineages, TLS-ready staging vhost,
+  scoped renewal reload hook, hardened systemd timer, crash recovery and
+  exact-release deployment staging.
 - ⬜ **Phase 4:** application routing/authentication activation.
 - ⬜ **Phase 5:** Hub setup UI and NetaMate production pilot.
 - ⬜ **Phase 6:** canonical Hub hostname migration from
