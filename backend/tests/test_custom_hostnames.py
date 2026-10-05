@@ -177,6 +177,40 @@ class CustomHostnameTenantAPITest(TestCase):
             "unprovisioned",
         )
 
+
+    @mock.patch(
+        "apps.tenants.custom_hosts._lookup_cname_targets",
+        return_value=(["custom.matemail.online"], ""),
+    )
+    def test_fresh_verify_explicitly_requeues_a_provisioning_error(self, _lookup):
+        row = CustomHostname.objects.create(
+            tenant=self.tenant,
+            hostname="retry.customer.com",
+            surface="postbox",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ERROR,
+            certificate_status=CustomHostnameCertificateStatus.ERROR,
+            last_error="old edge failure",
+        )
+
+        response = self.client.post(
+            f"/api/custom-hostnames/{row.id}/verify/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row.refresh_from_db()
+        self.assertEqual(
+            row.provisioning_status,
+            CustomHostnameProvisioningStatus.UNPROVISIONED,
+        )
+        self.assertEqual(
+            row.certificate_status,
+            CustomHostnameCertificateStatus.NOT_REQUESTED,
+        )
+        self.assertEqual(row.last_error, "")
+
     def test_suspended_workspace_can_still_relinquish_an_unprovisioned_hostname(self):
         created = self.create("mail.customer.com")
         self.assertEqual(created.status_code, 201)
@@ -234,7 +268,7 @@ class CustomHostnameInternalAPITest(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
-    def test_pending_queue_contains_only_dns_verified_unprovisioned_rows(self):
+    def test_pending_queue_contains_verified_unprovisioned_and_crash_recovery_rows(self):
         CustomHostname.objects.create(
             tenant=make_tenant(
                 make_user("other@example.com"),
@@ -245,15 +279,32 @@ class CustomHostnameInternalAPITest(TestCase):
             surface="hub",
             dns_status=CustomHostnameDNSStatus.FAILED,
         )
+        recovering = CustomHostname.objects.create(
+            tenant=make_tenant(
+                make_user("recover@example.com"),
+                name="Recover",
+                slug="recover",
+            ),
+            hostname="hub.recover.com",
+            surface="hub",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.PROVISIONING,
+            certificate_status=CustomHostnameCertificateStatus.ISSUING,
+        )
         self.auth()
 
         response = self.client.get("/api/internal/custom-hostnames/pending/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data["results"]), 1)
-        self.assertEqual(response.data["results"][0]["hostname"], "mail.customer.com")
+        hostnames = {item["hostname"] for item in response.data["results"]}
+        self.assertEqual(hostnames, {"mail.customer.com", recovering.hostname})
+        first = next(
+            item for item in response.data["results"]
+            if item["hostname"] == "mail.customer.com"
+        )
+        self.assertEqual(first["hostname"], "mail.customer.com")
         self.assertEqual(
-            response.data["results"][0]["cname_target"],
+            first["cname_target"],
             "custom.matemail.online",
         )
 
