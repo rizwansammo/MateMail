@@ -48,6 +48,7 @@ import {
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
 import { ConversationReader } from "@/components/postbox/conversation-reader";
 import { MessageHeaders } from "@/components/postbox/message-headers";
+import { LinkifiedPlainText } from "@/components/postbox/linkified-plain-text";
 import { resolveInlineImageReferences } from "@/lib/postbox-inline-images";
 import { POSTBOX_MAILBOX_EVENT } from "@/lib/postbox-realtime";
 import { useAsyncData } from "@/components/postbox/use-async";
@@ -1531,7 +1532,9 @@ function Reader({
             <div dangerouslySetInnerHTML={{ __html: renderedHtml }} />
           ) : (
             <pre className="whitespace-pre-wrap">
-              {detail.text || "(This message has no readable content.)"}
+              <LinkifiedPlainText
+                text={detail.text || "(This message has no readable content.)"}
+              />
             </pre>
           )}
         </div>

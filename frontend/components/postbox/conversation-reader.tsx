@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
 import { MessageHeaders } from "@/components/postbox/message-headers";
+import { LinkifiedPlainText } from "@/components/postbox/linkified-plain-text";
 import { resolveInlineImageReferences } from "@/lib/postbox-inline-images";
 import { describePostBoxError } from "@/contexts/postbox-context";
 import {
@@ -432,14 +433,16 @@ function ThreadMessageCard({
             <div className="pb-message-body pb-thread-mail-body">
               {safeHtml ? <div dangerouslySetInnerHTML={{ __html: safeHtml }} /> :
                 plainQuote ? <>
-                  <pre className="whitespace-pre-wrap">{plainQuote.fresh}</pre>
+                  <pre className="whitespace-pre-wrap"><LinkifiedPlainText text={plainQuote.fresh} /></pre>
                   <details className="pb-thread-quoted-history">
                     <summary>Show quoted history</summary>
-                    <pre className="whitespace-pre-wrap">{plainQuote.quoted}</pre>
+                    <pre className="whitespace-pre-wrap"><LinkifiedPlainText text={plainQuote.quoted} /></pre>
                   </details>
                 </> :
                 <pre className="whitespace-pre-wrap">
-                  {detail.text || "(This message has no readable content.)"}
+                  <LinkifiedPlainText
+                    text={detail.text || "(This message has no readable content.)"}
+                  />
                 </pre>}
             </div>
             {attachments.length > 0 && <section className="pb-thread-attachments">
