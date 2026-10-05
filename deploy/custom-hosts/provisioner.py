@@ -50,6 +50,10 @@ LOCK_PATH = Path(
         "/run/lock/matemail-custom-host-provisioner.lock",
     )
 )
+FRONTEND_OVERRIDES_RAW = os.environ.get(
+    "MATEMAIL_CUSTOM_HOST_FRONTEND_OVERRIDES",
+    "",
+)
 HTTP_TIMEOUT = float(os.environ.get("MATEMAIL_CUSTOM_HOST_HTTP_TIMEOUT", "10"))
 GENERATED_MARKER = "# MATEMAIL CUSTOM HOST v1"
 HOST_RE = re.compile(
@@ -183,6 +187,46 @@ def run(argv: list[str], *, capture: bool = True) -> subprocess.CompletedProcess
         raise ProvisioningError(f"{Path(argv[0]).name} failed{suffix}") from exc
     except OSError as exc:
         raise ProvisioningError(f"could not execute {Path(argv[0]).name}") from exc
+
+
+def frontend_overrides(raw: str) -> dict[str, str]:
+    """
+    Parse root-owned per-host frontend overrides.
+
+    This exists for the NetaMate production pilot, whose branded build listens
+    on 127.0.0.1:3060. It is deliberately NOT customer-controlled. Targets are
+    restricted to loopback HTTP ports so this setting cannot turn nginx into a
+    generic open proxy even if an operator mistypes it.
+    """
+    values: dict[str, str] = {}
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        hostname, sep, target = item.partition("=")
+        if not sep:
+            raise ProvisioningError(
+                "invalid MATEMAIL_CUSTOM_HOST_FRONTEND_OVERRIDES entry"
+            )
+        hostname = validate_hostname(hostname)
+        target = target.strip()
+        match = re.fullmatch(r"http://127\.0\.0\.1:(\d{2,5})", target)
+        if not match:
+            raise ProvisioningError(
+                "custom-host frontend overrides must use http://127.0.0.1:<port>"
+            )
+        port = int(match.group(1))
+        if port < 1024 or port > 65535:
+            raise ProvisioningError("custom-host frontend override port is invalid")
+        values[hostname] = target
+    return values
+
+
+def frontend_upstream_for(hostname: str) -> str:
+    return frontend_overrides(FRONTEND_OVERRIDES_RAW).get(
+        validate_hostname(hostname),
+        "http://matemail_frontend",
+    )
 
 
 def site_path(hostname: str) -> Path:
@@ -443,6 +487,7 @@ def active_vhost(hostname: str, surface: str) -> str:
     never uses these headers for tenant authorization — it resolves the ACTIVE
     hostname from the database.
     """
+    frontend_upstream = frontend_upstream_for(hostname)
     common_http = f"""{GENERATED_MARKER}
 # ACTIVE MateMail custom hostname. surface={surface}
 server {{
@@ -520,7 +565,7 @@ server {{
     }
 
     location / {
-        proxy_pass             http://matemail_frontend;
+        proxy_pass             __FRONTEND_UPSTREAM__;
         proxy_hide_header      Strict-Transport-Security;
         proxy_set_header       Host                     $host;
         proxy_set_header       X-Real-IP                $remote_addr;
@@ -535,7 +580,10 @@ server {{
     }
 }
 """
-        return common_http + body
+        return (common_http + body).replace(
+            "__FRONTEND_UPSTREAM__",
+            frontend_upstream,
+        )
 
     if surface == "postbox":
         body = """    client_max_body_size 40m;
@@ -574,7 +622,7 @@ server {{
     location ^~ /api/ { return 404; }
 
     location / {
-        proxy_pass             http://matemail_frontend;
+        proxy_pass             __FRONTEND_UPSTREAM__;
         proxy_hide_header      Strict-Transport-Security;
         proxy_set_header       Host                     $host;
         proxy_set_header       X-Real-IP                $remote_addr;
@@ -588,7 +636,10 @@ server {{
     }
 }
 """
-        return common_http + body
+        return (common_http + body).replace(
+            "__FRONTEND_UPSTREAM__",
+            frontend_upstream,
+        )
 
     raise ProvisioningError("refusing to generate nginx for an unknown surface")
 
