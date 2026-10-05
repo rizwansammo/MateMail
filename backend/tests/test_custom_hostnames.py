@@ -4,6 +4,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
+from apps.mailboxes.models import MailboxStatus
 from apps.tenants.models import (
     CustomHostname,
     CustomHostnameCertificateStatus,
@@ -16,6 +17,8 @@ from tests.factories import (
     FAST_PASSWORD_HASHERS,
     add_member,
     auth_client,
+    make_domain,
+    make_mailbox,
     make_tenant,
     make_unapproved_tenant,
     make_user,
@@ -331,7 +334,7 @@ class CustomHostnameInternalAPITest(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertFalse(response.data["approved"])
 
-    def test_worker_can_advance_to_ready_but_cannot_activate(self):
+    def test_worker_can_advance_to_ready_then_activate(self):
         self.auth()
 
         response = self.client.post(
@@ -357,6 +360,15 @@ class CustomHostnameInternalAPITest(TestCase):
         self.assertEqual(response.data["provisioning_status"], "ready")
         self.assertEqual(response.data["certificate_status"], "active")
 
+        pending = self.client.get(
+            "/api/internal/custom-hostnames/activation-pending/"
+        )
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(
+            [item["hostname"] for item in pending.data["results"]],
+            ["mail.customer.com"],
+        )
+
         response = self.client.post(
             f"/api/internal/custom-hostnames/{self.row.id}/state/",
             {
@@ -365,7 +377,15 @@ class CustomHostnameInternalAPITest(TestCase):
             },
             format="json",
         )
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["provisioning_status"], "active")
+        self.assertIsNotNone(response.data["activated_at"])
+
+        pending = self.client.get(
+            "/api/internal/custom-hostnames/activation-pending/"
+        )
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(pending.data["results"], [])
 
 
 @override_settings(
@@ -411,7 +431,9 @@ class CustomHostnameHostGuardTest(TestCase):
             "/api/workspaces/",
             HTTP_HOST=active.hostname,
         )
-        self.assertEqual(response.status_code, 401)
+        # The hostname is accepted, then the PostBox surface guard hides
+        # Workspace APIs on it.
+        self.assertEqual(response.status_code, 404)
 
         other_tenant = make_tenant(
             make_user("other@example.com"),
@@ -433,3 +455,123 @@ class CustomHostnameHostGuardTest(TestCase):
             HTTP_HOST=ready.hostname,
         )
         self.assertEqual(response.status_code, 400)
+
+
+    def test_active_custom_hub_login_is_bound_to_its_tenant(self):
+        other = make_tenant(self.owner, name="Other", slug="other-tenant")
+        hub = CustomHostname.objects.create(
+            tenant=self.tenant,
+            hostname="hub.customer.com",
+            surface="hub",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+            certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+        )
+        cache.clear()
+
+        response = APIClient().post(
+            "/api/auth/login/",
+            {"email": self.owner.email, "password": TEST_PASSWORD},
+            format="json",
+            HTTP_HOST=hub.hostname,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["tenant"]["slug"], self.tenant.slug)
+        self.assertNotEqual(response.data["tenant"]["slug"], other.slug)
+
+    def test_custom_hub_blocks_postbox_and_platform_apis(self):
+        hub = CustomHostname.objects.create(
+            tenant=self.tenant,
+            hostname="hub.customer.com",
+            surface="hub",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+            certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+        )
+        cache.clear()
+
+        for path in (
+            "/api/postbox/me/",
+            "/api/platform/stats/",
+            "/api/internal/health/",
+        ):
+            with self.subTest(path=path):
+                response = APIClient().get(path, HTTP_HOST=hub.hostname)
+                self.assertEqual(response.status_code, 404)
+
+    def test_custom_postbox_exposes_only_postbox_api_and_binds_mailbox_tenant(self):
+        host = CustomHostname.objects.create(
+            tenant=self.tenant,
+            hostname="inbox.customer.com",
+            surface="postbox",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+            certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+        )
+        domain = make_domain(self.tenant, "acme-mail.example")
+        mailbox = make_mailbox(self.tenant, domain, local_part="alice")
+        mailbox.status = MailboxStatus.ACTIVE
+        mailbox.mail_engine_provisioned = True
+        mailbox.save(update_fields=["status", "mail_engine_provisioned"])
+
+        outsider = make_tenant(
+            make_user("outside-owner@example.com"),
+            name="Outside",
+            slug="outside-custom",
+        )
+        outside_domain = make_domain(outsider, "outside-mail.example")
+        outside_mailbox = make_mailbox(
+            outsider, outside_domain, local_part="mallory"
+        )
+        outside_mailbox.status = MailboxStatus.ACTIVE
+        outside_mailbox.mail_engine_provisioned = True
+        outside_mailbox.save(update_fields=["status", "mail_engine_provisioned"])
+        cache.clear()
+
+        denied = APIClient().post(
+            "/api/auth/login/",
+            {"email": self.owner.email, "password": TEST_PASSWORD},
+            format="json",
+            HTTP_HOST=host.hostname,
+        )
+        self.assertEqual(denied.status_code, 404)
+
+        with mock.patch("apps.postbox.auth.imap.authenticate", return_value=True):
+            allowed = APIClient().post(
+                "/api/postbox/auth/login/",
+                {"email": mailbox.email, "password": "Mailbox-Password"},
+                format="json",
+                HTTP_HOST=host.hostname,
+            )
+            blocked = APIClient().post(
+                "/api/postbox/auth/login/",
+                {"email": outside_mailbox.email, "password": "Mailbox-Password"},
+                format="json",
+                HTTP_HOST=host.hostname,
+            )
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(blocked.status_code, 401)
+
+    def test_custom_hub_signup_is_not_a_new_workspace_entry_point(self):
+        hub = CustomHostname.objects.create(
+            tenant=self.tenant,
+            hostname="hub.customer.com",
+            surface="hub",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+            certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+        )
+        cache.clear()
+        response = APIClient().post(
+            "/api/auth/signup/",
+            {
+                "email": "new-user@example.com",
+                "password": TEST_PASSWORD,
+                "full_name": "New User",
+                "workspace_name": "Wrong Workspace",
+            },
+            format="json",
+            HTTP_HOST=hub.hostname,
+        )
+        self.assertEqual(response.status_code, 404)
