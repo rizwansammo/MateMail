@@ -50,8 +50,7 @@ merged or deployed until all six custom-domain phases are complete.
   post-deploy acceptance gate because the owner will deploy only after all
   phases are merged.
 - ⬜ **Phase 6:** canonical Hub hostname migration from
-  `portal.matemail.online` to `mailhub.matemail.online`. The owner has
-  already prepared DNS for `mailhub.matemail.online`.
+  `portal.matemail.online` to `hub.matemail.online`.
 
 The feature is **not live** because this branch is intentionally undeployed.
 The Phase 4 production release configuration enables the dynamic Host guard,
