@@ -66,6 +66,11 @@ class ProvisioningError(RuntimeError):
     pass
 
 
+class RetryableEdgeError(ProvisioningError):
+    """Local edge failure that is safe to retry without another DNS click."""
+    pass
+
+
 def log(message: str) -> None:
     print(message, flush=True)
 
@@ -699,16 +704,51 @@ def provision(job: dict[str, str]) -> None:
     # Authorization is deliberately checked immediately before host mutation,
     # not only when the pending list was fetched.
     authorize(job)
+
+    # A valid certificate may already exist when a previous run reached ACME
+    # successfully but failed later while writing/reloading nginx. Reuse it so
+    # local edge retries never create repeated CA issuance attempts.
+    certificate_ready = False
+    try:
+        verify_certificate(hostname)
+        certificate_ready = True
+    except ProvisioningError:
+        certificate_ready = False
+
     post_state(
         job["id"],
         "provisioning",
-        certificate_status="issuing",
+        certificate_status="active" if certificate_ready else "not_requested",
     )
 
-    install_site(hostname, bootstrap_vhost(hostname))
-    issue_certificate(hostname)
-    verify_certificate(hostname)
-    install_site(hostname, ready_vhost(hostname, job["surface"]))
+    try:
+        install_site(hostname, bootstrap_vhost(hostname))
+    except Exception as exc:
+        # nginx/systemd/filesystem problems are local infrastructure failures.
+        # Keep the durable row in PROVISIONING so the timer retries
+        # automatically; the customer must not have to click Verify again.
+        raise RetryableEdgeError(f"bootstrap edge preparation failed: {exc}") from exc
+
+    if not certificate_ready:
+        post_state(
+            job["id"],
+            "provisioning",
+            certificate_status="issuing",
+        )
+        issue_certificate(hostname)
+        verify_certificate(hostname)
+        post_state(
+            job["id"],
+            "provisioning",
+            certificate_status="active",
+        )
+
+    try:
+        install_site(hostname, ready_vhost(hostname, job["surface"]))
+    except Exception as exc:
+        # The certificate is already valid here. Leave it ACTIVE and retry only
+        # the local nginx step on the next timer tick.
+        raise RetryableEdgeError(f"TLS edge activation failed: {exc}") from exc
 
     # Re-authorize after the slow external operation too. If the organization
     # was suspended or the mapping changed while ACME ran, do not advertise
@@ -818,11 +858,24 @@ def main() -> int:
             try:
                 job = validate_job(raw)
                 provision(job)
+            except RetryableEdgeError as exc:
+                failures += 1
+                if job is None:
+                    log(f"custom-host: invalid retryable job ignored: {exc}")
+                    continue
+                # The row deliberately remains PROVISIONING. The pending queue
+                # includes that state, so the systemd timer retries without
+                # requiring another customer DNS verification click.
+                log(
+                    f"custom-host: RETRYABLE {job['hostname']}: {exc}"
+                )
             except Exception as exc:
                 failures += 1
                 if job is None:
                     log(f"custom-host: invalid job ignored: {exc}")
                     continue
+                # ACME/certificate failures remain explicit ERROR to avoid
+                # hammering the CA indefinitely.
                 safe_error(job, exc)
 
         # Activation is a separate durable queue. That makes READY a real
