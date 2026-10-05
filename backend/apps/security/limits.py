@@ -43,6 +43,12 @@ AUTODISCOVER_PER_IP = Limit("autodiscover:ip", 30, QUARTER_HOUR)
 #: on our behalf, so this is an outbound-traffic control as much as an abuse one.
 DOMAIN_CHECK_PER_DOMAIN = Limit("domain:check", 10, HOUR)
 
+
+#: Custom Hub/PostBox CNAME verification, per hostname record. This is a
+#: separate bucket from mail-domain checks because the two features have
+#: independent customer retry loops and should not consume each other's budget.
+CUSTOM_HOST_CHECK_PER_HOST = Limit("custom_host:check", 10, HOUR)
+
 #: Mailbox creation per tenant.
 MAILBOX_CREATE_PER_TENANT = Limit("mailbox:create", 20, HOUR)
 
