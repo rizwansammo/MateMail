@@ -39,14 +39,19 @@ merged or deployed until all six custom-domain phases are complete.
   ACME bootstrap, individual certificate lineages, TLS-ready staging vhost,
   scoped renewal reload hook, hardened systemd timer, crash recovery and
   exact-release deployment staging.
-- ⬜ **Phase 4:** application routing/authentication activation.
+- ✅ **Phase 4:** routing/authentication complete — ACTIVE custom hosts are
+  database-bound to one tenant/surface, final nginx routing preserves the
+  customer URL, frontend PostBox routing is surface-aware, Hub/PostBox sessions
+  stay host-scoped, and cross-tenant/cross-surface requests fail closed.
 - ⬜ **Phase 5:** Hub setup UI and NetaMate production pilot.
 - ⬜ **Phase 6:** canonical Hub hostname migration from
   `portal.matemail.online` to `hub.matemail.online`.
 
-The feature is **not live**. `CUSTOM_HOSTS_DYNAMIC_ENABLED=False` remains the
-production-safe default, and Phase 2 exposes no path that can mark a custom
-hostname ACTIVE.
+The feature is **not live** because this branch is intentionally undeployed.
+The Phase 4 production release configuration enables the dynamic Host guard,
+but it accepts only fixed operator hosts or ACTIVE database-backed custom
+hostnames. READY certificate-only rows remain rejected until the internal
+activation worker installs the final routing and advances them to ACTIVE.
 
 Full design and current acceptance results: `docs/CUSTOM_DOMAINS.md`.
 
