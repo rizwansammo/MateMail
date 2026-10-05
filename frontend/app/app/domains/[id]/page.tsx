@@ -82,7 +82,11 @@ function recordHelp(record: DNSRecord) {
   }
   if (record.record_type === "MX") return "Routes incoming email for this domain to MateMail.";
   if (record.host.startsWith("_dmarc")) return "Publishes the policy receiving servers use for email authentication results.";
-  if (record.host.includes("._domainkey")) return "Publishes the public key used to verify signed outgoing email.";
+  if (record.host.includes("._domainkey")) {
+    return record.expected_value.includes("<pending>")
+      ? "MateMail is preparing the DKIM value. You do not need to add this record until the value is ready."
+      : "Publishes the public key used to verify signed outgoing email.";
+  }
   if (record.expected_value.startsWith("v=spf1")) return "Authorizes MateMail to send email for this domain.";
   return "";
 }
@@ -91,6 +95,7 @@ type DisplayField = {
   label: string;
   value: string;
   copyLabel: string;
+  copy?: boolean;
 };
 
 function displayFields(record: DNSRecord, domain: string): DisplayField[] {
@@ -119,9 +124,17 @@ function displayFields(record: DNSRecord, domain: string): DisplayField[] {
     ];
   }
 
+  const dkimPending =
+    record.host.includes("._domainkey") && record.expected_value.includes("<pending>");
+
   return [
     { label: "Host / Name", value: host, copyLabel: `Copy ${recordLabel(record)} host` },
-    { label: "Value", value: record.expected_value, copyLabel: `Copy ${recordLabel(record)} value` },
+    {
+      label: "Value",
+      value: dkimPending ? "MateMail is generating this value" : record.expected_value,
+      copyLabel: `Copy ${recordLabel(record)} value`,
+      copy: !dkimPending,
+    },
   ];
 }
 
@@ -169,11 +182,20 @@ function RecordRow({ record, domain }: { record: DNSRecord; domain: string }) {
             <span>{field.label.toUpperCase()}</span>
             <div className="portal-code-field">
               <code>{field.value}</code>
-              <PortalCopyButton value={field.value} label={field.copyLabel} />
+              {field.copy !== false && (
+                <PortalCopyButton value={field.value} label={field.copyLabel} />
+              )}
             </div>
           </div>
         ))}
       </div>
+
+      {fields.some((field) => field.value === "@") && (
+        <p className="portal-dns-provider-note">
+          <code>@</code> means the root domain. Some DNS providers display the root as your
+          full domain name or let you leave the Host field blank.
+        </p>
+      )}
 
       {record.record_type === "SRV" && (
         <p className="portal-dns-provider-note">
@@ -192,13 +214,13 @@ function RecordRow({ record, domain }: { record: DNSRecord; domain: string }) {
           <span>Raw record value</span>
           <code>{record.expected_value}</code>
         </div>
+        {record.detected_value && (
+          <div>
+            <span>Detected value</span>
+            <code>{record.detected_value}</code>
+          </div>
+        )}
       </details>
-
-      {record.detected_value && (
-        <p className="portal-detected">
-          <strong>Detected:</strong> <code>{record.detected_value}</code>
-        </p>
-      )}
       {record.last_checked && (
         <p className="portal-detected">
           Last checked {new Date(record.last_checked).toLocaleString()}
@@ -322,7 +344,7 @@ export default function DomainDetailPage() {
           ? headerSeconds
           : Number.isFinite(detailSeconds)
             ? detailSeconds
-            : 0;
+            : 60;
 
         if (waitSeconds > 0) setRetryUntil(Date.now() + waitSeconds * 1000);
         setCheckMessage(
@@ -548,8 +570,8 @@ export default function DomainDetailPage() {
                 </strong>
                 <p>
                   {scoredRecords.length
-                    ? `${verifiedScored} of ${scoredRecords.length} scored DNS records are currently verified.`
-                    : "Run a DNS check to populate the current records."}
+                    ? `${verifiedScored} of ${scoredRecords.length} required DNS records are connected.`
+                    : "Run a DNS check after adding the records below."}
                 </p>
               </div>
               <div className="portal-readiness-score">
@@ -568,6 +590,9 @@ export default function DomainDetailPage() {
 
             {records.length ? (
               <>
+                <p className="portal-dns-setup-tip">
+                  Copy each field exactly as shown. For TTL, keep your DNS provider’s default or Auto value.
+                </p>
                 <div className="portal-dns-list">
                   {scoredRecords.map((record) => (
                     <RecordRow key={record.id} record={record} domain={domain.domain} />
@@ -577,9 +602,9 @@ export default function DomainDetailPage() {
                 {discoveryRecords.length > 0 && (
                   <div className="mt-6">
                     <div className="mb-3">
-                      <h2 className="text-[13px] font-semibold text-[var(--portal-text-strong)]">Mail client discovery</h2>
+                      <h2 className="text-[13px] font-semibold text-[var(--portal-text-strong)]">Optional mail app setup</h2>
                       <p className="mt-1 text-[10px] leading-5 text-[var(--portal-muted)]">
-                        Optional discovery records help some mail clients configure themselves. They do not affect the DNS health score.
+                        Helps Outlook and some mail apps find the right settings automatically. Email works normally without this record.
                       </p>
                     </div>
                     <div className="portal-dns-list">
