@@ -1,6 +1,7 @@
 # MateMail custom-host edge worker
 
-This directory is Phase 3 of the custom Hub/PostBox hostname project.
+This directory implements the Phase 3 TLS provisioner and Phase 4 activation
+worker for custom Hub/PostBox hostnames.
 
 The Django application never receives host privileges. A root-owned systemd
 oneshot polls the loopback backend API, re-authorizes each DNS-verified hostname,
@@ -8,8 +9,10 @@ installs an exact-host nginx bootstrap, obtains a Let's Encrypt certificate with
 the server's existing Certbot webroot, and replaces the bootstrap with a
 TLS-ready staging vhost.
 
-The staging vhost intentionally returns HTTP 503. Phase 4 replaces it with the
-Hub/PostBox proxy only after hostname-aware routing/authentication is complete.
+The staging vhost intentionally returns HTTP 503. After the application reports
+the hostname READY, the same worker consumes the Phase 4 activation queue,
+installs the final surface-aware Hub/PostBox proxy vhost, validates nginx, and
+only then reports the hostname ACTIVE.
 
 ## Runtime paths
 
@@ -28,6 +31,8 @@ the worker's root-only environment file by `install.sh`. It is never printed.
 
 A broken candidate nginx config is restored before the worker returns. Certbot
 failure leaves the ACME bootstrap in place, so a later explicit DNS Verify can
-requeue the hostname without rebuilding the edge manually. The backend never
-allows the Phase 3 worker to mark a hostname ACTIVE; READY is the highest state
-it can report.
+requeue the hostname without rebuilding the edge manually. A certificate failure leaves the row in ERROR and requires a fresh successful
+DNS Verify before another ACME attempt. A crash after certificate issuance
+leaves the row READY; activation retries idempotently without reissuing the
+certificate. The final database transition to ACTIVE occurs only after the
+surface-aware nginx vhost has passed `nginx -t` and reloaded successfully.
