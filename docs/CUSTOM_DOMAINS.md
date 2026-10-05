@@ -1,6 +1,6 @@
 # MateMail Custom Hub/PostBox Domains
 
-**Status:** Phase 1–4 complete; Phase 5 implementation complete, live NetaMate pilot pending final deployment  
+**Status:** Phase 1–5 engineering complete; post-deploy NetaMate acceptance gate pending owner deployment  
 **Branch:** `feature/custom-domains-caddy`  
 **Date:** 2026-10-05
 
@@ -668,10 +668,14 @@ It does not log in or change application, DNS, nginx or certificate state.
 
 ### Phase 5 completion gate
 
-Phase 5 is **implementation-complete but not production-validated**. It becomes
-fully complete only after the final release is deployed by the owner and both
-`mailadmin.netamate.com` and `postbox.netamate.com` pass the automated smoke
-test plus the manual authenticated/branding checks in the pilot runbook.
+Phase 5 engineering is **complete**. The customer UI, lifecycle, removal,
+NetaMate adoption path, guarded branded-frontend override, non-destructive smoke
+tool, rollback runbook and read-only production baseline are all finished.
 
-That deferral is intentional; performing the live pilot now would contradict
+The remaining NetaMate check is a **post-deploy acceptance gate**, not missing
+implementation: after the final release is deployed by the owner,
+`mailadmin.netamate.com` and `postbox.netamate.com` must pass the automated
+smoke test plus the manual authenticated/branding checks in the pilot runbook.
+
+That deferral is intentional; performing the live handover now would contradict
 the agreed rule that this branch is not deployed until all phases are finished.
