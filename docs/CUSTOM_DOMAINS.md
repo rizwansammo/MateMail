@@ -1,6 +1,6 @@
 # MateMail Custom Hub/PostBox Domains
 
-**Status:** Phase 1–4 complete; Phase 5 Hub UI/pilot pending  
+**Status:** Phase 1–4 complete; Phase 5 implementation complete, live NetaMate pilot pending final deployment  
 **Branch:** `feature/custom-domains-caddy`  
 **Date:** 2026-10-05
 
@@ -372,11 +372,14 @@ separate decision.
 4. ✅ **Routing + Authentication** — complete: ACTIVE database bindings now
    drive tenant resolution, exact-host nginx routing and frontend surface
    selection; Hub/PostBox auth and cookies remain host-isolated.
-5. **Hub UI + NetaMate Pilot + Production Tests** — one-CNAME customer flow,
-   live NetaMate validation, failure/rollback checks.
+5. 🟡 **Hub UI + NetaMate Pilot + Production Tests** — Hub UI, safe removal,
+   production smoke tooling and the guarded NetaMate adoption path are complete.
+   The live NetaMate proof is intentionally deferred until the owner deploys the
+   final merged release.
 6. **Hub canonical rename** — `portal.matemail.online` ->
-   `hub.matemail.online`, with the old hostname retained as a permanent
-   redirect until access logs justify removal.
+   `mailhub.matemail.online`, with the old hostname retained as a permanent
+   redirect until access logs justify removal. DNS for the new canonical name
+   has already been prepared by the owner.
 
 ## Phase 1 acceptance result
 
@@ -425,8 +428,10 @@ is returned to the next poll and the provisioning sequence is idempotently
 resumed. A deliberate `ERROR` is not retried forever (which could hit CA rate
 limits); a fresh successful DNS Verify explicitly requeues it.
 
-The Phase 3 worker can report at most `READY`. It has no API contract that can
-mark a hostname `ACTIVE`; Phase 4 remains the activation boundary.
+Phase 3 originally stopped at `READY`. Phase 4 deliberately extended the
+same narrow worker contract with a separate activation queue; the final
+`ACTIVE` transition occurs only after the generated surface-aware nginx vhost
+has passed validation and reloaded successfully.
 
 
 ## Phase 2 acceptance result
@@ -582,3 +587,91 @@ The state update to ACTIVE happens only after `nginx -t`, nginx reload,
 certificate validation and a fresh backend authorization check. The application
 cache is invalidated on transition so the new binding becomes request-eligible
 without a process restart.
+
+
+## Phase 5 implementation result
+
+The customer-facing implementation is complete on the feature branch. No
+production hostname has been migrated because the owner explicitly requires all
+custom-domain phases to be completed before merging and deploying.
+
+### Hub customer experience
+
+Workspace Settings now contains a **Custom access URLs** area with separate
+MateMail Hub and PostBox panels. Owners/admins can:
+
+1. enter any valid customer-owned hostname;
+2. copy the exact CNAME instruction to `custom.matemail.online`;
+3. run DNS verification;
+4. watch DNS, HTTPS and edge activation status;
+5. open an ACTIVE custom URL without any canonical-host redirect;
+6. remove a hostname through the durable deactivation lifecycle.
+
+Transient provisioning/removal states are polled automatically. Read-only
+workspace roles can inspect the configuration but cannot mutate it.
+
+### Safe customer removal
+
+Removal is no longer blocked once edge provisioning has started.
+
+A customer DELETE first moves the database row to `DEACTIVATING`. Because
+only ACTIVE rows are request-eligible, access is revoked immediately. The
+root-owned worker then:
+
+1. verifies it owns the generated nginx file;
+2. disables the generated enabled symlink;
+3. runs `nginx -t` and reloads;
+4. asks Certbot to revoke/delete the exact per-host lineage;
+5. reports `INACTIVE / REVOKED`.
+
+Cleanup is allowed even when the tenant has since been suspended or DNS has
+moved away. Operator-owned nginx files are never deleted.
+
+### NetaMate pilot preparation
+
+The live audit confirmed the two intended pilot hostnames currently use
+hand-written nginx vhosts, existing certificates and the NetaMate-branded
+frontend on `127.0.0.1:3060`.
+
+The generic worker therefore gained a **root-owned, exact-host frontend
+override** for controlled adoption. It accepts only loopback HTTP high ports
+and is never customer-controlled. This preserves NetaMate branding while the
+same database/edge lifecycle is exercised.
+
+A guarded management command,
+`adopt_dedicated_custom_hostname`, can stage an existing
+`DEDICATED_TENANT_HOSTS` name at READY only when:
+
+- the deployment binding already maps it to the requested tenant;
+- the tenant is eligible;
+- the hostname now satisfies the same direct CNAME contract as every customer;
+- database uniqueness permits the mapping.
+
+The root worker still verifies the existing certificate and installs the final
+generated vhost before ACTIVE.
+
+The exact post-deploy handover, rollback and evidence checklist lives in
+`docs/CUSTOM_DOMAIN_NETAMATE_PILOT.md`.
+
+### Production smoke tooling
+
+`deploy/custom-hosts/smoke_test.py` is a read-only post-deploy test. It checks:
+
+- direct CNAME;
+- trusted hostname-valid TLS;
+- no canonical MateMail redirect leakage;
+- customer-safe HSTS;
+- Hub isolation from internal/Platform/PostBox/signup routes;
+- PostBox isolation from internal/Platform/Workspace routes.
+
+It does not log in or change application, DNS, nginx or certificate state.
+
+### Phase 5 completion gate
+
+Phase 5 is **implementation-complete but not production-validated**. It becomes
+fully complete only after the final release is deployed by the owner and both
+`mailadmin.netamate.com` and `postbox.netamate.com` pass the automated smoke
+test plus the manual authenticated/branding checks in the pilot runbook.
+
+That deferral is intentional; performing the live pilot now would contradict
+the agreed rule that this branch is not deployed until all phases are finished.
