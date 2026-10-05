@@ -17,7 +17,11 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from .models import CustomHostname, CustomHostnameDNSStatus
+from .models import (
+    CustomHostname,
+    CustomHostnameDNSStatus,
+    CustomHostnameProvisioningStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -216,11 +220,78 @@ def verify_custom_hostname_dns(custom_hostname: CustomHostname) -> tuple[bool, s
 
 
 def custom_hostname_cache_key(hostname: str) -> str:
-    return f"custom-host-active:{hostname}"
+    # v2 because Phase 2 cached a boolean under the old key. Redis survives
+    # application deploys, so reusing that key for the richer binding payload
+    # would make a freshly deployed process read True as though it were a dict.
+    return f"custom-host-binding-v2:{hostname}"
+
+
+def active_custom_hostname_binding(hostname: str) -> dict[str, str] | None:
+    """
+    Return the ACTIVE custom-host binding for `hostname`, or None.
+
+    This is the single application-level lookup used by both the dynamic Host
+    allowlist and tenant/surface resolution. Keeping those two decisions on the
+    same cached payload prevents a hostname from being accepted by one layer
+    while a second layer resolves it differently.
+    """
+    try:
+        hostname = normalize_hostname(hostname)
+    except CustomHostnameValueError:
+        return None
+
+    key = custom_hostname_cache_key(hostname)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached if isinstance(cached, dict) else None
+
+    row = (
+        CustomHostname.objects.filter(
+            hostname=hostname,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+        )
+        .values(
+            "id",
+            "tenant_id",
+            "tenant__slug",
+            "surface",
+        )
+        .first()
+    )
+    if row is None:
+        cache.set(
+            key,
+            False,
+            timeout=getattr(settings, "CUSTOM_HOST_CACHE_TTL", 30),
+        )
+        return None
+
+    binding = {
+        "id": str(row["id"]),
+        "tenant_id": str(row["tenant_id"]),
+        "tenant_slug": str(row["tenant__slug"]),
+        "surface": str(row["surface"]),
+        "hostname": hostname,
+    }
+    cache.set(
+        key,
+        binding,
+        timeout=getattr(settings, "CUSTOM_HOST_CACHE_TTL", 30),
+    )
+    return binding
 
 
 def invalidate_custom_hostname_cache(hostname: str) -> None:
     try:
-        cache.delete(custom_hostname_cache_key(normalize_hostname(hostname)))
+        hostname = normalize_hostname(hostname)
     except CustomHostnameValueError:
         return
+
+    # Delete the Phase 2 boolean key as well. It may still be present in Redis
+    # across the first Phase 4 deployment and must never influence a request.
+    cache.delete_many(
+        [
+            custom_hostname_cache_key(hostname),
+            f"custom-host-active:{hostname}",
+        ]
+    )
