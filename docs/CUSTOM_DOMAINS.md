@@ -1,6 +1,6 @@
 # MateMail Custom Hub/PostBox Domains
 
-**Status:** Phase 1 architecture accepted; implementation pending  
+**Status:** Phase 1–2 complete; Phase 3 edge automation pending  
 **Branch:** `feature/custom-domains-caddy`  
 **Date:** 2026-10-05
 
@@ -312,21 +312,29 @@ the current NetaMate dedicated hostname.
 A custom hostname moves through explicit states rather than becoming live on
 submit.
 
-Suggested lifecycle:
+Implemented backend lifecycle:
 
 ```
-PENDING_DNS
-    -> VERIFIED
+DNS: PENDING -> VERIFIED / FAILED
+
+Edge:
+UNPROVISIONED
     -> PROVISIONING
+    -> READY
     -> ACTIVE
 
-Any provisioning error
-    -> ERROR
+Provisioning failure
+    -> ERROR -> PROVISIONING
 
-Customer removes/changes hostname
+Removal
     -> DEACTIVATING
     -> INACTIVE
 ```
+
+`READY` is deliberate: Phase 3 may have installed nginx and a valid
+certificate, but the application must still refuse the hostname until Phase 4
+has made routing and tenant binding safe. The Phase 2 provisioning API cannot
+set `ACTIVE`.
 
 Removing a hostname revokes the application mapping first, then removes the
 edge vhost/certificate material. A stale certificate must never imply that an
@@ -352,9 +360,9 @@ separate decision.
 
 ## Revised implementation phases
 
-1. **Audit + Final Architecture** — this document. No production mutation.
-2. **Custom Domain Backend** — model, authorization, DNS verification,
-   dynamic host allowlisting, provisioning API/state.
+1. ✅ **Audit + Final Architecture** — complete. No production mutation.
+2. ✅ **Custom Domain Backend** — complete: model, authorization, DNS
+   verification, dynamic host allowlisting and provisioning API/state.
 3. **nginx + Certbot Automation** — host worker, bootstrap/final vhost
    templates, certificate issuance/renewal hook. **No Caddy migration.**
 4. **Routing + Authentication** — custom Hub/PostBox routing, trusted surface
@@ -378,3 +386,50 @@ PASS:
 - edge technology chosen without changing production.
 
 Phase 1 deliberately changes no live server configuration.
+
+
+## Phase 2 acceptance result
+
+PASS:
+
+- `CustomHostname` is durable tenant-owned application state, with separate
+  Hub/PostBox surfaces, DNS state, edge state and certificate state;
+- the database enforces global live-hostname uniqueness and one live hostname
+  per organization/surface, including concurrent requests;
+- customer hostnames are normalized, IDNA-safe and reject URLs, ports,
+  wildcards, IP literals, MateMail-owned names and reserved fixed names;
+- the customer setup contract is one direct CNAME to
+  `custom.matemail.online`;
+- DNS verification is exact, retryable and rate-limited to 10 checks/hour per
+  custom-host record;
+- only authenticated owner/admin roles may add, verify or remove a hostname;
+  read-only members cannot mutate, and cross-tenant detail access returns 404;
+- add/verify fail closed for organizations that are not eligible to use the
+  service, while an authorized admin may still relinquish an unprovisioned
+  hostname after suspension;
+- the Phase 3 host-worker API uses its own purpose-specific secret, exposes only
+  verified/eligible mappings, and cannot mark a hostname ACTIVE;
+- the dynamic Host guard exists now but activation remains OFF by default.
+  When enabled later, only fixed operator-owned hosts or database rows in
+  `ACTIVE` state pass; `READY` still fails closed;
+- Django system checks refuse an unsafe dynamic-host deployment if the guard is
+  missing/reordered or the Host settings are inconsistent;
+- Django receives no nginx, Certbot, Docker-socket or root privilege.
+
+### Phase 2 validation
+
+The branch passed the repository's complete quality gates after implementation:
+
+- `manage.py check` — PASS;
+- `manage.py check --deploy` — PASS;
+- `makemigrations --check --dry-run` — PASS;
+- full Django test suite, including the custom-host security regressions — PASS;
+- pytest-only regression suite — PASS;
+- production Compose validation and NetaMate infrastructure invariants — PASS;
+- frontend ESLint — PASS;
+- canonical MateMail production build — PASS;
+- NetaMate Email production build — PASS.
+
+No production nginx, certificate, database or application deployment was
+changed by Phase 2. `CUSTOM_HOSTS_DYNAMIC_ENABLED` remains `False` until
+Phase 4.
