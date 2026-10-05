@@ -473,7 +473,11 @@ function PremiumPostBoxShell({
 
   return (
     <div className={`pb pb-premium-shell ${
-      preferences.density === "compact" ? "pb-density-compact" : ""
+      preferences.density === "compact"
+        ? "pb-density-compact"
+        : preferences.density === "extra_compact"
+          ? "pb-density-extra-compact"
+          : ""
     }`}>
       {railOpen && <button type="button" className="pb-premium-overlay" aria-label="Close folders" onClick={closeRail} />}
 

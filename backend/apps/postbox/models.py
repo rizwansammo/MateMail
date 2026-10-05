@@ -158,6 +158,7 @@ class PostBoxPreference(models.Model):
     class Density(models.TextChoices):
         COMFORTABLE = "comfortable", "Comfortable"
         COMPACT = "compact", "Compact"
+        EXTRA_COMPACT = "extra_compact", "Extra Compact"
 
     class ReadingPane(models.TextChoices):
         RIGHT = "right", "Right"
@@ -170,7 +171,7 @@ class PostBoxPreference(models.Model):
 
     theme = models.CharField(max_length=10, choices=Theme.choices, default=Theme.SYSTEM)
     density = models.CharField(
-        max_length=12, choices=Density.choices, default=Density.COMFORTABLE
+        max_length=13, choices=Density.choices, default=Density.COMFORTABLE
     )
     reading_pane = models.CharField(
         max_length=8, choices=ReadingPane.choices, default=ReadingPane.RIGHT
