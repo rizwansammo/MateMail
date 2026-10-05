@@ -1,7 +1,7 @@
 # SECURITY.md — Security Architecture and Controls
 
 **Product:** MateMail
-**Last updated:** 2026-09-11
+**Last updated:** 2026-10-05
 **Classification:** Engineering reference
 
 ---
@@ -43,6 +43,7 @@
 | `docs/MAIL_POLICY.md` | Sending policy, the approval gate, abuse response, deliverability, and the operator runbook (P5) |
 | `docs/MAIL_ENGINE.md` | The adapter boundary, DKIM lifecycle, engine runtime |
 | `docs/DECISIONS.md` | DEC-017 (policy framework), DEC-018 (free accounts, design) |
+| `docs/CUSTOM_DOMAINS.md` | Customer-owned Hub/PostBox hostname architecture and lifecycle |
 
 ---
 
@@ -56,6 +57,38 @@
 6. **No secret logging** — Passwords, tokens, and private keys are never written to logs.
 
 ---
+
+
+## Customer custom-host security
+
+**Status: Phase 2 implemented; edge activation intentionally disabled.**
+
+Customer-owned Hub/PostBox hostnames are application state, not mail domains.
+They do not change MX, SPF, DKIM, DMARC or SMTP/IMAP policy.
+
+- A hostname must be a normalized valid FQDN and must directly CNAME to
+  `custom.matemail.online` before it becomes eligible for edge provisioning.
+- MateMail-owned/fixed names, URLs, ports, IP literals and wildcards are
+  rejected.
+- Partial database constraints make a live hostname globally unique and limit
+  each organization to one live hostname per surface.
+- Reads are tenant-scoped. Only owner/admin roles may add, verify or remove
+  hostnames; cross-tenant detail requests return 404.
+- DNS verification is limited to 10 checks/hour per custom-host record.
+- Django never receives root, the Docker socket, nginx write access or Certbot
+  write access. Phase 3 uses a separate root-owned host worker.
+- That worker authenticates to a narrow internal API with
+  `CUSTOM_HOST_PROVISIONER_SECRET`, separate from
+  `INTERNAL_API_SECRET`. Public nginx already denies `/api/internal/`.
+- The worker may advance an eligible hostname only through edge-preparation
+  states up to `READY`; it cannot mark the hostname `ACTIVE`.
+- Dynamic customer Host acceptance is guarded by
+  `CustomHostnameHostGuardMiddleware`. When enabled, only fixed
+  operator-owned hosts or database rows in `ACTIVE` state pass.
+- Django system checks fail deployment if dynamic Host mode is enabled without
+  that guard first in the middleware chain or with inconsistent Host settings.
+- `CUSTOM_HOSTS_DYNAMIC_ENABLED=False` remains the default until Phase 4,
+  so Phase 2 cannot accidentally expose a customer hostname.
 
 ## Anti-Relay Controls
 
