@@ -781,3 +781,55 @@ class ThreadOriginalAndProfileDismissalTest(SimpleTestCase):
         self.assertIn('href="/postbox/settings"', layout)
         self.assertIn('href="/postbox/settings?section=appearance"', layout)
         self.assertIn('className="pb-premium-account-footer"', layout)
+
+
+class PlainTextLinkificationRegressionTest(SimpleTestCase):
+    """Plain-text mail may gain clickable URLs, but never altered message text."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.helper = read("components", "postbox", "linkified-plain-text.tsx")
+        cls.page = read("app", "postbox", "(app)", "page.tsx")
+        cls.thread = read("components", "postbox", "conversation-reader.tsx")
+        cls.css = read("app", "globals.css")
+
+    def test_only_http_and_https_are_promoted_to_links(self):
+        self.assertIn('const HTTP_URL = /https?:\\/\\/[^\\s<>"\']+/gi;', self.helper)
+        self.assertIn('href={href}', self.helper)
+        self.assertIn('target="_blank"', self.helper)
+        self.assertIn('rel="noopener noreferrer nofollow"', self.helper)
+        self.assertNotIn("dangerouslySetInnerHTML", self.helper)
+        self.assertNotIn("javascript:", self.helper)
+
+    def test_original_plain_text_is_emitted_without_reflow_or_html_conversion(self):
+        self.assertIn("output.push(text.slice(cursor, start))", self.helper)
+        self.assertIn("output.push(text.slice(cursor))", self.helper)
+        self.assertIn("if (trailing) output.push(trailing)", self.helper)
+        self.assertNotIn(".trim()", self.helper)
+        self.assertNotIn(".replace(", self.helper)
+
+    def test_single_and_thread_readers_use_the_same_safe_linkifier(self):
+        self.assertIn(
+            'import { LinkifiedPlainText } from "@/components/postbox/linkified-plain-text";',
+            self.page,
+        )
+        self.assertIn(
+            'import { LinkifiedPlainText } from "@/components/postbox/linkified-plain-text";',
+            self.thread,
+        )
+        self.assertIn(
+            'text={detail.text || "(This message has no readable content.)"}',
+            self.page,
+        )
+        self.assertIn("text={plainQuote.fresh}", self.thread)
+        self.assertIn("text={plainQuote.quoted}", self.thread)
+        self.assertIn(
+            'text={detail.text || "(This message has no readable content.)"}',
+            self.thread,
+        )
+
+    def test_long_verification_links_can_wrap_without_changing_surrounding_text(self):
+        block = self.css.split(".pb-plain-text-link {", 1)[1].split("}", 1)[0]
+        self.assertIn("overflow-wrap:anywhere", block)
+        self.assertIn("word-break:break-word", block)
