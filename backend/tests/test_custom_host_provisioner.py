@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKER_PATH = ROOT / "deploy" / "custom-hosts" / "provisioner.py"
 HOOK_PATH = ROOT / "deploy" / "custom-hosts" / "renew-hook.sh"
 INSTALLER_PATH = ROOT / "deploy" / "custom-hosts" / "install.sh"
+SMOKE_PATH = ROOT / "deploy" / "custom-hosts" / "smoke_test.py"
 SERVICE_PATH = (
     ROOT
     / "deploy"
@@ -437,6 +438,15 @@ class HostInstallArtifactsTest(unittest.TestCase):
         self.assertIn("chmod 0600", source)
         self.assertIn("--activate", source)
         self.assertIn("MATEMAIL_CUSTOM_HOST_FRONTEND_OVERRIDES", source)
+
+    def test_production_smoke_tool_is_valid_python_and_read_only_by_contract(self):
+        source = SMOKE_PATH.read_text(encoding="utf-8")
+        compile(source, str(SMOKE_PATH), "exec")
+        self.assertIn("http.client.HTTPSConnection", source)
+        self.assertIn("dig", source)
+        self.assertNotIn("certbot", source.lower())
+        self.assertNotIn("systemctl", source.lower())
+        self.assertNotIn("docker", source.lower())
 
     def test_manual_deploy_stages_worker_from_the_exact_release_sha(self):
         source = DEPLOY_WORKFLOW_PATH.read_text(encoding="utf-8")
