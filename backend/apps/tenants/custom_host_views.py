@@ -166,29 +166,42 @@ class CustomHostnameDetailView(APIView):
         if not row:
             return Response({"detail": "Not found."}, status=404)
 
-        # Phase 2 can safely retire rows that have never reached the edge. Once
-        # Phase 3 has begun provisioning, removal must coordinate nginx and
-        # certificate cleanup rather than pretending a database update did it.
-        if row.provisioning_status in {
-            CustomHostnameProvisioningStatus.PROVISIONING,
-            CustomHostnameProvisioningStatus.READY,
-            CustomHostnameProvisioningStatus.ACTIVE,
-            CustomHostnameProvisioningStatus.DEACTIVATING,
-        } or row.certificate_status in {
-            CustomHostnameCertificateStatus.ISSUING,
-            CustomHostnameCertificateStatus.ACTIVE,
-        }:
-            return Response(
-                {
-                    "detail": (
-                        "This hostname already has edge provisioning state and "
-                        "must be deactivated by the provisioning service."
-                    )
-                },
-                status=409,
-            )
-
         hostname = row.hostname
+
+        # If the edge has never been touched, retiring the row is immediate.
+        # Otherwise revoke request eligibility first (DEACTIVATING is not an
+        # accepted Host state), then let the root-owned worker remove the exact
+        # nginx site and Certbot lineage. This keeps Django unprivileged while
+        # still giving customers a normal Remove action in Hub.
+        edge_started = (
+            row.provisioning_status
+            in {
+                CustomHostnameProvisioningStatus.PROVISIONING,
+                CustomHostnameProvisioningStatus.READY,
+                CustomHostnameProvisioningStatus.ACTIVE,
+                CustomHostnameProvisioningStatus.DEACTIVATING,
+            }
+            or row.certificate_status
+            in {
+                CustomHostnameCertificateStatus.ISSUING,
+                CustomHostnameCertificateStatus.ACTIVE,
+            }
+        )
+
+        if edge_started:
+            if row.provisioning_status != CustomHostnameProvisioningStatus.DEACTIVATING:
+                row.provisioning_status = CustomHostnameProvisioningStatus.DEACTIVATING
+                row.last_error = ""
+                row.save(
+                    update_fields=[
+                        "provisioning_status",
+                        "last_error",
+                        "updated_at",
+                    ]
+                )
+            invalidate_custom_hostname_cache(hostname)
+            return Response(CustomHostnameSerializer(row).data, status=202)
+
         row.provisioning_status = CustomHostnameProvisioningStatus.INACTIVE
         row.deactivated_at = timezone.now()
         row.last_error = ""
@@ -383,6 +396,46 @@ class CustomHostnameActivationPendingInternalView(APIView):
         )
 
 
+class CustomHostnameDeactivationPendingInternalView(APIView):
+    """
+    GET /api/internal/custom-hostnames/deactivation-pending/
+
+    Customer removal immediately moves a live hostname out of ACTIVE, so request
+    routing fails closed. The root-owned worker then removes only the generated
+    nginx vhost and Certbot lineage and reports INACTIVE.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        denied = _internal_denied(request)
+        if denied:
+            return denied
+
+        rows = (
+            CustomHostname.objects.filter(
+                provisioning_status=CustomHostnameProvisioningStatus.DEACTIVATING,
+            )
+            .select_related("tenant")
+            .order_by("updated_at")[:50]
+        )
+        return Response(
+            {
+                "results": [
+                    {
+                        "id": str(row.id),
+                        "hostname": row.hostname,
+                        "surface": row.surface,
+                        "tenant_id": str(row.tenant_id),
+                        "cname_target": cname_target(),
+                    }
+                    for row in rows
+                ]
+            }
+        )
+
+
 class CustomHostnameAuthorizeInternalView(APIView):
     """
     POST /api/internal/custom-hostnames/authorize/
@@ -466,6 +519,9 @@ class CustomHostnameStateInternalView(APIView):
             CustomHostnameProvisioningStatus.ACTIVE,
             CustomHostnameProvisioningStatus.ERROR,
         },
+        CustomHostnameProvisioningStatus.DEACTIVATING: {
+            CustomHostnameProvisioningStatus.INACTIVE,
+        },
     }
 
     def post(self, request, pk):
@@ -486,18 +542,28 @@ class CustomHostnameStateInternalView(APIView):
             )
             if not row:
                 return Response({"detail": "Not found."}, status=404)
-            if not row.tenant.can_use_mail:
-                return Response(
-                    {"detail": "This organization is not eligible for custom-host provisioning."},
-                    status=409,
-                )
-            if not row.is_dns_verified:
-                return Response(
-                    {"detail": "DNS verification is required before provisioning."},
-                    status=409,
-                )
-
             next_status = data["provisioning_status"]
+            is_deactivation_finish = (
+                row.provisioning_status
+                == CustomHostnameProvisioningStatus.DEACTIVATING
+                and next_status == CustomHostnameProvisioningStatus.INACTIVE
+            )
+
+            # Cleanup must remain possible after suspension or after the
+            # customer has already moved DNS away. Every other worker state
+            # change still requires an eligible tenant and verified DNS.
+            if not is_deactivation_finish:
+                if not row.tenant.can_use_mail:
+                    return Response(
+                        {"detail": "This organization is not eligible for custom-host provisioning."},
+                        status=409,
+                    )
+                if not row.is_dns_verified:
+                    return Response(
+                        {"detail": "DNS verification is required before provisioning."},
+                        status=409,
+                    )
+
             allowed = self._TRANSITIONS.get(row.provisioning_status, set())
             if next_status not in allowed:
                 return Response(
@@ -533,6 +599,10 @@ class CustomHostnameStateInternalView(APIView):
                 row.activated_at = timezone.now()
                 row.deactivated_at = None
                 update_fields.extend(["activated_at", "deactivated_at"])
+            elif next_status == CustomHostnameProvisioningStatus.INACTIVE:
+                row.deactivated_at = timezone.now()
+                row.last_error = ""
+                update_fields.extend(["deactivated_at", "last_error"])
 
             row.save(update_fields=update_fields)
 
@@ -542,6 +612,13 @@ class CustomHostnameStateInternalView(APIView):
             log_event(
                 row.tenant,
                 LogEventType.CUSTOM_HOSTNAME_ACTIVATED,
+                result="success",
+                metadata={"hostname": row.hostname, "surface": row.surface},
+            )
+        elif next_status == CustomHostnameProvisioningStatus.INACTIVE:
+            log_event(
+                row.tenant,
+                LogEventType.CUSTOM_HOSTNAME_REMOVED,
                 result="success",
                 metadata={"hostname": row.hostname, "surface": row.surface},
             )
