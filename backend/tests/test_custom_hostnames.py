@@ -4,7 +4,10 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
+from apps.accounts.cookies import REFRESH_COOKIE_NAME
+from apps.accounts.tokens import make_tokens
 from apps.mailboxes.models import MailboxStatus
+from apps.postbox import auth as postbox_auth
 from apps.tenants.models import (
     CustomHostname,
     CustomHostnameCertificateStatus,
@@ -553,6 +556,98 @@ class CustomHostnameHostGuardTest(TestCase):
 
         self.assertEqual(allowed.status_code, 200)
         self.assertEqual(blocked.status_code, 401)
+
+    def test_custom_hub_refresh_cookie_is_host_only_and_strict(self):
+        hub = CustomHostname.objects.create(
+            tenant=self.tenant,
+            hostname="hub.customer.com",
+            surface="hub",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+            certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+        )
+        cache.clear()
+
+        response = APIClient().post(
+            "/api/auth/login/",
+            {"email": self.owner.email, "password": TEST_PASSWORD},
+            format="json",
+            HTTP_HOST=hub.hostname,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        cookie = response.cookies[REFRESH_COOKIE_NAME]
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["domain"], "")
+        self.assertEqual(cookie["path"], "/api/auth/")
+        self.assertEqual(cookie["samesite"], "Strict")
+
+    def test_custom_hub_rejects_refresh_token_for_another_tenant(self):
+        other_owner = make_user("other-refresh@example.com")
+        other = make_tenant(
+            other_owner,
+            name="Other Refresh",
+            slug="other-refresh",
+        )
+        hub = CustomHostname.objects.create(
+            tenant=self.tenant,
+            hostname="hub.customer.com",
+            surface="hub",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+            certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+        )
+        cache.clear()
+
+        tokens = make_tokens(other_owner, tenant_id=other.id)
+        client = APIClient()
+        client.cookies[REFRESH_COOKIE_NAME] = tokens["refresh"]
+        response = client.post(
+            "/api/auth/refresh/",
+            {},
+            format="json",
+            HTTP_HOST=hub.hostname,
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn(REFRESH_COOKIE_NAME, response.cookies)
+        self.assertEqual(response.cookies[REFRESH_COOKIE_NAME].value, "")
+
+    def test_custom_postbox_cookie_is_host_only_host_prefix_cookie(self):
+        host = CustomHostname.objects.create(
+            tenant=self.tenant,
+            hostname="inbox-cookie.customer.com",
+            surface="postbox",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+            certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+        )
+        domain = make_domain(self.tenant, "cookie-mail.example")
+        mailbox = make_mailbox(self.tenant, domain, local_part="cookie")
+        mailbox.status = MailboxStatus.ACTIVE
+        mailbox.mail_engine_provisioned = True
+        mailbox.save(update_fields=["status", "mail_engine_provisioned"])
+        cache.clear()
+
+        with (
+            mock.patch("apps.postbox.auth.imap.authenticate", return_value=True),
+            mock.patch("apps.postbox.imap.open_mailbox", side_effect=RuntimeError("skip folders")),
+        ):
+            response = APIClient().post(
+                "/api/postbox/auth/login/",
+                {"email": mailbox.email, "password": "Mailbox-Password"},
+                format="json",
+                HTTP_HOST=host.hostname,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        cookie = response.cookies[postbox_auth.SESSION_COOKIE_NAME]
+        self.assertTrue(postbox_auth.SESSION_COOKIE_NAME.startswith("__Host-"))
+        self.assertTrue(cookie["httponly"])
+        self.assertTrue(cookie["secure"])
+        self.assertEqual(cookie["domain"], "")
+        self.assertEqual(cookie["path"], "/")
+        self.assertEqual(cookie["samesite"], "Lax")
 
     def test_custom_hub_signup_is_not_a_new_workspace_entry_point(self):
         hub = CustomHostname.objects.create(
