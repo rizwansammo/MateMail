@@ -44,9 +44,9 @@ x-backend-env: &backend_env
   # a 400 DisallowedHost.
   DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-portal.matemail.online,postbox.matemail.online,platform.matemail.online,autodiscover.matemail.online,app.matemail.online,matemail.online,localhost,127.0.0.1}
   DEDICATED_TENANT_HOSTS: ${DEDICATED_TENANT_HOSTS:-}
-  # Customer-owned Hub/PostBox hostnames. Dynamic Host acceptance stays OFF
-  # until Phase 4 activates routing; Phase 2 only stores/verifies mappings.
-  CUSTOM_HOSTS_DYNAMIC_ENABLED: ${CUSTOM_HOSTS_DYNAMIC_ENABLED:-False}
+  # Customer-owned Hub/PostBox hostnames. Phase 4 activates the database-backed
+  # Host/surface guards; unknown hosts remain fail-closed.
+  CUSTOM_HOSTS_DYNAMIC_ENABLED: ${CUSTOM_HOSTS_DYNAMIC_ENABLED:-True}
   CUSTOM_HOST_CNAME_TARGET: ${CUSTOM_HOST_CNAME_TARGET:-custom.matemail.online}
   CUSTOM_HOST_RESERVED_SUFFIXES: ${CUSTOM_HOST_RESERVED_SUFFIXES:-matemail.online}
   CUSTOM_HOST_PROVISIONER_SECRET: ${CUSTOM_HOST_PROVISIONER_SECRET:-}
