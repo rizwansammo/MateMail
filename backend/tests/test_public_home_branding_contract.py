@@ -32,3 +32,16 @@ class PublicHomepageBrandingContractTest(SimpleTestCase):
         )
         self.assertIn('src: "../public/assets/HemiHead-Bold.otf"', root)
         self.assertIn('variable: "--font-matemail-hub"', root)
+
+
+    def test_public_host_allows_brand_assets_without_workspace_redirect(self):
+        middleware = read("middleware.ts")
+        self.assertIn('pathname.startsWith("/assets/")', middleware)
+
+    def test_public_home_owns_its_browser_title_and_favicon(self):
+        page = read("app", "public-home", "page.tsx")
+        self.assertIn(
+            'absolute: "MateMail | Business Email by NetaMate Solutions"',
+            page,
+        )
+        self.assertIn('icon: "/assets/matemail-mark.svg"', page)
