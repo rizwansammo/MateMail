@@ -336,7 +336,13 @@ class CustomHostnameAuthorizeInternalView(APIView):
             CustomHostname.objects.filter(
                 hostname=hostname,
                 dns_status=CustomHostnameDNSStatus.VERIFIED,
-                provisioning_status__in=CUSTOM_HOSTNAME_LIVE_STATES,
+                provisioning_status__in=(
+                    CustomHostnameProvisioningStatus.UNPROVISIONED,
+                    CustomHostnameProvisioningStatus.PROVISIONING,
+                    CustomHostnameProvisioningStatus.READY,
+                    CustomHostnameProvisioningStatus.ACTIVE,
+                    CustomHostnameProvisioningStatus.ERROR,
+                ),
             )
             .select_related("tenant")
             .first()
