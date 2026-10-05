@@ -125,17 +125,19 @@ export default function DomainsPage() {
         title="Domains"
         description="Connect, verify and monitor the domains that power your organization’s email."
         actions={
-          <PortalButton
-            type="button"
-            onClick={() => {
-              setAddOpen(true);
-              setAddError("");
-            }}
-            disabled={!canAttemptDomainCreate}
-          >
-            <Plus className="h-4 w-4" />
-            Add domain
-          </PortalButton>
+          addOpen ? undefined : (
+            <PortalButton
+              type="button"
+              onClick={() => {
+                setAddOpen(true);
+                setAddError("");
+              }}
+              disabled={!canAttemptDomainCreate}
+            >
+              <Plus className="h-4 w-4" />
+              Add domain
+            </PortalButton>
+          )
         }
       />
 
@@ -166,31 +168,28 @@ export default function DomainsPage() {
           title="Connect a new domain"
           subtitle="Add a domain you already own. MateMail does not transfer or purchase the domain."
         >
-          <form onSubmit={handleAdd}>
-            <div className="portal-form-row">
-              <div className="portal-form-field">
-                <label htmlFor="portal-domain-name">Domain name</label>
-                <input
-                  id="portal-domain-name"
-                  className="portal-input"
-                  type="text"
-                  autoFocus
-                  required
-                  value={newDomain}
-                  onChange={(event) => {
-                    setNewDomain(event.target.value);
-                    setAddError("");
-                  }}
-                  placeholder="yourcompany.com"
-                />
-                <p className="mt-2 text-[10px] text-[var(--portal-muted)]">
-                  Enter the root domain. Prefixes such as https:// and www. are normalized by the backend.
-                </p>
-                {addError && <div className="portal-form-error">{addError}</div>}
-              </div>
-              <PortalButton type="submit" disabled={adding || !newDomain.trim()}>
-                {adding ? "Adding…" : "Add domain"}
-              </PortalButton>
+          <form onSubmit={handleAdd} className="portal-add-domain-form">
+            <div className="portal-form-field">
+              <label htmlFor="portal-domain-name">Root domain</label>
+              <input
+                id="portal-domain-name"
+                className="portal-input"
+                type="text"
+                autoFocus
+                required
+                value={newDomain}
+                onChange={(event) => {
+                  setNewDomain(event.target.value);
+                  setAddError("");
+                }}
+                placeholder="yourcompany.com"
+              />
+              <p className="mt-2 text-[10px] text-[var(--portal-muted)]">
+                Enter only the domain you own, for example yourcompany.com. We automatically remove https:// and www.
+              </p>
+              {addError && <div className="portal-form-error">{addError}</div>}
+            </div>
+            <div className="portal-form-actions">
               <PortalButton
                 type="button"
                 variant="secondary"
@@ -202,6 +201,9 @@ export default function DomainsPage() {
                 }}
               >
                 Cancel
+              </PortalButton>
+              <PortalButton type="submit" disabled={adding || !newDomain.trim()}>
+                {adding ? "Adding…" : "Add domain"}
               </PortalButton>
             </div>
           </form>
@@ -251,7 +253,7 @@ export default function DomainsPage() {
             title="Connect your first domain"
             description="Add a domain you own, prove ownership with a TXT record, then configure mail DNS."
             action={
-              canAttemptDomainCreate ? (
+              canAttemptDomainCreate && !addOpen ? (
                 <PortalButton type="button" onClick={() => setAddOpen(true)}>
                   <Plus className="h-4 w-4" />
                   Add domain
