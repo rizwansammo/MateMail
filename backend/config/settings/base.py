@@ -12,7 +12,37 @@ environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 DEBUG = env("DJANGO_DEBUG", default=False)
-ALLOWED_HOSTS = list({*env("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1").split(","), "localhost", "127.0.0.1"})
+# Fixed names remain the operator-owned allowlist. Dynamic customer hostnames
+# cannot be enumerated here, so when that feature is enabled Django performs
+# only syntactic Host validation (ALLOWED_HOSTS=["*"]) and the first middleware
+# below enforces this fixed list plus ACTIVE rows from CustomHostname.
+_configured_hosts = {
+    item.strip().lower()
+    for item in env(
+        "DJANGO_ALLOWED_HOSTS",
+        default="localhost,127.0.0.1",
+    ).split(",")
+    if item.strip()
+}
+_configured_hosts.update({"localhost", "127.0.0.1"})
+CUSTOM_HOST_FIXED_HOSTS = tuple(sorted(_configured_hosts))
+CUSTOM_HOSTS_DYNAMIC_ENABLED = env.bool("CUSTOM_HOSTS_DYNAMIC_ENABLED", default=False)
+ALLOWED_HOSTS = ["*"] if CUSTOM_HOSTS_DYNAMIC_ENABLED else list(CUSTOM_HOST_FIXED_HOSTS)
+
+CUSTOM_HOST_CNAME_TARGET = env(
+    "CUSTOM_HOST_CNAME_TARGET",
+    default="custom.matemail.online",
+).strip().rstrip(".").lower()
+CUSTOM_HOST_RESERVED_SUFFIXES = tuple(
+    item.strip().rstrip(".").lower()
+    for item in env(
+        "CUSTOM_HOST_RESERVED_SUFFIXES",
+        default="matemail.online",
+    ).split(",")
+    if item.strip()
+)
+CUSTOM_HOST_PROVISIONER_SECRET = env("CUSTOM_HOST_PROVISIONER_SECRET", default="")
+CUSTOM_HOST_CACHE_TTL = env.int("CUSTOM_HOST_CACHE_TTL", default=30)
 
 
 def _parse_dedicated_tenant_hosts(raw: str) -> dict[str, str]:
@@ -82,6 +112,9 @@ LOCAL_APPS = [
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
+    # MUST remain first when CUSTOM_HOSTS_DYNAMIC_ENABLED=True: Django's
+    # ALLOWED_HOSTS is then ["*"] so this becomes the real Host allowlist.
+    "apps.tenants.host_middleware.CustomHostnameHostGuardMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
