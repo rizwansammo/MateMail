@@ -1,5 +1,5 @@
 """
-Phase 3 custom-host edge worker contracts.
+Custom-host edge worker contracts (Phase 3 TLS + Phase 4 activation).
 
 These tests never call nginx, Certbot or systemd. They exercise the generated
 configuration and the privilege-boundary behavior with temporary directories
@@ -86,6 +86,29 @@ class GeneratedNginxTest(unittest.TestCase):
         self.assertIn("surface=postbox", text)
         self.assertNotIn("proxy_pass", text)
         self.assertIn('return 503 "MateMail custom domain is ready', text)
+
+
+    def test_active_hub_vhost_routes_same_origin_and_blocks_other_surfaces(self):
+        text = worker.active_vhost("manage.customer.com", "hub")
+        self.assertIn("server_name manage.customer.com;", text)
+        self.assertIn("proxy_pass             http://matemail_backend;", text)
+        self.assertIn("proxy_pass             http://matemail_frontend;", text)
+        self.assertIn("X-MateMail-Custom-Host   1", text)
+        self.assertIn("X-MateMail-Surface       hub", text)
+        self.assertIn("location ^~ /api/postbox/ { return 404; }", text)
+        self.assertIn("location ^~ /api/platform/ { return 404; }", text)
+        self.assertIn("location ^~ /platform { return 404; }", text)
+        self.assertNotIn("portal.matemail.online", text)
+        self.assertNotIn("postbox.matemail.online", text)
+
+    def test_active_postbox_vhost_exposes_only_postbox_api(self):
+        text = worker.active_vhost("inbox.customer.com", "postbox")
+        self.assertIn("X-MateMail-Surface       postbox", text)
+        self.assertIn("location ^~ /api/postbox/", text)
+        self.assertIn("location ^~ /api/ { return 404; }", text)
+        self.assertIn("proxy_buffering        off;", text)
+        self.assertNotIn("portal.matemail.online", text)
+        self.assertNotIn("return 301 https://postbox.matemail.online", text)
 
     def test_candidate_failure_restores_previous_generated_site(self):
         with tempfile.TemporaryDirectory() as td:
@@ -199,6 +222,45 @@ class ProvisioningFlowTest(unittest.TestCase):
             ],
         )
         self.assertNotIn(("state", "active", "active"), states)
+        self.assertEqual(sum(1 for item in calls if item[0] == "authorize"), 2)
+
+
+
+
+class ActivationFlowTest(unittest.TestCase):
+    def test_activation_installs_route_before_marking_database_active(self):
+        calls = []
+        job = {
+            "id": "0a410cf7-b655-466e-929f-727ed6444309",
+            "hostname": "inbox.customer.com",
+            "surface": "postbox",
+            "tenant_id": "0e40081a-b654-4901-afec-d6cb741acdf6",
+        }
+
+        originals = {
+            "authorize": worker.authorize,
+            "post_state": worker.post_state,
+            "install_site": worker.install_site,
+            "verify_certificate": worker.verify_certificate,
+        }
+        try:
+            worker.authorize = lambda value: calls.append(("authorize", value["hostname"]))
+            worker.verify_certificate = lambda hostname: calls.append(("certcheck", hostname))
+            worker.install_site = lambda hostname, content: calls.append(
+                ("site", "postbox" if "X-MateMail-Surface       postbox" in content else "other")
+            )
+            worker.post_state = lambda job_id, state, **kw: calls.append(
+                ("state", state, kw.get("certificate_status"))
+            )
+
+            worker.activate(job)
+        finally:
+            for name, value in originals.items():
+                setattr(worker, name, value)
+
+        site_index = calls.index(("site", "postbox"))
+        state_index = calls.index(("state", "active", "active"))
+        self.assertLess(site_index, state_index)
         self.assertEqual(sum(1 for item in calls if item[0] == "authorize"), 2)
 
 
