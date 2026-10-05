@@ -19,6 +19,8 @@ def custom_hostname_binding(request) -> dict[str, str] | None:
     """
     if not getattr(settings, "CUSTOM_HOSTS_DYNAMIC_ENABLED", False):
         return None
+    if hasattr(request, "custom_hostname_binding"):
+        return request.custom_hostname_binding
     return active_custom_hostname_binding(request_host(request))
 
 
