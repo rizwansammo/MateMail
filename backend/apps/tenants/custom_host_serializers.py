@@ -63,15 +63,15 @@ class CustomHostnameCreateSerializer(serializers.Serializer):
 
 class CustomHostnameInternalStateSerializer(serializers.Serializer):
     """
-    Phase 3 worker callback contract.
+    Host-worker callback contract.
 
-    ACTIVE is deliberately absent from provisioning_status. The edge worker may
-    prepare nginx/TLS and report READY, but Phase 4 owns activation once the
-    application routing/authentication code is present.
+    Phase 3 stopped at READY. Phase 4 permits the root-owned worker to report
+    ACTIVE only after it has atomically installed the final surface-aware nginx
+    vhost. The backend still validates the lifecycle transition.
     """
 
     provisioning_status = serializers.ChoiceField(
-        choices=("provisioning", "ready", "error")
+        choices=("provisioning", "ready", "active", "error")
     )
     certificate_status = serializers.ChoiceField(
         choices=("not_requested", "issuing", "active", "error"),
@@ -84,10 +84,10 @@ class CustomHostnameInternalStateSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        if attrs["provisioning_status"] == "ready":
+        if attrs["provisioning_status"] in {"ready", "active"}:
             if attrs.get("certificate_status") != "active":
                 raise serializers.ValidationError(
-                    "READY requires certificate_status=active."
+                    "READY/ACTIVE requires certificate_status=active."
                 )
             attrs["last_error"] = ""
         return attrs
