@@ -103,8 +103,22 @@ export interface MailboxProfile {
   email: string;
   full_name: string;
   quota_mb: number;
+  kind: "personal" | "team_box";
   organization: string;
   domain: string;
+}
+
+export interface MailboxPermissions {
+  can_read: boolean;
+  can_manage: boolean;
+  can_send_as: boolean;
+  can_send_on_behalf: boolean;
+}
+
+export interface AvailablePostBoxMailbox {
+  mailbox: MailboxProfile;
+  permissions: MailboxPermissions;
+  is_personal: boolean;
 }
 
 export interface SavedPostBoxAccount {
@@ -281,6 +295,7 @@ export interface Identity {
   name?: string;
   is_primary: boolean;
   kind: string;
+  send_mode?: "send_as" | "on_behalf";
 }
 
 /** What a signature is. Stated, not inferred from which field is filled. */
@@ -455,9 +470,23 @@ export const postbox = {
       "/auth/switch/",
       { method: "POST", body: JSON.stringify({ session_id: sessionId }) },
     ),
+  switchMailbox: (mailboxId: string | null) =>
+    request<{
+      mailbox: MailboxProfile;
+      authenticated_mailbox: MailboxProfile;
+      permissions: MailboxPermissions;
+      available_mailboxes: AvailablePostBoxMailbox[];
+      preferences: Preferences;
+    }>(
+      "/auth/mailbox-switch/",
+      { method: "POST", body: JSON.stringify({ mailbox_id: mailboxId }) },
+    ),
   me: () =>
     request<{
       mailbox: MailboxProfile;
+      authenticated_mailbox: MailboxProfile;
+      permissions: MailboxPermissions;
+      available_mailboxes: AvailablePostBoxMailbox[];
       preferences: Preferences;
       mail_client: MailClientSettings;
     }>("/auth/me/"),
