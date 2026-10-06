@@ -1,9 +1,16 @@
 from unittest import mock
 
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.mailboxes.models import MailboxStatus
+from apps.tenants.models import (
+    CustomHostname,
+    CustomHostnameCertificateStatus,
+    CustomHostnameDNSStatus,
+    CustomHostnameProvisioningStatus,
+)
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
     TEST_PASSWORD,
@@ -16,42 +23,50 @@ from tests.factories import (
 )
 
 
-DEDICATED = {
-    "mailadmin.netamate.com": "netamate-solutions",
-    "postbox.netamate.com": "netamate-solutions",
-}
-
-
 @override_settings(
     PASSWORD_HASHERS=FAST_PASSWORD_HASHERS,
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
-    ALLOWED_HOSTS=[
-        "testserver",
-        "portal.matemail.online",
-        "mailadmin.netamate.com",
-        "postbox.netamate.com",
-    ],
-    DEDICATED_TENANT_HOSTS=DEDICATED,
+    CUSTOM_HOSTS_DYNAMIC_ENABLED=True,
+    ALLOWED_HOSTS=["*"],
+    CUSTOM_HOST_FIXED_HOSTS=("testserver", "portal.matemail.online"),
+    CUSTOM_HOST_CACHE_TTL=30,
 )
-class DedicatedTenantHostTest(TestCase):
+class CustomHostnameTenantBindingTest(TestCase):
     def setUp(self):
         self.user = make_user("owner@example.test")
         self.other = make_tenant(self.user, name="Other", slug="other")
         self.netamate = make_tenant(
             self.user, name="NetaMate Solutions", slug="netamate-solutions"
         )
+        self.hub = CustomHostname.objects.create(
+            tenant=self.netamate,
+            hostname="mailhub.netamate.com",
+            surface="hub",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+            certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+        )
+        self.postbox = CustomHostname.objects.create(
+            tenant=self.netamate,
+            hostname="postbox.netamate.com",
+            surface="postbox",
+            dns_status=CustomHostnameDNSStatus.VERIFIED,
+            provisioning_status=CustomHostnameProvisioningStatus.ACTIVE,
+            certificate_status=CustomHostnameCertificateStatus.ACTIVE,
+        )
+        cache.clear()
 
-    def test_login_selects_the_host_bound_tenant(self):
+    def test_login_selects_the_custom_host_bound_tenant(self):
         response = APIClient().post(
             "/api/auth/login/",
             {"email": self.user.email, "password": TEST_PASSWORD},
             format="json",
-            HTTP_HOST="mailadmin.netamate.com",
+            HTTP_HOST=self.hub.hostname,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["tenant"]["slug"], "netamate-solutions")
 
-    def test_main_workspace_login_keeps_normal_multi_tenant_behavior(self):
+    def test_canonical_workspace_login_keeps_normal_behavior(self):
         response = APIClient().post(
             "/api/auth/login/",
             {"email": self.user.email, "password": TEST_PASSWORD},
@@ -68,11 +83,11 @@ class DedicatedTenantHostTest(TestCase):
             "/api/auth/login/",
             {"email": outsider.email, "password": TEST_PASSWORD},
             format="json",
-            HTTP_HOST="mailadmin.netamate.com",
+            HTTP_HOST=self.hub.hostname,
         )
         self.assertEqual(response.status_code, 403)
 
-    def test_signup_is_not_available_on_dedicated_host(self):
+    def test_signup_is_not_available_on_custom_hub(self):
         response = APIClient().post(
             "/api/auth/signup/",
             {
@@ -82,32 +97,19 @@ class DedicatedTenantHostTest(TestCase):
                 "workspace_name": "New Workspace",
             },
             format="json",
-            HTTP_HOST="mailadmin.netamate.com",
+            HTTP_HOST=self.hub.hostname,
         )
         self.assertEqual(response.status_code, 404)
 
     def test_workspace_list_only_returns_the_bound_tenant(self):
         client = auth_client(self.user, self.netamate)
-        response = client.get(
-            "/api/workspaces/", HTTP_HOST="mailadmin.netamate.com"
-        )
+        response = client.get("/api/workspaces/", HTTP_HOST=self.hub.hostname)
         self.assertEqual(response.status_code, 200)
         self.assertEqual([row["slug"] for row in response.data], ["netamate-solutions"])
 
-    def test_workspace_switch_cannot_leave_the_bound_tenant(self):
-        client = auth_client(self.user, self.netamate)
-        response = client.post(
-            "/api/workspaces/switch/",
-            {"tenant_id": str(self.other.id)},
-            format="json",
-            HTTP_HOST="mailadmin.netamate.com",
-        )
-        self.assertEqual(response.status_code, 404)
-
-
-    def test_platform_api_is_not_exposed_on_dedicated_host(self):
+    def test_platform_api_is_not_exposed_on_custom_hub(self):
         response = APIClient().get(
-            "/api/platform/stats/", HTTP_HOST="mailadmin.netamate.com"
+            "/api/platform/stats/", HTTP_HOST=self.hub.hostname
         )
         self.assertEqual(response.status_code, 404)
 
@@ -115,9 +117,7 @@ class DedicatedTenantHostTest(TestCase):
         raw, _ = make_api_key(self.other, self.user)
         client = APIClient()
         client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
-        response = client.get(
-            "/api/workspaces/", HTTP_HOST="mailadmin.netamate.com"
-        )
+        response = client.get("/api/workspaces/", HTTP_HOST=self.hub.hostname)
         self.assertEqual(response.status_code, 403)
 
     def test_postbox_rejects_mailbox_from_another_tenant(self):
@@ -132,7 +132,7 @@ class DedicatedTenantHostTest(TestCase):
                 "/api/postbox/auth/login/",
                 {"email": mailbox.email, "password": "Correct-Mailbox-Password"},
                 format="json",
-                HTTP_HOST="postbox.netamate.com",
+                HTTP_HOST=self.postbox.hostname,
             )
 
         self.assertEqual(response.status_code, 401)

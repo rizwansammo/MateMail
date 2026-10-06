@@ -7,7 +7,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 from .models import TenantMembership
-from .dedicated import dedicated_tenant_slug
+from .host_binding import bound_tenant_slug
 
 
 class TenantMiddleware:
@@ -35,7 +35,7 @@ class TenantMiddleware:
         # misconfiguration cannot turn a customer hostname into a Platform route.
         path = request.path_info
         if path.startswith("/api/platform/"):
-            if dedicated_tenant_slug(request):
+            if bound_tenant_slug(request):
                 return JsonResponse({"detail": "Not found."}, status=404)
             return self.get_response(request)
 
@@ -51,7 +51,7 @@ class TenantMiddleware:
         # credential type rather than discovering it from an exception.
         if request.META.get("HTTP_AUTHORIZATION", "").startswith("Bearer mm_"):
             self._try_api_key_auth(request)
-            bound_slug = dedicated_tenant_slug(request)
+            bound_slug = bound_tenant_slug(request)
             if bound_slug and request.tenant and request.tenant.slug != bound_slug:
                 return JsonResponse(
                     {"detail": "This tenant is not available on this host."},
@@ -105,7 +105,7 @@ class TenantMiddleware:
                 request.tenant = membership.tenant
                 request.tenant_membership = membership
 
-        bound_slug = dedicated_tenant_slug(request)
+        bound_slug = bound_tenant_slug(request)
         if bound_slug and request.tenant and request.tenant.slug != bound_slug:
             return JsonResponse({"detail": "This tenant is not available on this host."}, status=403)
 

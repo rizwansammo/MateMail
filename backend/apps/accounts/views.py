@@ -17,7 +17,7 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.tenants.models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
-from apps.tenants.dedicated import dedicated_tenant_slug, scope_memberships, tenant_matches_request
+from apps.tenants.host_binding import bound_tenant_slug, scope_memberships, tenant_matches_request
 from .models import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -139,7 +139,7 @@ class SignupView(APIView):
     throttle_classes = [AuthThrottle]
 
     def post(self, request):
-        if dedicated_tenant_slug(request):
+        if bound_tenant_slug(request):
             return Response({"detail": "Signup is not available on this host."}, status=404)
 
         # Counted before validation: a signup flood does not become cheaper by
@@ -395,7 +395,7 @@ class LoginView(APIView):
             .order_by("created_at")
             .first()
         )
-        if dedicated_tenant_slug(request) and membership is None:
+        if bound_tenant_slug(request) and membership is None:
             return Response({"detail": "This account cannot use this host."}, status=403)
 
         tenant_id = membership.tenant_id if membership else None
@@ -440,7 +440,7 @@ class RefreshView(APIView):
         try:
             token = RefreshToken(raw)
             tenant_id = token.get("tenant_id")
-            if dedicated_tenant_slug(request) and not tenant_id:
+            if bound_tenant_slug(request) and not tenant_id:
                 return clear_refresh_cookie(
                     Response({"detail": "Session is not valid on this host."}, status=403)
                 )
@@ -819,7 +819,7 @@ class TwoFactorVerifyView(APIView):
                 ),
             ).first()
         ) if tenant_id else None
-        if dedicated_tenant_slug(request) and membership is None:
+        if bound_tenant_slug(request) and membership is None:
             return Response({"detail": "This account cannot use this host."}, status=403)
 
         tokens = make_tokens(user, tenant_id=tenant_id)

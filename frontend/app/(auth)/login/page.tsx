@@ -14,7 +14,6 @@ import {
 } from "@/components/workspace/premium-auth";
 import { useAuth } from "@/contexts/auth-context";
 import { ApiError } from "@/lib/api";
-import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 function readApiDetail(caught: unknown, fallback: string) {
   if (!(caught instanceof ApiError)) return fallback;
@@ -63,11 +62,7 @@ function LoginContent() {
   return (
     <PremiumAuthShell
       title="Welcome back."
-      description={
-        IS_NETAMATE_EMAIL
-          ? "Sign in to securely manage NetaMate Solutions email with MateMail."
-          : "Sign in to manage your organization’s email."
-      }
+      description="Sign in to manage your organization’s email."
       icon={<LockKeyhole className="h-6 w-6" />}
     >
       <form onSubmit={handleSubmit} className="auth-form" noValidate>
@@ -80,7 +75,7 @@ function LoginContent() {
             required
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder={IS_NETAMATE_EMAIL ? "you@netamate.com" : "you@yourcompany.com"}
+            placeholder="you@yourcompany.com"
           />
         </AuthField>
 
@@ -114,14 +109,12 @@ function LoginContent() {
           {loading ? "Signing in…" : "Sign in"}
         </AuthButton>
 
-        {!IS_NETAMATE_EMAIL && (
-          <p className="auth-switch">
-            New to MateMail?{" "}
-            <Link href="/signup" className="auth-text-button">
-              Create an account
-            </Link>
-          </p>
-        )}
+        <p className="auth-switch">
+          New to MateMail?{" "}
+          <Link href="/signup" className="auth-text-button">
+            Create an account
+          </Link>
+        </p>
       </form>
     </PremiumAuthShell>
   );

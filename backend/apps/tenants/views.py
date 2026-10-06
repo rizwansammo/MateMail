@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 
 from apps.billing.utils import check_member_limit
 from .models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
-from .dedicated import dedicated_tenant_slug, scope_memberships
+from .host_binding import bound_tenant_slug, scope_memberships
 from .permissions import IsTenantAdmin, IsTenantOwner
 from .membership_policy import (
     MEMBER_DOMAIN_ERROR,

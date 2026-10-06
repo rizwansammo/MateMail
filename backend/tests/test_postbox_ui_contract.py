@@ -312,7 +312,7 @@ class DedicatedBrandParityTest(SimpleTestCase):
     def test_dedicated_tab_branding_is_matemail(self):
         root = read("app", "layout.tsx")
         postbox = read("app", "postbox", "layout.tsx")
-        self.assertIn('"MailAdmin | MateMail"', root)
+        self.assertIn('"MateMail · Organization Hub"', root)
         self.assertNotIn("NetaMate Email", root)
         self.assertNotIn("NETAMATE_LOGO_SRC", root)
         self.assertIn('url: "/postbox/favicon?v=3"', postbox)

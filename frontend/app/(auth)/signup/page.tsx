@@ -8,12 +8,10 @@ import {
   AuthButton,
   AuthError,
   AuthField,
-  AuthNotice,
   PremiumAuthShell,
 } from "@/components/workspace/premium-auth";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest, ApiError } from "@/lib/api";
-import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 function message(value: unknown): string {
   if (Array.isArray(value)) return value.map(String).join(" ");
@@ -101,24 +99,6 @@ export default function SignupPage() {
     }
   }
 
-  if (IS_NETAMATE_EMAIL) {
-    return (
-      <PremiumAuthShell
-        title="Account creation isn’t available here."
-        description="This dedicated MailAdmin host only accepts existing authorized accounts."
-        icon={<Mail className="h-6 w-6" />}
-      >
-        <div className="auth-form">
-          <AuthNotice>
-            Create and manage MateMail organization accounts from the main MateMail Hub.
-          </AuthNotice>
-          <Link href="/login" className="auth-button">
-            Back to sign in
-          </Link>
-        </div>
-      </PremiumAuthShell>
-    );
-  }
 
   if (inviteLoading) {
     return (

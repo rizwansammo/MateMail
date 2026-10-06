@@ -1,8 +1,22 @@
 # MateMail Custom Hub/PostBox Domains
 
-**Status:** Phase 1–5 engineering complete; post-deploy NetaMate acceptance gate pending owner deployment  
-**Branch:** `feature/custom-domains-caddy`  
-**Date:** 2026-10-05
+**Status:** Production live; NetaMate acceptance and legacy retirement complete  
+**Date:** 2026-10-06
+
+## Production acceptance — 2026-10-06
+
+The first production tenant is live on the normal custom-host path:
+
+- Hub: `mailhub.netamate.com CNAME custom.matemail.online`
+- PostBox: `postbox.netamate.com CNAME custom.matemail.online`
+- both rows are DNS verified, HTTPS active and routing active;
+- both generated vhosts use the canonical MateMail frontend on `127.0.0.1:3020`;
+- legacy `DEDICATED_TENANT_HOSTS`, fixed-host entries, the port-3060 frontend,
+  legacy NetaMate nginx vhosts and the `/opt/NetaMate-Email` deployment were retired;
+- the obsolete `mailadmin.netamate.com` certificate lineage was revoked and deleted.
+
+The Phase 1 section below is retained as historical audit evidence; statements
+there describe the pre-migration production state, not the current topology.
 
 ## Goal
 

@@ -198,10 +198,10 @@ def frontend_overrides(raw: str) -> dict[str, str]:
     """
     Parse root-owned per-host frontend overrides.
 
-    This exists for the NetaMate production pilot, whose branded build listens
-    on 127.0.0.1:3060. It is deliberately NOT customer-controlled. Targets are
-    restricted to loopback HTTP ports so this setting cannot turn nginx into a
-    generic open proxy even if an operator mistypes it.
+    This exists only for controlled migrations of a pre-existing branded
+    frontend. It is deliberately NOT customer-controlled. Targets are restricted
+    to loopback HTTP ports so this setting cannot turn nginx into a generic open
+    proxy even if an operator mistypes it.
     """
     values: dict[str, str] = {}
     for item in raw.split(","):
