@@ -31,7 +31,6 @@ import { BrandMark } from "@/components/brand-mark";
 import { WorkspaceThemeProvider, WorkspaceThemeToggle } from "@/components/workspace/theme";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
-import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 const navGroups = [
   {
@@ -185,7 +184,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <PlugZap className="h-4 w-4" />
         Connected apps
       </Link>
-      {user?.is_platform_admin && !IS_NETAMATE_EMAIL && (
+      {user?.is_platform_admin && (
         <Link className="portal-account-action" href="/admin">
           <ExternalLink className="h-4 w-4" />
           Admin console
