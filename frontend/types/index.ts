@@ -51,6 +51,7 @@ export interface Mailbox {
   email: string;
   local_part: string;
   domain: string;
+  kind: "personal" | "team_box";
   status: MailboxStatus;
   quota_mb: number;
   storage_used_mb: number;

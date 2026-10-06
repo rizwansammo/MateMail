@@ -78,6 +78,8 @@ export function Compose({
   onClose,
   onSent,
   inline = false,
+  draftsEnabled = true,
+  schedulingEnabled = true,
 }: {
   initial: ComposeInitial;
   identities: Identity[];
@@ -85,6 +87,8 @@ export function Compose({
   onClose: () => void;
   onSent: (message: string) => void;
   inline?: boolean;
+  draftsEnabled?: boolean;
+  schedulingEnabled?: boolean;
 }) {
   // Two composers may coexist (inline reply and sidebar Compose). Form labels
   // and ARIA references must remain unique instead of targeting the other one.
@@ -241,6 +245,11 @@ export function Compose({
 
   const saveDraftNow = useCallback(
     async (closeAfter = false) => {
+      if (!draftsEnabled) {
+        if (closeAfter) onClose();
+        return true;
+      }
+
       const hasDraftMaterial = Boolean(
         to.trim() ||
           cc.trim() ||
@@ -290,6 +299,7 @@ export function Compose({
       includeOriginal,
       initial.quoted_text,
       draftUid,
+      draftsEnabled,
       existingAttachments.length,
       onClose,
       payload,
@@ -302,7 +312,7 @@ export function Compose({
   // one save rather than twenty, and short enough that a closed tab loses at
   // most a sentence.
   useEffect(() => {
-    if (!dirty.current || busy || saving) return;
+    if (!draftsEnabled || !dirty.current || busy || saving) return;
     const timer = window.setTimeout(async () => {
       const attachmentRevisionAtStart = attachmentRevision.current;
       const editRevisionAtStart = editRevision.current;
@@ -321,7 +331,7 @@ export function Compose({
       }
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [applySavedDraft, busy, payload, saving]);
+  }, [applySavedDraft, busy, draftsEnabled, payload, saving]);
 
 
 
@@ -356,6 +366,10 @@ export function Compose({
       ];
       if (recipients.length === 0) {
         setError("Add at least one recipient.");
+        return;
+      }
+      if (schedule && !schedulingEnabled) {
+        setError("Scheduled sending is unavailable with this TeamBox permission.");
         return;
       }
       if (schedule && !scheduleAt) {
@@ -393,11 +407,11 @@ export function Compose({
         setBusy(false);
       }
     },
-    [to, cc, bcc, scheduleAt, payload, onSent, onClose],
+    [to, cc, bcc, scheduleAt, schedulingEnabled, payload, onSent, onClose],
   );
 
   const discard = useCallback(async () => {
-    if (draftUid) {
+    if (draftsEnabled && draftUid) {
       try {
         await postbox.deleteDraft(draftUid);
       } catch {
@@ -405,7 +419,7 @@ export function Compose({
       }
     }
     onClose();
-  }, [draftUid, onClose]);
+  }, [draftUid, draftsEnabled, onClose]);
 
   useEffect(() => {
     if (inline) return;
@@ -798,7 +812,7 @@ export function Compose({
               </div>
             )}
 
-          {showSchedule && (
+          {schedulingEnabled && showSchedule && (
             <div className="pb-compose-schedule mt-3 flex flex-wrap items-end gap-2">
               <div>
                 <label htmlFor={fieldId("schedule")} className="pb-label">
@@ -867,18 +881,21 @@ export function Compose({
             Attach
           </button>
 
-          <button
-            type="button"
-            className="pb-btn pb-btn-ghost"
-            aria-pressed={showSchedule}
-            disabled={busy || saving}
-            onClick={() => setShowSchedule((open) => !open)}
-          >
-            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-            Schedule
-          </button>
+          {schedulingEnabled && (
+            <button
+              type="button"
+              className="pb-btn pb-btn-ghost"
+              aria-pressed={showSchedule}
+              disabled={busy || saving}
+              onClick={() => setShowSchedule((open) => !open)}
+            >
+              <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+              Schedule
+            </button>
+          )}
 
-                      <button
+          {draftsEnabled && (
+            <button
               type="button"
               className="pb-btn pb-btn-ghost pb-compose-save-draft"
               disabled={saving || busy}
@@ -891,6 +908,7 @@ export function Compose({
               )}
               Save draft
             </button>
+          )}
 
 
           <button

@@ -19,6 +19,7 @@ from apps.mail_engine.dto import (
     EngineDomain,
     EngineHealth,
     EngineMailbox,
+    ForwardGroupSpec,
     ForwardingSpec,
     MailboxSpec,
     MailboxUsage,
@@ -204,6 +205,65 @@ class AdapterContractTests:
     def test_alias_spec_requires_a_destination(self):
         with self.assertRaises(ValueError):
             AliasSpec(address=f"sales@{DOMAIN}", destinations=())
+
+    def test_ensure_forward_group_is_idempotent(self):
+        self.adapter.ensure_domain(domain_spec())
+        spec = ForwardGroupSpec(
+            address=f"engineering@{DOMAIN}",
+            domain=DOMAIN,
+            destinations=(ADDRESS,),
+            sender_policy="anyone",
+        )
+        self.adapter.ensure_forward_group(spec)
+        self.adapter.ensure_forward_group(spec)
+        self.assertEqual(
+            self.forward_group_state(spec.address),
+            spec,
+        )
+
+    def test_ensure_forward_group_replaces_member_and_sender_sets(self):
+        self.adapter.ensure_domain(domain_spec())
+        self.adapter.ensure_mailbox(
+            mailbox_spec(),
+            "Initial-Passphrase-1",
+        )
+        self.adapter.ensure_mailbox(
+            mailbox_spec(address=f"bob@{DOMAIN}"),
+            "Bob-Passphrase-2",
+        )
+        address = f"engineering@{DOMAIN}"
+        self.adapter.ensure_forward_group(
+            ForwardGroupSpec(
+                address=address,
+                domain=DOMAIN,
+                destinations=(ADDRESS, f"bob@{DOMAIN}"),
+                sender_policy="selected",
+                allowed_senders=(ADDRESS, f"bob@{DOMAIN}"),
+            )
+        )
+        replacement = ForwardGroupSpec(
+            address=address,
+            domain=DOMAIN,
+            destinations=(f"bob@{DOMAIN}",),
+            sender_policy="selected",
+            allowed_senders=(f"bob@{DOMAIN}",),
+        )
+        self.adapter.ensure_forward_group(replacement)
+        self.assertEqual(self.forward_group_state(address), replacement)
+
+    def test_delete_forward_group_is_idempotent(self):
+        self.adapter.ensure_domain(domain_spec())
+        address = f"engineering@{DOMAIN}"
+        self.adapter.ensure_forward_group(
+            ForwardGroupSpec(
+                address=address,
+                domain=DOMAIN,
+                destinations=(ADDRESS,),
+            )
+        )
+        self.adapter.delete_forward_group(address)
+        self.adapter.delete_forward_group(address)
+        self.assertIsNone(self.forward_group_state(address))
 
     def test_ensure_forwarding_applies_destinations_verbatim(self):
         self.adapter.ensure_domain(domain_spec())
@@ -400,3 +460,6 @@ class StubAdapterContractTest(AdapterContractTests, SimpleTestCase):
     def alias_destinations(self, address):
         spec = self.adapter._aliases.get(address)
         return spec.destinations if spec else None
+
+    def forward_group_state(self, address):
+        return self.adapter._forward_groups.get(address)

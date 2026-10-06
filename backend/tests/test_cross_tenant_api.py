@@ -159,7 +159,7 @@ class CrossTenantApiTest(TestCase):
             {
                 "source_local_part": "intruder",
                 "domain_id": str(self.domain_b.id),
-                "destination_address": "attacker@elsewhere.example",
+                "destination_mailbox_id": str(self.mailbox_b.id),
             },
             format="json",
         )

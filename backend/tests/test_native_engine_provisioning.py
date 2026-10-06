@@ -1955,6 +1955,21 @@ class NativeAdapterContractTest(AdapterContractTests, EngineDatabaseTestCase):
             return None
         return tuple(forwarded) if forwarded else None
 
+    def forward_group_state(self, address):
+        state = provisioning.get_forward_group(self.conn, address)
+        if state is None:
+            return None
+        _, _, domain = address.rpartition("@")
+        from apps.mail_engine.dto import ForwardGroupSpec
+        return ForwardGroupSpec(
+            address=address,
+            domain=domain,
+            destinations=tuple(state["destinations"]),
+            sender_policy=state["sender_policy"],
+            allowed_senders=tuple(state["allowed_senders"]),
+            active=bool(state["active"]),
+        )
+
     # ── not applicable until NE3 / NE4 ──────────────────────────────────────
     #
     # Skipped rather than satisfied with an empty result. An adapter that
@@ -2042,12 +2057,13 @@ class NativeAdapterCapabilityTest(EngineDatabaseTestCase):
         implemented = abstract & defined - refusing
         remaining = abstract & refusing
 
-        # NE4 completed the port: 18 of 26 at NE3, 26 of 26 now, nothing
+        # Phase E adds two Forward Group operations; the complete port now has
+        # 28 abstract operations and both implementations provide all of them.
         # deferred. The count is still read from the code rather than from
         # prose — an earlier report claimed 16 of 26 because it had missed two
         # methods and nothing checked the arithmetic.
-        self.assertEqual(len(abstract), 26, "the port's method count changed")
-        self.assertEqual(len(implemented), 26, sorted(implemented))
+        self.assertEqual(len(abstract), 28, "the port's method count changed")
+        self.assertEqual(len(implemented), 28, sorted(implemented))
         self.assertEqual(len(remaining), 0, sorted(remaining))
         self.assertEqual(implemented | remaining, abstract,
                          "every abstract method must be implemented or explicitly refused")

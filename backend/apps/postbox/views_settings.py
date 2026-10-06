@@ -47,20 +47,37 @@ logger = logging.getLogger(__name__)
 # ── preferences ─────────────────────────────────────────────────────────────
 
 class PreferenceView(PostBoxView):
+    team_box_permission_scope = "identity"
+
     def get(self, request):
-        preference, _ = PostBoxPreference.objects.get_or_create(mailbox=self.mailbox)
+        preference, _ = PostBoxPreference.objects.get_or_create(
+            mailbox=request.identity_mailbox
+        )
         return Response(PreferenceSerializer(preference).data)
 
     def patch(self, request):
-        preference, _ = PostBoxPreference.objects.get_or_create(mailbox=self.mailbox)
+        preference, _ = PostBoxPreference.objects.get_or_create(
+            mailbox=request.identity_mailbox
+        )
         serializer = PreferenceSerializer(preference, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
 
         identity = serializer.validated_data.get("default_identity")
         if identity:
-            # A default sender that is not a permitted identity would fail at
-            # every send; refusing here says so once, at the moment it is set.
-            sending.assert_may_send_as(self.mailbox, identity)
+            if request.mailbox.pk != request.identity_mailbox.pk:
+                return Response(
+                    {
+                        "default_identity": [
+                            "Switch back to your personal mailbox to change the default sender."
+                        ]
+                    },
+                    status=400,
+                )
+            sending.assert_may_send_as(
+                request.identity_mailbox,
+                identity,
+                actor_mailbox=request.identity_mailbox,
+            )
 
         serializer.save()
         return Response(serializer.data)
@@ -142,10 +159,16 @@ class SignatureListView(MailboxScopedListView):
     model = MailSignature
     serializer_class = SignatureSerializer
 
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send" if request.method == "GET" else "manage"
+
 
 class SignatureDetailView(MailboxScopedDetailView):
     model = MailSignature
     serializer_class = SignatureSerializer
+
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send" if request.method == "GET" else "manage"
 
 
 #: What an image signature may be, by what the bytes actually START with.
@@ -184,6 +207,9 @@ def _sniff_image(payload: bytes) -> tuple[str, str] | None:
 
 
 class SignatureImageView(PostBoxView):
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send" if request.method == "GET" else "manage"
+
     """
     POST an image for a signature; GET it back for the preview and the
     composer; DELETE to remove it.
@@ -278,6 +304,9 @@ class SignatureImageView(PostBoxView):
 
 
 class SignatureHtmlImageView(PostBoxView):
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send"
+
     """
     GET the [index]th https image of this mailbox's own HTML signature, for
     the native app's preview, which never loads remote images itself.
@@ -481,7 +510,10 @@ def _sync_sieve(mailbox) -> None:
 # ── identities, forwarding, quota ───────────────────────────────────────────
 
 class IdentityListView(PostBoxView):
-    """Every address this mailbox may send as, from authoritative data."""
+    """Every address this active mailbox may send as, from authoritative data."""
+
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send"
 
     def get(self, request):
         return Response({"results": [
@@ -490,8 +522,12 @@ class IdentityListView(PostBoxView):
                 "name": i.name,
                 "is_primary": i.is_primary,
                 "kind": i.kind,
+                "send_mode": i.send_mode,
             }
-            for i in sending.allowed_identities(self.mailbox)
+            for i in sending.allowed_identities(
+                self.mailbox,
+                actor_mailbox=request.identity_mailbox,
+            )
         ]})
 
 
@@ -531,6 +567,7 @@ class ForwardingView(PostBoxView):
 
 
 class MailboxAccountView(PostBoxView):
+    team_box_permission_scope = "identity"
     """
     Mailbox and account: quota, identities and the real connection settings.
 
@@ -543,7 +580,7 @@ class MailboxAccountView(PostBoxView):
     """
 
     def get(self, request):
-        mailbox = self.mailbox
+        mailbox = request.identity_mailbox
         usage_mb = None
         quota_mb = mailbox.quota_mb
 
@@ -578,7 +615,10 @@ class MailboxAccountView(PostBoxView):
             },
             "identities": [
                 {"address": i.address, "is_primary": i.is_primary, "kind": i.kind}
-                for i in sending.allowed_identities(mailbox)
+                for i in sending.allowed_identities(
+                    mailbox,
+                    actor_mailbox=mailbox,
+                )
             ],
             "connection": {
                 "imap": {"host": host, "port": 993, "security": "SSL/TLS"},
@@ -597,6 +637,7 @@ class PasswordChangeSerializer(serializers.Serializer):
 
 
 class PasswordChangeView(PostBoxView):
+    team_box_permission_scope = "identity"
     """
     Change the mailbox password.
 
@@ -616,7 +657,7 @@ class PasswordChangeView(PostBoxView):
         data = serializer.validated_data
 
         decision = ratelimit.hit(
-            POSTBOX_PASSWORD_CHANGE.bucket, str(self.mailbox.pk),
+            POSTBOX_PASSWORD_CHANGE.bucket, str(request.identity_mailbox.pk),
             limit=POSTBOX_PASSWORD_CHANGE.limit, window=POSTBOX_PASSWORD_CHANGE.window,
         )
         if not decision.allowed:
@@ -624,7 +665,7 @@ class PasswordChangeView(PostBoxView):
 
             raise Throttled(wait=decision.retry_after, detail="Too many attempts.")
 
-        if not imap.authenticate(self.mailbox.email, data["current_password"]):
+        if not imap.authenticate(request.identity_mailbox.email, data["current_password"]):
             return Response(
                 {"current_password": ["That is not your current password."]}, status=400
             )
@@ -641,19 +682,19 @@ class PasswordChangeView(PostBoxView):
         from apps.mail_engine.factory import get_adapter
 
         try:
-            get_adapter().set_mailbox_password(self.mailbox.email, data["new_password"])
+            get_adapter().set_mailbox_password(request.identity_mailbox.email, data["new_password"])
         except MailEngineError as exc:
             logger.error(
-                "PostBox password change failed for %s: %s", self.mailbox.pk, exc.log_message
+                "PostBox password change failed for %s: %s", request.identity_mailbox.pk, exc.log_message
             )
             return Response({"detail": exc.customer_message}, status=502)
 
         with transaction.atomic():
-            revoked = revoke_other_sessions(self.mailbox, keep=request.postbox_session)
+            revoked = revoke_other_sessions(request.identity_mailbox, keep=request.postbox_session)
 
         logger.info(
             "PostBox password changed for mailbox %s; %d other session(s) revoked",
-            self.mailbox.pk, revoked,
+            request.identity_mailbox.pk, revoked,
         )
         return Response({
             "detail": "Your password has been changed.",

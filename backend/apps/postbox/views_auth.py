@@ -20,6 +20,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.mail_directory.models import AccessGrantKind, MailboxAccessGrant
+from apps.mailboxes.models import Mailbox, MailboxKind, MailboxStatus
 from apps.tenants.host_binding import tenant_matches_request
 
 from . import auth as postbox_auth
@@ -37,6 +39,71 @@ class LoginSerializer(serializers.Serializer):
 
 class AccountSwitchSerializer(serializers.Serializer):
     session_id = serializers.UUIDField()
+
+
+class MailboxSwitchSerializer(serializers.Serializer):
+    mailbox_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+def _permissions_json(permissions) -> dict:
+    return {
+        "can_read": permissions.can_read,
+        "can_manage": permissions.can_manage,
+        "can_send_as": permissions.can_send_as,
+        "can_send_on_behalf": permissions.can_send_on_behalf,
+    }
+
+
+def _available_mailboxes(identity):
+    rows = [{
+        "mailbox": MailboxProfileSerializer(identity).data,
+        "permissions": _permissions_json(
+            postbox_auth.MailboxPermissions.owner()
+        ),
+        "is_personal": True,
+        "access_type": "personal",
+    }]
+
+    grants = (
+        MailboxAccessGrant.objects
+        .filter(
+            tenant=identity.tenant,
+            grantee_mailbox=identity,
+            grant_type__in=[
+                AccessGrantKind.TEAM_BOX,
+                AccessGrantKind.DELEGATION,
+            ],
+            active=True,
+            target_mailbox__status=MailboxStatus.ACTIVE,
+            target_mailbox__mail_engine_provisioned=True,
+        )
+        .select_related(
+            "target_mailbox",
+            "target_mailbox__tenant",
+            "target_mailbox__domain",
+        )
+        .order_by("grant_type", "target_mailbox__email")
+    )
+    for grant in grants:
+        try:
+            permissions = postbox_auth._assert_shared_mailbox_available(
+                identity,
+                grant.target_mailbox,
+            )
+        except postbox_auth.MailboxUnavailable:
+            continue
+
+        rows.append({
+            "mailbox": MailboxProfileSerializer(grant.target_mailbox).data,
+            "permissions": _permissions_json(permissions),
+            "is_personal": False,
+            "access_type": (
+                "team_box"
+                if grant.grant_type == AccessGrantKind.TEAM_BOX
+                else "delegation"
+            ),
+        })
+    return rows
 
 
 class PostBoxLoginView(APIView):
@@ -98,6 +165,75 @@ class PostBoxLoginView(APIView):
         postbox_auth.set_session_cookie(response, raw, session)
         postbox_auth.remember_session_on_device(response, request, raw, session)
         return response
+
+
+class PostBoxMailboxSwitchView(APIView):
+    """
+    Select the mailbox this authenticated personal session is operating on.
+
+    The request may name a TeamBox or delegated personal mailbox id, but the id
+    is only a lookup key. The authenticated personal mailbox plus a live access
+    grant remain the authority.
+    """
+
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [postbox_auth.PostBoxSessionAuthentication]
+
+    def post(self, request):
+        serializer = MailboxSwitchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        mailbox_id = serializer.validated_data.get("mailbox_id")
+
+        target = None
+        if mailbox_id is not None:
+            target = (
+                Mailbox.objects
+                .select_related("tenant", "domain")
+                .filter(pk=mailbox_id)
+                .first()
+            )
+            if target is None:
+                return Response(
+                    {"detail": "That mailbox is not available."},
+                    status=404,
+                )
+
+        try:
+            mailbox, permissions = postbox_auth.switch_active_mailbox(
+                request.postbox_session,
+                target,
+            )
+        except postbox_auth.MailboxUnavailable as exc:
+            return Response({"detail": exc.message}, status=403)
+
+        try:
+            from . import imap
+
+            with imap.open_mailbox(mailbox.email) as connection:
+                connection.ensure_standard_folders()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "PostBox folder provisioning failed while switching to %s: %r",
+                mailbox.pk,
+                exc,
+            )
+
+        preference, _ = PostBoxPreference.objects.get_or_create(
+            mailbox=request.identity_mailbox
+        )
+        from .serializers import PreferenceSerializer
+
+        return Response({
+            "mailbox": MailboxProfileSerializer(mailbox).data,
+            "authenticated_mailbox": MailboxProfileSerializer(
+                request.identity_mailbox
+            ).data,
+            "permissions": _permissions_json(permissions),
+            "available_mailboxes": _available_mailboxes(
+                request.identity_mailbox
+            ),
+            "preferences": PreferenceSerializer(preference).data,
+        })
 
 
 class PostBoxLogoutView(APIView):
@@ -274,16 +410,17 @@ class PostBoxLogoutAllView(APIView):
     authentication_classes = [postbox_auth.PostBoxSessionAuthentication]
 
     def post(self, request):
+        identity = request.identity_mailbox
         retained_before = postbox_auth.saved_account_sessions(request)[0]
-        revoked = postbox_auth.revoke_other_sessions(request.mailbox)
+        revoked = postbox_auth.revoke_other_sessions(identity)
         request.postbox_session.revoke()
         logger.info(
             "PostBox: all sessions revoked for mailbox %s (%d others)",
-            request.mailbox.pk, revoked,
+            identity.pk, revoked,
         )
         response = Response({"detail": "Signed out on all devices.", "revoked": revoked + 1})
         for name, _, session in retained_before:
-            if session.mailbox_id == request.mailbox.id:
+            if session.mailbox_id == identity.id:
                 response.delete_cookie(name, path="/")
         postbox_auth.clear_session_cookie(response)
         return response
@@ -328,11 +465,15 @@ class PostBoxMeView(APIView):
     def get(self, request):
         from .serializers import PreferenceSerializer
 
-        preference, _ = PostBoxPreference.objects.get_or_create(mailbox=request.mailbox)
+        identity = request.identity_mailbox
+        preference, _ = PostBoxPreference.objects.get_or_create(mailbox=identity)
         return Response({
             "mailbox": MailboxProfileSerializer(request.mailbox).data,
+            "authenticated_mailbox": MailboxProfileSerializer(identity).data,
+            "permissions": _permissions_json(request.mailbox_permissions),
+            "available_mailboxes": _available_mailboxes(identity),
             "preferences": PreferenceSerializer(preference).data,
-            "mail_client": mail_client_settings(request.mailbox.email),
+            "mail_client": mail_client_settings(identity.email),
             "session": {
                 "id": str(request.postbox_session.id),
                 "expires_at": request.postbox_session.expires_at.isoformat(),
@@ -354,7 +495,7 @@ class PostBoxSessionListView(APIView):
 
     def get(self, request):
         sessions = (
-            PostBoxSession.objects.for_mailbox(request.mailbox)
+            PostBoxSession.objects.for_mailbox(request.identity_mailbox)
             .filter(revoked_at__isnull=True)
             .order_by("-last_seen_at")
         )
@@ -389,7 +530,7 @@ class PostBoxSessionRevokeView(APIView):
 
     def delete(self, request, session_id):
         session = (
-            PostBoxSession.objects.for_mailbox(request.mailbox)
+            PostBoxSession.objects.for_mailbox(request.identity_mailbox)
             .filter(pk=session_id)
             .first()
         )

@@ -25,6 +25,7 @@ import base64
 import binascii
 import logging
 from datetime import datetime
+from email.utils import formataddr
 
 from django.conf import settings
 from django.utils import timezone
@@ -225,8 +226,13 @@ def _attachment_refs_for_saved_message(
 class ComposeMixin:
     """Shared building of a message from a compose payload."""
 
-    def build(self, data, *, mailbox, draft=False):
-        identity = sending.assert_may_send_as(mailbox, data["from_address"])
+    def build(self, data, *, mailbox, actor_mailbox=None, draft=False):
+        actor = actor_mailbox or mailbox
+        identity = sending.assert_may_send_as(
+            mailbox,
+            data["from_address"],
+            actor_mailbox=actor,
+        )
 
         html = data.get("html") or ""
         text = data.get("text") or ""
@@ -307,10 +313,21 @@ class ComposeMixin:
             draft_signature_id=str(signature.id) if draft and signature else "",
             draft_quoted_text=quoted_text if draft else "",
         )
+        if (
+            identity.send_mode == "on_behalf"
+            and actor.pk != mailbox.pk
+            and not draft
+        ):
+            message["Sender"] = formataddr((
+                actor.full_name or "",
+                actor.email,
+            ))
         return message, identity
 
 
 class SendView(PostBoxView, ComposeMixin):
+    def required_team_box_permission(self, request) -> str:
+        return "send"
     """
     Send now, or schedule.
 
@@ -325,6 +342,7 @@ class SendView(PostBoxView, ComposeMixin):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         mailbox = self.mailbox
+        actor = request.identity_mailbox
 
         recipients = sending.envelope_recipients(
             data.get("to") or [], data.get("cc") or [], data.get("bcc") or []
@@ -347,27 +365,66 @@ class SendView(PostBoxView, ComposeMixin):
             )
 
         send_at = data.get("send_at")
+        if send_at and actor.pk != mailbox.pk and not request.mailbox_permissions.can_manage:
+            return Response(
+                {
+                    "detail": (
+                        "Scheduling from a TeamBox requires Manage permission "
+                        "because it creates shared scheduled-mail state."
+                    )
+                },
+                status=403,
+            )
         if send_at:
             # Store an EDITABLE source message in Scheduled: Bcc and the
             # selected signature remain draft metadata, while the signature
             # itself is not applied yet. The worker finalises it at send time.
-            scheduled_source, _ = self.build(data, mailbox=mailbox, draft=True)
+            scheduled_source, _ = self.build(
+                data,
+                mailbox=mailbox,
+                actor_mailbox=actor,
+                draft=True,
+            )
             return self._schedule(
                 scheduled_source,
                 data,
                 send_at,
                 recipients,
                 mailbox,
+                actor,
             )
 
-        message, identity = self.build(data, mailbox=mailbox)
+        message, identity = self.build(
+            data,
+            mailbox=mailbox,
+            actor_mailbox=actor,
+        )
         sending.submit(
-            message, mailbox=mailbox, envelope_from=identity.address, recipients=recipients
+            message,
+            mailbox=actor,
+            envelope_from=identity.address,
+            recipients=recipients,
         )
 
         # Only now. Submission succeeded, so this copy is true.
         appended = self._file_in_sent(mailbox, message)
         self._discard_draft(mailbox, data.get("draft_uid"))
+
+        if actor.pk != mailbox.pk:
+            from apps.logs.utils import log_event
+
+            log_event(
+                mailbox.tenant,
+                "postbox_mailbox_sent_by_actor",
+                request=request,
+                source=actor.email,
+                metadata={
+                    "target_mailbox": mailbox.email,
+                    "from_address": identity.address,
+                    "send_mode": identity.send_mode,
+                    "filed_in_sent": appended,
+                },
+            )
 
         logger.info(
             "PostBox sent: mailbox=%s recipients=%d filed=%s",
@@ -379,7 +436,15 @@ class SendView(PostBoxView, ComposeMixin):
             "filed_in_sent": appended,
         })
 
-    def _schedule(self, message, data, send_at, recipients, mailbox):
+    def _schedule(
+        self,
+        message,
+        data,
+        send_at,
+        recipients,
+        mailbox,
+        submission_mailbox,
+    ):
         if send_at <= timezone.now():
             return Response({"detail": "Choose a time in the future."}, status=400)
 
@@ -400,6 +465,10 @@ class SendView(PostBoxView, ComposeMixin):
 
         scheduled = ScheduledMessage.objects.create(
             mailbox=mailbox,
+            submission_mailbox=submission_mailbox,
+            requires_submission_mailbox=(
+                submission_mailbox.pk != mailbox.pk
+            ),
             folder="Scheduled",
             uid_validity=uid_validity,
             uid=uid,
@@ -408,6 +477,21 @@ class SendView(PostBoxView, ComposeMixin):
             scheduled_at=send_at,
         )
         self._discard_draft(mailbox, data.get("draft_uid"))
+
+        if submission_mailbox.pk != mailbox.pk:
+            from apps.logs.utils import log_event
+
+            log_event(
+                mailbox.tenant,
+                "postbox_mailbox_scheduled_by_actor",
+                request=self.request,
+                source=submission_mailbox.email,
+                metadata={
+                    "target_mailbox": mailbox.email,
+                    "scheduled_message_id": str(scheduled.id),
+                    "scheduled_at": send_at.isoformat(),
+                },
+            )
 
         logger.info(
             "PostBox scheduled %s for mailbox=%s at %s", scheduled.id, mailbox.pk, send_at
@@ -455,6 +539,8 @@ class SendView(PostBoxView, ComposeMixin):
 
 
 class DraftView(PostBoxView, ComposeMixin):
+    def required_team_box_permission(self, request) -> str:
+        return "manage_and_send" if request.method == "POST" else "manage"
     """
     Save a draft, replacing a previous version.
 
@@ -470,7 +556,12 @@ class DraftView(PostBoxView, ComposeMixin):
 
         # The draft keeps its Bcc and its chosen signature as headers so it
         # reopens whole; it is never submitted as-is (see mime.build_message).
-        message, _ = self.build(data, mailbox=self.mailbox, draft=True)
+        message, _ = self.build(
+            data,
+            mailbox=self.mailbox,
+            actor_mailbox=request.identity_mailbox,
+            draft=True,
+        )
         previous = data.get("draft_uid")
 
         with imap.open_mailbox(self.mailbox.email) as connection:
@@ -527,7 +618,11 @@ class ReplyContextView(PostBoxView):
             raw = connection.fetch_raw(uid)
 
         parsed = mime.parse_message(raw, load_remote_images=False)
-        identities = {i.address.lower() for i in sending.allowed_identities(self.mailbox)}
+        sender_identities = sending.allowed_identities(
+            self.mailbox,
+            actor_mailbox=request.identity_mailbox,
+        )
+        identities = {i.address.lower() for i in sender_identities}
 
         quoted_text = ""
         if mode == "forward":
@@ -546,8 +641,25 @@ class ReplyContextView(PostBoxView):
                 parsed, identities, reply_all=(mode == "reply-all")
             )
 
-        preference, _ = PostBoxPreference.objects.get_or_create(mailbox=self.mailbox)
-        default_identity = preference.default_identity or self.mailbox.email
+        preference, _ = PostBoxPreference.objects.get_or_create(
+            mailbox=request.identity_mailbox
+        )
+        if self.mailbox.pk == request.identity_mailbox.pk:
+            permitted = {item.address.lower() for item in sender_identities}
+            default_identity = (
+                preference.default_identity
+                if preference.default_identity.lower() in permitted
+                else self.mailbox.email
+            )
+        else:
+            # A TeamBox reply defaults to its shared identity. A personal
+            # default sender (including a personal Alias) must never leak into
+            # a shared-mailbox reply.
+            default_identity = (
+                sender_identities[0].address
+                if sender_identities
+                else self.mailbox.email
+            )
 
         return Response({
             "mode": mode,

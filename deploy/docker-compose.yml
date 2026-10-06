@@ -210,7 +210,12 @@ services:
   migrate:
     <<: *backend_image
     restart: "no"
-    command: python manage.py migrate --noinput
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        python manage.py migrate --noinput
+        python manage.py collaboration_preflight
     environment: *backend_env
     depends_on:
       postgres: {condition: service_healthy}

@@ -21,7 +21,7 @@ from email.utils import parsedate_to_datetime
 
 from django.conf import settings
 from rest_framework import serializers
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import SAFE_METHODS, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -29,6 +29,7 @@ from apps.security import ratelimit
 from apps.security.limits import POSTBOX_SEARCH_PER_MAILBOX, POSTBOX_SEND_PER_MAILBOX
 
 from . import imap, mime, sending, realtime
+from . import auth as postbox_auth
 from .auth import PostBoxSessionAuthentication
 from .models import FolderAppearance, MailRule, MessageMoveProvenance, MessageOrigin, PostBoxPreference, RemoteImageSenderTrust
 from .appearance import DEFAULT_FOLDER_COLOR, validate_color
@@ -53,6 +54,18 @@ class PostBoxView(APIView):
 
     permission_classes = [IsAuthenticated]
     authentication_classes = [PostBoxSessionAuthentication]
+    team_box_permission_scope = "active"
+
+    def required_team_box_permission(self, request) -> str:
+        return "read" if request.method in SAFE_METHODS else "manage"
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if self.team_box_permission_scope == "active":
+            postbox_auth.require_active_mailbox_permission(
+                request,
+                self.required_team_box_permission(request),
+            )
 
     def handle_exception(self, exc):
         """
@@ -80,7 +93,11 @@ class PostBoxView(APIView):
         return self.request.mailbox
 
     def preferences(self) -> PostBoxPreference:
-        preference, _ = PostBoxPreference.objects.get_or_create(mailbox=self.mailbox)
+        # Appearance/list preferences follow the signed-in person, not a shared
+        # TeamBox. Shared message/folder state still uses self.mailbox.
+        preference, _ = PostBoxPreference.objects.get_or_create(
+            mailbox=self.request.identity_mailbox
+        )
         return preference
 
 

@@ -253,6 +253,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "required_schema_version": db.REQUIRED_VERSION,
             "dkim_storage_writable": writable,
             "phase": "NE2",
+            "capabilities": {
+                "mailbox_sender_authorization": True,
+                "forward_groups": True,
+                "forward_group_sender_policy": True,
+                "collaboration_version": 1,
+            },
         })
 
     def _handle_status(self):
@@ -451,7 +457,8 @@ def _domains_delete(conn, body):
 
 def _mailboxes_ensure(conn, body):
     validation.payload(body, allowed={
-        "address", "local_part", "domain", "display_name", "quota_mb", "active", "password",
+        "address", "local_part", "domain", "display_name", "quota_mb", "active",
+        "password", "login_enabled", "authorized_senders",
     }, required={"address"})
     password = body.get("password", "") or ""
     return provisioning.ensure_mailbox(conn, body, password)
@@ -499,6 +506,28 @@ def _forwarding_ensure(conn, body):
     validation.payload(body, allowed={"mailbox_address", "destinations"},
                        required={"mailbox_address"})
     return provisioning.ensure_forwarding(conn, body)
+
+
+def _forward_groups_ensure(conn, body):
+    validation.payload(
+        body,
+        allowed={
+            "address",
+            "domain",
+            "destinations",
+            "sender_policy",
+            "allowed_senders",
+            "active",
+        },
+        required={"address", "destinations", "sender_policy"},
+    )
+    return provisioning.ensure_forward_group(conn, body)
+
+
+def _forward_groups_delete(conn, body):
+    validation.payload(body, allowed={"address"}, required={"address"})
+    provisioning.delete_forward_group(conn, body["address"])
+    return {"ok": True}
 
 
 def _dkim_rotate(conn, body):
@@ -559,6 +588,10 @@ def _read_forwarding(conn, query):
         "mailbox_address": validation.email_address(address, "mailbox_address"),
         "destinations": provisioning.get_forwarding(conn, address),
     }
+
+
+def _read_forward_group(conn, query):
+    return provisioning.get_forward_group(conn, query.get("address", ""))
 
 
 def _read_dkim(conn, query):
@@ -628,6 +661,7 @@ _READ_ROUTES = {
     "/v1/aliases":             _read_alias,
     "/v1/mailboxes/send-as":   _read_send_as,
     "/v1/forwarding":          _read_forwarding,
+    "/v1/forward-groups":      _read_forward_group,
     "/v1/dkim":                _read_dkim,
     "/v1/mailboxes/usage":     _read_usage,
     "/v1/mailboxes/rate-limit": _read_rate_limit,
@@ -649,6 +683,8 @@ _WRITE_ROUTES = {
     "/v1/aliases/ensure":          _aliases_ensure,
     "/v1/aliases/delete":          _aliases_delete,
     "/v1/forwarding/ensure":       _forwarding_ensure,
+    "/v1/forward-groups/ensure":   _forward_groups_ensure,
+    "/v1/forward-groups/delete":   _forward_groups_delete,
     "/v1/dkim/rotate":             _dkim_rotate,
     "/v1/dkim/delete":             _dkim_delete,
     "/v1/dkim/reconcile":          _dkim_reconcile,

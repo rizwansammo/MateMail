@@ -99,7 +99,17 @@ const PINNED_ROLES = new Set(PINNED.map((entry) => entry.role));
 export default function PostBoxAppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const { mailbox, preferences, isLoading, signOut, updatePreferences } = usePostBox();
+  const {
+    mailbox,
+    authenticatedMailbox,
+    availableMailboxes,
+    permissions,
+    preferences,
+    isLoading,
+    signOut,
+    switchMailbox,
+    updatePreferences,
+  } = usePostBox();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -197,11 +207,15 @@ export default function PostBoxAppLayout({
       folders={folders}
       refreshFolders={refreshFolders}
       mailbox={mailbox}
+      authenticatedMailbox={authenticatedMailbox}
+      availableMailboxes={availableMailboxes}
+      permissions={permissions}
       preferences={preferences}
       railOpen={railOpen}
       setRailOpen={setRailOpen}
       closeRail={closeRail}
       signOut={signOut}
+      switchMailbox={switchMailbox}
       updatePreferences={updatePreferences}
     >
       {children}
@@ -214,22 +228,30 @@ function PremiumPostBoxShell({
   folders,
   refreshFolders,
   mailbox,
+  authenticatedMailbox,
+  availableMailboxes,
+  permissions,
   preferences,
   railOpen,
   setRailOpen,
   closeRail,
   signOut,
+  switchMailbox,
   updatePreferences,
 }: {
   children: React.ReactNode;
   folders: Folder[];
   refreshFolders: () => Promise<void>;
   mailbox: NonNullable<ReturnType<typeof usePostBox>["mailbox"]>;
+  authenticatedMailbox: ReturnType<typeof usePostBox>["authenticatedMailbox"];
+  availableMailboxes: ReturnType<typeof usePostBox>["availableMailboxes"];
+  permissions: ReturnType<typeof usePostBox>["permissions"];
   preferences: ReturnType<typeof usePostBox>["preferences"];
   railOpen: boolean;
   setRailOpen: (open: boolean) => void;
   closeRail: () => void;
   signOut: () => Promise<void>;
+  switchMailbox: ReturnType<typeof usePostBox>["switchMailbox"];
   updatePreferences: ReturnType<typeof usePostBox>["updatePreferences"];
 }) {
   const router = useRouter();
@@ -237,6 +259,7 @@ function PremiumPostBoxShell({
   const accountMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [savedAccounts, setSavedAccounts] = useState<SavedPostBoxAccount[]>([]);
   const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
+  const [switchingMailbox, setSwitchingMailbox] = useState<string | null>(null);
   const [accountMenuError, setAccountMenuError] = useState<string | null>(null);
   const [labels, setLabels] = useState<MailLabel[]>([]);
   const [editor, setEditor] = useState<{
@@ -442,8 +465,26 @@ function PremiumPostBoxShell({
   const custom = folders.filter((folder) => !PINNED_ROLES.has(folder.role));
   const initials = accountInitials(mailbox.full_name, mailbox.email);
   const otherAccounts = savedAccounts.filter(
-    (item) => item.mailbox.id !== mailbox.id,
+    (item) => item.mailbox.id !== authenticatedMailbox?.id,
   );
+  const teamBoxes = availableMailboxes.filter(
+    (item) =>
+      item.access_type === "team_box" &&
+      item.mailbox.id !== mailbox.id,
+  );
+  const delegatedMailboxes = availableMailboxes.filter(
+    (item) =>
+      item.access_type === "delegation" &&
+      item.mailbox.id !== mailbox.id,
+  );
+  const activeDelegation = Boolean(
+    authenticatedMailbox &&
+    mailbox.kind === "personal" &&
+    mailbox.id !== authenticatedMailbox.id,
+  );
+
+  const canReadMailbox = permissions.can_read;
+  const canSendMailbox = permissions.can_send_as || permissions.can_send_on_behalf;
 
   const themeOptions = [
     { value: "light" as const, Icon: Sun, label: "Light" },
@@ -462,14 +503,14 @@ function PremiumPostBoxShell({
       ) {
         return;
       }
-      if (event.key.toLowerCase() === "c") {
+      if (event.key.toLowerCase() === "c" && canSendMailbox) {
         event.preventDefault();
         router.push("/postbox?compose=new");
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [router]);
+  }, [canSendMailbox, router]);
 
   return (
     <div className={`pb pb-premium-shell ${
@@ -509,27 +550,36 @@ function PremiumPostBoxShell({
           <span className="pb-premium-wordmark">PostBox</span>
         </Link>
 
-        <div className="pb-premium-compose-wrap">
-          <Link href="/postbox?compose=new" className="pb-premium-compose" onClick={closeRail}>
-            <PenLine className="h-[18px] w-[18px]" aria-hidden="true" />
-            Compose
-            <kbd>C</kbd>
-          </Link>
-        </div>
+        {canSendMailbox && (
+          <div className="pb-premium-compose-wrap">
+            <Link href="/postbox?compose=new" className="pb-premium-compose" onClick={closeRail}>
+              <PenLine className="h-[18px] w-[18px]" aria-hidden="true" />
+              Compose
+              <kbd>C</kbd>
+            </Link>
+          </div>
+        )}
 
-        <nav className="pb-premium-nav" aria-label="Folders">
-          <Suspense fallback={null}>
-            <PremiumFolderNavigation
-              folders={folders}
-              byRole={byRole}
-              custom={custom}
-              labels={labels}
-              onNavigate={closeRail}
-              onCreate={openEditor}
-              onDelete={deleteEntry}
-            />
-          </Suspense>
-        </nav>
+        {canReadMailbox ? (
+          <nav className="pb-premium-nav" aria-label="Folders">
+            <Suspense fallback={null}>
+              <PremiumFolderNavigation
+                folders={folders}
+                byRole={byRole}
+                custom={custom}
+                labels={labels}
+                onNavigate={closeRail}
+                onCreate={openEditor}
+                onDelete={deleteEntry}
+                canManage={permissions.can_manage}
+              />
+            </Suspense>
+          </nav>
+        ) : (
+          <div className="px-4 py-3 text-sm pb-muted">
+            This mailbox grants sending access only. Inbox and folders are not available.
+          </div>
+        )}
 
       </aside>
 
@@ -544,9 +594,16 @@ function PremiumPostBoxShell({
             <Menu className="h-5 w-5" aria-hidden="true" />
           </button>
 
-          <Suspense fallback={<div className="pb-premium-search" aria-hidden="true" />}>
-            <PremiumSearch />
-          </Suspense>
+          {canReadMailbox ? (
+            <Suspense fallback={<div className="pb-premium-search" aria-hidden="true" />}>
+              <PremiumSearch />
+            </Suspense>
+          ) : (
+            <div className="pb-premium-search" aria-label="Send-only mailbox access">
+              <Search className="h-[19px] w-[19px]" aria-hidden="true" />
+              <span className="pb-muted">Send-only mailbox access</span>
+            </div>
+          )}
 
           <div className="pb-premium-top-actions">
             <Link
@@ -571,6 +628,12 @@ function PremiumPostBoxShell({
                   <div className="pb-premium-account-copy">
                     <strong>{mailbox.full_name || mailbox.email}</strong>
                     <span>{mailbox.email}</span>
+                    {mailbox.kind === "team_box" && authenticatedMailbox && (
+                      <small>TeamBox · signed in as {authenticatedMailbox.email}</small>
+                    )}
+                    {activeDelegation && authenticatedMailbox && (
+                      <small>Delegated mailbox · signed in as {authenticatedMailbox.email}</small>
+                    )}
                   </div>
                   <Link
                     href="/postbox/settings?section=account"
@@ -580,6 +643,182 @@ function PremiumPostBoxShell({
                     Manage account
                   </Link>
                 </div>
+
+                {(mailbox.kind === "team_box" || teamBoxes.length > 0) && authenticatedMailbox && (
+                  <div className="pb-premium-account-switcher">
+                    <div className="pb-premium-account-section-label">TeamBoxes</div>
+
+                    {mailbox.kind === "team_box" && (
+                      <button
+                        type="button"
+                        className="pb-premium-account-row"
+                        disabled={Boolean(switchingMailbox)}
+                        onClick={async () => {
+                          setAccountMenuError(null);
+                          setSwitchingMailbox(authenticatedMailbox.id);
+                          try {
+                            await switchMailbox(null);
+                            window.location.assign("/postbox?folder=INBOX");
+                          } catch {
+                            window.location.assign("/postbox?folder=INBOX");
+                          }
+                        }}
+                      >
+                        <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                          {accountInitials(authenticatedMailbox.full_name, authenticatedMailbox.email) || "PB"}
+                        </span>
+                        <span className="pb-premium-account-row-copy">
+                          <strong>{authenticatedMailbox.full_name || authenticatedMailbox.email}</strong>
+                          <small>{authenticatedMailbox.email} · My mailbox</small>
+                        </span>
+                        {switchingMailbox === authenticatedMailbox.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
+                        ) : (
+                          <span className="pb-premium-account-switch-label">Open</span>
+                        )}
+                      </button>
+                    )}
+
+                    {teamBoxes.map((entry) => {
+                      const target = entry.mailbox;
+                      const switching = switchingMailbox === target.id;
+                      const canRead = entry.permissions.can_read;
+                      const canSend =
+                        entry.permissions.can_send_as ||
+                        entry.permissions.can_send_on_behalf;
+                      return (
+                        <button
+                          key={target.id}
+                          type="button"
+                          className="pb-premium-account-row"
+                          disabled={Boolean(switchingMailbox)}
+                          onClick={async () => {
+                            setAccountMenuError(null);
+                            setSwitchingMailbox(target.id);
+                            try {
+                              await switchMailbox(target.id);
+                              window.location.assign(
+                                canRead
+                                  ? "/postbox?folder=INBOX"
+                                  : canSend
+                                    ? "/postbox?compose=new"
+                                    : "/postbox",
+                              );
+                            } catch {
+                              setAccountMenuError("You no longer have access to that TeamBox.");
+                              setSwitchingMailbox(null);
+                            }
+                          }}
+                        >
+                          <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                            <Users className="h-4 w-4" />
+                          </span>
+                          <span className="pb-premium-account-row-copy">
+                            <strong>{target.full_name || target.email}</strong>
+                            <small>
+                              {target.email}
+                              {!canRead && canSend ? " · Send only" : ""}
+                            </small>
+                          </span>
+                          {switching ? (
+                            <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
+                          ) : (
+                            <span className="pb-premium-account-switch-label">Open</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {(activeDelegation || delegatedMailboxes.length > 0) && authenticatedMailbox && (
+                  <div className="pb-premium-account-switcher">
+                    <div className="pb-premium-account-section-label">Delegated mailboxes</div>
+
+                    {activeDelegation && (
+                      <button
+                        type="button"
+                        className="pb-premium-account-row"
+                        disabled={Boolean(switchingMailbox)}
+                        onClick={async () => {
+                          setAccountMenuError(null);
+                          setSwitchingMailbox(authenticatedMailbox.id);
+                          try {
+                            await switchMailbox(null);
+                            window.location.assign("/postbox?folder=INBOX");
+                          } catch {
+                            window.location.assign("/postbox?folder=INBOX");
+                          }
+                        }}
+                      >
+                        <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                          {accountInitials(authenticatedMailbox.full_name, authenticatedMailbox.email) || "PB"}
+                        </span>
+                        <span className="pb-premium-account-row-copy">
+                          <strong>{authenticatedMailbox.full_name || authenticatedMailbox.email}</strong>
+                          <small>{authenticatedMailbox.email} · My mailbox</small>
+                        </span>
+                        {switchingMailbox === authenticatedMailbox.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
+                        ) : (
+                          <span className="pb-premium-account-switch-label">Open</span>
+                        )}
+                      </button>
+                    )}
+
+                    {delegatedMailboxes.map((entry) => {
+                      const target = entry.mailbox;
+                      const switching = switchingMailbox === target.id;
+                      const canRead = entry.permissions.can_read;
+                      const canSend =
+                        entry.permissions.can_send_as ||
+                        entry.permissions.can_send_on_behalf;
+                      return (
+                        <button
+                          key={target.id}
+                          type="button"
+                          className="pb-premium-account-row"
+                          disabled={Boolean(switchingMailbox)}
+                          onClick={async () => {
+                            setAccountMenuError(null);
+                            setSwitchingMailbox(target.id);
+                            try {
+                              await switchMailbox(target.id);
+                              window.location.assign(
+                                canRead
+                                  ? "/postbox?folder=INBOX"
+                                  : canSend
+                                    ? "/postbox?compose=new"
+                                    : "/postbox",
+                              );
+                            } catch {
+                              setAccountMenuError(
+                                "You no longer have access to that delegated mailbox.",
+                              );
+                              setSwitchingMailbox(null);
+                            }
+                          }}
+                        >
+                          <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                            <User className="h-4 w-4" />
+                          </span>
+                          <span className="pb-premium-account-row-copy">
+                            <strong>{target.full_name || target.email}</strong>
+                            <small>
+                              {target.email}
+                              {!canRead && canSend ? " · Send only" : ""}
+                            </small>
+                          </span>
+                          {switching ? (
+                            <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
+                          ) : (
+                            <span className="pb-premium-account-switch-label">Open</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {otherAccounts.length > 0 && (
                   <div className="pb-premium-account-switcher">
@@ -675,13 +914,15 @@ function PremiumPostBoxShell({
                   </p>
                 )}
 
-                <Link
-                  href="/postbox/contacts"
-                  className="pb-premium-account-contacts"
-                >
-                  <Users className="h-4 w-4" aria-hidden="true" />
-                  Contacts
-                </Link>
+                {canReadMailbox && (
+                  <Link
+                    href="/postbox/contacts"
+                    className="pb-premium-account-contacts"
+                  >
+                    <Users className="h-4 w-4" aria-hidden="true" />
+                    Contacts
+                  </Link>
+                )}
 
                 <div className="pb-premium-account-footer">
                   <Link href="/postbox/settings">
@@ -947,7 +1188,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function PremiumFolderNavigation({
-  byRole, custom, labels, onNavigate, onCreate, onDelete,
+  byRole, custom, labels, onNavigate, onCreate, onDelete, canManage,
 }: {
   folders: Folder[];
   byRole: Map<string, Folder>;
@@ -959,6 +1200,7 @@ function PremiumFolderNavigation({
     color?: string | null, colorOnly?: boolean,
   ) => void;
   onDelete: (kind: "folder" | "label", name: string, id?: string) => void;
+  canManage: boolean;
 }) {
   const pathname = usePathname();
   const params = useSearchParams();
@@ -1000,8 +1242,10 @@ function PremiumFolderNavigation({
           {foldersOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
           <span>FOLDERS</span>
         </button>
-        <button type="button" aria-label="Create folder" title="Create folder"
-          onClick={() => onCreate("folder")}><Plus size={17} /></button>
+        {canManage && (
+          <button type="button" aria-label="Create folder" title="Create folder"
+            onClick={() => onCreate("folder")}><Plus size={17} /></button>
+        )}
       </div>
       {foldersOpen && custom.map((folder) => {
         const active = pathname === "/postbox" && !selectedLabel &&
@@ -1018,24 +1262,26 @@ function PremiumFolderNavigation({
               <span className="truncate">{folder.name}</span>
               {folder.unseen ? <span className="pb-premium-nav-count">{folder.unseen}</span> : null}
             </Link>
-            <details className="pb-organize-item-menu">
-              <summary aria-label={"Manage folder " + folder.name}
-                title={"Manage folder " + folder.name}><MoreHorizontal size={17} /></summary>
-              <div>
-                <button type="button" onClick={(event) => {
-                  event.currentTarget.closest("details")!.open = false;
-                  onCreate("folder", folder.name, undefined, folder.color);
-                }}>Edit</button>
-                <button type="button" onClick={(event) => {
-                  event.currentTarget.closest("details")!.open = false;
-                  onCreate("folder", folder.name, undefined, folder.color, true);
-                }}>Change Color</button>
-                <button type="button" onClick={(event) => {
-                  event.currentTarget.closest("details")!.open = false;
-                  onDelete("folder", folder.name);
-                }}>Delete</button>
-              </div>
-            </details>
+            {canManage && (
+              <details className="pb-organize-item-menu">
+                <summary aria-label={"Manage folder " + folder.name}
+                  title={"Manage folder " + folder.name}><MoreHorizontal size={17} /></summary>
+                <div>
+                  <button type="button" onClick={(event) => {
+                    event.currentTarget.closest("details")!.open = false;
+                    onCreate("folder", folder.name, undefined, folder.color);
+                  }}>Edit</button>
+                  <button type="button" onClick={(event) => {
+                    event.currentTarget.closest("details")!.open = false;
+                    onCreate("folder", folder.name, undefined, folder.color, true);
+                  }}>Change Color</button>
+                  <button type="button" onClick={(event) => {
+                    event.currentTarget.closest("details")!.open = false;
+                    onDelete("folder", folder.name);
+                  }}>Delete</button>
+                </div>
+              </details>
+            )}
           </div>
         );
       })}
@@ -1047,8 +1293,10 @@ function PremiumFolderNavigation({
           {labelsOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
           <span>LABELS</span>
         </button>
-        <button type="button" aria-label="Create label" title="Create label"
-          onClick={() => onCreate("label")}><Plus size={17} /></button>
+        {canManage && (
+          <button type="button" aria-label="Create label" title="Create label"
+            onClick={() => onCreate("label")}><Plus size={17} /></button>
+        )}
       </div>
       {labelsOpen && labels.map((label) => (
         <div className="pb-organize-nav-row" key={label.id}>
@@ -1061,24 +1309,26 @@ function PremiumFolderNavigation({
             <Tag size={17} aria-hidden="true" style={{ color: label.color || LABEL_COLOR_DEFAULT }} />
             <span className="truncate">{label.name}</span>
           </Link>
-          <details className="pb-organize-item-menu">
-            <summary aria-label={"Manage label " + label.name}
-              title={"Manage label " + label.name}><MoreHorizontal size={17} /></summary>
-            <div>
-              <button type="button" onClick={(event) => {
-                event.currentTarget.closest("details")!.open = false;
-                onCreate("label", label.name, label.id, label.color);
-              }}>Edit</button>
-              <button type="button" onClick={(event) => {
-                event.currentTarget.closest("details")!.open = false;
-                onCreate("label", label.name, label.id, label.color, true);
-              }}>Change Color</button>
-              <button type="button" onClick={(event) => {
-                event.currentTarget.closest("details")!.open = false;
-                onDelete("label", label.name, label.id);
-              }}>Delete</button>
-            </div>
-          </details>
+          {canManage && (
+            <details className="pb-organize-item-menu">
+              <summary aria-label={"Manage label " + label.name}
+                title={"Manage label " + label.name}><MoreHorizontal size={17} /></summary>
+              <div>
+                <button type="button" onClick={(event) => {
+                  event.currentTarget.closest("details")!.open = false;
+                  onCreate("label", label.name, label.id, label.color);
+                }}>Edit</button>
+                <button type="button" onClick={(event) => {
+                  event.currentTarget.closest("details")!.open = false;
+                  onCreate("label", label.name, label.id, label.color, true);
+                }}>Change Color</button>
+                <button type="button" onClick={(event) => {
+                  event.currentTarget.closest("details")!.open = false;
+                  onDelete("label", label.name, label.id);
+                }}>Delete</button>
+              </div>
+            </details>
+          )}
         </div>
       ))}
 

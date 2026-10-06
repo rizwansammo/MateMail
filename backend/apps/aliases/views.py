@@ -9,6 +9,7 @@ from apps.domains.models import Domain
 from apps.domains.verification import DomainNotVerified, assert_provisionable
 from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
+from apps.mail_directory.services import AddressConflict
 from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
 from apps.tenants.policy import MailNotPermitted, assert_can_use_mail
 from .models import Alias, AliasStatus
@@ -18,19 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 def _alias_destinations(alias) -> tuple[str, ...]:
-    """
-    The alias's final destination set.
-
-    Which address an alias delivers to is MateMail product logic, so it is
-    resolved here and handed to the adapter as a finished instruction.
-    """
-    target = (
-        alias.destination_mailbox.email
-        if alias.destination_mailbox
-        else alias.destination_address
-    )
-    return (target,) if target else ()
-
+    """An Alias always resolves to exactly one existing MateMail mailbox."""
+    return (alias.destination_mailbox.email,)
 
 def _apply_alias(alias) -> None:
     """Push an alias's desired state to the Mail Engine and record the result."""
@@ -102,19 +92,13 @@ class AliasListCreateView(APIView):
                 status=400,
             )
 
-        destination_mailbox = None
-        destination_address = ""
-
-        if data.get("destination_mailbox_id"):
-            destination_mailbox = (
-                Mailbox.objects.for_tenant(request.tenant)
-                .filter(pk=data["destination_mailbox_id"])
-                .first()
-            )
-            if not destination_mailbox:
-                return Response({"destination_mailbox_id": "Mailbox not found."}, status=400)
-        else:
-            destination_address = data["destination_address"]
+        destination_mailbox = (
+            Mailbox.objects.for_tenant(request.tenant)
+            .filter(pk=data["destination_mailbox_id"])
+            .first()
+        )
+        if not destination_mailbox:
+            return Response({"destination_mailbox_id": "Mailbox not found."}, status=400)
 
         # Aliases were previously uncapped entirely. Checked and created under
         # the tenant lock, like every other plan-limited resource.
@@ -122,14 +106,16 @@ class AliasListCreateView(APIView):
             if not slot.allowed:
                 return Response({"detail": slot.message}, status=402)
 
-            alias = Alias.objects.create(
-                tenant=request.tenant,
-                domain=domain,
-                source_address=source_address,
-                destination_mailbox=destination_mailbox,
-                destination_address=destination_address,
-                status=AliasStatus.ACTIVE,
-            )
+            try:
+                alias = Alias.objects.create(
+                    tenant=request.tenant,
+                    domain=domain,
+                    source_address=source_address,
+                    destination_mailbox=destination_mailbox,
+                    status=AliasStatus.ACTIVE,
+                )
+            except AddressConflict as exc:
+                return Response({"source_local_part": exc.customer_message}, status=400)
 
         try:
             _apply_alias(alias)

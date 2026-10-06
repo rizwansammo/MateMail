@@ -210,6 +210,7 @@ def serialise_mailbox(mailbox) -> dict:
         "id": str(mailbox.id),
         "email": mailbox.email,
         "full_name": mailbox.full_name,
+        "kind": mailbox.kind,
         "tenant": _tenant_brief(mailbox.tenant),
         "domain": mailbox.domain.domain if mailbox.domain else None,
         "status": mailbox.status,
@@ -244,7 +245,7 @@ class PlatformAliasListView(PlatformListView):
         if term:
             qs = qs.filter(
                 Q(source_address__icontains=term)
-                | Q(destination_address__icontains=term)
+                | Q(destination_mailbox__email__icontains=term)
                 | Q(tenant__name__icontains=term)
             )
         if status_filter := request.query_params.get("status"):
@@ -256,9 +257,7 @@ class PlatformAliasListView(PlatformListView):
 
 
 def serialise_alias(alias) -> dict:
-    destination = alias.destination_address
-    if not destination and alias.destination_mailbox:
-        destination = alias.destination_mailbox.email
+    destination = alias.destination_mailbox.email
     return {
         "id": str(alias.id),
         "kind": "alias",
@@ -269,9 +268,9 @@ def serialise_alias(alias) -> dict:
         "status": alias.status,
         "mail_engine_provisioned": alias.mail_engine_provisioned,
         "created_at": _iso(alias.created_at),
-        # An alias whose destination leaves the platform is the shape abuse
-        # takes, so the console can surface it without re-deriving the rule.
-        "external_destination": _is_external(destination),
+        # Alias destinations are structurally internal. External delivery is
+        # represented only by ForwardingRule.
+        "external_destination": False,
     }
 
 

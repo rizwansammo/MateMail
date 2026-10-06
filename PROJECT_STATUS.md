@@ -23,6 +23,37 @@
 
 ---
 
+## Mail collaboration foundation — feature branch (2026-10-06)
+
+Development branch: `feature/mail-collaboration`.
+
+Phase A establishes the shared-address and mailbox-access primitives for
+TeamBox, Forward Group and Delegation. Phase B normalizes Alias as an alternate
+address for exactly one existing MateMail mailbox. Phase C adds full TeamBox
+Hub/backend/native-engine management, including passwordless storage and
+engine-enforced member sender authorization. Phase D adds permission-aware
+TeamBox switching and use inside PostBox while keeping the authenticated
+personal mailbox identity immutable. Phase E adds Forward Groups as a separate
+distribution feature with Native Engine routing, member management and
+SMTP-enforced posting policies. Phase F adds personal-mailbox Delegation with
+Hub administration, PostBox switching and actor-aware delegated sending.
+Phase G adds final cross-feature security and production rollout hardening.
+
+- Central `AddressClaim` registry prevents cross-type address collisions.
+- Existing personal mailboxes and aliases are backfilled into the registry.
+- `Mailbox.kind` distinguishes personal mailboxes from future TeamBoxes.
+- Direct PostBox authentication remains personal-mailbox only.
+- `MailboxAccessGrant` is the permission primitive for TeamBox membership and
+  Delegation.
+- Existing `ForwardingRule` remains separate from Forward Group.
+- Phase B removes external Alias destinations from the product contract; external delivery remains the existing Forwarding feature.
+- Phase C adds dedicated TeamBox Hub screens, member permissions, native-engine schema v5 and SMTP sender authorization.
+- Phase D adds PostBox TeamBox switching, Read/Manage/Send As/Send on behalf enforcement, personal-actor SMTP submission, shared Sent/Drafts, scheduled-send actor retention and audit logging.
+- Phase E adds Forward Groups (FG): dedicated Hub UI/API/models, engine schema v6 distribution routing, Anyone/Organization/Members/Selected sender policies, SMTP RCPT-time enforcement and forwarding-loop protection. Existing Forwarding remains a separate mailbox rule.
+- Phase F adds Delegation: owner/admin Hub management, personal→personal access grants, dedicated PostBox delegated-mailbox switching, Read/Manage/Send As/Send on behalf enforcement, alias-aware delegated sending, live push revocation and target-delete session safety.
+- Phase G finalizes collaboration production safety: deleted-actor scheduled sends fail closed, shared-mailbox push devices are session-isolated, migrations are followed by a read-only collaboration data preflight, and application deployment refuses to proceed until Native Engine schema v6 plus the Forward Group Postfix policy are actually live.
+
+Design record: `docs/COLLABORATION.md`.
 
 ## Custom Hub/PostBox Domains — production live (2026-10-06)
 

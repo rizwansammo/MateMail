@@ -91,7 +91,22 @@ function CentredSpinner() {
 function Mailbox() {
   const router = useRouter();
   const params = useSearchParams();
-  const { preferences, updatePreferences } = usePostBox();
+  const {
+    mailbox,
+    authenticatedMailbox,
+    permissions,
+    preferences,
+    updatePreferences,
+  } = usePostBox();
+  const canReadMailbox = permissions.can_read;
+  const canManageMailbox = permissions.can_manage;
+  const canSendMailbox = permissions.can_send_as || permissions.can_send_on_behalf;
+  const isTeamBox = mailbox?.kind === "team_box";
+  const isSharedMailbox = Boolean(
+    mailbox &&
+    authenticatedMailbox &&
+    mailbox.id !== authenticatedMailbox.id,
+  );
 
   const folder = params.get("folder") || "INBOX";
   const labelId = params.get("label");
@@ -215,8 +230,21 @@ function Mailbox() {
   }, [query]);
 
   const list = useAsyncData<MessagePage>(
-    () =>
-      labelId ? postbox.labeledMessages(labelId, {
+    () => {
+      if (!canReadMailbox) {
+        return Promise.resolve({
+          folder,
+          scope: "folder",
+          sort: sortMode,
+          uid_validity: 0,
+          page: 1,
+          page_size: preferences.messages_per_page || 25,
+          total: 0,
+          has_next: false,
+          results: [],
+        } as MessagePage);
+      }
+      return labelId ? postbox.labeledMessages(labelId, {
         page: pageNumber,
         q: search || undefined,
         sort: sortMode,
@@ -233,8 +261,11 @@ function Mailbox() {
         sort: sortMode,
         unread: unreadOnly ? "true" : undefined,
         starred: filteredStarredOnly ? "true" : undefined,
-      }),
+      });
+    },
     [
+      canReadMailbox,
+      folder,
       labelId,
       folder,
       pageNumber,
@@ -253,8 +284,21 @@ function Mailbox() {
   const loadList = list.reload;
 
   const directory = useAsyncData(
-    () => Promise.all([postbox.identities(), postbox.signatures(), postbox.folders(), postbox.labels()]),
-    [],
+    () => Promise.all([
+      canSendMailbox
+        ? postbox.identities()
+        : Promise.resolve({ results: [] }),
+      canSendMailbox
+        ? postbox.signatures()
+        : Promise.resolve({ results: [] }),
+      canReadMailbox
+        ? postbox.folders()
+        : Promise.resolve({ results: [] }),
+      canReadMailbox
+        ? postbox.labels()
+        : Promise.resolve({ results: [] }),
+    ]),
+    [canReadMailbox, canSendMailbox],
     "",
   );
   const identities = directory.data?.[0]?.results ?? [];
@@ -265,8 +309,10 @@ function Mailbox() {
     [directory.data],
   );
   const contacts = useAsyncData(
-    () => postbox.contacts(),
-    [],
+    () => canReadMailbox
+      ? postbox.contacts()
+      : Promise.resolve({ results: [] }),
+    [canReadMailbox],
     "",
   );
   const contactNameByEmail = useMemo(() => {
@@ -304,19 +350,21 @@ function Mailbox() {
     sortMode === "newest" && searchScope === "folder";
   const conversationMode = conversationEligible && listView === "conversations";
   const conversations = useAsyncData<ConversationPage>(
-    () => conversationMode
+    () => canReadMailbox && conversationMode
       ? postbox.conversations({ scope: "inbox", page: pageNumber, page_size: Math.min(100, preferences.messages_per_page || 25) })
       : Promise.resolve({
           scope: "inbox" as const, page: 1, page_size: 25, total: 0,
           has_next: false, results: [],
         }),
-    [conversationMode, pageNumber, preferences.messages_per_page],
+    [canReadMailbox, conversationMode, pageNumber, preferences.messages_per_page],
     "Conversation view is unavailable. Switch to Messages.",
   );
 
   const scheduledData = useAsyncData(
-    () => postbox.scheduled(),
-    [],
+    () => canReadMailbox
+      ? postbox.scheduled()
+      : Promise.resolve({ results: [] }),
+    [canReadMailbox],
     "",
   );
   const scheduledRows = scheduledData.data?.results ?? [];
@@ -343,14 +391,15 @@ function Mailbox() {
   // not need an effect that copies URL state into React state.
   const composeRequested = params.get("compose") === "new";
   const composeRecipient = params.get("to")?.trim() || "";
-  const compose =
-    explicitCompose ??
+  const compose = canSendMailbox
+    ? explicitCompose ??
     (composeRequested
       ? {
           mode: "new" as const,
           ...(composeRecipient ? { to: [composeRecipient] } : {}),
         }
-      : null);
+      : null)
+    : null;
 
   const closeCompose = useCallback(() => {
     setExplicitCompose(null);
@@ -434,7 +483,12 @@ function Mailbox() {
         setDetail(data);
         // Marking read is a separate, explicit call — the list does not mark
         // things seen as it scrolls past them.
-        if (!summary.seen && role !== "sent" && !summary.sent_origin) {
+        if (
+          canManageMailbox &&
+          !summary.seen &&
+          role !== "sent" &&
+          !summary.sent_origin
+        ) {
           await postbox.act("read", summary.folder, [summary.uid], {
             uid_validity: summary.uid_validity,
           });
@@ -469,7 +523,7 @@ function Mailbox() {
         if (requestId === openRequestId.current) setDetailLoading(false);
       }
     },
-    [loadList, mailFolders, conversationMode],
+    [canManageMailbox, loadList, mailFolders, conversationMode],
   );
 
   const applyLabel = async (labelIdToApply: string, remove: boolean, uids: number[], sourceFolder: string, uidValidity: number) => {
@@ -730,10 +784,95 @@ function Mailbox() {
     router.push(`/postbox?${next.toString()}`);
   };
 
+  if (!canReadMailbox) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {notice && (
+          <div
+            className="shrink-0 px-3 py-2 text-xs"
+            role="status"
+            style={{ background: "var(--pb-warn-soft)", color: "var(--pb-warn)" }}
+          >
+            {notice}
+          </div>
+        )}
+
+        {successNotice && (
+          <div
+            ref={successToastRef}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className={`fixed left-1/2 top-1/2 z-[70] flex max-w-[min(90vw,30rem)] -translate-x-1/2 -translate-y-1/2 items-center gap-2 border px-3 py-2 text-sm shadow-2xl transition-all duration-200 ${
+              successVisible ? "scale-100 opacity-100" : "scale-95 opacity-0"
+            }`}
+            style={{
+              background: "var(--pb-success-soft)",
+              borderColor: "var(--pb-success)",
+              color: "var(--pb-fg)",
+              borderLeftWidth: "3px",
+              boxShadow: "0 16px 42px rgb(0 0 0 / 0.28)",
+            }}
+          >
+            <CheckCircle2
+              className="h-4 w-4 shrink-0"
+              style={{ color: "var(--pb-success)" }}
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 truncate font-medium">{successNotice}</span>
+            <button
+              type="button"
+              className="pb-btn pb-btn-plain -mr-1"
+              aria-label="Dismiss confirmation"
+              onClick={dismissSuccess}
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <EmptyState
+            title={
+              isTeamBox
+                ? "Send-only TeamBox access"
+                : isSharedMailbox
+                  ? "Send-only delegated mailbox access"
+                  : "Mailbox unavailable"
+            }
+            detail={
+              isTeamBox
+                ? "You can send from this TeamBox, but its Inbox, folders and message history are not available with your current permission."
+                : isSharedMailbox
+                  ? "You can send from this delegated mailbox, but its Inbox, folders and message history are not available with your current permission."
+                  : "This mailbox is not available for reading."
+            }
+          />
+        </div>
+
+        {compose && (
+          <Compose
+            initial={compose}
+            identities={identities}
+            signatures={signatures}
+            draftsEnabled={false}
+            schedulingEnabled={false}
+            onClose={closeCompose}
+            onSent={(message) => {
+              setNotice(null);
+              setSuccessNotice(message);
+              setSuccessVisible(true);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {!detail && <div className="pb-premium-mail-toolbar">
-          {!isCrossFolderView && !conversationMode && (
+          {canManageMailbox && !isCrossFolderView && !conversationMode && (
             <input
               className="pb-premium-select-all"
               type="checkbox"
@@ -856,7 +995,7 @@ function Mailbox() {
                 <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
               </summary>
               <div className="pb-premium-mail-menu">
-                {!isCrossFolderView && !conversationMode && !folderIsSent && (
+                {canManageMailbox && !isCrossFolderView && !conversationMode && !folderIsSent && (
                   <button
                     type="button"
                     disabled={rows.length === 0}
@@ -880,6 +1019,7 @@ function Mailbox() {
           type="checkbox"
           aria-label="Select all messages"
           checked={allSelected}
+          disabled={!canManageMailbox}
           onChange={(event) =>
             setSelected(
               event.target.checked ? new Set(rows.map((r) => r.uid)) : new Set(),
@@ -1120,7 +1260,7 @@ function Mailbox() {
                     data-selected={detail?.uid === row.uid}
                     data-sent={rowIsSent}
                   >
-                    {!isCrossFolderView && (
+                    {canManageMailbox && !isCrossFolderView && (
                       <input
                         type="checkbox"
                         aria-label={
@@ -1140,6 +1280,7 @@ function Mailbox() {
                     <button
                       type="button"
                       className="pb-premium-row-star"
+                      disabled={!canManageMailbox}
                       aria-label={row.flagged ? "Unstar message" : "Star message"}
                       onClick={() =>
                         void act(
@@ -1260,6 +1401,8 @@ function Mailbox() {
               identities={identities}
               signatures={signatures}
               labels={mailLabels}
+              canManage={canManageMailbox}
+              canSend={canSendMailbox}
               onApplyLabel={(member, id, remove) => {
                 if (threadInlineActive.current) {
                   setNotice("Save or close your inline reply before changing labels.");
@@ -1303,6 +1446,8 @@ function Mailbox() {
               }
               onTrustRemote={() => void trustRemoteSender()}
               onReply={openReply}
+              canManage={canManageMailbox}
+              canSend={canSendMailbox}
               folders={mailFolders}
               labels={mailLabels}
               onApplyLabel={(id, remove) =>
@@ -1327,6 +1472,8 @@ function Mailbox() {
           initial={compose}
           identities={identities}
           signatures={signatures}
+          draftsEnabled={!isSharedMailbox || canManageMailbox}
+          schedulingEnabled={!isSharedMailbox || canManageMailbox}
           onClose={closeCompose}
           onSent={(message) => {
             setNotice(null);
@@ -1353,6 +1500,8 @@ function Reader({
   onLoadRemote,
   onTrustRemote,
   onReply,
+  canManage,
+  canSend,
   folders,
   labels,
   onApplyLabel,
@@ -1371,6 +1520,8 @@ function Reader({
   onLoadRemote: () => void;
   onTrustRemote: () => void;
   onReply: (mode: "reply" | "reply-all" | "forward") => void;
+  canManage: boolean;
+  canSend: boolean;
   folders: Folder[];
   labels: MailLabel[];
   onApplyLabel: (id: string, remove: boolean) => void;
@@ -1404,38 +1555,42 @@ function Reader({
           <span>Back</span>
         </button>
         <span className="pb-premium-toolbar-divider" aria-hidden="true" />
-        {!sentMessage && (
-          <ToolbarButton label="Archive" icon={Archive} onClick={() => onAction("archive")} />
-        )}
-        <ToolbarButton
-          label={isTrash ? "Permanently delete" : "Move to Trash"}
-          icon={Trash2}
-          onClick={() => {
-            if (!isTrash || window.confirm("Permanently delete this message? This cannot be undone.")) {
-              onAction(isTrash ? "delete" : "trash");
-            }
-          }}
-        />
-        {!sentMessage && (
-          <ToolbarButton
-            label={isSpam ? "Not spam" : "Mark as spam"}
-            icon={isSpam ? ShieldCheck : ShieldAlert}
-            onClick={() => onAction(isSpam ? "not-spam" : "spam")}
-          />
-        )}
-        {!sentMessage && (
-          <ToolbarButton label="Mark unread" icon={Mail} onClick={() => onAction("unread")} />
-        )}
-        <MoveMenu
-          folders={folders}
-          currentFolder={detail.folder}
-          sentMessage={sentMessage}
-          onMove={onMove}
-        />
-        <LabelMenu labels={labels} currentLabels={detail.labels}
-          onApply={onApplyLabel} />
-        {isTrash && (
-          <ToolbarButton label="Restore" icon={RotateCcw} onClick={() => onAction("restore")} />
+        {canManage && (
+          <>
+            {!sentMessage && (
+              <ToolbarButton label="Archive" icon={Archive} onClick={() => onAction("archive")} />
+            )}
+            <ToolbarButton
+              label={isTrash ? "Permanently delete" : "Move to Trash"}
+              icon={Trash2}
+              onClick={() => {
+                if (!isTrash || window.confirm("Permanently delete this message? This cannot be undone.")) {
+                  onAction(isTrash ? "delete" : "trash");
+                }
+              }}
+            />
+            {!sentMessage && (
+              <ToolbarButton
+                label={isSpam ? "Not spam" : "Mark as spam"}
+                icon={isSpam ? ShieldCheck : ShieldAlert}
+                onClick={() => onAction(isSpam ? "not-spam" : "spam")}
+              />
+            )}
+            {!sentMessage && (
+              <ToolbarButton label="Mark unread" icon={Mail} onClick={() => onAction("unread")} />
+            )}
+            <MoveMenu
+              folders={folders}
+              currentFolder={detail.folder}
+              sentMessage={sentMessage}
+              onMove={onMove}
+            />
+            <LabelMenu labels={labels} currentLabels={detail.labels}
+              onApply={onApplyLabel} />
+            {isTrash && (
+              <ToolbarButton label="Restore" icon={RotateCcw} onClick={() => onAction("restore")} />
+            )}
+          </>
         )}
         <span className="flex-1" />
         {onThread && (
@@ -1469,6 +1624,7 @@ function Reader({
             <button
               type="button"
               className="pb-premium-reader-star"
+              disabled={!canManage}
               aria-label={summary.flagged ? "Unstar message" : "Star message"}
               onClick={() => onAction(summary.flagged ? "unstar" : "star")}
             >
@@ -1517,7 +1673,7 @@ function Reader({
               <p>To protect your privacy, images from this sender are blocked.</p>
               <div className="pb-premium-privacy-actions">
                 <button type="button" onClick={onLoadRemote}>Display images</button>
-                {detail.from.address && (
+                {canManage && detail.from.address && (
                   <button type="button" onClick={onTrustRemote}>
                     Always display images from this sender
                   </button>
@@ -1595,7 +1751,7 @@ function Reader({
           </section>
         )}
 
-        {!isSpam && !isTrash && (
+        {canSend && !isSpam && !isTrash && (
           <div className="pb-premium-reply-actions">
             <button type="button" className="pb-btn pb-btn-ghost" onClick={() => onReply("reply")}>
               <CornerUpLeft className="h-4 w-4" aria-hidden="true" />

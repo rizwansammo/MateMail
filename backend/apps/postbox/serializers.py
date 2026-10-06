@@ -28,6 +28,7 @@ class MailboxProfileSerializer(serializers.Serializer):
     email = serializers.EmailField(read_only=True)
     full_name = serializers.CharField(read_only=True)
     quota_mb = serializers.IntegerField(read_only=True)
+    kind = serializers.CharField(read_only=True)
     organization = serializers.SerializerMethodField()
     domain = serializers.SerializerMethodField()
 

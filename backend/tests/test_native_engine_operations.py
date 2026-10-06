@@ -336,8 +336,11 @@ class RateLimitRejectionIsTemporaryTest(SimpleTestCase):
         is a throttling decision.
         """
         control = (NE / "images" / "postfix" / "engine_control.py").read_text(encoding="utf-8")
-        self.assertIn("DEFER_IF_PERMIT 4.7.1", control)
-        self.assertNotIn("action=REJECT", control)
+        rate_verdict = control.split("def rate_verdict", 1)[1].split(
+            "\n\nclass PolicyServer", 1
+        )[0]
+        self.assertIn("DEFER_IF_PERMIT 4.7.1", rate_verdict)
+        self.assertNotIn("action=REJECT", rate_verdict)
 
     def test_the_identity_charged_is_the_authenticated_login(self):
         """
@@ -435,16 +438,21 @@ class OperationsDatabaseTestCase(SimpleTestCase):
 
 
 class SchemaVersionTest(OperationsDatabaseTestCase):
-    def test_the_engine_is_at_version_four(self):
-        self.assertEqual(4, engine_db.REQUIRED_VERSION)
-        self.assertEqual(4, engine_db.current_version(self.conn))
+    def test_the_engine_is_at_the_required_version(self):
+        self.assertEqual(
+            engine_db.REQUIRED_VERSION,
+            engine_db.current_version(self.conn),
+        )
 
     def test_migrations_are_idempotent(self):
+        before = engine_db.current_version(self.conn)
         engine_db.apply_migrations(self.conn)
         engine_db.apply_migrations(self.conn)
-        self.assertEqual(4, engine_db.current_version(self.conn))
+        self.assertEqual(before, engine_db.current_version(self.conn))
         self.assertEqual(
-            4, self.rows("SELECT count(*) FROM schema_version")[0][0])
+            len(engine_db.available_migrations()),
+            self.rows("SELECT count(*) FROM schema_version")[0][0],
+        )
 
 
 class MailboxStorageIdentityTest(OperationsDatabaseTestCase):
@@ -704,7 +712,7 @@ class OperationsClientTest(SimpleTestCase):
 
 
 class AdapterCapabilityAuditTest(SimpleTestCase):
-    """The headline NE4 claim, asserted rather than counted by hand."""
+    """The complete adapter surface, including Phase E Forward Groups."""
 
     def test_every_port_method_is_implemented(self):
         import inspect
@@ -712,7 +720,7 @@ class AdapterCapabilityAuditTest(SimpleTestCase):
         from apps.mail_engine.native_adapter import NativeMailEngineAdapter, _LATER
 
         abstract = sorted(MailEngineAdapter.__abstractmethods__)
-        self.assertEqual(26, len(abstract), "the port is 26 methods")
+        self.assertEqual(28, len(abstract), "the port is 28 methods after Forward Groups")
         self.assertEqual({}, _LATER, "nothing may still be deferred")
 
         refusing = [

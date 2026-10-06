@@ -33,7 +33,8 @@ from email.message import EmailMessage
 from django.conf import settings
 
 from apps.aliases.models import Alias, AliasStatus
-from apps.mailboxes.models import Mailbox
+from apps.mail_directory.models import AccessGrantKind, MailboxAccessGrant
+from apps.mailboxes.models import Mailbox, MailboxKind
 
 from .mime import clean_header
 
@@ -54,30 +55,66 @@ class Identity:
     address: str
     name: str = ""
     is_primary: bool = False
-    kind: str = "mailbox"   # mailbox | alias
+    kind: str = "mailbox"   # mailbox | alias | team_box
+    send_mode: str = "send_as"  # send_as | on_behalf
 
 
-def allowed_identities(mailbox: Mailbox) -> list[Identity]:
+def allowed_identities(
+    mailbox: Mailbox,
+    *,
+    actor_mailbox: Mailbox | None = None,
+) -> list[Identity]:
     """
-    Every address this mailbox may legitimately send as.
-
-    Two sources, both authoritative:
-
-      * the mailbox's own address;
-      * aliases that resolve to it and are active.
-
-    Nothing else. In particular a PostBox user cannot nominate an address:
-    if it is not in this list the submission is refused before it reaches
-    Postfix, and Postfix would refuse it again through
-    `reject_sender_login_mismatch`. Two independent refusals is the point —
-    this one produces a good error message, that one is the guarantee.
+    Every sender identity the authenticated personal mailbox may use while
+    operating on `mailbox`.
     """
+    actor = actor_mailbox or mailbox
+    send_mode = "send_as"
+
+    delegated_personal = (
+        mailbox.kind == MailboxKind.PERSONAL
+        and actor.pk != mailbox.pk
+    )
+
+    if mailbox.kind == MailboxKind.TEAM_BOX or delegated_personal:
+        grant_type = (
+            AccessGrantKind.TEAM_BOX
+            if mailbox.kind == MailboxKind.TEAM_BOX
+            else AccessGrantKind.DELEGATION
+        )
+        grant = (
+            MailboxAccessGrant.objects
+            .filter(
+                tenant=mailbox.tenant,
+                target_mailbox=mailbox,
+                grantee_mailbox=actor,
+                grant_type=grant_type,
+                active=True,
+            )
+            .first()
+        )
+        if grant is None:
+            return []
+        if grant.can_send_as:
+            send_mode = "send_as"
+        elif grant.can_send_on_behalf:
+            send_mode = "on_behalf"
+        else:
+            return []
+
     identities = [
         Identity(
             address=mailbox.email,
             name=mailbox.full_name or "",
             is_primary=True,
-            kind="mailbox",
+            kind=(
+                "team_box"
+                if mailbox.kind == MailboxKind.TEAM_BOX
+                else "delegated_mailbox"
+                if delegated_personal
+                else "mailbox"
+            ),
+            send_mode=send_mode,
         )
     ]
 
@@ -91,31 +128,26 @@ def allowed_identities(mailbox: Mailbox) -> list[Identity]:
     )
     for address in aliases:
         identities.append(
-            Identity(address=address, name=mailbox.full_name or "", kind="alias")
+            Identity(
+                address=address,
+                name=mailbox.full_name or "",
+                kind="alias",
+                send_mode=send_mode,
+            )
         )
-
-    # Also aliases written as a plain destination address rather than a FK.
-    literal = (
-        Alias.objects.filter(
-            tenant=mailbox.tenant,
-            destination_address__iexact=mailbox.email,
-            status=AliasStatus.ACTIVE,
-        )
-        .values_list("source_address", flat=True)
-    )
-    known = {i.address.lower() for i in identities}
-    for address in literal:
-        if address.lower() not in known:
-            identities.append(Identity(address=address, kind="alias"))
-            known.add(address.lower())
 
     return identities
 
 
-def assert_may_send_as(mailbox: Mailbox, from_address: str) -> Identity:
+def assert_may_send_as(
+    mailbox: Mailbox,
+    from_address: str,
+    *,
+    actor_mailbox: Mailbox | None = None,
+) -> Identity:
     """The identity for this address, or a refusal. Never trusts the request."""
     wanted = (from_address or "").strip().lower()
-    for identity in allowed_identities(mailbox):
+    for identity in allowed_identities(mailbox, actor_mailbox=actor_mailbox):
         if identity.address.lower() == wanted:
             return identity
     logger.warning(

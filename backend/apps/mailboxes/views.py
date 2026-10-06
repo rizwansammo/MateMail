@@ -19,8 +19,10 @@ from apps.security import ratelimit
 from apps.security.limits import MAILBOX_CREATE_PER_TENANT
 from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
+from apps.mail_directory.services import AddressConflict
+from apps.forward_groups.services import sync_all_groups_for_tenant
 from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
-from .models import Mailbox
+from .models import Mailbox, MailboxKind
 from .serializers import MailboxCreateSerializer, MailboxReProvisionSerializer, MailboxSerializer, MailboxStatusSerializer
 
 logger = logging.getLogger(__name__)
@@ -134,13 +136,16 @@ class MailboxListCreateView(APIView):
             if not slot.allowed:
                 return Response({"detail": slot.message}, status=402)
 
-            mailbox = Mailbox.objects.create(
-                tenant=request.tenant,
-                domain=domain,
-                local_part=data["local_part"],
-                full_name=data["full_name"],
-                quota_mb=quota_mb,
-            )
+            try:
+                mailbox = Mailbox.objects.create(
+                    tenant=request.tenant,
+                    domain=domain,
+                    local_part=data["local_part"],
+                    full_name=data["full_name"],
+                    quota_mb=quota_mb,
+                )
+            except AddressConflict as exc:
+                return Response({"local_part": exc.customer_message}, status=400)
 
         # Synchronous provisioning — password only lives in this call stack.
         # A provisioning failure does not fail mailbox creation: the record
@@ -157,6 +162,7 @@ class MailboxListCreateView(APIView):
             mailbox.mail_engine_error = MailEngineError.customer_message
             mailbox.save(update_fields=["mail_engine_error"])
 
+        sync_all_groups_for_tenant(request.tenant)
         log_event(request.tenant, LogEventType.MAILBOX_CREATED, request=request, mailbox=mailbox)
         return Response(MailboxSerializer(mailbox).data, status=201)
 
@@ -165,7 +171,13 @@ class MailboxDetailView(APIView):
     permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
     def _get_mailbox(self, request, pk):
-        return Mailbox.objects.for_tenant(request.tenant).select_related("domain").filter(pk=pk).first()
+        return (
+            Mailbox.objects
+            .for_tenant(request.tenant)
+            .select_related("domain")
+            .filter(pk=pk, kind=MailboxKind.PERSONAL)
+            .first()
+        )
 
     def get(self, request, pk):
         mb = self._get_mailbox(request, pk)
@@ -177,6 +189,19 @@ class MailboxDetailView(APIView):
         mb = self._get_mailbox(request, pk)
         if not mb:
             return Response({"detail": "Not found."}, status=404)
+
+        for membership in mb.forward_group_memberships.select_related("group"):
+            if membership.group.members.count() <= 1:
+                return Response(
+                    {
+                        "detail": (
+                            f"{mb.email} is the last member of Forward Group "
+                            f"{membership.group.address}. Add another member or "
+                            "delete the group first."
+                        )
+                    },
+                    status=409,
+                )
 
         # Queue engine cleanup before deleting the local row.  If the mailbox
         # is provisioned and the broker cannot accept the cleanup task, fail
@@ -204,8 +229,30 @@ class MailboxDetailView(APIView):
                     status=503,
                 )
 
-        log_event(request.tenant, LogEventType.MAILBOX_DELETED, request=request, mailbox=mb)
+        # A deleted delegated target must not become a silent personal-mailbox
+        # fallback on the next request. Revoke sessions actively operating on
+        # this mailbox before its SET_NULL active_mailbox FK can erase that
+        # context.
+        from apps.postbox.models import PostBoxSession
+
+        active_sessions = list(
+            PostBoxSession.objects.filter(
+                active_mailbox=mb,
+                revoked_at__isnull=True,
+            )
+        )
+        for session in active_sessions:
+            session.revoke()
+
+        log_event(
+            request.tenant,
+            LogEventType.MAILBOX_DELETED,
+            request=request,
+            mailbox=mb,
+            metadata={"active_postbox_sessions_revoked": len(active_sessions)},
+        )
         mb.delete()
+        sync_all_groups_for_tenant(request.tenant)
         return Response(status=204)
 
 
@@ -214,7 +261,13 @@ class MailboxStatusView(APIView):
     permission_classes = [IsAuthenticated, IsTenantAdmin]
 
     def patch(self, request, pk):
-        mb = Mailbox.objects.for_tenant(request.tenant).select_related("domain").filter(pk=pk).first()
+        mb = (
+            Mailbox.objects
+            .for_tenant(request.tenant)
+            .select_related("domain")
+            .filter(pk=pk, kind=MailboxKind.PERSONAL)
+            .first()
+        )
         if not mb:
             return Response({"detail": "Not found."}, status=404)
 
@@ -250,6 +303,7 @@ class MailboxStatusView(APIView):
 
         mb.status = new_status
         mb.save(update_fields=["status", "updated_at"])
+        sync_all_groups_for_tenant(request.tenant)
         if new_status == "disabled":
             log_event(request.tenant, LogEventType.MAILBOX_DISABLED, request=request, mailbox=mb)
         return Response(MailboxSerializer(mb).data)
@@ -260,7 +314,13 @@ class MailboxReProvisionView(APIView):
     permission_classes = [IsAuthenticated, IsTenantAdmin, IsEmailVerified]
 
     def post(self, request, pk):
-        mb = Mailbox.objects.for_tenant(request.tenant).select_related("domain").filter(pk=pk).first()
+        mb = (
+            Mailbox.objects
+            .for_tenant(request.tenant)
+            .select_related("domain")
+            .filter(pk=pk, kind=MailboxKind.PERSONAL)
+            .first()
+        )
         if not mb:
             return Response({"detail": "Not found."}, status=404)
 
@@ -288,4 +348,5 @@ class MailboxReProvisionView(APIView):
             logger.exception("Unexpected error re-provisioning mailbox %s", mb.email)
             return Response({"detail": MailEngineError.customer_message}, status=503)
 
+        sync_all_groups_for_tenant(request.tenant)
         return Response(MailboxSerializer(mb).data)

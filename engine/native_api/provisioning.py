@@ -176,43 +176,101 @@ def ensure_mailbox(conn, spec: dict, password: str = "") -> dict:
             f"address {address} does not belong to domain {declared}", "domain"
         )
 
+    login_enabled = validation.boolean(
+        spec.get("login_enabled", True), "login_enabled"
+    )
+    authorized_senders = validation.destinations(
+        spec.get("authorized_senders", [])
+    )
     password_hash = passwords.hash_password(password) if password else None
 
     with conn.cursor() as cur:
         domain_id = _domain_id(cur, domain)
-        cur.execute("SELECT id FROM mailbox WHERE address = %s", (address,))
-        exists = cur.fetchone() is not None
-        if not exists and password_hash is None:
+        cur.execute(
+            "SELECT id, password_hash FROM mailbox WHERE address = %s",
+            (address,),
+        )
+        existing = cur.fetchone()
+        current_hash = existing[1] if existing else None
+
+        if login_enabled and password_hash is None and current_hash is None:
             raise ValidationError(
-                "a new mailbox requires a password", "password"
+                "a login-enabled mailbox requires a password", "password"
             )
+
+        # A passwordless TeamBox is deliberate, not a half-provisioned login.
+        if not login_enabled:
+            password_hash = None
 
         cur.execute(
             """
             INSERT INTO mailbox (domain_id, address, local_part, display_name,
-                                 password_hash, quota_mb, active)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                 password_hash, quota_mb, active, login_enabled)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (address) DO UPDATE SET
                 domain_id     = EXCLUDED.domain_id,
                 local_part    = EXCLUDED.local_part,
                 display_name  = EXCLUDED.display_name,
                 quota_mb      = EXCLUDED.quota_mb,
                 active        = EXCLUDED.active,
-                -- COALESCE keeps the stored credential when this call carried
-                -- no password. Assigning EXCLUDED.password_hash unconditionally
-                -- is what would lock every customer out on a retry.
-                password_hash = COALESCE(EXCLUDED.password_hash, mailbox.password_hash),
+                login_enabled = EXCLUDED.login_enabled,
+                password_hash = CASE
+                    WHEN NOT EXCLUDED.login_enabled THEN NULL
+                    ELSE COALESCE(EXCLUDED.password_hash, mailbox.password_hash)
+                END,
                 updated_at    = now()
             RETURNING id
             """,
-            (domain_id, address, local_part, display_name, password_hash, quota, active),
+            (
+                domain_id,
+                address,
+                local_part,
+                display_name,
+                password_hash,
+                quota,
+                active,
+                login_enabled,
+            ),
         )
         mailbox_id = cur.fetchone()[0]
+
+        cur.execute(
+            "DELETE FROM mailbox_sender_authorization WHERE target_mailbox_id = %s",
+            (mailbox_id,),
+        )
+        for sender in authorized_senders:
+            if sender == address:
+                raise ValidationError(
+                    "a mailbox cannot delegate sender authorization to itself",
+                    "authorized_senders",
+                )
+            cur.execute(
+                "SELECT id FROM mailbox WHERE address = %s",
+                (sender,),
+            )
+            owner = cur.fetchone()
+            if owner is None:
+                raise NotFound(
+                    f"authorized sender mailbox {sender} is not provisioned"
+                )
+            cur.execute(
+                """
+                INSERT INTO mailbox_sender_authorization
+                       (target_mailbox_id, owner_mailbox_id)
+                VALUES (%s, %s)
+                """,
+                (mailbox_id, owner[0]),
+            )
+
         # A destination that was external because no such mailbox existed is now
         # internal. Re-link so send-as authorisation follows reality rather than
         # the order operations happened to arrive in.
         _relink_destinations(cur, address, mailbox_id)
-    return {"address": address}
+    return {
+        "address": address,
+        "login_enabled": login_enabled,
+        "authorized_senders": list(authorized_senders),
+    }
 
 
 def record_login(conn, address: str) -> bool:
@@ -270,6 +328,18 @@ def set_mailbox_password(conn, address: str, password: str) -> None:
     """
     address = validation.email_address(address)
     plaintext = validation.password(password)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT login_enabled FROM mailbox WHERE address = %s",
+            (address,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise NotFound(f"mailbox {address} is not provisioned in the engine")
+        if not row[0]:
+            raise ValidationError(
+                "direct login is disabled for this mailbox", "password"
+            )
     digest = passwords.hash_password(plaintext)
     if not passwords.is_hashed(digest):          # belt and braces before a write
         raise RuntimeError("refusing to store a credential that is not hashed")
@@ -565,38 +635,154 @@ def get_alias(conn, address: str) -> dict | None:
             (row[0],),
         )
         rows = cur.fetchall()
+        cur.execute(
+            "SELECT owner FROM postfix_sender_login WHERE address = %s ORDER BY owner",
+            (address,),
+        )
+        authorized_senders = [r[0] for r in cur.fetchall()]
     return {
         "address": address,
         "active": row[1],
         "destinations": [r[0] for r in rows],
-        # The send-as answer, made explicit rather than left to be recomputed by
-        # whoever asks next.
-        "authorized_senders": [r[0] for r in rows if r[1] is not None],
+        # Report the same ownership Postfix enforces. For an Alias of a TeamBox
+        # this is the TeamBox's authorised personal mailbox members, not the
+        # passwordless TeamBox address itself.
+        "authorized_senders": authorized_senders,
     }
 
 
 def authorized_send_as(conn, mailbox_address: str) -> list[str]:
     """
-    Every address this mailbox may use as an envelope sender, besides itself.
+    Every additional address this login may use as an envelope sender.
 
-    Reads ONLY alias_destination. The forwarding table is not joined, is not
-    unioned, and is not reachable from this query — which is the structural
-    reason forwarding cannot become a sending right.
+    The authoritative answer is the same Postfix view used at submission time,
+    so this diagnostic endpoint can never disagree with SMTP enforcement.
+    Forwarding is absent from that view by construction.
     """
     address = validation.email_address(mailbox_address)
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT a.address
-            FROM alias_destination ad
-            JOIN alias   a ON a.id = ad.alias_id
-            JOIN mailbox m ON m.id = ad.mailbox_id
-            WHERE m.address = %s AND a.active AND m.active
-            ORDER BY a.address
+            SELECT address
+            FROM postfix_sender_login
+            WHERE owner = %s AND address <> %s
+            ORDER BY address
             """,
-            (address,),
+            (address, address),
         )
         return [r[0] for r in cur.fetchall()]
+
+
+# ── Forward Groups ──────────────────────────────────────────────────────────
+
+
+_FORWARD_GROUP_POLICIES = {"anyone", "organization", "members", "selected"}
+
+
+def ensure_forward_group(conn, spec: dict) -> dict:
+    address = validation.email_address(spec["address"])
+    destinations = validation.destinations(spec.get("destinations", []))
+    allowed_senders = validation.destinations(spec.get("allowed_senders", []))
+    sender_policy = str(spec.get("sender_policy") or "anyone").strip().lower()
+    active = validation.boolean(spec.get("active", True), "active")
+
+    if sender_policy not in _FORWARD_GROUP_POLICIES:
+        raise ValidationError("unsupported Forward Group sender policy", "sender_policy")
+    if active and not destinations:
+        raise ValidationError("an active Forward Group requires at least one destination", "destinations")
+    if address in destinations:
+        raise ValidationError("a Forward Group cannot deliver to itself", "destinations")
+
+    _, _, domain = address.rpartition("@")
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM domain WHERE name = %s", (domain,))
+        row = cur.fetchone()
+        if row is None:
+            raise NotFound(f"domain {domain} is not provisioned in the engine")
+        domain_id = row[0]
+
+        cur.execute(
+            """
+            INSERT INTO forward_group (domain_id, address, active, sender_policy)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (address) DO UPDATE SET
+                domain_id = EXCLUDED.domain_id,
+                active = EXCLUDED.active,
+                sender_policy = EXCLUDED.sender_policy,
+                updated_at = now()
+            RETURNING id
+            """,
+            (domain_id, address, active, sender_policy),
+        )
+        group_id = cur.fetchone()[0]
+
+        cur.execute("DELETE FROM forward_group_destination WHERE group_id = %s", (group_id,))
+        for position, destination in enumerate(destinations):
+            cur.execute(
+                "INSERT INTO forward_group_destination (group_id, destination, position) "
+                "VALUES (%s, %s, %s)",
+                (group_id, destination, position),
+            )
+
+        cur.execute("DELETE FROM forward_group_sender WHERE group_id = %s", (group_id,))
+        for position, sender in enumerate(allowed_senders):
+            cur.execute(
+                "SELECT id FROM mailbox WHERE address = %s AND active AND login_enabled",
+                (sender,),
+            )
+            if cur.fetchone() is None:
+                raise NotFound(f"allowed sender mailbox {sender} is not provisioned")
+            cur.execute(
+                "INSERT INTO forward_group_sender (group_id, sender, position) "
+                "VALUES (%s, %s, %s)",
+                (group_id, sender, position),
+            )
+
+    return {
+        "address": address,
+        "destinations": list(destinations),
+        "sender_policy": sender_policy,
+        "allowed_senders": list(allowed_senders),
+        "active": active,
+    }
+
+
+def delete_forward_group(conn, address: str) -> None:
+    address = validation.email_address(address)
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM forward_group WHERE address = %s", (address,))
+
+
+def get_forward_group(conn, address: str) -> dict | None:
+    address = validation.email_address(address)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, active, sender_policy FROM forward_group WHERE address = %s",
+            (address,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        group_id, active, sender_policy = row
+        cur.execute(
+            "SELECT destination FROM forward_group_destination "
+            "WHERE group_id = %s ORDER BY position",
+            (group_id,),
+        )
+        destinations = [r[0] for r in cur.fetchall()]
+        cur.execute(
+            "SELECT sender FROM forward_group_sender "
+            "WHERE group_id = %s ORDER BY position",
+            (group_id,),
+        )
+        allowed_senders = [r[0] for r in cur.fetchall()]
+    return {
+        "address": address,
+        "active": active,
+        "sender_policy": sender_policy,
+        "destinations": destinations,
+        "allowed_senders": allowed_senders,
+    }
 
 
 # ── Forwarding ───────────────────────────────────────────────────────────────

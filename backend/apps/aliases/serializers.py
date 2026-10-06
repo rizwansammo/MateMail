@@ -6,37 +6,35 @@ from .models import Alias
 class AliasSerializer(serializers.ModelSerializer):
     mail_service_ready = serializers.BooleanField(source="mail_engine_provisioned", read_only=True)
     domain_name = serializers.CharField(source="domain.domain", read_only=True)
-    destination_email = serializers.SerializerMethodField()
+    destination_email = serializers.EmailField(source="destination_mailbox.email", read_only=True)
 
     class Meta:
         model = Alias
         fields = [
             "id", "source_address", "domain", "domain_name",
-            "destination_mailbox", "destination_address", "destination_email",
+            "destination_mailbox", "destination_email",
             "status", "mail_service_ready", "created_at",
         ]
-
-    def get_destination_email(self, obj):
-        if obj.destination_mailbox:
-            return obj.destination_mailbox.email
-        return obj.destination_address
 
 
 class AliasCreateSerializer(serializers.Serializer):
     source_local_part = serializers.CharField(max_length=64)
     domain_id = serializers.UUIDField()
-    destination_mailbox_id = serializers.UUIDField(required=False, allow_null=True)
-    destination_address = serializers.EmailField(required=False, allow_blank=True, default="")
+    destination_mailbox_id = serializers.UUIDField(required=False)
 
     def validate(self, data):
-        has_mailbox = bool(data.get("destination_mailbox_id"))
-        has_address = bool((data.get("destination_address") or "").strip())
-        if not has_mailbox and not has_address:
-            raise serializers.ValidationError(
-                "Specify either destination_mailbox_id or destination_address."
-            )
-        if has_mailbox and has_address:
-            raise serializers.ValidationError(
-                "Specify only one of destination_mailbox_id or destination_address."
-            )
+        # Make the retired API shape fail loudly. Silently ignoring a legacy
+        # external destination would make an old client think it created
+        # forwarding when it did not.
+        if "destination_address" in self.initial_data:
+            raise serializers.ValidationError({
+                "destination_address": (
+                    "Aliases can only point to a MateMail mailbox. "
+                    "Use Forwarding for an external destination."
+                )
+            })
+        if not data.get("destination_mailbox_id"):
+            raise serializers.ValidationError({
+                "destination_mailbox_id": "This field is required."
+            })
         return data
