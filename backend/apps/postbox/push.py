@@ -107,6 +107,28 @@ def register_device(
         return device, False
 
 
+def assert_mailbox_may_receive_push(mailbox) -> None:
+    """
+    Delivery eligibility is not the same thing as login eligibility.
+
+    A TeamBox is deliberately passwordless and therefore must fail
+    assert_mailbox_may_sign_in(), but it is still a real active mailbox whose
+    members may receive delivery notifications through their personal sessions.
+    """
+    from apps.mailboxes.models import MailboxKind, MailboxStatus
+
+    if mailbox.kind != MailboxKind.TEAM_BOX:
+        assert_mailbox_may_sign_in(mailbox)
+        return
+
+    if mailbox.status != MailboxStatus.ACTIVE:
+        raise MailboxUnavailable("This TeamBox is not active.")
+    if not mailbox.mail_engine_provisioned:
+        raise MailboxUnavailable("This TeamBox is still being set up.")
+    if mailbox.tenant is None or not mailbox.tenant.can_use_mail:
+        raise MailboxUnavailable("This organization's mail service is not active.")
+
+
 def active_devices(mailbox):
     """
     Registrations that may receive a push right now, for this mailbox.
@@ -199,7 +221,7 @@ def dispatch(event_id) -> str:
     if not event.claim():
         return "claimed"
     try:
-        assert_mailbox_may_sign_in(event.mailbox)
+        assert_mailbox_may_receive_push(event.mailbox)
     except MailboxUnavailable:
         return "mailbox_unavailable"
     devices = list(active_devices(event.mailbox).values_list("id", flat=True))
@@ -248,7 +270,7 @@ def deliver(event_id, device_id) -> PushOutcome:
     if not device.enabled or not device.session.is_active:
         return PushOutcome(PushOutcome.REJECTED, "inactive")
     try:
-        assert_mailbox_may_sign_in(device.mailbox)
+        assert_mailbox_may_receive_push(device.mailbox)
     except MailboxUnavailable:
         return PushOutcome(PushOutcome.REJECTED, "mailbox_unavailable")
 
