@@ -154,10 +154,17 @@ class MailboxSpec:
         is_team_box = getattr(mailbox, "kind", "personal") == "team_box"
         authorized_senders: tuple[str, ...] = ()
 
-        if is_team_box and getattr(mailbox, "pk", None):
+        if getattr(mailbox, "pk", None):
+            grant_type = "team_box" if is_team_box else "delegation"
             grants = (
                 mailbox.access_grants_received
-                .filter(active=True, grant_type="team_box")
+                .filter(
+                    active=True,
+                    grant_type=grant_type,
+                    grantee_mailbox__kind="personal",
+                    grantee_mailbox__status="active",
+                    grantee_mailbox__mail_engine_provisioned=True,
+                )
                 .select_related("grantee_mailbox")
             )
             authorized_senders = tuple(sorted({
