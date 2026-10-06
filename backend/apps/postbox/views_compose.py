@@ -365,6 +365,16 @@ class SendView(PostBoxView, ComposeMixin):
             )
 
         send_at = data.get("send_at")
+        if send_at and actor.pk != mailbox.pk and not request.mailbox_permissions.can_read:
+            return Response(
+                {
+                    "detail": (
+                        "Scheduling from a TeamBox requires Read access so you "
+                        "can review or cancel the scheduled message."
+                    )
+                },
+                status=403,
+            )
         if send_at:
             # Store an EDITABLE source message in Scheduled: Bcc and the
             # selected signature remain draft metadata, while the signature
@@ -527,7 +537,7 @@ class SendView(PostBoxView, ComposeMixin):
 
 class DraftView(PostBoxView, ComposeMixin):
     def required_team_box_permission(self, request) -> str:
-        return "send" if request.method == "POST" else "manage"
+        return "read_and_send" if request.method == "POST" else "manage"
     """
     Save a draft, replacing a previous version.
 
