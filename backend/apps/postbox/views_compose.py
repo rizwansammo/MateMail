@@ -365,12 +365,12 @@ class SendView(PostBoxView, ComposeMixin):
             )
 
         send_at = data.get("send_at")
-        if send_at and actor.pk != mailbox.pk and not request.mailbox_permissions.can_read:
+        if send_at and actor.pk != mailbox.pk and not request.mailbox_permissions.can_manage:
             return Response(
                 {
                     "detail": (
-                        "Scheduling from a TeamBox requires Read access so you "
-                        "can review or cancel the scheduled message."
+                        "Scheduling from a TeamBox requires Manage permission "
+                        "because it creates shared scheduled-mail state."
                     )
                 },
                 status=403,
@@ -537,7 +537,7 @@ class SendView(PostBoxView, ComposeMixin):
 
 class DraftView(PostBoxView, ComposeMixin):
     def required_team_box_permission(self, request) -> str:
-        return "read_and_send" if request.method == "POST" else "manage"
+        return "manage_and_send" if request.method == "POST" else "manage"
     """
     Save a draft, replacing a previous version.
 
