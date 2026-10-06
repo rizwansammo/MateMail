@@ -71,14 +71,24 @@ def allowed_identities(
     actor = actor_mailbox or mailbox
     send_mode = "send_as"
 
-    if mailbox.kind == MailboxKind.TEAM_BOX:
+    delegated_personal = (
+        mailbox.kind == MailboxKind.PERSONAL
+        and actor.pk != mailbox.pk
+    )
+
+    if mailbox.kind == MailboxKind.TEAM_BOX or delegated_personal:
+        grant_type = (
+            AccessGrantKind.TEAM_BOX
+            if mailbox.kind == MailboxKind.TEAM_BOX
+            else AccessGrantKind.DELEGATION
+        )
         grant = (
             MailboxAccessGrant.objects
             .filter(
                 tenant=mailbox.tenant,
                 target_mailbox=mailbox,
                 grantee_mailbox=actor,
-                grant_type=AccessGrantKind.TEAM_BOX,
+                grant_type=grant_type,
                 active=True,
             )
             .first()
@@ -91,16 +101,19 @@ def allowed_identities(
             send_mode = "on_behalf"
         else:
             return []
-    elif actor.pk != mailbox.pk:
-        # Delegated personal mailbox access is Phase F.
-        return []
 
     identities = [
         Identity(
             address=mailbox.email,
             name=mailbox.full_name or "",
             is_primary=True,
-            kind="team_box" if mailbox.kind == MailboxKind.TEAM_BOX else "mailbox",
+            kind=(
+                "team_box"
+                if mailbox.kind == MailboxKind.TEAM_BOX
+                else "delegated_mailbox"
+                if delegated_personal
+                else "mailbox"
+            ),
             send_mode=send_mode,
         )
     ]
