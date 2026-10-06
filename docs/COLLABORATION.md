@@ -1,6 +1,6 @@
 # MateMail Collaboration Features
 
-Status: **Phase A + Phase B + Phase C + Phase D + Phase E + Phase F implemented on `feature/mail-collaboration`**.
+Status: **Phase A through Phase G implemented on `feature/mail-collaboration`**.
 
 This document defines the product vocabulary and security boundaries for the
 next collaboration feature set. Later phases add customer surfaces; Phase A
@@ -16,6 +16,79 @@ only establishes the primitives they must share.
 | Forward Group (FG) | A distribution address that fans one message out to members. It has no Inbox, password or PostBox session. |
 | Delegation | Explicit permission for one personal mailbox identity to access another personal mailbox. |
 | Forwarding | The existing mailbox-to-destination forwarding rule. It remains separate from Forward Group. |
+
+## Phase G — Final integration and production hardening
+
+Phase G adds no new collaboration product. It closes cross-feature and
+production-rollout failure modes found by auditing TeamBox, Forward Group,
+Delegation, Alias, Forwarding and PostBox together.
+
+### Fail-closed scheduled sending
+
+A collaboration scheduled message stores both:
+
+- the personal mailbox that authenticated submission; and
+- whether that distinct submission identity is mandatory.
+
+The FK to the personal actor remains nullable so deleting an account is not
+blocked by an old scheduled message. A separate durable boolean survives that
+delete. If a TeamBox/Delegation actor disappears before delivery, the worker now
+marks the message failed **before IMAP or SMTP**, instead of falling back to the
+target mailbox.
+
+Existing pre-collaboration personal scheduled messages migrate with the flag
+false and retain their historical mailbox fallback.
+
+### Push-device isolation
+
+Push registrations belong to both a mailbox and the personal PostBox session
+that created them. Device list/delete operations are now scoped to that exact
+session. A delegate or TeamBox member cannot enumerate or remove another
+person's device registration for the same shared mailbox.
+
+Live push delivery still re-checks Read permission before sending a
+notification.
+
+### Post-migration data preflight
+
+Production's one-shot `migrate` service now runs:
+
+```
+python manage.py migrate --noinput
+python manage.py collaboration_preflight
+```
+
+The preflight is read-only and blocks backend startup when it finds:
+
+- a missing, orphaned or mismatched `AddressClaim`;
+- an invalid TeamBox/Delegation access grant;
+- an active Forward Group with no members;
+- cross-tenant/non-personal Forward Group sender state;
+- a direct `Forward Group -> member -> Forwarding -> same Forward Group`
+  delivery loop.
+
+It never repairs production data automatically. The deployment stops with the
+exact inconsistency so an operator can review it.
+
+### Native Engine dependency gate
+
+Forward Groups require both Native Engine schema v6 and the Postfix RCPT policy
+hook. The MateMail application deploy workflow now verifies **before transferring
+or changing the application release** that:
+
+- `matemail-native-api` and `matemail-native-postfix` are running;
+- authenticated Native API `/ready` reports schema >= 6;
+- collaboration capabilities include mailbox sender authorization,
+  Forward Groups and Forward Group sender policy;
+- running Postfix has
+  `check_policy_service inet:127.0.0.1:10032` in recipient restrictions; and
+- the running Postfix control plane contains `forward_group_verdict`.
+
+Therefore the supported production order is **Native Engine collaboration
+release first, MateMail application release second**. A wrong-order deployment
+fails before the existing MateMail stack is touched.
+
+See `docs/COLLABORATION_DEPLOYMENT.md` for the production checklist.
 
 ## Phase F — Delegation
 
