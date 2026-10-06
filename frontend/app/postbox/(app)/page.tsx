@@ -91,11 +91,22 @@ function CentredSpinner() {
 function Mailbox() {
   const router = useRouter();
   const params = useSearchParams();
-  const { mailbox, permissions, preferences, updatePreferences } = usePostBox();
+  const {
+    mailbox,
+    authenticatedMailbox,
+    permissions,
+    preferences,
+    updatePreferences,
+  } = usePostBox();
   const canReadMailbox = permissions.can_read;
   const canManageMailbox = permissions.can_manage;
   const canSendMailbox = permissions.can_send_as || permissions.can_send_on_behalf;
   const isTeamBox = mailbox?.kind === "team_box";
+  const isSharedMailbox = Boolean(
+    mailbox &&
+    authenticatedMailbox &&
+    mailbox.id !== authenticatedMailbox.id,
+  );
 
   const folder = params.get("folder") || "INBOX";
   const labelId = params.get("label");
@@ -822,11 +833,19 @@ function Mailbox() {
 
         <div className="flex min-h-0 flex-1 items-center justify-center p-6">
           <EmptyState
-            title={isTeamBox ? "Send-only TeamBox access" : "Mailbox unavailable"}
+            title={
+              isTeamBox
+                ? "Send-only TeamBox access"
+                : isSharedMailbox
+                  ? "Send-only delegated mailbox access"
+                  : "Mailbox unavailable"
+            }
             detail={
               isTeamBox
                 ? "You can send from this TeamBox, but its Inbox, folders and message history are not available with your current permission."
-                : "This mailbox is not available for reading."
+                : isSharedMailbox
+                  ? "You can send from this delegated mailbox, but its Inbox, folders and message history are not available with your current permission."
+                  : "This mailbox is not available for reading."
             }
           />
         </div>
@@ -1453,8 +1472,8 @@ function Mailbox() {
           initial={compose}
           identities={identities}
           signatures={signatures}
-          draftsEnabled={!isTeamBox || canManageMailbox}
-          schedulingEnabled={!isTeamBox || canManageMailbox}
+          draftsEnabled={!isSharedMailbox || canManageMailbox}
+          schedulingEnabled={!isSharedMailbox || canManageMailbox}
           onClose={closeCompose}
           onSent={(message) => {
             setNotice(null);
