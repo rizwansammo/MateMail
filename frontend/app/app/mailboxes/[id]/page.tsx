@@ -44,7 +44,7 @@ interface Mailbox {
 
 interface Alias {
   id: string;
-  destination_mailbox: string | null;
+  destination_mailbox: string;
   destination_email: string;
 }
 
