@@ -57,6 +57,16 @@ class PostBoxSession(models.Model):
     mailbox = models.ForeignKey(
         "mailboxes.Mailbox", on_delete=models.CASCADE, related_name="postbox_sessions"
     )
+    # Optional mailbox currently being viewed through this personal session.
+    # The authenticated identity remains `mailbox`; only an explicitly
+    # authorised TeamBox may be stored here.
+    active_mailbox = models.ForeignKey(
+        "mailboxes.Mailbox",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="active_postbox_sessions",
+    )
 
     #: SHA-256 of the opaque cookie value. Unique so a token cannot address two
     #: rows, and indexed because it is the lookup on every single request.
@@ -709,6 +719,17 @@ class ScheduledMessage(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     mailbox = models.ForeignKey(
         "mailboxes.Mailbox", on_delete=models.CASCADE, related_name="postbox_scheduled"
+    )
+    # The personal mailbox that authenticated SMTP submission when this was
+    # scheduled. For ordinary personal-mailbox sends it may be NULL and falls
+    # back to `mailbox`. TeamBox scheduled sends always set it explicitly so
+    # the worker never attempts to authenticate as the passwordless TeamBox.
+    submission_mailbox = models.ForeignKey(
+        "mailboxes.Mailbox",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="postbox_scheduled_submissions",
     )
 
     #: Where the message actually is. UIDVALIDITY is stored with the UID
