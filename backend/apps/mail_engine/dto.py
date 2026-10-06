@@ -162,8 +162,6 @@ class MailboxSpec:
                     active=True,
                     grant_type=grant_type,
                     grantee_mailbox__kind="personal",
-                    grantee_mailbox__status="active",
-                    grantee_mailbox__mail_engine_provisioned=True,
                 )
                 .select_related("grantee_mailbox")
             )
