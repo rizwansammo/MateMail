@@ -41,7 +41,7 @@ def dispatch_scheduled_messages() -> dict:
     due = ScheduledMessage.objects.filter(
         state=ScheduledMessage.State.PENDING,
         scheduled_at__lte=timezone.now(),
-    ).select_related("mailbox", "mailbox__tenant")[:200]
+    ).select_related("mailbox", "mailbox__tenant", "submission_mailbox")[:200]
 
     sent = failed = skipped = 0
     for row in due:
@@ -73,7 +73,12 @@ def send_scheduled_message(scheduled_id: str) -> str:
     from .models import ScheduledMessage
 
     row = (
-        ScheduledMessage.objects.select_related("mailbox", "mailbox__tenant")
+        ScheduledMessage.objects.select_related(
+            "mailbox",
+            "mailbox__tenant",
+            "submission_mailbox",
+            "submission_mailbox__tenant",
+        )
         .filter(pk=scheduled_id)
         .first()
     )
@@ -87,11 +92,17 @@ def send_scheduled_message(scheduled_id: str) -> str:
         return "skipped"
 
     mailbox = row.mailbox
+    submission_mailbox = row.submission_mailbox or mailbox
 
     try:
         # Re-checked at send time, not only when it was scheduled. An
         # organization suspended between scheduling and sending must not send.
         sending.assert_organization_may_send(mailbox)
+
+        if submission_mailbox.pk != mailbox.pk:
+            from .auth import assert_mailbox_may_sign_in
+
+            assert_mailbox_may_sign_in(submission_mailbox)
 
         with imap.open_mailbox(mailbox.email) as connection:
             info = connection.select(row.folder, readonly=True)
@@ -106,10 +117,11 @@ def send_scheduled_message(scheduled_id: str) -> str:
         message, from_address, recipients = _scheduled_message_for_delivery(
             mailbox,
             raw,
+            actor_mailbox=submission_mailbox,
         )
         sending.submit(
             message,
-            mailbox=mailbox,
+            mailbox=submission_mailbox,
             envelope_from=from_address,
             recipients=recipients,
         )
@@ -158,7 +170,7 @@ def send_scheduled_message(scheduled_id: str) -> str:
 
 
 
-def _scheduled_message_for_delivery(mailbox, raw: bytes):
+def _scheduled_message_for_delivery(mailbox, raw: bytes, *, actor_mailbox=None):
     """
     Finalise one Scheduled source message.
 
@@ -188,10 +200,27 @@ def _scheduled_message_for_delivery(mailbox, raw: bytes):
                 "legacy scheduled source has no envelope recipients",
             )
         from_address = email_module.utils.parseaddr(message.get("From", ""))[1]
-        sending.assert_may_send_as(mailbox, from_address)
+        identity = sending.assert_may_send_as(
+            mailbox,
+            from_address,
+            actor_mailbox=actor_mailbox or mailbox,
+        )
+        if identity.send_mode == "on_behalf" and (actor_mailbox or mailbox).pk != mailbox.pk:
+            actor = actor_mailbox or mailbox
+            if "Sender" in message:
+                del message["Sender"]
+            message["Sender"] = email_module.utils.formataddr((
+                actor.full_name or "",
+                actor.email,
+            ))
         return message, from_address, recipients
 
-    identity = sending.assert_may_send_as(mailbox, parsed.from_address)
+    actor = actor_mailbox or mailbox
+    identity = sending.assert_may_send_as(
+        mailbox,
+        parsed.from_address,
+        actor_mailbox=actor,
+    )
     signature = signatures.for_mailbox(mailbox, parsed.draft_signature_id or None)
     if parsed.draft_signature_id and signature is None:
         raise sending.SendFailed(
@@ -244,6 +273,11 @@ def _scheduled_message_for_delivery(mailbox, raw: bytes):
         related=related,
         message_id=parsed.message_id,
     )
+    if identity.send_mode == "on_behalf" and actor.pk != mailbox.pk:
+        message["Sender"] = email_module.utils.formataddr((
+            actor.full_name or "",
+            actor.email,
+        ))
     return message, identity.address, recipients
 
 
