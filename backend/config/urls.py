@@ -12,6 +12,7 @@ urlpatterns = [
     path("api/team-boxes/", include("apps.team_boxes.urls")),
     path("api/aliases/", include("apps.aliases.urls")),
     path("api/forwarding/", include("apps.forwarding.urls")),
+    path("api/forward-groups/", include("apps.forward_groups.urls")),
     path("api/billing/", include("apps.billing.urls")),
     path("api/logs/", include("apps.logs.urls")),
     path("api/queue/", include("apps.mailqueue.urls")),
