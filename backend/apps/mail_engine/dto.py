@@ -146,9 +146,26 @@ class MailboxSpec:
     display_name: str = ""
     quota_mb: int = 10240
     active: bool = True
+    login_enabled: bool = True
+    authorized_senders: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_model(cls, mailbox) -> "MailboxSpec":
+        is_team_box = getattr(mailbox, "kind", "personal") == "team_box"
+        authorized_senders: tuple[str, ...] = ()
+
+        if is_team_box and getattr(mailbox, "pk", None):
+            grants = (
+                mailbox.access_grants_received
+                .filter(active=True, grant_type="team_box")
+                .select_related("grantee_mailbox")
+            )
+            authorized_senders = tuple(sorted({
+                grant.grantee_mailbox.email
+                for grant in grants
+                if grant.can_send_as or grant.can_send_on_behalf
+            }))
+
         return cls(
             address=mailbox.email,
             local_part=mailbox.local_part,
@@ -156,6 +173,8 @@ class MailboxSpec:
             display_name=mailbox.full_name or "",
             quota_mb=mailbox.quota_mb,
             active=mailbox.status == "active",
+            login_enabled=not is_team_box,
+            authorized_senders=authorized_senders,
         )
 
 
