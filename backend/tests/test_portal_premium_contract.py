@@ -228,7 +228,7 @@ class MateMailHubBrandingContractTest(SimpleTestCase):
     def test_browser_title_is_the_organization_hub_title(self):
         root_layout = read("app", "layout.tsx")
         self.assertIn('"MateMail · Organization Hub"', root_layout)
-        self.assertIn('IS_NETAMATE_EMAIL', root_layout)
+        self.assertNotIn('IS_NETAMATE_EMAIL', root_layout)
         self.assertIn('template: "%s | MateMail"', root_layout)
         self.assertIn('icon: "/assets/matemail-mark.svg"', root_layout)
 
