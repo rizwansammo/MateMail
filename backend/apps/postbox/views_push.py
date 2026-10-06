@@ -101,7 +101,9 @@ class DeviceListView(APIView):
 
     def get(self, request):
         postbox_auth.require_active_mailbox_permission(request, "read")
-        devices = PostBoxPushDevice.objects.for_mailbox(request.mailbox)
+        devices = PostBoxPushDevice.objects.for_mailbox(request.mailbox).filter(
+            session=request.postbox_session
+        )
         return Response({"results": [device_json(d) for d in devices]})
 
     def post(self, request):
@@ -135,8 +137,9 @@ class DeviceDetailView(APIView):
     """
     Remove one registration.
 
-    Scoped with `for_mailbox`, so another mailbox's registration id is a 404 -
-    the ids are unguessable UUIDs, and scoping makes that irrelevant.
+    Scoped by both the active mailbox and the personal PostBox session that
+    registered it. A delegate or TeamBox member therefore cannot enumerate or
+    remove another person's push registration for the same shared mailbox.
     """
 
     permission_classes = [IsAuthenticated]
@@ -145,7 +148,10 @@ class DeviceDetailView(APIView):
     def delete(self, request, device_id):
         postbox_auth.require_active_mailbox_permission(request, "read")
         deleted, _ = (
-            PostBoxPushDevice.objects.for_mailbox(request.mailbox).filter(pk=device_id).delete()
+            PostBoxPushDevice.objects.for_mailbox(request.mailbox).filter(
+                pk=device_id,
+                session=request.postbox_session,
+            ).delete()
         )
         if not deleted:
             return Response({"detail": "Not found."}, status=404)
