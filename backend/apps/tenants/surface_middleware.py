@@ -1,6 +1,6 @@
 from django.http import JsonResponse, HttpResponseNotFound
 
-from .dedicated import custom_hostname_surface
+from .host_binding import custom_hostname_surface
 
 
 class CustomHostnameSurfaceGuardMiddleware:
