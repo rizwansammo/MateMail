@@ -246,6 +246,75 @@ jobs:
             fi
             echo "  matemail_engine_link present and internal=true"
 
+            # ── Collaboration release dependency ───────────────────────────
+            #
+            # TeamBox delegated sending can tolerate the older schema by simply
+            # not being configured yet, but Forward Groups cannot: Phase E adds
+            # Native API schema v6 AND a Postfix RCPT policy hook. Deploying the
+            # Hub/backend first would expose controls that the running mail path
+            # cannot enforce. Fail before transferring or changing MateMail.
+            echo "▸ Checking Native Engine collaboration readiness..."
+            for container in matemail-native-api matemail-native-postfix; do
+              if ! docker inspect "$container" >/dev/null 2>&1; then
+                echo "FATAL: required Native Engine container '$container' is not running."
+                echo "       Deploy the Phase G Native Engine release first."
+                exit 1
+              fi
+            done
+
+            ENGINE_READY_JSON=$(docker exec matemail-native-api sh -ec               'wget -qO- --header="X-Native-Api-Secret: $NATIVE_API_SECRET" http://127.0.0.1:8451/ready')
+            ENGINE_READY_JSON="$ENGINE_READY_JSON" python3 - <<'PYENGINE'
+            import json, os, sys
+
+            try:
+                data = json.loads(os.environ["ENGINE_READY_JSON"])
+            except Exception as exc:
+                print(f"FATAL: Native Engine /ready returned invalid JSON: {exc}")
+                sys.exit(1)
+
+            caps = data.get("capabilities") or {}
+            problems = []
+            if data.get("ready") is not True:
+                problems.append("Native API reports ready=false")
+            if int(data.get("schema_version") or 0) < 6:
+                problems.append(
+                    f"Native Engine schema must be >= 6, got {data.get('schema_version')!r}"
+                )
+            for name in (
+                "mailbox_sender_authorization",
+                "forward_groups",
+                "forward_group_sender_policy",
+            ):
+                if caps.get(name) is not True:
+                    problems.append(f"Native Engine capability {name!r} is missing")
+            if int(caps.get("collaboration_version") or 0) < 1:
+                problems.append("Native Engine collaboration_version must be >= 1")
+
+            if problems:
+                print("FATAL: Native Engine is not ready for this MateMail release:")
+                for problem in problems:
+                    print("  - " + problem)
+                print("Deploy the Native API/Postfix collaboration release first.")
+                sys.exit(1)
+
+            print(
+                "  Native API ready: schema=%s collaboration=%s"
+                % (data.get("schema_version"), caps.get("collaboration_version"))
+            )
+            PYENGINE
+
+            if ! docker exec matemail-native-postfix               postconf smtpd_recipient_restrictions               | grep -Fq 'check_policy_service inet:127.0.0.1:10032'; then
+              echo "FATAL: Native Postfix is missing the Forward Group RCPT policy hook."
+              echo "       Deploy the Phase G Postfix configuration/image first."
+              exit 1
+            fi
+            if ! docker exec matemail-native-postfix               grep -Fq 'def forward_group_verdict'               /usr/local/lib/matemail/engine_control.py; then
+              echo "FATAL: Native Postfix control plane lacks Forward Group policy code."
+              echo "       Deploy the Phase G Postfix image first."
+              exit 1
+            fi
+            echo "  Native Postfix Forward Group policy is active"
+
             mkdir -p "$DEPLOY_DIR/.deploy" "$DEPLOY_DIR/backups"
             chmod 755 "$DEPLOY_DIR/.deploy"
             # Keep the last few staged candidates for forensics, not all of them.
