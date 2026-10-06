@@ -66,6 +66,7 @@ from .dto import (
     EngineDomain,
     EngineHealth,
     EngineMailbox,
+    ForwardGroupSpec,
     ForwardingSpec,
     MailboxSpec,
     MailboxUsage,
@@ -183,6 +184,14 @@ class MailEngineAdapter(ABC):
     @abstractmethod
     def delete_alias(self, address: str) -> None:
         """Remove an alias. Idempotent."""
+
+    @abstractmethod
+    def ensure_forward_group(self, spec: ForwardGroupSpec) -> None:
+        """Create or reconcile a Forward Group. Idempotent."""
+
+    @abstractmethod
+    def delete_forward_group(self, address: str) -> None:
+        """Remove a Forward Group. Idempotent."""
 
     @abstractmethod
     def ensure_forwarding(self, spec: ForwardingSpec) -> None:
