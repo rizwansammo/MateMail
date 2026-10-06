@@ -558,6 +558,7 @@ function PremiumPostBoxShell({
                 onNavigate={closeRail}
                 onCreate={openEditor}
                 onDelete={deleteEntry}
+                canManage={permissions.can_manage}
               />
             </Suspense>
           </nav>
@@ -580,9 +581,16 @@ function PremiumPostBoxShell({
             <Menu className="h-5 w-5" aria-hidden="true" />
           </button>
 
-          <Suspense fallback={<div className="pb-premium-search" aria-hidden="true" />}>
-            <PremiumSearch />
-          </Suspense>
+          {canReadMailbox ? (
+            <Suspense fallback={<div className="pb-premium-search" aria-hidden="true" />}>
+              <PremiumSearch />
+            </Suspense>
+          ) : (
+            <div className="pb-premium-search" aria-label="Send-only TeamBox">
+              <Search className="h-[19px] w-[19px]" aria-hidden="true" />
+              <span className="pb-muted">Send-only TeamBox</span>
+            </div>
+          )}
 
           <div className="pb-premium-top-actions">
             <Link
@@ -636,8 +644,7 @@ function PremiumPostBoxShell({
                             await switchMailbox(null);
                             window.location.assign("/postbox?folder=INBOX");
                           } catch {
-                            setAccountMenuError("Your personal mailbox could not be opened.");
-                            setSwitchingMailbox(null);
+                            window.location.assign("/postbox?folder=INBOX");
                           }
                         }}
                       >
@@ -802,13 +809,15 @@ function PremiumPostBoxShell({
                   </p>
                 )}
 
-                <Link
-                  href="/postbox/contacts"
-                  className="pb-premium-account-contacts"
-                >
-                  <Users className="h-4 w-4" aria-hidden="true" />
-                  Contacts
-                </Link>
+                {canReadMailbox && (
+                  <Link
+                    href="/postbox/contacts"
+                    className="pb-premium-account-contacts"
+                  >
+                    <Users className="h-4 w-4" aria-hidden="true" />
+                    Contacts
+                  </Link>
+                )}
 
                 <div className="pb-premium-account-footer">
                   <Link href="/postbox/settings">
@@ -1074,7 +1083,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function PremiumFolderNavigation({
-  byRole, custom, labels, onNavigate, onCreate, onDelete,
+  byRole, custom, labels, onNavigate, onCreate, onDelete, canManage,
 }: {
   folders: Folder[];
   byRole: Map<string, Folder>;
@@ -1086,6 +1095,7 @@ function PremiumFolderNavigation({
     color?: string | null, colorOnly?: boolean,
   ) => void;
   onDelete: (kind: "folder" | "label", name: string, id?: string) => void;
+  canManage: boolean;
 }) {
   const pathname = usePathname();
   const params = useSearchParams();
@@ -1127,8 +1137,10 @@ function PremiumFolderNavigation({
           {foldersOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
           <span>FOLDERS</span>
         </button>
-        <button type="button" aria-label="Create folder" title="Create folder"
-          onClick={() => onCreate("folder")}><Plus size={17} /></button>
+        {canManage && (
+          <button type="button" aria-label="Create folder" title="Create folder"
+            onClick={() => onCreate("folder")}><Plus size={17} /></button>
+        )}
       </div>
       {foldersOpen && custom.map((folder) => {
         const active = pathname === "/postbox" && !selectedLabel &&
@@ -1145,24 +1157,26 @@ function PremiumFolderNavigation({
               <span className="truncate">{folder.name}</span>
               {folder.unseen ? <span className="pb-premium-nav-count">{folder.unseen}</span> : null}
             </Link>
-            <details className="pb-organize-item-menu">
-              <summary aria-label={"Manage folder " + folder.name}
-                title={"Manage folder " + folder.name}><MoreHorizontal size={17} /></summary>
-              <div>
-                <button type="button" onClick={(event) => {
-                  event.currentTarget.closest("details")!.open = false;
-                  onCreate("folder", folder.name, undefined, folder.color);
-                }}>Edit</button>
-                <button type="button" onClick={(event) => {
-                  event.currentTarget.closest("details")!.open = false;
-                  onCreate("folder", folder.name, undefined, folder.color, true);
-                }}>Change Color</button>
-                <button type="button" onClick={(event) => {
-                  event.currentTarget.closest("details")!.open = false;
-                  onDelete("folder", folder.name);
-                }}>Delete</button>
-              </div>
-            </details>
+            {canManage && (
+              <details className="pb-organize-item-menu">
+                <summary aria-label={"Manage folder " + folder.name}
+                  title={"Manage folder " + folder.name}><MoreHorizontal size={17} /></summary>
+                <div>
+                  <button type="button" onClick={(event) => {
+                    event.currentTarget.closest("details")!.open = false;
+                    onCreate("folder", folder.name, undefined, folder.color);
+                  }}>Edit</button>
+                  <button type="button" onClick={(event) => {
+                    event.currentTarget.closest("details")!.open = false;
+                    onCreate("folder", folder.name, undefined, folder.color, true);
+                  }}>Change Color</button>
+                  <button type="button" onClick={(event) => {
+                    event.currentTarget.closest("details")!.open = false;
+                    onDelete("folder", folder.name);
+                  }}>Delete</button>
+                </div>
+              </details>
+            )}
           </div>
         );
       })}
@@ -1174,8 +1188,10 @@ function PremiumFolderNavigation({
           {labelsOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
           <span>LABELS</span>
         </button>
-        <button type="button" aria-label="Create label" title="Create label"
-          onClick={() => onCreate("label")}><Plus size={17} /></button>
+        {canManage && (
+          <button type="button" aria-label="Create label" title="Create label"
+            onClick={() => onCreate("label")}><Plus size={17} /></button>
+        )}
       </div>
       {labelsOpen && labels.map((label) => (
         <div className="pb-organize-nav-row" key={label.id}>
@@ -1188,24 +1204,26 @@ function PremiumFolderNavigation({
             <Tag size={17} aria-hidden="true" style={{ color: label.color || LABEL_COLOR_DEFAULT }} />
             <span className="truncate">{label.name}</span>
           </Link>
-          <details className="pb-organize-item-menu">
-            <summary aria-label={"Manage label " + label.name}
-              title={"Manage label " + label.name}><MoreHorizontal size={17} /></summary>
-            <div>
-              <button type="button" onClick={(event) => {
-                event.currentTarget.closest("details")!.open = false;
-                onCreate("label", label.name, label.id, label.color);
-              }}>Edit</button>
-              <button type="button" onClick={(event) => {
-                event.currentTarget.closest("details")!.open = false;
-                onCreate("label", label.name, label.id, label.color, true);
-              }}>Change Color</button>
-              <button type="button" onClick={(event) => {
-                event.currentTarget.closest("details")!.open = false;
-                onDelete("label", label.name, label.id);
-              }}>Delete</button>
-            </div>
-          </details>
+          {canManage && (
+            <details className="pb-organize-item-menu">
+              <summary aria-label={"Manage label " + label.name}
+                title={"Manage label " + label.name}><MoreHorizontal size={17} /></summary>
+              <div>
+                <button type="button" onClick={(event) => {
+                  event.currentTarget.closest("details")!.open = false;
+                  onCreate("label", label.name, label.id, label.color);
+                }}>Edit</button>
+                <button type="button" onClick={(event) => {
+                  event.currentTarget.closest("details")!.open = false;
+                  onCreate("label", label.name, label.id, label.color, true);
+                }}>Change Color</button>
+                <button type="button" onClick={(event) => {
+                  event.currentTarget.closest("details")!.open = false;
+                  onDelete("label", label.name, label.id);
+                }}>Delete</button>
+              </div>
+            </details>
+          )}
         </div>
       ))}
 
