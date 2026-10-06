@@ -46,6 +46,23 @@ Current production facts:
 - both emit customer-safe HSTS (`max-age=31536000`, no `includeSubDomains`);
 - host nginx syntax is clean.
 
+## Phase A repository decoupling
+
+Before any DNS or nginx handover, MateMail CI/CD is decoupled from the legacy
+NetaMate frontend deployment:
+
+- MateMail CI no longer builds or publishes
+  `ghcr.io/rizwansammo/matemail-frontend-netamate-email`;
+- the MateMail deploy workflow no longer touches `/opt/NetaMate-Email`;
+- the currently running branded frontend on `127.0.0.1:3060` is intentionally
+  left running and unchanged as a rollback asset;
+- the hand-written NetaMate nginx vhosts and their enabled symlinks remain
+  untouched in this phase;
+- no DNS record is changed in this phase.
+
+This is a control-plane separation only. The later custom-host adoption still
+uses the existing port-3060 frontend override until the pilot has passed.
+
 Legacy-vhost isolation baseline:
 
 | Host | Probe | Current result | Expected after custom-host handover |
