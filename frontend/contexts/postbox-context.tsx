@@ -1,17 +1,11 @@
 "use client";
 
 /**
- * The PostBox session, preferences and theme.
+ * The PostBox session, active mailbox and personal display preferences.
  *
- * One context rather than three, because they are read together on every
- * screen and a preference change (theme, density) has to reach the shell, the
- * list and the reader at the same moment.
- *
- * THE THEME IS SERVER-SIDE STATE
- *   Somebody who sets dark mode on their laptop expects dark mode on their
- *   phone, so the choice is a mailbox preference rather than a browser one.
- *   It is applied optimistically and then persisted — a theme toggle that
- *   waits for a round trip feels broken.
+ * Authentication always belongs to one personal mailbox. `mailbox` is the
+ * mailbox currently open in the UI and may be an authorised TeamBox.
+ * `authenticatedMailbox` never changes until account sign-out/switch.
  */
 import {
   createContext,
@@ -25,6 +19,8 @@ import {
 import {
   postbox,
   PostBoxError,
+  type AvailablePostBoxMailbox,
+  type MailboxPermissions,
   type MailboxProfile,
   type Preferences,
 } from "@/lib/postbox-api";
@@ -43,12 +39,23 @@ const DEFAULT_PREFERENCES: Preferences = {
   default_identity: "",
 };
 
+const OWNER_PERMISSIONS: MailboxPermissions = {
+  can_read: true,
+  can_manage: true,
+  can_send_as: true,
+  can_send_on_behalf: true,
+};
+
 interface PostBoxValue {
   mailbox: MailboxProfile | null;
+  authenticatedMailbox: MailboxProfile | null;
+  availableMailboxes: AvailablePostBoxMailbox[];
+  permissions: MailboxPermissions;
   preferences: Preferences;
   isLoading: boolean;
   signIn: (email: string, password: string, remember: boolean) => Promise<void>;
   signOut: () => Promise<void>;
+  switchMailbox: (mailboxId: string | null) => Promise<void>;
   updatePreferences: (patch: Partial<Preferences>) => Promise<void>;
   refresh: () => void;
 }
@@ -66,13 +73,26 @@ function applyTheme(theme: Preferences["theme"]) {
 
 export function PostBoxProvider({ children }: { children: React.ReactNode }) {
   const [mailbox, setMailbox] = useState<MailboxProfile | null>(null);
+  const [authenticatedMailbox, setAuthenticatedMailbox] =
+    useState<MailboxProfile | null>(null);
+  const [availableMailboxes, setAvailableMailboxes] =
+    useState<AvailablePostBoxMailbox[]>([]);
+  const [permissions, setPermissions] =
+    useState<MailboxPermissions>(OWNER_PERMISSIONS);
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
   const [isLoading, setIsLoading] = useState(true);
 
-  // `nonce` exists so `refresh()` can re-run this without the effect writing
-  // state on its way in, which is what react-hooks/set-state-in-effect flags.
   const [nonce, setNonce] = useState(0);
   const load = useCallback(() => setNonce((value) => value + 1), []);
+
+  const applyMe = useCallback((data: Awaited<ReturnType<typeof postbox.me>>) => {
+    setMailbox(data.mailbox);
+    setAuthenticatedMailbox(data.authenticated_mailbox);
+    setAvailableMailboxes(data.available_mailboxes);
+    setPermissions(data.permissions);
+    setPreferences({ ...DEFAULT_PREFERENCES, ...data.preferences });
+    applyTheme(data.preferences?.theme ?? "system");
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,14 +100,15 @@ export function PostBoxProvider({ children }: { children: React.ReactNode }) {
     postbox
       .me()
       .then((data) => {
-        if (cancelled) return;
-        setMailbox(data.mailbox);
-        setPreferences({ ...DEFAULT_PREFERENCES, ...data.preferences });
-        applyTheme(data.preferences?.theme ?? "system");
+        if (!cancelled) applyMe(data);
       })
       .catch(() => {
-        // Not signed in, or the session ended. Either way there is no mailbox.
-        if (!cancelled) setMailbox(null);
+        if (!cancelled) {
+          setMailbox(null);
+          setAuthenticatedMailbox(null);
+          setAvailableMailboxes([]);
+          setPermissions(OWNER_PERMISSIONS);
+        }
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -96,36 +117,41 @@ export function PostBoxProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [nonce]);
+  }, [applyMe, nonce]);
 
   const signIn = useCallback(
     async (email: string, password: string, remember: boolean) => {
-      const data = await postbox.login(email, password, remember);
-      setMailbox(data.mailbox);
-      // Preferences are fetched rather than assumed: a returning person's
-      // theme should be right on the first paint after signing in.
-      const me = await postbox.me();
-      setPreferences({ ...DEFAULT_PREFERENCES, ...me.preferences });
-      applyTheme(me.preferences?.theme ?? "system");
+      await postbox.login(email, password, remember);
+      applyMe(await postbox.me());
     },
-    [],
+    [applyMe],
   );
 
   const signOut = useCallback(async () => {
     try {
       await postbox.logout();
     } catch {
-      // The cookie is cleared server-side on success; if the call itself
-      // failed there is nothing useful to say, and the state below is what
-      // stops PostBox rendering either way.
+      // Local state still clears so an ended/failed session never keeps mail UI
+      // visible as if it were authenticated.
     }
     setMailbox(null);
+    setAuthenticatedMailbox(null);
+    setAvailableMailboxes([]);
+    setPermissions(OWNER_PERMISSIONS);
+  }, []);
+
+  const switchMailbox = useCallback(async (mailboxId: string | null) => {
+    const data = await postbox.switchMailbox(mailboxId);
+    setMailbox(data.mailbox);
+    setAuthenticatedMailbox(data.authenticated_mailbox);
+    setAvailableMailboxes(data.available_mailboxes);
+    setPermissions(data.permissions);
+    setPreferences({ ...DEFAULT_PREFERENCES, ...data.preferences });
+    applyTheme(data.preferences?.theme ?? "system");
   }, []);
 
   const updatePreferences = useCallback(
     async (patch: Partial<Preferences>) => {
-      // Applied first. A theme toggle that waits for the network feels broken,
-      // and the server is the authority only for what persists.
       const next = { ...preferences, ...patch };
       setPreferences(next);
       if (patch.theme) applyTheme(patch.theme);
@@ -135,7 +161,6 @@ export function PostBoxProvider({ children }: { children: React.ReactNode }) {
         setPreferences({ ...DEFAULT_PREFERENCES, ...saved });
         applyTheme(saved.theme);
       } catch (error) {
-        // Roll back, so the UI never shows a preference that was refused.
         setPreferences(preferences);
         applyTheme(preferences.theme);
         throw error;
@@ -147,14 +172,30 @@ export function PostBoxProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       mailbox,
+      authenticatedMailbox,
+      availableMailboxes,
+      permissions,
       preferences,
       isLoading,
       signIn,
       signOut,
+      switchMailbox,
       updatePreferences,
       refresh: load,
     }),
-    [mailbox, preferences, isLoading, signIn, signOut, updatePreferences, load],
+    [
+      mailbox,
+      authenticatedMailbox,
+      availableMailboxes,
+      permissions,
+      preferences,
+      isLoading,
+      signIn,
+      signOut,
+      switchMailbox,
+      updatePreferences,
+      load,
+    ],
   );
 
   return <PostBoxContext.Provider value={value}>{children}</PostBoxContext.Provider>;
@@ -168,7 +209,6 @@ export function usePostBox(): PostBoxValue {
   return context;
 }
 
-/** The message an API failure should show, without leaking internals. */
 export function describePostBoxError(error: unknown, fallback: string): string {
   if (error instanceof PostBoxError) return error.message;
   return fallback;
