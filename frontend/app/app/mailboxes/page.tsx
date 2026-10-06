@@ -54,6 +54,7 @@ interface Mailbox {
   domain: string;
   domain_name: string;
   status: "active" | "disabled" | "suspended";
+  kind: "personal" | "team_box";
   quota_mb: number;
   storage_used_mb: number;
   mail_service_ready: boolean;
@@ -116,7 +117,8 @@ export default function MailboxesPage() {
       const [mailboxResponse, domainResponse, billingResponse] = await Promise.all(requests);
 
       if (mailboxResponse.ok) {
-        setMailboxes(await mailboxResponse.json());
+        const rows = (await mailboxResponse.json()) as Mailbox[];
+        setMailboxes(rows.filter((mailbox) => mailbox.kind === "personal"));
       } else {
         const data = await mailboxResponse.json().catch(() => null);
         setLoadError(data?.detail ?? "Mailboxes could not be loaded.");
