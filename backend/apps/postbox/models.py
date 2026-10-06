@@ -731,6 +731,11 @@ class ScheduledMessage(models.Model):
         blank=True,
         related_name="postbox_scheduled_submissions",
     )
+    # True when SMTP submission MUST use a distinct authenticated personal
+    # mailbox (TeamBox or Delegation). If that actor is later deleted, the
+    # nullable FK becomes NULL but this bit survives, so the worker fails
+    # closed instead of falling back to the target mailbox.
+    requires_submission_mailbox = models.BooleanField(default=False)
 
     #: Where the message actually is. UIDVALIDITY is stored with the UID
     #: because a UID alone is meaningless if the folder is recreated — that is
