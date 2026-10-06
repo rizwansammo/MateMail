@@ -19,21 +19,21 @@ class ForwardGroupLoop(ValueError):
     )
 
 
-def _active_member_mailboxes(group):
+def _member_mailboxes(group):
     return (
         Mailbox.objects
-        .filter(
-            forward_group_memberships__group=group,
-            status=MailboxStatus.ACTIVE,
-        )
+        .filter(forward_group_memberships__group=group)
         .distinct()
         .order_by("email")
     )
 
 
 def resolved_destinations(group) -> tuple[str, ...]:
+    # Membership is durable configuration. A temporarily disabled mailbox
+    # remains a group member; that mailbox's own delivery state decides whether
+    # it can receive at that moment.
     return tuple(
-        sorted(set(_active_member_mailboxes(group).values_list("email", flat=True)))
+        sorted(set(_member_mailboxes(group).values_list("email", flat=True)))
     )
 
 
@@ -49,7 +49,10 @@ def resolved_allowed_senders(group) -> tuple[str, ...]:
             status=MailboxStatus.ACTIVE,
         )
     elif policy == ForwardGroupSenderPolicy.MEMBERS:
-        qs = _active_member_mailboxes(group).filter(kind=MailboxKind.PERSONAL)
+        qs = _member_mailboxes(group).filter(
+            kind=MailboxKind.PERSONAL,
+            status=MailboxStatus.ACTIVE,
+        )
     elif policy == ForwardGroupSenderPolicy.SELECTED:
         qs = Mailbox.objects.filter(
             forward_group_sender_grants__group=group,
