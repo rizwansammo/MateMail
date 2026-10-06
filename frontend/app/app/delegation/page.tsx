@@ -131,15 +131,15 @@ export default function DelegationPage() {
     return () => window.clearTimeout(timer);
   }, [fetchAll]);
 
-  const availableDelegates = useMemo(
-    () => mailboxes.filter((mailbox) => mailbox.id !== targetId),
-    [mailboxes, targetId]
-  );
-
   const chosenTarget =
     mailboxes.some((mailbox) => mailbox.id === targetId)
       ? targetId
       : mailboxes[0]?.id || "";
+
+  const availableDelegates = useMemo(
+    () => mailboxes.filter((mailbox) => mailbox.id !== chosenTarget),
+    [chosenTarget, mailboxes]
+  );
 
   const chosenDelegate =
     availableDelegates.some((mailbox) => mailbox.id === delegateId)
