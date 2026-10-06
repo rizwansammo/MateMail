@@ -3,6 +3,7 @@ from django.http import StreamingHttpResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 
+from . import auth as postbox_auth
 from .auth import PostBoxSessionAuthentication
 from . import realtime
 
@@ -20,6 +21,7 @@ class RealtimeEventView(APIView):
     authentication_classes = [PostBoxSessionAuthentication]
 
     def get(self, request):
+        postbox_auth.require_active_mailbox_permission(request, "read")
         response = StreamingHttpResponse(
             realtime.stream(request.mailbox.pk),
             content_type="text/event-stream",
