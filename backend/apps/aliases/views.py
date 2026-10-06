@@ -9,6 +9,7 @@ from apps.domains.models import Domain
 from apps.domains.verification import DomainNotVerified, assert_provisionable
 from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
+from apps.mail_directory.services import AddressConflict
 from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
 from apps.tenants.policy import MailNotPermitted, assert_can_use_mail
 from .models import Alias, AliasStatus
@@ -122,14 +123,17 @@ class AliasListCreateView(APIView):
             if not slot.allowed:
                 return Response({"detail": slot.message}, status=402)
 
-            alias = Alias.objects.create(
-                tenant=request.tenant,
-                domain=domain,
-                source_address=source_address,
-                destination_mailbox=destination_mailbox,
-                destination_address=destination_address,
-                status=AliasStatus.ACTIVE,
-            )
+            try:
+                alias = Alias.objects.create(
+                    tenant=request.tenant,
+                    domain=domain,
+                    source_address=source_address,
+                    destination_mailbox=destination_mailbox,
+                    destination_address=destination_address,
+                    status=AliasStatus.ACTIVE,
+                )
+            except AddressConflict as exc:
+                return Response({"source_local_part": exc.customer_message}, status=400)
 
         try:
             _apply_alias(alias)
