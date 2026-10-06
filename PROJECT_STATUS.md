@@ -31,7 +31,9 @@ Phase A establishes the shared-address and mailbox-access primitives for
 TeamBox, Forward Group and Delegation. Phase B normalizes Alias as an alternate
 address for exactly one existing MateMail mailbox. Phase C adds full TeamBox
 Hub/backend/native-engine management, including passwordless storage and
-engine-enforced member sender authorization.
+engine-enforced member sender authorization. Phase D adds permission-aware
+TeamBox switching and use inside PostBox while keeping the authenticated
+personal mailbox identity immutable.
 
 - Central `AddressClaim` registry prevents cross-type address collisions.
 - Existing personal mailboxes and aliases are backfilled into the registry.
@@ -41,7 +43,8 @@ engine-enforced member sender authorization.
   Delegation.
 - Existing `ForwardingRule` remains separate from Forward Group.
 - Phase B removes external Alias destinations from the product contract; external delivery remains the existing Forwarding feature.
-- Phase C adds dedicated TeamBox Hub screens, member permissions, native-engine schema v5 and SMTP sender authorization; PostBox TeamBox switching remains Phase D.
+- Phase C adds dedicated TeamBox Hub screens, member permissions, native-engine schema v5 and SMTP sender authorization.
+- Phase D adds PostBox TeamBox switching, Read/Manage/Send As/Send on behalf enforcement, personal-actor SMTP submission, shared Sent/Drafts, scheduled-send actor retention and audit logging.
 
 Design record: `docs/COLLABORATION.md`.
 
