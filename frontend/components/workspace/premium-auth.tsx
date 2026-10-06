@@ -10,7 +10,6 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
-import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 
 export function AuthBrand({ href = "/" }: { href?: string }) {
   return (
@@ -40,9 +39,7 @@ export function PremiumAuthShell({
         <aside className="auth-story">
           <AuthBrand />
           <div className="auth-story-body">
-            <div className="auth-eyebrow">
-              {IS_NETAMATE_EMAIL ? "SECURE MAIL ADMINISTRATION" : "BUILT FOR YOUR ORGANIZATION"}
-            </div>
+            <div className="auth-eyebrow">BUILT FOR YOUR ORGANIZATION</div>
             <h1>
               Great email.
               <br />
@@ -70,14 +67,14 @@ export function PremiumAuthShell({
           </div>
           <footer className="auth-story-footer">
             <span>MateMail Hub</span>
-            <span>{IS_NETAMATE_EMAIL ? "MailAdmin" : "Organization Hub"}</span>
+            <span>Organization Hub</span>
           </footer>
         </aside>
 
         <main className="auth-main">
           <div className="auth-top">
             <AuthBrand />
-            <span>{topNote ?? (IS_NETAMATE_EMAIL ? "Private administration" : "Secure organization access")}</span>
+            <span>{topNote ?? "Secure organization access"}</span>
           </div>
           <div className="auth-form-wrap">
             <span className="auth-form-icon">{icon}</span>
