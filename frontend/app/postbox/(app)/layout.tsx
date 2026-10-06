@@ -468,7 +468,19 @@ function PremiumPostBoxShell({
     (item) => item.mailbox.id !== authenticatedMailbox?.id,
   );
   const teamBoxes = availableMailboxes.filter(
-    (item) => !item.is_personal && item.mailbox.id !== mailbox.id,
+    (item) =>
+      item.access_type === "team_box" &&
+      item.mailbox.id !== mailbox.id,
+  );
+  const delegatedMailboxes = availableMailboxes.filter(
+    (item) =>
+      item.access_type === "delegation" &&
+      item.mailbox.id !== mailbox.id,
+  );
+  const activeDelegation = Boolean(
+    authenticatedMailbox &&
+    mailbox.kind === "personal" &&
+    mailbox.id !== authenticatedMailbox.id,
   );
 
   const canReadMailbox = permissions.can_read;
@@ -565,7 +577,7 @@ function PremiumPostBoxShell({
           </nav>
         ) : (
           <div className="px-4 py-3 text-sm pb-muted">
-            This TeamBox grants sending access only. Inbox and folders are not available.
+            This mailbox grants sending access only. Inbox and folders are not available.
           </div>
         )}
 
@@ -587,9 +599,9 @@ function PremiumPostBoxShell({
               <PremiumSearch />
             </Suspense>
           ) : (
-            <div className="pb-premium-search" aria-label="Send-only TeamBox">
+            <div className="pb-premium-search" aria-label="Send-only mailbox access">
               <Search className="h-[19px] w-[19px]" aria-hidden="true" />
-              <span className="pb-muted">Send-only TeamBox</span>
+              <span className="pb-muted">Send-only mailbox access</span>
             </div>
           )}
 
@@ -618,6 +630,9 @@ function PremiumPostBoxShell({
                     <span>{mailbox.email}</span>
                     {mailbox.kind === "team_box" && authenticatedMailbox && (
                       <small>TeamBox · signed in as {authenticatedMailbox.email}</small>
+                    )}
+                    {activeDelegation && authenticatedMailbox && (
+                      <small>Delegated mailbox · signed in as {authenticatedMailbox.email}</small>
                     )}
                   </div>
                   <Link
@@ -697,6 +712,95 @@ function PremiumPostBoxShell({
                         >
                           <span className="pb-premium-account-avatar-sm" aria-hidden="true">
                             <Users className="h-4 w-4" />
+                          </span>
+                          <span className="pb-premium-account-row-copy">
+                            <strong>{target.full_name || target.email}</strong>
+                            <small>
+                              {target.email}
+                              {!canRead && canSend ? " · Send only" : ""}
+                            </small>
+                          </span>
+                          {switching ? (
+                            <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
+                          ) : (
+                            <span className="pb-premium-account-switch-label">Open</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {(activeDelegation || delegatedMailboxes.length > 0) && authenticatedMailbox && (
+                  <div className="pb-premium-account-switcher">
+                    <div className="pb-premium-account-section-label">Delegated mailboxes</div>
+
+                    {activeDelegation && (
+                      <button
+                        type="button"
+                        className="pb-premium-account-row"
+                        disabled={Boolean(switchingMailbox)}
+                        onClick={async () => {
+                          setAccountMenuError(null);
+                          setSwitchingMailbox(authenticatedMailbox.id);
+                          try {
+                            await switchMailbox(null);
+                            window.location.assign("/postbox?folder=INBOX");
+                          } catch {
+                            window.location.assign("/postbox?folder=INBOX");
+                          }
+                        }}
+                      >
+                        <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                          {accountInitials(authenticatedMailbox.full_name, authenticatedMailbox.email) || "PB"}
+                        </span>
+                        <span className="pb-premium-account-row-copy">
+                          <strong>{authenticatedMailbox.full_name || authenticatedMailbox.email}</strong>
+                          <small>{authenticatedMailbox.email} · My mailbox</small>
+                        </span>
+                        {switchingMailbox === authenticatedMailbox.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
+                        ) : (
+                          <span className="pb-premium-account-switch-label">Open</span>
+                        )}
+                      </button>
+                    )}
+
+                    {delegatedMailboxes.map((entry) => {
+                      const target = entry.mailbox;
+                      const switching = switchingMailbox === target.id;
+                      const canRead = entry.permissions.can_read;
+                      const canSend =
+                        entry.permissions.can_send_as ||
+                        entry.permissions.can_send_on_behalf;
+                      return (
+                        <button
+                          key={target.id}
+                          type="button"
+                          className="pb-premium-account-row"
+                          disabled={Boolean(switchingMailbox)}
+                          onClick={async () => {
+                            setAccountMenuError(null);
+                            setSwitchingMailbox(target.id);
+                            try {
+                              await switchMailbox(target.id);
+                              window.location.assign(
+                                canRead
+                                  ? "/postbox?folder=INBOX"
+                                  : canSend
+                                    ? "/postbox?compose=new"
+                                    : "/postbox",
+                              );
+                            } catch {
+                              setAccountMenuError(
+                                "You no longer have access to that delegated mailbox.",
+                              );
+                              setSwitchingMailbox(null);
+                            }
+                          }}
+                        >
+                          <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                            <User className="h-4 w-4" />
                           </span>
                           <span className="pb-premium-account-row-copy">
                             <strong>{target.full_name || target.email}</strong>
