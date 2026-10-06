@@ -69,6 +69,7 @@ LOCAL_APPS = [
     "apps.accounts",
     "apps.tenants",
     "apps.domains",
+    "apps.mail_directory",
     "apps.mailboxes",
     "apps.autodiscover",
     "apps.dnshealth",
