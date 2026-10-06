@@ -837,6 +837,7 @@ function Mailbox() {
             identities={identities}
             signatures={signatures}
             draftsEnabled={false}
+            schedulingEnabled={false}
             onClose={closeCompose}
             onSent={(message) => {
               setNotice(null);
