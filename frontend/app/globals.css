@@ -1811,37 +1811,7 @@ body {
   accent-color: var(--nm-accent);
 }
 
-.ws.nm-mailadmin {
-  --ws-canvas: #f4f7fb;
-  --ws-surface: #ffffff;
-  --ws-surface-2: #f7f9fc;
-  --ws-surface-3: #eef3f8;
-  --ws-border: #dce4ee;
-  --ws-border-strong: #bdc9d8;
-  --ws-text: #142033;
-  --ws-text-muted: #607086;
-  --ws-text-faint: #8b99aa;
-  --ws-primary: #10243d;
-  --ws-primary-fg: #ffffff;
-  --ws-accent: #1769d2;
-  --ws-accent-soft: #e9f2ff;
-}
 
-:root[data-ws-theme="dark"] .ws.nm-mailadmin {
-  --ws-canvas: #08111e;
-  --ws-surface: #0f1a29;
-  --ws-surface-2: #132238;
-  --ws-surface-3: #192a41;
-  --ws-border: #26374d;
-  --ws-border-strong: #3a506b;
-  --ws-text: #e8eef7;
-  --ws-text-muted: #a0aec0;
-  --ws-text-faint: #71839a;
-  --ws-primary: #60a5fa;
-  --ws-primary-fg: #07111f;
-  --ws-accent: #71b2ff;
-  --ws-accent-soft: #102b4a;
-}
 
 .pb.nm-postbox {
   --pb-bg: #ffffff;
