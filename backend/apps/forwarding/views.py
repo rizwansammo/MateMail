@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.forward_groups.services import forwarding_would_loop
 from apps.mail_engine.errors import MailEngineError
 from apps.mailboxes.models import Mailbox
 from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
@@ -43,6 +44,17 @@ class ForwardingRuleListCreateView(APIView):
         )
         if not mailbox:
             return Response({"source_mailbox_id": "Mailbox not found."}, status=400)
+
+        if forwarding_would_loop(mailbox, data["destination_email"]):
+            return Response(
+                {
+                    "destination_email": (
+                        "This mailbox is a member of that Forward Group, so "
+                        "forwarding back to it would create a delivery loop."
+                    )
+                },
+                status=400,
+            )
 
         if ForwardingRule.objects.for_tenant(request.tenant).filter(
             source_mailbox=mailbox,
@@ -144,6 +156,19 @@ class ForwardingRuleStatusView(APIView):
                 assert_can_use_mail(request.tenant)
             except MailNotPermitted as exc:
                 return Response({"detail": exc.customer_message}, status=403)
+            if forwarding_would_loop(
+                rule.source_mailbox,
+                rule.destination_email,
+            ):
+                return Response(
+                    {
+                        "detail": (
+                            "This mailbox is a member of that Forward Group, "
+                            "so enabling the rule would create a delivery loop."
+                        )
+                    },
+                    status=400,
+                )
 
         previous_status = rule.status
         rule.status = new_status
