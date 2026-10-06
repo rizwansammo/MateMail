@@ -1,6 +1,6 @@
 # MateMail Collaboration Features
 
-Status: **Phase A foundation implemented on `feature/mail-collaboration`**.
+Status: **Phase A + Phase B implemented on `feature/mail-collaboration`**.
 
 This document defines the product vocabulary and security boundaries for the
 next collaboration feature set. Later phases add customer surfaces; Phase A
@@ -16,6 +16,27 @@ only establishes the primitives they must share.
 | Forward Group (FG) | A distribution address that fans one message out to members. It has no Inbox, password or PostBox session. |
 | Delegation | Explicit permission for one personal mailbox identity to access another personal mailbox. |
 | Forwarding | The existing mailbox-to-destination forwarding rule. It remains separate from Forward Group. |
+
+## Phase B — Alias is a mailbox identity
+
+MateMail now defines an Alias as an alternate address for exactly one existing
+MateMail mailbox.
+
+- Alias creation requires `destination_mailbox_id`.
+- The destination mailbox must belong to the same organization.
+- The old `destination_address` API shape is rejected with guidance to use
+  Forwarding for external delivery.
+- The database no longer stores an arbitrary Alias destination address.
+- PostBox Send As identities come only from Alias rows linked by mailbox FK.
+- Mail Hub no longer offers an external destination option when creating an
+  Alias.
+- Platform oversight treats Alias destinations as structurally internal.
+
+The migration converts a legacy literal destination only when it already names
+a mailbox in the same organization. Any genuinely external legacy Alias makes
+the migration fail closed rather than silently changing mail flow.
+
+The existing `ForwardingRule` model/API/UI is unchanged.
 
 ## Phase A invariants
 
