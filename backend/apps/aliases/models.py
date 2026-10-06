@@ -1,5 +1,8 @@
 import uuid
-from django.db import models
+
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
+
 from apps.tenants.managers import TenantScopedManager
 
 
@@ -39,3 +42,36 @@ class Alias(models.Model):
 
     def __str__(self):
         return str(self.source_address)
+
+    def save(self, *args, **kwargs):
+        """Reserve Alias addresses in the same namespace as mailbox addresses."""
+        normalized = (self.source_address or "").strip().lower()
+
+        if self._state.adding:
+            from apps.mail_directory.models import AddressKind
+            from apps.mail_directory.services import reserve_address
+
+            with transaction.atomic():
+                reserve_address(
+                    tenant=self.tenant,
+                    domain=self.domain,
+                    address=normalized,
+                    kind=AddressKind.ALIAS,
+                )
+                self.source_address = normalized
+                return super().save(*args, **kwargs)
+
+        previous = (
+            type(self).objects
+            .filter(pk=self.pk)
+            .values_list("source_address", flat=True)
+            .first()
+        )
+        if previous and previous.lower() != normalized:
+            raise ValidationError(
+                "Alias addresses cannot be changed in place. Create a new alias instead."
+            )
+        if previous:
+            self.source_address = previous
+
+        return super().save(*args, **kwargs)
