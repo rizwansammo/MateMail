@@ -99,7 +99,17 @@ const PINNED_ROLES = new Set(PINNED.map((entry) => entry.role));
 export default function PostBoxAppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const { mailbox, preferences, isLoading, signOut, updatePreferences } = usePostBox();
+  const {
+    mailbox,
+    authenticatedMailbox,
+    availableMailboxes,
+    permissions,
+    preferences,
+    isLoading,
+    signOut,
+    switchMailbox,
+    updatePreferences,
+  } = usePostBox();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -197,11 +207,15 @@ export default function PostBoxAppLayout({
       folders={folders}
       refreshFolders={refreshFolders}
       mailbox={mailbox}
+      authenticatedMailbox={authenticatedMailbox}
+      availableMailboxes={availableMailboxes}
+      permissions={permissions}
       preferences={preferences}
       railOpen={railOpen}
       setRailOpen={setRailOpen}
       closeRail={closeRail}
       signOut={signOut}
+      switchMailbox={switchMailbox}
       updatePreferences={updatePreferences}
     >
       {children}
@@ -214,6 +228,9 @@ function PremiumPostBoxShell({
   folders,
   refreshFolders,
   mailbox,
+  authenticatedMailbox,
+  availableMailboxes,
+  permissions,
   preferences,
   railOpen,
   setRailOpen,
@@ -225,11 +242,15 @@ function PremiumPostBoxShell({
   folders: Folder[];
   refreshFolders: () => Promise<void>;
   mailbox: NonNullable<ReturnType<typeof usePostBox>["mailbox"]>;
+  authenticatedMailbox: ReturnType<typeof usePostBox>["authenticatedMailbox"];
+  availableMailboxes: ReturnType<typeof usePostBox>["availableMailboxes"];
+  permissions: ReturnType<typeof usePostBox>["permissions"];
   preferences: ReturnType<typeof usePostBox>["preferences"];
   railOpen: boolean;
   setRailOpen: (open: boolean) => void;
   closeRail: () => void;
   signOut: () => Promise<void>;
+  switchMailbox: ReturnType<typeof usePostBox>["switchMailbox"];
   updatePreferences: ReturnType<typeof usePostBox>["updatePreferences"];
 }) {
   const router = useRouter();
@@ -237,6 +258,7 @@ function PremiumPostBoxShell({
   const accountMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [savedAccounts, setSavedAccounts] = useState<SavedPostBoxAccount[]>([]);
   const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
+  const [switchingMailbox, setSwitchingMailbox] = useState<string | null>(null);
   const [accountMenuError, setAccountMenuError] = useState<string | null>(null);
   const [labels, setLabels] = useState<MailLabel[]>([]);
   const [editor, setEditor] = useState<{
@@ -442,7 +464,10 @@ function PremiumPostBoxShell({
   const custom = folders.filter((folder) => !PINNED_ROLES.has(folder.role));
   const initials = accountInitials(mailbox.full_name, mailbox.email);
   const otherAccounts = savedAccounts.filter(
-    (item) => item.mailbox.id !== mailbox.id,
+    (item) => item.mailbox.id !== authenticatedMailbox?.id,
+  );
+  const teamBoxes = availableMailboxes.filter(
+    (item) => !item.is_personal && item.mailbox.id !== mailbox.id,
   );
 
   const themeOptions = [
