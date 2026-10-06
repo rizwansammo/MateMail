@@ -79,6 +79,7 @@ export function Compose({
   onSent,
   inline = false,
   draftsEnabled = true,
+  schedulingEnabled = true,
 }: {
   initial: ComposeInitial;
   identities: Identity[];
@@ -87,6 +88,7 @@ export function Compose({
   onSent: (message: string) => void;
   inline?: boolean;
   draftsEnabled?: boolean;
+  schedulingEnabled?: boolean;
 }) {
   // Two composers may coexist (inline reply and sidebar Compose). Form labels
   // and ARIA references must remain unique instead of targeting the other one.
@@ -366,6 +368,10 @@ export function Compose({
         setError("Add at least one recipient.");
         return;
       }
+      if (schedule && !schedulingEnabled) {
+        setError("Scheduled sending is unavailable with this TeamBox permission.");
+        return;
+      }
       if (schedule && !scheduleAt) {
         setError("Choose when to send.");
         return;
@@ -401,7 +407,7 @@ export function Compose({
         setBusy(false);
       }
     },
-    [to, cc, bcc, scheduleAt, payload, onSent, onClose],
+    [to, cc, bcc, scheduleAt, schedulingEnabled, payload, onSent, onClose],
   );
 
   const discard = useCallback(async () => {
@@ -806,7 +812,7 @@ export function Compose({
               </div>
             )}
 
-          {showSchedule && (
+          {schedulingEnabled && showSchedule && (
             <div className="pb-compose-schedule mt-3 flex flex-wrap items-end gap-2">
               <div>
                 <label htmlFor={fieldId("schedule")} className="pb-label">
@@ -875,16 +881,18 @@ export function Compose({
             Attach
           </button>
 
-          <button
-            type="button"
-            className="pb-btn pb-btn-ghost"
-            aria-pressed={showSchedule}
-            disabled={busy || saving}
-            onClick={() => setShowSchedule((open) => !open)}
-          >
-            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-            Schedule
-          </button>
+          {schedulingEnabled && (
+            <button
+              type="button"
+              className="pb-btn pb-btn-ghost"
+              aria-pressed={showSchedule}
+              disabled={busy || saving}
+              onClick={() => setShowSchedule((open) => !open)}
+            >
+              <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+              Schedule
+            </button>
+          )}
 
           {draftsEnabled && (
             <button
