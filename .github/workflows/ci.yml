@@ -415,7 +415,6 @@ jobs:
             NEXT_PUBLIC_PLATFORM_HOST=platform.matemail.online
             NEXT_PUBLIC_POSTBOX_HOST=postbox.matemail.online
             NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS=app.matemail.online
-            NEXT_PUBLIC_BRAND_VARIANT=matemail
           tags: |
             ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
             ${{ env.FRONTEND_IMAGE }}:main
