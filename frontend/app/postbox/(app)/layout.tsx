@@ -236,6 +236,7 @@ function PremiumPostBoxShell({
   setRailOpen,
   closeRail,
   signOut,
+  switchMailbox,
   updatePreferences,
 }: {
   children: React.ReactNode;
