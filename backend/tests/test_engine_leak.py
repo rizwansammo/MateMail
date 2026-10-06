@@ -15,6 +15,7 @@ The two historical leaks this pins shut:
   incomplete: `Mailcow`, `postfix`, `SOGo`, `ClamAV` and engine API paths all
   passed through unchanged.
 """
+import re
 from unittest import mock
 
 from django.core.cache import cache
@@ -74,13 +75,30 @@ ENGINE_FAILURE_MESSAGES = [
 def assert_clean(testcase, blob: str, *, context: str):
     lowered = blob.lower()
     for term in FORBIDDEN_TERMS:
-        testcase.assertNotIn(
-            term, lowered, f"{context} leaked engine detail {term!r}: {blob[:400]}"
-        )
+        message = f"{context} leaked engine detail {term!r}: {blob[:400]}"
+        if term.isalnum():
+            # Engine product names must appear as vocabulary, not merely as a
+            # coincidental byte sequence inside an opaque customer token. A
+            # random verification token can legitimately contain e.g. "sogo".
+            testcase.assertIsNone(
+                re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", lowered),
+                message,
+            )
+        else:
+            testcase.assertNotIn(term, lowered, message)
 
 
 class ErrorTypeLeakTest(TestCase):
     """The exception types themselves must be safe to handle carelessly."""
+
+    def test_opaque_token_substrings_are_not_engine_vocabulary(self):
+        assert_clean(
+            self,
+            '{"verification_record_value":"matemail-verify-abcsogoxyz"}',
+            context="opaque verification token",
+        )
+        with self.assertRaises(AssertionError):
+            assert_clean(self, "SOGo unavailable", context="real engine vocabulary")
 
     def test_customer_message_never_contains_engine_detail(self):
         for error_type in ALL_ERROR_TYPES:
