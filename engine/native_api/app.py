@@ -253,6 +253,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "required_schema_version": db.REQUIRED_VERSION,
             "dkim_storage_writable": writable,
             "phase": "NE2",
+            "capabilities": {
+                "mailbox_sender_authorization": True,
+                "forward_groups": True,
+                "forward_group_sender_policy": True,
+                "collaboration_version": 1,
+            },
         })
 
     def _handle_status(self):
