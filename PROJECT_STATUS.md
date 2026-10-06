@@ -35,7 +35,8 @@ engine-enforced member sender authorization. Phase D adds permission-aware
 TeamBox switching and use inside PostBox while keeping the authenticated
 personal mailbox identity immutable. Phase E adds Forward Groups as a separate
 distribution feature with Native Engine routing, member management and
-SMTP-enforced posting policies.
+SMTP-enforced posting policies. Phase F adds personal-mailbox Delegation with
+Hub administration, PostBox switching and actor-aware delegated sending.
 
 - Central `AddressClaim` registry prevents cross-type address collisions.
 - Existing personal mailboxes and aliases are backfilled into the registry.
@@ -48,6 +49,7 @@ SMTP-enforced posting policies.
 - Phase C adds dedicated TeamBox Hub screens, member permissions, native-engine schema v5 and SMTP sender authorization.
 - Phase D adds PostBox TeamBox switching, Read/Manage/Send As/Send on behalf enforcement, personal-actor SMTP submission, shared Sent/Drafts, scheduled-send actor retention and audit logging.
 - Phase E adds Forward Groups (FG): dedicated Hub UI/API/models, engine schema v6 distribution routing, Anyone/Organization/Members/Selected sender policies, SMTP RCPT-time enforcement and forwarding-loop protection. Existing Forwarding remains a separate mailbox rule.
+- Phase F adds Delegation: owner/admin Hub management, personal→personal access grants, dedicated PostBox delegated-mailbox switching, Read/Manage/Send As/Send on behalf enforcement, alias-aware delegated sending, live push revocation and target-delete session safety.
 
 Design record: `docs/COLLABORATION.md`.
 
