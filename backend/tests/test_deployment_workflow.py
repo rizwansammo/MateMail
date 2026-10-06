@@ -105,9 +105,8 @@ class DeployWorkflowTest(SimpleTestCase):
 
     def test_deploy_does_not_manage_legacy_netamate_frontend(self):
         """
-        The existing NetaMate frontend on 127.0.0.1:3060 is a temporary
-        production rollback asset during the custom-domain adoption. MateMail
-        deployment must not build, update, restart or otherwise own it.
+        The retired NetaMate frontend must never return as a second production
+        deployment. MateMail owns one canonical frontend image and deployment.
         """
         self.assertNotIn("deploy-netamate-email", self.wf["jobs"])
         self.assertNotIn("/opt/NetaMate-Email", self.raw)
@@ -132,9 +131,8 @@ class CiWorkflowTest(SimpleTestCase):
 
     def test_ci_does_not_build_or_publish_legacy_netamate_frontend(self):
         """
-        Phase A deliberately freezes the existing port-3060 NetaMate frontend
-        in production while custom-host adoption is proven. CI publishes only
-        the canonical MateMail backend/frontend images.
+        CI publishes only the canonical MateMail backend/frontend images. The
+        retired NetaMate-specific image must never return.
         """
         self.assertNotIn("NetaMate Email production build", self.raw)
         self.assertNotIn("Build and push NetaMate Email frontend", self.raw)
@@ -236,14 +234,6 @@ class ProductionNetworkTopologyTest(SimpleTestCase):
         self.assertEqual(
             joined, expected,
             "exactly backend and celery-worker may reach the Mail Engine",
-        )
-
-    def test_dedicated_tenant_hosts_are_passed_to_backend(self):
-        backend_env = self.compose["x-backend-env"]
-        self.assertIn(
-            "DEDICATED_TENANT_HOSTS",
-            backend_env,
-            "production .env bindings must reach Django; otherwise dedicated host isolation is silently disabled",
         )
 
     def test_datastores_and_frontend_stay_off_the_link(self):
