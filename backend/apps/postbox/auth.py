@@ -28,7 +28,7 @@ from django.utils import timezone
 from rest_framework import authentication, exceptions
 
 from apps.mailboxes.models import Mailbox, MailboxStatus
-from apps.tenants.dedicated import tenant_matches_request
+from apps.tenants.host_binding import tenant_matches_request
 from apps.security import ratelimit
 from apps.security.client_ip import get_client_ip
 
