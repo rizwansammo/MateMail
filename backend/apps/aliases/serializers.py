@@ -20,7 +20,7 @@ class AliasSerializer(serializers.ModelSerializer):
 class AliasCreateSerializer(serializers.Serializer):
     source_local_part = serializers.CharField(max_length=64)
     domain_id = serializers.UUIDField()
-    destination_mailbox_id = serializers.UUIDField()
+    destination_mailbox_id = serializers.UUIDField(required=False)
 
     def validate(self, data):
         # Make the retired API shape fail loudly. Silently ignoring a legacy
@@ -32,5 +32,9 @@ class AliasCreateSerializer(serializers.Serializer):
                     "Aliases can only point to a MateMail mailbox. "
                     "Use Forwarding for an external destination."
                 )
+            })
+        if not data.get("destination_mailbox_id"):
+            raise serializers.ValidationError({
+                "destination_mailbox_id": "This field is required."
             })
         return data
