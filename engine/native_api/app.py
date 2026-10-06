@@ -451,7 +451,8 @@ def _domains_delete(conn, body):
 
 def _mailboxes_ensure(conn, body):
     validation.payload(body, allowed={
-        "address", "local_part", "domain", "display_name", "quota_mb", "active", "password",
+        "address", "local_part", "domain", "display_name", "quota_mb", "active",
+        "password", "login_enabled", "authorized_senders",
     }, required={"address"})
     password = body.get("password", "") or ""
     return provisioning.ensure_mailbox(conn, body, password)
