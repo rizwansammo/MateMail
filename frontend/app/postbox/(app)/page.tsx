@@ -773,10 +773,86 @@ function Mailbox() {
     router.push(`/postbox?${next.toString()}`);
   };
 
+  if (!canReadMailbox) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {notice && (
+          <div
+            className="shrink-0 px-3 py-2 text-xs"
+            role="status"
+            style={{ background: "var(--pb-warn-soft)", color: "var(--pb-warn)" }}
+          >
+            {notice}
+          </div>
+        )}
+
+        {successNotice && (
+          <div
+            ref={successToastRef}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className={`fixed left-1/2 top-1/2 z-[70] flex max-w-[min(90vw,30rem)] -translate-x-1/2 -translate-y-1/2 items-center gap-2 border px-3 py-2 text-sm shadow-2xl transition-all duration-200 ${
+              successVisible ? "scale-100 opacity-100" : "scale-95 opacity-0"
+            }`}
+            style={{
+              background: "var(--pb-success-soft)",
+              borderColor: "var(--pb-success)",
+              color: "var(--pb-fg)",
+              borderLeftWidth: "3px",
+              boxShadow: "0 16px 42px rgb(0 0 0 / 0.28)",
+            }}
+          >
+            <CheckCircle2
+              className="h-4 w-4 shrink-0"
+              style={{ color: "var(--pb-success)" }}
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 truncate font-medium">{successNotice}</span>
+            <button
+              type="button"
+              className="pb-btn pb-btn-plain -mr-1"
+              aria-label="Dismiss confirmation"
+              onClick={dismissSuccess}
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        )}
+
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <EmptyState
+            title={isTeamBox ? "Send-only TeamBox access" : "Mailbox unavailable"}
+            detail={
+              isTeamBox
+                ? "You can send from this TeamBox, but its Inbox, folders and message history are not available with your current permission."
+                : "This mailbox is not available for reading."
+            }
+          />
+        </div>
+
+        {compose && (
+          <Compose
+            initial={compose}
+            identities={identities}
+            signatures={signatures}
+            draftsEnabled={false}
+            onClose={closeCompose}
+            onSent={(message) => {
+              setNotice(null);
+              setSuccessNotice(message);
+              setSuccessVisible(true);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {!detail && <div className="pb-premium-mail-toolbar">
-          {!isCrossFolderView && !conversationMode && (
+          {canManageMailbox && !isCrossFolderView && !conversationMode && (
             <input
               className="pb-premium-select-all"
               type="checkbox"
@@ -899,7 +975,7 @@ function Mailbox() {
                 <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
               </summary>
               <div className="pb-premium-mail-menu">
-                {!isCrossFolderView && !conversationMode && !folderIsSent && (
+                {canManageMailbox && !isCrossFolderView && !conversationMode && !folderIsSent && (
                   <button
                     type="button"
                     disabled={rows.length === 0}
@@ -923,6 +999,7 @@ function Mailbox() {
           type="checkbox"
           aria-label="Select all messages"
           checked={allSelected}
+          disabled={!canManageMailbox}
           onChange={(event) =>
             setSelected(
               event.target.checked ? new Set(rows.map((r) => r.uid)) : new Set(),
@@ -1163,7 +1240,7 @@ function Mailbox() {
                     data-selected={detail?.uid === row.uid}
                     data-sent={rowIsSent}
                   >
-                    {!isCrossFolderView && (
+                    {canManageMailbox && !isCrossFolderView && (
                       <input
                         type="checkbox"
                         aria-label={
@@ -1183,6 +1260,7 @@ function Mailbox() {
                     <button
                       type="button"
                       className="pb-premium-row-star"
+                      disabled={!canManageMailbox}
                       aria-label={row.flagged ? "Unstar message" : "Star message"}
                       onClick={() =>
                         void act(
@@ -1303,6 +1381,8 @@ function Mailbox() {
               identities={identities}
               signatures={signatures}
               labels={mailLabels}
+              canManage={canManageMailbox}
+              canSend={canSendMailbox}
               onApplyLabel={(member, id, remove) => {
                 if (threadInlineActive.current) {
                   setNotice("Save or close your inline reply before changing labels.");
@@ -1346,6 +1426,8 @@ function Mailbox() {
               }
               onTrustRemote={() => void trustRemoteSender()}
               onReply={openReply}
+              canManage={canManageMailbox}
+              canSend={canSendMailbox}
               folders={mailFolders}
               labels={mailLabels}
               onApplyLabel={(id, remove) =>
@@ -1370,6 +1452,7 @@ function Mailbox() {
           initial={compose}
           identities={identities}
           signatures={signatures}
+          draftsEnabled={canReadMailbox}
           onClose={closeCompose}
           onSent={(message) => {
             setNotice(null);
