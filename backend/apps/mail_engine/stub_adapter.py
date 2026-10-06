@@ -23,6 +23,7 @@ from .dto import (
     EngineDomain,
     EngineHealth,
     EngineMailbox,
+    ForwardGroupSpec,
     ForwardingSpec,
     MailboxSpec,
     MailboxUsage,
@@ -43,6 +44,7 @@ class StubAdapter(MailEngineAdapter):
         self._passwords: dict[str, bool] = {}
         self._dkim_rotations = 0
         self._rate_limits: dict[str, RateLimit] = {}
+        self._forward_groups: dict[str, ForwardGroupSpec] = {}
 
     # ── Domains ─────────────────────────────────────────────────────────────
 
@@ -171,6 +173,12 @@ class StubAdapter(MailEngineAdapter):
 
     def delete_alias(self, address: str) -> None:
         self._aliases.pop(address, None)
+
+    def ensure_forward_group(self, spec: ForwardGroupSpec) -> None:
+        self._forward_groups[spec.address] = spec
+
+    def delete_forward_group(self, address: str) -> None:
+        self._forward_groups.pop(address, None)
 
     def ensure_forwarding(self, spec: ForwardingSpec) -> None:
         if spec.is_empty:
