@@ -1842,10 +1842,10 @@ forwarding                             ->  a different table; the send-as query
                                            cannot reach it at all
 ```
 
-This mirrors MateMail's own product rule exactly — `Alias.destination_mailbox`
-(internal, confers send-as) versus `Alias.destination_address` (external, does
-not) — without needing a new DTO field, because the engine can already tell
-which destinations are mailboxes it hosts.
+The native engine can represent generic alias destination sets, but MateMail's
+product layer now provisions an Alias only to an existing mailbox in the same
+organization. External delivery belongs to `ForwardingRule`, which remains a
+separate engine table and cannot confer Alias send-as rights.
 
 Keeping forwarding in its own table is the point. If it lived in
 `alias_destination`, then a support address forwarding to an outside mailbox
