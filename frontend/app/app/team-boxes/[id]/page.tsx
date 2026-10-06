@@ -132,7 +132,7 @@ export default function TeamBoxDetailPage() {
   }, [fetchAll, tenant?.id]);
 
   const canAdmin = myRole === "owner" || myRole === "admin";
-  const members = teamBox?.members || [];
+  const members = useMemo(() => teamBox?.members ?? [], [teamBox?.members]);
   const availableMailboxes = useMemo(
     () => mailboxes.filter(
       (mailbox) =>
@@ -142,14 +142,10 @@ export default function TeamBoxDetailPage() {
     ),
     [mailboxes, members]
   );
-
-  useEffect(() => {
-    setMemberMailboxId((current) =>
-      availableMailboxes.some((mailbox) => mailbox.id === current)
-        ? current
-        : availableMailboxes[0]?.id || ""
-    );
-  }, [availableMailboxes]);
+  const selectedMemberMailboxId =
+    availableMailboxes.some((mailbox) => mailbox.id === memberMailboxId)
+      ? memberMailboxId
+      : availableMailboxes[0]?.id || "";
 
   function setNotice(text: string, isFailed = false) {
     setMessage(text);
@@ -158,14 +154,14 @@ export default function TeamBoxDetailPage() {
 
   async function addMember(event: React.FormEvent) {
     event.preventDefault();
-    if (!memberMailboxId) return;
+    if (!selectedMemberMailboxId) return;
     setAddingMember(true);
     setNotice("");
     try {
       const response = await apiRequest(`/api/team-boxes/${params.id}/members/`, {
         method: "POST",
         body: JSON.stringify({
-          mailbox_id: memberMailboxId,
+          mailbox_id: selectedMemberMailboxId,
           ...memberPermissions,
         }),
       });
@@ -427,7 +423,7 @@ export default function TeamBoxDetailPage() {
                 <label>Add personal mailbox</label>
                 {availableMailboxes.length ? (
                   <select
-                    value={memberMailboxId}
+                    value={selectedMemberMailboxId}
                     onChange={(event) => setMemberMailboxId(event.target.value)}
                     required
                   >
@@ -473,7 +469,7 @@ export default function TeamBoxDetailPage() {
             <div className="portal-detail-actions">
               <PortalButton
                 type="submit"
-                disabled={addingMember || !memberMailboxId || !Object.values(memberPermissions).some(Boolean)}
+                disabled={addingMember || !selectedMemberMailboxId || !Object.values(memberPermissions).some(Boolean)}
               >
                 <UserPlus className="h-4 w-4" />
                 {addingMember ? "Adding…" : "Add member"}
