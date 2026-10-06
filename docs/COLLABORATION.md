@@ -1,6 +1,6 @@
 # MateMail Collaboration Features
 
-Status: **Phase A + Phase B implemented on `feature/mail-collaboration`**.
+Status: **Phase A + Phase B + Phase C implemented on `feature/mail-collaboration`**.
 
 This document defines the product vocabulary and security boundaries for the
 next collaboration feature set. Later phases add customer surfaces; Phase A
@@ -16,6 +16,44 @@ only establishes the primitives they must share.
 | Forward Group (FG) | A distribution address that fans one message out to members. It has no Inbox, password or PostBox session. |
 | Delegation | Explicit permission for one personal mailbox identity to access another personal mailbox. |
 | Forwarding | The existing mailbox-to-destination forwarding rule. It remains separate from Forward Group. |
+
+## Phase C — TeamBox management
+
+TeamBox is now a first-class shared-mailbox feature in Mail Hub.
+
+- TeamBoxes are stored as `Mailbox(kind="team_box")` and use the same storage
+  quota and mailbox-plan limit as personal mailboxes.
+- A TeamBox has no direct password and cannot authenticate to PostBox.
+- It remains a real mail recipient with Maildir storage and normal inbound
+  delivery.
+- Mail Hub has dedicated TeamBox list/detail screens instead of mixing TeamBoxes
+  into the personal Mailboxes screen.
+- Owner/Admin can create, enable/disable, reprovision and delete TeamBoxes.
+- TeamBox members are personal mailboxes from the same organization.
+- Per-member permissions are Read, Manage, Send As and Send on behalf.
+- Manage requires Read and an active membership must retain at least one
+  permission.
+- Member add/update/remove is synchronized to the Mail Engine before the Hub
+  treats the resulting sender rights as usable.
+- TeamBox deletion is blocked while an Alias points to it, avoiding an orphaned
+  engine Alias route.
+
+### Native Mail Engine enforcement
+
+Engine schema v5 separates delivery from authentication:
+
+- `mailbox.login_enabled=false` keeps a TeamBox deliverable and present in
+  Dovecot userdb while excluding it from direct Dovecot authentication.
+- `mailbox_sender_authorization` maps a TeamBox to the personal mailboxes
+  permitted to submit as that address.
+- `postfix_sender_login` includes those mappings, so Send As / Send on behalf
+  rights are enforced by SMTP sender-login checks as well as the Hub.
+- Aliases that target a TeamBox inherit the TeamBox's effective authorised
+  senders.
+- Forwarding is still absent from sender authorization by construction.
+
+Phase D will expose the already-authorized TeamBox inside a member's PostBox
+session. Phase C deliberately does not add mailbox switching to PostBox.
 
 ## Phase B — Alias is a mailbox identity
 
