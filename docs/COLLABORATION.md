@@ -2,9 +2,9 @@
 
 Status: **Phase A through Phase G implemented on `feature/mail-collaboration`**.
 
-This document defines the product vocabulary and security boundaries for the
-next collaboration feature set. Later phases add customer surfaces; Phase A
-only establishes the primitives they must share.
+This document defines the final product vocabulary, security boundaries and
+production invariants for MateMail collaboration features delivered in
+Phases A through G.
 
 ## Product vocabulary
 
@@ -316,8 +316,8 @@ Engine schema v5 separates delivery from authentication:
   senders.
 - Forwarding is still absent from sender authorization by construction.
 
-Phase D will expose the already-authorized TeamBox inside a member's PostBox
-session. Phase C deliberately does not add mailbox switching to PostBox.
+Phase D exposes the already-authorized TeamBox inside a member's PostBox
+session while preserving the Phase C passwordless TeamBox identity model.
 
 ## Phase B — Alias is a mailbox identity
 
@@ -361,8 +361,8 @@ collision. It never chooses a winner automatically.
 - A TeamBox cannot sign in directly.
 - Cross-mailbox access is represented by an explicit `MailboxAccessGrant`.
 
-Later PostBox phases may let an authenticated personal mailbox select an
-authorized target mailbox, but every request must resolve authorization
+PostBox may let an authenticated personal mailbox select an authorized TeamBox
+or delegated personal mailbox, but every request resolves authorization
 server-side. A client-supplied mailbox id is never authority by itself.
 
 ### Access permissions
@@ -383,15 +383,15 @@ The existing `ForwardingRule` model is unchanged.
 
 Forwarding means `one mailbox -> destination address(es)`.
 
-A future Forward Group means `one group address -> managed group members`.
+Forward Group means `one group address -> managed group members`.
 
-They may eventually share low-level Mail Engine routing primitives, but they
-must not share MateMail product models, APIs or UI terminology.
+Forward Group and Forwarding share only the low-level routing surface Postfix
+needs. They remain separate MateMail product models, APIs and UI terminology.
 
-## Planned phases
+## Completed phases
 
 - **A** — shared-address registry, mailbox kind, access-grant foundation.
-- **B** — normalize existing Alias behavior around mailbox identities.
+- **B** — normalized Alias behavior around mailbox identities.
 - **C** — TeamBox Hub/backend/mail-engine management.
 - **D** — TeamBox access inside PostBox.
 - **E** — Forward Group (FG).
