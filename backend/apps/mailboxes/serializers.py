@@ -12,14 +12,14 @@ class MailboxSerializer(serializers.ModelSerializer):
     class Meta:
         model = Mailbox
         fields = [
-            "id", "email", "full_name", "local_part",
+            "id", "email", "full_name", "local_part", "kind",
             "domain", "domain_name", "status",
             "quota_mb", "storage_used_mb",
             "mail_service_ready", "mail_service_message",
             "last_login", "created_at",
         ]
         read_only_fields = [
-            "id", "email", "status", "storage_used_mb",
+            "id", "email", "kind", "status", "storage_used_mb",
             "mail_service_ready", "mail_service_message",
             "last_login", "created_at",
         ]
