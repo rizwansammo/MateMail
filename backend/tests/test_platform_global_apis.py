@@ -71,7 +71,7 @@ class PlatformGlobalApiTest(TestCase):
 
         Alias.objects.create(
             tenant=self.tenant_a, domain=self.domain_a,
-            source_address="sales@acme.test", destination_address="ada@acme.test",
+            source_address="sales@acme.test", destination_mailbox=self.mailbox_a,
         )
         ForwardingRule.objects.create(
             tenant=self.tenant_a, source_mailbox=self.mailbox_a,
@@ -227,7 +227,7 @@ class PlatformOversightActionTest(TestCase):
         )
         self.alias = Alias.objects.create(
             tenant=self.tenant, domain=self.domain,
-            source_address="sales@acme.test", destination_address="ada@acme.test",
+            source_address="sales@acme.test", destination_mailbox=self.mailbox,
         )
         self.rule = ForwardingRule.objects.create(
             tenant=self.tenant, source_mailbox=self.mailbox,
