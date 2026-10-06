@@ -400,6 +400,22 @@ class SendView(PostBoxView, ComposeMixin):
         appended = self._file_in_sent(mailbox, message)
         self._discard_draft(mailbox, data.get("draft_uid"))
 
+        if actor.pk != mailbox.pk:
+            from apps.logs.utils import log_event
+
+            log_event(
+                mailbox.tenant,
+                "postbox_mailbox_sent_by_actor",
+                request=request,
+                source=actor.email,
+                metadata={
+                    "target_mailbox": mailbox.email,
+                    "from_address": identity.address,
+                    "send_mode": identity.send_mode,
+                    "filed_in_sent": appended,
+                },
+            )
+
         logger.info(
             "PostBox sent: mailbox=%s recipients=%d filed=%s",
             mailbox.pk, len(recipients), appended,
@@ -448,6 +464,21 @@ class SendView(PostBoxView, ComposeMixin):
             scheduled_at=send_at,
         )
         self._discard_draft(mailbox, data.get("draft_uid"))
+
+        if submission_mailbox.pk != mailbox.pk:
+            from apps.logs.utils import log_event
+
+            log_event(
+                mailbox.tenant,
+                "postbox_mailbox_scheduled_by_actor",
+                request=self.request,
+                source=submission_mailbox.email,
+                metadata={
+                    "target_mailbox": mailbox.email,
+                    "scheduled_message_id": str(scheduled.id),
+                    "scheduled_at": send_at.isoformat(),
+                },
+            )
 
         logger.info(
             "PostBox scheduled %s for mailbox=%s at %s", scheduled.id, mailbox.pk, send_at
