@@ -89,39 +89,40 @@ class StubAdapter(MailEngineAdapter):
     # ── Mailboxes ───────────────────────────────────────────────────────────
 
     def ensure_mailbox(self, spec: MailboxSpec, password: str = "") -> None:
+        existing_password = self._passwords.get(spec.address, False)
+        if spec.login_enabled and not password and not existing_password:
+            raise Rejected(
+                "a login-enabled mailbox requires a password",
+                operation="ensure_mailbox",
+            )
         self._mailboxes[spec.address] = spec
-        if password:
-            self._passwords[spec.address] = True
+        if spec.login_enabled:
+            if password:
+                self._passwords[spec.address] = True
+        else:
+            self._passwords.pop(spec.address, None)
         logger.debug("[stub] ensure_mailbox %s", spec.address)
 
     def set_mailbox_active(self, address: str, active: bool) -> None:
         existing = self._mailboxes.get(address)
         if existing is not None:
-            self._mailboxes[address] = MailboxSpec(
-                address=existing.address,
-                local_part=existing.local_part,
-                domain=existing.domain,
-                display_name=existing.display_name,
-                quota_mb=existing.quota_mb,
-                active=active,
-            )
+            self._mailboxes[address] = replace(existing, active=active)
 
     def set_mailbox_password(self, address: str, password: str) -> None:
         if not password:
             raise Rejected("empty password", operation="set_mailbox_password")
+        existing = self._mailboxes.get(address)
+        if existing is not None and not existing.login_enabled:
+            raise Rejected(
+                "direct login is disabled for this mailbox",
+                operation="set_mailbox_password",
+            )
         self._passwords[address] = True
 
     def set_mailbox_quota(self, address: str, quota_mb: int) -> None:
         existing = self._mailboxes.get(address)
         if existing is not None:
-            self._mailboxes[address] = MailboxSpec(
-                address=existing.address,
-                local_part=existing.local_part,
-                domain=existing.domain,
-                display_name=existing.display_name,
-                quota_mb=quota_mb,
-                active=existing.active,
-            )
+            self._mailboxes[address] = replace(existing, quota_mb=quota_mb)
 
     def delete_mailbox(self, address: str) -> None:
         self._mailboxes.pop(address, None)
