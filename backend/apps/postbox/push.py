@@ -108,12 +108,29 @@ def register_device(
 
 
 def active_devices(mailbox):
-    """Registrations that may receive a push right now, for this mailbox."""
-    return PostBoxPushDevice.objects.for_mailbox(mailbox).filter(
+    """
+    Registrations that may receive a push right now, for this mailbox.
+
+    TeamBox registrations are tied to a personal PostBox session. Re-check the
+    live TeamBox grant here so revoking Read access also stops future mailbox
+    activity notifications without waiting for that device to open PostBox.
+    """
+    devices = PostBoxPushDevice.objects.for_mailbox(mailbox).filter(
         enabled=True,
         session__revoked_at__isnull=True,
         session__expires_at__gt=timezone.now(),
     )
+
+    from apps.mailboxes.models import MailboxKind
+
+    if mailbox.kind == MailboxKind.TEAM_BOX:
+        devices = devices.filter(
+            session__mailbox__access_grants__target_mailbox=mailbox,
+            session__mailbox__access_grants__grant_type="team_box",
+            session__mailbox__access_grants__active=True,
+            session__mailbox__access_grants__can_read=True,
+        ).distinct()
+    return devices
 
 
 # ── events ──────────────────────────────────────────────────────────────────
