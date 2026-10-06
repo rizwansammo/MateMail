@@ -229,7 +229,28 @@ class MailboxDetailView(APIView):
                     status=503,
                 )
 
-        log_event(request.tenant, LogEventType.MAILBOX_DELETED, request=request, mailbox=mb)
+        # A deleted delegated target must not become a silent personal-mailbox
+        # fallback on the next request. Revoke sessions actively operating on
+        # this mailbox before its SET_NULL active_mailbox FK can erase that
+        # context.
+        from apps.postbox.models import PostBoxSession
+
+        active_sessions = list(
+            PostBoxSession.objects.filter(
+                active_mailbox=mb,
+                revoked_at__isnull=True,
+            )
+        )
+        for session in active_sessions:
+            session.revoke()
+
+        log_event(
+            request.tenant,
+            LogEventType.MAILBOX_DELETED,
+            request=request,
+            mailbox=mb,
+            metadata={"active_postbox_sessions_revoked": len(active_sessions)},
+        )
         mb.delete()
         sync_all_groups_for_tenant(request.tenant)
         return Response(status=204)
