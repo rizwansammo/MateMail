@@ -107,24 +107,6 @@ PY
   exit 1
 }
 
-# Optional root-owned routing exception used only when an operator must preserve
-# an existing branded frontend during a controlled hostname adoption. Ordinary
-# customer custom URLs leave this empty and use matemail_frontend.
-FRONTEND_OVERRIDES="$(
-  ENV_FILE="$ENV_FILE" python3 - <<'PY'
-import os
-from pathlib import Path
-
-path = Path(os.environ["ENV_FILE"])
-value = ""
-for line in path.read_text(encoding="utf-8").splitlines():
-    if line.startswith("MATEMAIL_CUSTOM_HOST_FRONTEND_OVERRIDES="):
-        value = line.split("=", 1)[1].strip()
-        break
-print(value)
-PY
-)"
-
 install -o root -g root -m 0755 "$SCRIPT_DIR/provisioner.py" "$WORKER"
 install -o root -g root -m 0755 "$SCRIPT_DIR/renew-hook.sh" "$HOOK"
 install -o root -g root -m 0644   "$SCRIPT_DIR/systemd/matemail-custom-host-provisioner.service" "$SERVICE"
@@ -135,7 +117,6 @@ cat > "$RUNTIME_ENV.tmp" <<EOF
 CUSTOM_HOST_PROVISIONER_SECRET=$SECRET
 MATEMAIL_CUSTOM_HOST_API=http://127.0.0.1:8020/api/internal/custom-hostnames
 MATEMAIL_CUSTOM_HOST_ACME_WEBROOT=/var/www/html
-MATEMAIL_CUSTOM_HOST_FRONTEND_OVERRIDES=$FRONTEND_OVERRIDES
 EOF
 chown root:root "$RUNTIME_ENV.tmp"
 chmod 0600 "$RUNTIME_ENV.tmp"
