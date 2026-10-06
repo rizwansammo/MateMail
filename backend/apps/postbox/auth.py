@@ -27,6 +27,8 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import authentication, exceptions
 
+from apps.mail_directory.models import AccessGrantKind
+from apps.mail_directory.services import MailboxPermissions, permissions_for
 from apps.mailboxes.models import Mailbox, MailboxKind, MailboxStatus
 from apps.tenants.host_binding import tenant_matches_request
 from apps.security import ratelimit
@@ -162,13 +164,129 @@ def session_for_token(raw_token: str) -> PostBoxSession | None:
     if not raw_token:
         return None
     session = (
-        PostBoxSession.objects.select_related("mailbox", "mailbox__tenant", "mailbox__domain")
+        PostBoxSession.objects.select_related(
+            "mailbox",
+            "mailbox__tenant",
+            "mailbox__domain",
+            "active_mailbox",
+            "active_mailbox__tenant",
+            "active_mailbox__domain",
+        )
         .filter(token_hash=PostBoxSession.hash_token(raw_token))
         .first()
     )
     if session is None or not session.is_active:
         return None
     return session
+
+
+def _clear_active_mailbox(session: PostBoxSession) -> None:
+    if session.active_mailbox_id is not None:
+        session.active_mailbox = None
+        session.save(update_fields=["active_mailbox"])
+
+
+def _team_box_permissions(identity: Mailbox, target: Mailbox) -> MailboxPermissions:
+    if identity.tenant_id != target.tenant_id:
+        return MailboxPermissions()
+    return permissions_for(
+        grantee_mailbox=identity,
+        target_mailbox=target,
+    )
+
+
+def _assert_team_box_available(identity: Mailbox, target: Mailbox) -> MailboxPermissions:
+    if target.kind != MailboxKind.TEAM_BOX:
+        raise MailboxUnavailable("That mailbox cannot be opened through this session.")
+    if identity.tenant_id != target.tenant_id:
+        raise MailboxUnavailable("That TeamBox is not in this organization.")
+    if target.status != MailboxStatus.ACTIVE:
+        raise MailboxUnavailable("That TeamBox is not active.")
+    if not target.mail_engine_provisioned:
+        raise MailboxUnavailable("That TeamBox is still being set up.")
+    if target.tenant is None or not target.tenant.can_use_mail:
+        raise MailboxUnavailable("This organization's mail service is not active.")
+
+    permissions = _team_box_permissions(identity, target)
+    if not any((
+        permissions.can_read,
+        permissions.can_manage,
+        permissions.can_send_as,
+        permissions.can_send_on_behalf,
+    )):
+        raise MailboxUnavailable("You no longer have access to that TeamBox.")
+    return permissions
+
+
+def active_mailbox_for_session(
+    session: PostBoxSession,
+) -> tuple[Mailbox, MailboxPermissions]:
+    """
+    Resolve the mailbox currently being used without changing who authenticated.
+
+    A revoked grant must never make an in-flight destructive request fall back
+    to the personal mailbox. The caller gets a refusal for this request; the
+    stored TeamBox selection is cleared so the next request returns to the
+    signed-in personal mailbox.
+    """
+    identity = session.mailbox
+    target = session.active_mailbox
+    if target is None or target.pk == identity.pk:
+        return identity, MailboxPermissions.owner()
+
+    try:
+        permissions = _assert_team_box_available(identity, target)
+    except MailboxUnavailable:
+        _clear_active_mailbox(session)
+        raise
+
+    return target, permissions
+
+
+def switch_active_mailbox(
+    session: PostBoxSession,
+    target: Mailbox | None,
+) -> tuple[Mailbox, MailboxPermissions]:
+    identity = session.mailbox
+
+    if target is None or target.pk == identity.pk:
+        _clear_active_mailbox(session)
+        return identity, MailboxPermissions.owner()
+
+    permissions = _assert_team_box_available(identity, target)
+    session.active_mailbox = target
+    session.save(update_fields=["active_mailbox"])
+    return target, permissions
+
+
+def require_active_mailbox_permission(request, permission: str) -> None:
+    """
+    Enforce one TeamBox permission after session authentication.
+
+    Personal mailbox access is intrinsic. For TeamBoxes the grant is resolved
+    fresh on every request by PostBoxSessionAuthentication.
+    """
+    identity = getattr(request, "identity_mailbox", None)
+    mailbox = getattr(request, "mailbox", None)
+    if identity is None or mailbox is None or identity.pk == mailbox.pk:
+        return
+
+    permissions = getattr(request, "mailbox_permissions", MailboxPermissions())
+    allowed = {
+        "read": permissions.can_read,
+        "manage": permissions.can_manage,
+        "send": permissions.can_send_as or permissions.can_send_on_behalf,
+        "read_or_send": (
+            permissions.can_read
+            or permissions.can_send_as
+            or permissions.can_send_on_behalf
+        ),
+    }.get(permission, False)
+
+    if not allowed:
+        raise exceptions.PermissionDenied(
+            "Your TeamBox permission does not allow that action."
+        )
 
 
 class PostBoxSessionAuthentication(authentication.BaseAuthentication):
@@ -191,24 +309,29 @@ class PostBoxSessionAuthentication(authentication.BaseAuthentication):
         if session is None:
             raise exceptions.AuthenticationFailed("Your session has ended. Please sign in again.")
 
-        mailbox = session.mailbox
+        identity = session.mailbox
         try:
             # Re-checked per request, not merely at sign-in: a suspension has
             # to take effect while somebody is reading, not at their next login.
-            assert_mailbox_may_sign_in(mailbox)
+            assert_mailbox_may_sign_in(identity)
         except MailboxUnavailable as exc:
             session.revoke()
             raise exceptions.AuthenticationFailed(exc.message) from exc
 
+        try:
+            mailbox, permissions = active_mailbox_for_session(session)
+        except MailboxUnavailable as exc:
+            raise exceptions.PermissionDenied(exc.message) from exc
+
         session.touch()
         request.postbox_session = session
+        request.identity_mailbox = identity
         request.mailbox = mailbox
+        request.mailbox_permissions = permissions
 
-        # DRF needs *something* user-shaped. `PostBoxIdentity` is not a Django
-        # user and is not authenticated against `accounts.User` — returning a
-        # real User here would quietly make a mailbox look like a Workspace
-        # login to every permission class in the project.
-        return (PostBoxIdentity(mailbox, session), None)
+        # DRF's principal is always the mailbox that authenticated the session,
+        # never the TeamBox currently being viewed.
+        return (PostBoxIdentity(identity, session), None)
 
 
 class PostBoxIdentity:
