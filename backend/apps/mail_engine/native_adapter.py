@@ -225,6 +225,8 @@ class NativeMailEngineAdapter(MailEngineAdapter):
             "display_name": spec.display_name,
             "quota_mb": spec.quota_mb,
             "active": spec.active,
+            "login_enabled": spec.login_enabled,
+            "authorized_senders": list(spec.authorized_senders),
         }
         # Omitted entirely when absent, rather than sent as "". The engine treats
         # a missing password as "keep the existing credential", which is the
