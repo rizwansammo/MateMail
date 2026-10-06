@@ -52,8 +52,8 @@ continue with the still-valid personal session.
   personal mailbox as the RFC `Sender`.
 - A send-only member gets a compose-only TeamBox surface and cannot read shared
   mail.
-- Send-only access cannot create hidden Drafts or scheduled messages that the
-  member would be unable to review or cancel.
+- Shared Drafts and Scheduled messages require both Manage and Send permission;
+  users without Manage cannot create mailbox state they cannot later control.
 - Shared TeamBox signatures may be read by members who can send; changing a
   shared signature requires Manage.
 
