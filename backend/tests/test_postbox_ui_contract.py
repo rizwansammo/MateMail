@@ -853,14 +853,21 @@ class TeamBoxPostBoxUiContractTest(SimpleTestCase):
         self.assertIn("switchMailbox(target.id)", self.layout)
         self.assertIn("postbox.switchAccount(item.session_id)", self.layout)
 
+    def test_delegated_mailboxes_are_separate_from_teamboxes_and_device_accounts(self):
+        self.assertIn(">Delegated mailboxes</div>", self.layout)
+        self.assertIn('item.access_type === "team_box"', self.layout)
+        self.assertIn('item.access_type === "delegation"', self.layout)
+        self.assertIn("Accounts on this device", self.layout)
+
     def test_context_keeps_authenticated_and_active_mailboxes_separate(self):
         self.assertIn("authenticatedMailbox", self.context)
         self.assertIn("availableMailboxes", self.context)
         self.assertIn("switchMailbox", self.context)
 
-    def test_send_only_teambox_does_not_load_mailbox_content(self):
+    def test_send_only_shared_mailbox_does_not_load_mailbox_content(self):
         self.assertIn("if (!canReadMailbox)", self.page)
-        self.assertIn('title={isTeamBox ? "Send-only TeamBox access"', self.page)
+        self.assertIn('"Send-only TeamBox access"', self.page)
+        self.assertIn('"Send-only delegated mailbox access"', self.page)
         self.assertIn("draftsEnabled={false}", self.page)
         self.assertIn("schedulingEnabled={false}", self.page)
 
