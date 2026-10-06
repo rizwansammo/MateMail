@@ -1,7 +1,6 @@
 import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.utils import timezone
 from rest_framework.exceptions import Throttled
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -203,13 +202,15 @@ class TeamBoxDetailView(APIView):
         # other sessions for the same personal mailbox stay valid.
         from apps.postbox.models import PostBoxSession
 
-        revoked_sessions = PostBoxSession.objects.filter(
-            active_mailbox=team_box,
-            revoked_at__isnull=True,
-        ).update(
-            revoked_at=timezone.now(),
-            active_mailbox=None,
+        active_sessions = list(
+            PostBoxSession.objects.filter(
+                active_mailbox=team_box,
+                revoked_at__isnull=True,
+            )
         )
+        for session in active_sessions:
+            session.revoke()
+        revoked_sessions = len(active_sessions)
 
         from apps.logs.utils import log_event
         log_event(
