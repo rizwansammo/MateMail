@@ -44,6 +44,7 @@ from .dto import (
     EngineDomain,
     EngineHealth,
     EngineMailbox,
+    ForwardGroupSpec,
     ForwardingSpec,
     MailboxSpec,
     MailboxUsage,
@@ -296,6 +297,24 @@ class NativeMailEngineAdapter(MailEngineAdapter):
     def delete_alias(self, address: str) -> None:
         self._request("POST", "/v1/aliases/delete", json={"address": address},
                       operation="delete_alias")
+
+    def ensure_forward_group(self, spec: ForwardGroupSpec) -> None:
+        self._request("POST", "/v1/forward-groups/ensure", json={
+            "address": spec.address,
+            "domain": spec.domain,
+            "destinations": list(spec.destinations),
+            "sender_policy": spec.sender_policy,
+            "allowed_senders": list(spec.allowed_senders),
+            "active": spec.active,
+        }, operation="ensure_forward_group")
+
+    def delete_forward_group(self, address: str) -> None:
+        self._request(
+            "POST",
+            "/v1/forward-groups/delete",
+            json={"address": address},
+            operation="delete_forward_group",
+        )
 
     def ensure_forwarding(self, spec: ForwardingSpec) -> None:
         self._request("POST", "/v1/forwarding/ensure", json={
