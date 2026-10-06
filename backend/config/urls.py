@@ -9,6 +9,7 @@ urlpatterns = [
     path("api/custom-hostnames/", include("apps.tenants.custom_host_urls")),
     path("api/domains/", include("apps.domains.urls")),
     path("api/mailboxes/", include("apps.mailboxes.urls")),
+    path("api/team-boxes/", include("apps.team_boxes.urls")),
     path("api/aliases/", include("apps.aliases.urls")),
     path("api/forwarding/", include("apps.forwarding.urls")),
     path("api/billing/", include("apps.billing.urls")),
