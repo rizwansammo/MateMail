@@ -19,6 +19,7 @@ from apps.security import ratelimit
 from apps.security.limits import MAILBOX_CREATE_PER_TENANT
 from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
+from apps.mail_directory.services import AddressConflict
 from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
 from .models import Mailbox
 from .serializers import MailboxCreateSerializer, MailboxReProvisionSerializer, MailboxSerializer, MailboxStatusSerializer
@@ -134,13 +135,16 @@ class MailboxListCreateView(APIView):
             if not slot.allowed:
                 return Response({"detail": slot.message}, status=402)
 
-            mailbox = Mailbox.objects.create(
-                tenant=request.tenant,
-                domain=domain,
-                local_part=data["local_part"],
-                full_name=data["full_name"],
-                quota_mb=quota_mb,
-            )
+            try:
+                mailbox = Mailbox.objects.create(
+                    tenant=request.tenant,
+                    domain=domain,
+                    local_part=data["local_part"],
+                    full_name=data["full_name"],
+                    quota_mb=quota_mb,
+                )
+            except AddressConflict as exc:
+                return Response({"local_part": exc.customer_message}, status=400)
 
         # Synchronous provisioning — password only lives in this call stack.
         # A provisioning failure does not fail mailbox creation: the record
