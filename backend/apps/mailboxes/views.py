@@ -183,7 +183,6 @@ class MailboxDetailView(APIView):
         mb = self._get_mailbox(request, pk)
         if not mb:
             return Response({"detail": "Not found."}, status=404)
-        sync_all_groups_for_tenant(request.tenant)
         return Response(MailboxSerializer(mb).data)
 
     def delete(self, request, pk):
@@ -328,4 +327,5 @@ class MailboxReProvisionView(APIView):
             logger.exception("Unexpected error re-provisioning mailbox %s", mb.email)
             return Response({"detail": MailEngineError.customer_message}, status=503)
 
+        sync_all_groups_for_tenant(request.tenant)
         return Response(MailboxSerializer(mb).data)
