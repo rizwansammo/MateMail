@@ -23,6 +23,22 @@
 
 ---
 
+## Mail collaboration foundation — feature branch (2026-10-06)
+
+Development branch: `feature/mail-collaboration`.
+
+Phase A establishes the shared-address and mailbox-access primitives for
+TeamBox, Forward Group and Delegation. It does **not** expose their UI/API yet.
+
+- Central `AddressClaim` registry prevents cross-type address collisions.
+- Existing personal mailboxes and aliases are backfilled into the registry.
+- `Mailbox.kind` distinguishes personal mailboxes from future TeamBoxes.
+- Direct PostBox authentication remains personal-mailbox only.
+- `MailboxAccessGrant` is the permission primitive for TeamBox membership and
+  Delegation.
+- Existing `ForwardingRule` remains separate from Forward Group.
+
+Design record: `docs/COLLABORATION.md`.
 
 ## Custom Hub/PostBox Domains — production live (2026-10-06)
 
