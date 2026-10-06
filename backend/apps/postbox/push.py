@@ -29,6 +29,7 @@ import logging
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from kombu.exceptions import OperationalError
 
@@ -133,9 +134,9 @@ def active_devices(mailbox):
     """
     Registrations that may receive a push right now, for this mailbox.
 
-    TeamBox registrations are tied to a personal PostBox session. Re-check the
-    live TeamBox grant here so revoking Read access also stops future mailbox
-    activity notifications without waiting for that device to open PostBox.
+    Shared-mailbox registrations are tied to the personal PostBox session that
+    opened them. Re-check TeamBox/Delegation Read grants so revocation stops
+    future notifications without waiting for that device to open PostBox.
     """
     devices = PostBoxPushDevice.objects.for_mailbox(mailbox).filter(
         enabled=True,
@@ -151,6 +152,19 @@ def active_devices(mailbox):
             session__mailbox__access_grants__grant_type="team_box",
             session__mailbox__access_grants__active=True,
             session__mailbox__access_grants__can_read=True,
+        ).distinct()
+    else:
+        # A personal mailbox may have push registrations from its own sessions
+        # and from delegates currently reading it. Revoking Delegation Read
+        # permission must stop only the delegate registrations.
+        devices = devices.filter(
+            Q(session__mailbox=mailbox)
+            | Q(
+                session__mailbox__access_grants__target_mailbox=mailbox,
+                session__mailbox__access_grants__grant_type="delegation",
+                session__mailbox__access_grants__active=True,
+                session__mailbox__access_grants__can_read=True,
+            )
         ).distinct()
     return devices
 
