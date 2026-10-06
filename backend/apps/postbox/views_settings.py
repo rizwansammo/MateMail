@@ -47,20 +47,37 @@ logger = logging.getLogger(__name__)
 # ── preferences ─────────────────────────────────────────────────────────────
 
 class PreferenceView(PostBoxView):
+    team_box_permission_scope = "identity"
+
     def get(self, request):
-        preference, _ = PostBoxPreference.objects.get_or_create(mailbox=self.mailbox)
+        preference, _ = PostBoxPreference.objects.get_or_create(
+            mailbox=request.identity_mailbox
+        )
         return Response(PreferenceSerializer(preference).data)
 
     def patch(self, request):
-        preference, _ = PostBoxPreference.objects.get_or_create(mailbox=self.mailbox)
+        preference, _ = PostBoxPreference.objects.get_or_create(
+            mailbox=request.identity_mailbox
+        )
         serializer = PreferenceSerializer(preference, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
 
         identity = serializer.validated_data.get("default_identity")
         if identity:
-            # A default sender that is not a permitted identity would fail at
-            # every send; refusing here says so once, at the moment it is set.
-            sending.assert_may_send_as(self.mailbox, identity)
+            if request.mailbox.pk != request.identity_mailbox.pk:
+                return Response(
+                    {
+                        "default_identity": [
+                            "Switch back to your personal mailbox to change the default sender."
+                        ]
+                    },
+                    status=400,
+                )
+            sending.assert_may_send_as(
+                request.identity_mailbox,
+                identity,
+                actor_mailbox=request.identity_mailbox,
+            )
 
         serializer.save()
         return Response(serializer.data)
