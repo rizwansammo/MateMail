@@ -20,6 +20,7 @@ from apps.security.limits import MAILBOX_CREATE_PER_TENANT
 from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
 from apps.mail_directory.services import AddressConflict
+from apps.forward_groups.services import sync_all_groups_for_tenant
 from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
 from .models import Mailbox, MailboxKind
 from .serializers import MailboxCreateSerializer, MailboxReProvisionSerializer, MailboxSerializer, MailboxStatusSerializer
@@ -161,6 +162,7 @@ class MailboxListCreateView(APIView):
             mailbox.mail_engine_error = MailEngineError.customer_message
             mailbox.save(update_fields=["mail_engine_error"])
 
+        sync_all_groups_for_tenant(request.tenant)
         log_event(request.tenant, LogEventType.MAILBOX_CREATED, request=request, mailbox=mailbox)
         return Response(MailboxSerializer(mailbox).data, status=201)
 
@@ -181,12 +183,26 @@ class MailboxDetailView(APIView):
         mb = self._get_mailbox(request, pk)
         if not mb:
             return Response({"detail": "Not found."}, status=404)
+        sync_all_groups_for_tenant(request.tenant)
         return Response(MailboxSerializer(mb).data)
 
     def delete(self, request, pk):
         mb = self._get_mailbox(request, pk)
         if not mb:
             return Response({"detail": "Not found."}, status=404)
+
+        for membership in mb.forward_group_memberships.select_related("group"):
+            if membership.group.members.count() <= 1:
+                return Response(
+                    {
+                        "detail": (
+                            f"{mb.email} is the last member of Forward Group "
+                            f"{membership.group.address}. Add another member or "
+                            "delete the group first."
+                        )
+                    },
+                    status=409,
+                )
 
         # Queue engine cleanup before deleting the local row.  If the mailbox
         # is provisioned and the broker cannot accept the cleanup task, fail
@@ -216,6 +232,7 @@ class MailboxDetailView(APIView):
 
         log_event(request.tenant, LogEventType.MAILBOX_DELETED, request=request, mailbox=mb)
         mb.delete()
+        sync_all_groups_for_tenant(request.tenant)
         return Response(status=204)
 
 
@@ -266,6 +283,7 @@ class MailboxStatusView(APIView):
 
         mb.status = new_status
         mb.save(update_fields=["status", "updated_at"])
+        sync_all_groups_for_tenant(request.tenant)
         if new_status == "disabled":
             log_event(request.tenant, LogEventType.MAILBOX_DISABLED, request=request, mailbox=mb)
         return Response(MailboxSerializer(mb).data)
