@@ -27,7 +27,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import authentication, exceptions
 
-from apps.mailboxes.models import Mailbox, MailboxStatus
+from apps.mailboxes.models import Mailbox, MailboxKind, MailboxStatus
 from apps.tenants.host_binding import tenant_matches_request
 from apps.security import ratelimit
 from apps.security.client_ip import get_client_ip
@@ -85,6 +85,8 @@ def assert_mailbox_may_sign_in(mailbox: Mailbox) -> None:
     message as a wrong password — the distinction exists for the logs, not for
     the person at the form.
     """
+    if mailbox.kind != MailboxKind.PERSONAL:
+        raise MailboxUnavailable("This mailbox cannot be signed into directly.")
     if mailbox.status == MailboxStatus.SUSPENDED:
         raise MailboxUnavailable("This mailbox has been suspended by MateMail.")
     if mailbox.status != MailboxStatus.ACTIVE:
