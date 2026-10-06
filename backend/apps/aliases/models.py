@@ -23,10 +23,8 @@ class Alias(models.Model):
     destination_mailbox = models.ForeignKey(
         "mailboxes.Mailbox",
         on_delete=models.CASCADE,
-        null=True, blank=True,
         related_name="incoming_aliases",
     )
-    destination_address = models.EmailField(blank=True)
     status = models.CharField(
         max_length=20, choices=AliasStatus.choices, default=AliasStatus.ACTIVE
     )
@@ -43,9 +41,26 @@ class Alias(models.Model):
     def __str__(self):
         return str(self.source_address)
 
+    def clean(self):
+        super().clean()
+        if not self.destination_mailbox_id:
+            raise ValidationError(
+                {"destination_mailbox": "An alias must belong to a mailbox."}
+            )
+        if self.tenant_id and self.destination_mailbox.tenant_id != self.tenant_id:
+            raise ValidationError(
+                {"destination_mailbox": "Destination mailbox is not in this organization."}
+            )
+
     def save(self, *args, **kwargs):
-        """Reserve Alias addresses in the same namespace as mailbox addresses."""
+        """
+        Reserve Alias addresses in the shared namespace.
+
+        An Alias is an alternate identity for exactly one existing MateMail
+        mailbox. External delivery belongs to Forwarding, not Alias.
+        """
         normalized = (self.source_address or "").strip().lower()
+        self.clean()
 
         if self._state.adding:
             from apps.mail_directory.models import AddressKind
