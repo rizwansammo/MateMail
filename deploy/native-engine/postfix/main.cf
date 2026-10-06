@@ -222,6 +222,7 @@ smtpd_relay_restrictions =
 smtpd_recipient_restrictions =
     reject_non_fqdn_recipient,
     reject_unknown_recipient_domain,
+    check_policy_service inet:127.0.0.1:10032,
     permit_mynetworks,
     permit_sasl_authenticated,
     reject_unauth_destination
