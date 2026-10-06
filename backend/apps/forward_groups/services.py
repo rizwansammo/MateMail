@@ -117,6 +117,17 @@ def forwarding_would_loop(mailbox, destination_email: str) -> bool:
     ).exists()
 
 
+def sync_all_groups_for_tenant(tenant) -> None:
+    """Best-effort reconcile every Forward Group after mailbox lifecycle changes."""
+    from .models import ForwardGroup
+
+    for group in ForwardGroup.objects.filter(tenant=tenant).select_related("domain"):
+        try:
+            sync_group(group)
+        except Exception as exc:  # noqa: BLE001
+            mark_sync_failure(group, exc)
+
+
 def sync_groups_affected_by_mailbox(mailbox, *, include_organization=True) -> None:
     """
     Best-effort reconciliation after mailbox lifecycle changes.
