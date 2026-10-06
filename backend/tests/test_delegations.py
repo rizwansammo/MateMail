@@ -213,7 +213,7 @@ class DelegationApiTest(TestCase):
         spec, _ = get_adapter.return_value.ensure_mailbox.call_args.args
         self.assertEqual((), spec.authorized_senders)
 
-    def test_mailbox_spec_ignores_inactive_delegate_for_sender_right(self):
+    def test_mailbox_spec_keeps_grant_across_temporary_delegate_disable(self):
         grant = MailboxAccessGrant.objects.create(
             tenant=self.tenant,
             target_mailbox=self.target,
@@ -228,7 +228,11 @@ class DelegationApiTest(TestCase):
 
         spec = MailboxSpec.from_model(self.target)
 
-        self.assertEqual((), spec.authorized_senders)
+        # The Native Engine's postfix_sender_login view separately requires
+        # the owner mailbox to be active. Keeping desired authorization here
+        # means re-enabling the delegate restores the still-valid grant without
+        # another delegation mutation.
+        self.assertEqual((self.delegate.email,), spec.authorized_senders)
         self.assertTrue(grant.active)
 
     def test_service_preserves_personal_login_capability(self):
