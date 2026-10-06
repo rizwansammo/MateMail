@@ -1,0 +1,149 @@
+name: Deploy Native Engine collaboration 33c357a
+
+on:
+  push:
+    branches:
+      - ops/native-engine-collab-deploy-33c357a
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  RELEASE_SHA: 33c357a6f44e6b6ab1f120f1e7d2e99c54cd1f99
+  API_IMAGE: ghcr.io/rizwansammo/matemail-native-api@sha256:025aa3cb5cf032c53cd7b9fcf12cccf8455f176a1a0af3377ac49fa990ac3e86
+  POSTFIX_IMAGE: ghcr.io/rizwansammo/matemail-native-postfix@sha256:0e86d2013e274080696eca41c2bd2303475850967069d621c526bf99e6c79af1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact merged release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - name: Stage Native Engine release files
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: deploy/native-engine/deploy.sh,deploy/native-engine/docker-compose.yml,deploy/native-engine/postfix/main.cf
+          target: /opt/MateMailNative/.deploy-collab-33c357a/
+          overwrite: true
+
+      - name: Upgrade Native Engine safely
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_IMAGE: ${{ env.API_IMAGE }}
+          POSTFIX_IMAGE: ${{ env.POSTFIX_IMAGE }}
+          RELEASE_SHA: ${{ env.RELEASE_SHA }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: GHCR_USER,GHCR_TOKEN,API_IMAGE,POSTFIX_IMAGE,RELEASE_SHA
+          timeout: 60s
+          command_timeout: 15m
+          script: |
+            set -Eeuo pipefail
+            ROOT=/opt/MateMailNative
+            D=$ROOT/deploy/native-engine
+            C=$ROOT/.deploy-collab-33c357a/deploy/native-engine
+            STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+            B=$D/backups/native-collab-$STAMP
+
+            [ -f "$D/.env" ] || { echo 'FATAL: Native Engine .env missing'; exit 1; }
+            [ -f "$C/deploy.sh" ] || { echo 'FATAL: staged deploy.sh missing'; exit 1; }
+            [ -f "$C/docker-compose.yml" ] || { echo 'FATAL: staged compose missing'; exit 1; }
+            [ -f "$C/postfix/main.cf" ] || { echo 'FATAL: staged Postfix main.cf missing'; exit 1; }
+
+            echo '== pre-upgrade checks ==' 
+            docker exec matemail-native-postfix postqueue -p
+            docker exec matemail-native-db psql -U engine -d matemail_engine -Atc 'select version from schema_version order by version desc limit 1;'
+
+            DOCKER_CONFIG=$(mktemp -d)
+            export DOCKER_CONFIG
+            cleanup() { docker logout ghcr.io >/dev/null 2>&1 || true; rm -rf "$DOCKER_CONFIG"; }
+            trap cleanup EXIT
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+            unset GHCR_TOKEN
+
+            echo '== pull immutable release images ==' 
+            docker pull "$API_IMAGE"
+            docker pull "$POSTFIX_IMAGE"
+
+            echo '== backup runtime and engine database ==' 
+            mkdir -p "$B"
+            chmod 700 "$B"
+            cp -a "$D/.env" "$B/.env"
+            cp -a "$D/docker-compose.yml" "$B/docker-compose.yml"
+            cp -a "$D/deploy.sh" "$B/deploy.sh"
+            cp -a "$D/postfix/main.cf" "$B/postfix-main.cf"
+            docker inspect matemail-native-api matemail-native-postfix > "$B/container-inspect.json"
+            docker exec matemail-native-db pg_dump -U engine -d matemail_engine --format=custom > "$B/matemail_engine.pgcustom"
+            pg_restore -l "$B/matemail_engine.pgcustom" >/dev/null
+
+            echo '== pin images without touching secrets ==' 
+            python3 - "$D/.env" "$API_IMAGE" "$POSTFIX_IMAGE" <<'PY'
+            import pathlib, sys
+            path = pathlib.Path(sys.argv[1])
+            api, postfix = sys.argv[2], sys.argv[3]
+            text = path.read_text()
+            def replace(name, value, text):
+                lines = text.splitlines()
+                hits = [i for i, line in enumerate(lines) if line.startswith(name + '=')]
+                if len(hits) != 1:
+                    raise SystemExit(f'{name}: expected exactly one entry, found {len(hits)}')
+                lines[hits[0]] = f'{name}={value}'
+                return '\n'.join(lines) + '\n'
+            text = replace('NATIVE_API_IMAGE', api, text)
+            text = replace('NATIVE_POSTFIX_IMAGE', postfix, text)
+            tmp = path.with_suffix('.tmp')
+            tmp.write_text(text)
+            tmp.chmod(0o600)
+            tmp.replace(path)
+            PY
+
+            install -m 0755 "$C/deploy.sh" "$D/deploy.sh"
+            install -m 0644 "$C/docker-compose.yml" "$D/docker-compose.yml"
+            install -m 0644 "$C/postfix/main.cf" "$D/postfix/main.cf"
+
+            echo '== validate resolved Compose ==' 
+            cd "$D"
+            docker compose config --quiet
+
+            echo '== deploy Native Engine ==' 
+            ./deploy.sh pull
+
+            echo '== wait for API/Postfix healthy ==' 
+            for i in $(seq 1 60); do
+              A=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' matemail-native-api 2>/dev/null || true)
+              P=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' matemail-native-postfix 2>/dev/null || true)
+              if [ "$A" = healthy ] && [ "$P" = healthy ]; then break; fi
+              if [ "$i" -eq 60 ]; then echo "FATAL: health timeout api=$A postfix=$P"; docker logs --tail 100 matemail-native-api; docker logs --tail 100 matemail-native-postfix; exit 1; fi
+              sleep 2
+            done
+
+            echo '== verify schema and collaboration capabilities ==' 
+            SCHEMA=$(docker exec matemail-native-db psql -U engine -d matemail_engine -Atc 'select version from schema_version order by version desc limit 1;')
+            [ "$SCHEMA" = 6 ] || { echo "FATAL: expected schema 6, got $SCHEMA"; exit 1; }
+            READY=$(docker exec matemail-native-api sh -ec 'wget -qO- --header="X-Native-Api-Secret: $NATIVE_API_SECRET" http://127.0.0.1:8451/ready')
+            READY="$READY" python3 - <<'PY'
+            import json, os, sys
+            d=json.loads(os.environ['READY'])
+            c=d.get('capabilities') or {}
+            ok=(d.get('ready') is True and int(d.get('schema_version') or 0)>=6 and c.get('mailbox_sender_authorization') is True and c.get('forward_groups') is True and c.get('forward_group_sender_policy') is True and int(c.get('collaboration_version') or 0)>=1)
+            print(json.dumps(d, sort_keys=True))
+            sys.exit(0 if ok else 1)
+            PY
+            docker exec matemail-native-postfix postconf smtpd_recipient_restrictions | grep -F 'check_policy_service inet:127.0.0.1:10032'
+            docker exec matemail-native-postfix grep -F 'def forward_group_verdict' /usr/local/lib/matemail/engine_control.py >/dev/null
+            docker exec matemail-native-postfix postqueue -p
+            echo "NATIVE_ENGINE_COLLAB_READY release=$RELEASE_SHA schema=$SCHEMA backup=$B"
