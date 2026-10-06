@@ -635,13 +635,19 @@ def get_alias(conn, address: str) -> dict | None:
             (row[0],),
         )
         rows = cur.fetchall()
+        cur.execute(
+            "SELECT owner FROM postfix_sender_login WHERE address = %s ORDER BY owner",
+            (address,),
+        )
+        authorized_senders = [r[0] for r in cur.fetchall()]
     return {
         "address": address,
         "active": row[1],
         "destinations": [r[0] for r in rows],
-        # The send-as answer, made explicit rather than left to be recomputed by
-        # whoever asks next.
-        "authorized_senders": [r[0] for r in rows if r[1] is not None],
+        # Report the same ownership Postfix enforces. For an Alias of a TeamBox
+        # this is the TeamBox's authorised personal mailbox members, not the
+        # passwordless TeamBox address itself.
+        "authorized_senders": authorized_senders,
     }
 
 
