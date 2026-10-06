@@ -498,7 +498,10 @@ def _sync_sieve(mailbox) -> None:
 # ── identities, forwarding, quota ───────────────────────────────────────────
 
 class IdentityListView(PostBoxView):
-    """Every address this mailbox may send as, from authoritative data."""
+    """Every address this active mailbox may send as, from authoritative data."""
+
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send"
 
     def get(self, request):
         return Response({"results": [
@@ -507,8 +510,12 @@ class IdentityListView(PostBoxView):
                 "name": i.name,
                 "is_primary": i.is_primary,
                 "kind": i.kind,
+                "send_mode": i.send_mode,
             }
-            for i in sending.allowed_identities(self.mailbox)
+            for i in sending.allowed_identities(
+                self.mailbox,
+                actor_mailbox=request.identity_mailbox,
+            )
         ]})
 
 
@@ -548,6 +555,7 @@ class ForwardingView(PostBoxView):
 
 
 class MailboxAccountView(PostBoxView):
+    team_box_permission_scope = "identity"
     """
     Mailbox and account: quota, identities and the real connection settings.
 
@@ -560,7 +568,7 @@ class MailboxAccountView(PostBoxView):
     """
 
     def get(self, request):
-        mailbox = self.mailbox
+        mailbox = request.identity_mailbox
         usage_mb = None
         quota_mb = mailbox.quota_mb
 
@@ -595,7 +603,10 @@ class MailboxAccountView(PostBoxView):
             },
             "identities": [
                 {"address": i.address, "is_primary": i.is_primary, "kind": i.kind}
-                for i in sending.allowed_identities(mailbox)
+                for i in sending.allowed_identities(
+                    mailbox,
+                    actor_mailbox=mailbox,
+                )
             ],
             "connection": {
                 "imap": {"host": host, "port": 993, "security": "SSL/TLS"},
