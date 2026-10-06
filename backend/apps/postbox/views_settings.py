@@ -159,10 +159,16 @@ class SignatureListView(MailboxScopedListView):
     model = MailSignature
     serializer_class = SignatureSerializer
 
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send" if request.method == "GET" else "manage"
+
 
 class SignatureDetailView(MailboxScopedDetailView):
     model = MailSignature
     serializer_class = SignatureSerializer
+
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send" if request.method == "GET" else "manage"
 
 
 #: What an image signature may be, by what the bytes actually START with.
@@ -201,6 +207,9 @@ def _sniff_image(payload: bytes) -> tuple[str, str] | None:
 
 
 class SignatureImageView(PostBoxView):
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send" if request.method == "GET" else "manage"
+
     """
     POST an image for a signature; GET it back for the preview and the
     composer; DELETE to remove it.
@@ -295,6 +304,9 @@ class SignatureImageView(PostBoxView):
 
 
 class SignatureHtmlImageView(PostBoxView):
+    def required_team_box_permission(self, request) -> str:
+        return "read_or_send"
+
     """
     GET the [index]th https image of this mailbox's own HTML signature, for
     the native app's preview, which never loads remote images itself.
