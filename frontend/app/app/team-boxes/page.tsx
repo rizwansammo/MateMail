@@ -140,7 +140,10 @@ export default function TeamBoxesPage() {
   }, []);
 
   useEffect(() => {
-    fetchAll();
+    const loadTimer = window.setTimeout(() => {
+      void fetchAll();
+    }, 0);
+
     if (tenant?.id) {
       apiRequest(`/api/workspaces/${tenant.id}/stats/`)
         .then(async (response) => response.ok ? response.json() : null)
@@ -150,6 +153,8 @@ export default function TeamBoxesPage() {
         })
         .catch(() => {});
     }
+
+    return () => window.clearTimeout(loadTimer);
   }, [fetchAll, tenant?.id]);
 
   const canAdmin = myRole === "owner" || myRole === "admin";
