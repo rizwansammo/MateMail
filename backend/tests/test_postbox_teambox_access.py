@@ -318,7 +318,7 @@ class PostBoxTeamBoxAccessTest(TestCase):
         )
 
     def test_read_and_send_member_schedule_records_personal_submission_identity(self):
-        self.grant(can_read=True, can_send_as=True)
+        self.grant(can_read=True, can_manage=True, can_send_as=True)
         client, _ = self.client_for()
         self.assertEqual(200, self.switch(client).status_code)
 
