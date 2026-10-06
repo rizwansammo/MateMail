@@ -27,8 +27,8 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import authentication, exceptions
 
-from apps.mail_directory.models import AccessGrantKind
-from apps.mail_directory.services import MailboxPermissions, permissions_for
+from apps.mail_directory.models import AccessGrantKind, MailboxAccessGrant
+from apps.mail_directory.services import MailboxPermissions
 from apps.mailboxes.models import Mailbox, MailboxKind, MailboxStatus
 from apps.tenants.host_binding import tenant_matches_request
 from apps.security import ratelimit
@@ -186,35 +186,75 @@ def _clear_active_mailbox(session: PostBoxSession) -> None:
         session.save(update_fields=["active_mailbox"])
 
 
-def _team_box_permissions(identity: Mailbox, target: Mailbox) -> MailboxPermissions:
+def _access_grant_type_for_target(target: Mailbox) -> str:
+    if target.kind == MailboxKind.TEAM_BOX:
+        return AccessGrantKind.TEAM_BOX
+    if target.kind == MailboxKind.PERSONAL:
+        return AccessGrantKind.DELEGATION
+    raise MailboxUnavailable("That mailbox cannot be opened through this session.")
+
+
+def _shared_mailbox_permissions(
+    identity: Mailbox,
+    target: Mailbox,
+) -> MailboxPermissions:
     if identity.tenant_id != target.tenant_id:
         return MailboxPermissions()
-    return permissions_for(
-        grantee_mailbox=identity,
-        target_mailbox=target,
+
+    grant_type = _access_grant_type_for_target(target)
+    grant = (
+        MailboxAccessGrant.objects
+        .filter(
+            tenant_id=target.tenant_id,
+            grantee_mailbox=identity,
+            target_mailbox=target,
+            grant_type=grant_type,
+            active=True,
+        )
+        .first()
+    )
+    if grant is None:
+        return MailboxPermissions()
+
+    return MailboxPermissions(
+        can_read=grant.can_read,
+        can_manage=grant.can_manage,
+        can_send_as=grant.can_send_as,
+        can_send_on_behalf=grant.can_send_on_behalf,
     )
 
 
-def _assert_team_box_available(identity: Mailbox, target: Mailbox) -> MailboxPermissions:
+# Kept as a small compatibility helper for Phase D callers/tests.
+def _team_box_permissions(identity: Mailbox, target: Mailbox) -> MailboxPermissions:
     if target.kind != MailboxKind.TEAM_BOX:
-        raise MailboxUnavailable("That mailbox cannot be opened through this session.")
+        return MailboxPermissions()
+    return _shared_mailbox_permissions(identity, target)
+
+
+def _assert_shared_mailbox_available(
+    identity: Mailbox,
+    target: Mailbox,
+) -> MailboxPermissions:
+    grant_type = _access_grant_type_for_target(target)
+
     if identity.tenant_id != target.tenant_id:
-        raise MailboxUnavailable("That TeamBox is not in this organization.")
+        raise MailboxUnavailable("That mailbox is not in this organization.")
     if target.status != MailboxStatus.ACTIVE:
-        raise MailboxUnavailable("That TeamBox is not active.")
+        raise MailboxUnavailable("That mailbox is not active.")
     if not target.mail_engine_provisioned:
-        raise MailboxUnavailable("That TeamBox is still being set up.")
+        raise MailboxUnavailable("That mailbox is still being set up.")
     if target.tenant is None or not target.tenant.can_use_mail:
         raise MailboxUnavailable("This organization's mail service is not active.")
 
-    permissions = _team_box_permissions(identity, target)
+    permissions = _shared_mailbox_permissions(identity, target)
     if not any((
         permissions.can_read,
         permissions.can_manage,
         permissions.can_send_as,
         permissions.can_send_on_behalf,
     )):
-        raise MailboxUnavailable("You no longer have access to that TeamBox.")
+        label = "TeamBox" if grant_type == AccessGrantKind.TEAM_BOX else "delegated mailbox"
+        raise MailboxUnavailable(f"You no longer have access to that {label}.")
     return permissions
 
 
@@ -226,7 +266,7 @@ def active_mailbox_for_session(
 
     A revoked grant must never make an in-flight destructive request fall back
     to the personal mailbox. The caller gets a refusal for this request; the
-    stored TeamBox selection is cleared so the next request returns to the
+    stored shared-mailbox selection is cleared so the next request returns to the
     signed-in personal mailbox.
     """
     identity = session.mailbox
@@ -235,7 +275,7 @@ def active_mailbox_for_session(
         return identity, MailboxPermissions.owner()
 
     try:
-        permissions = _assert_team_box_available(identity, target)
+        permissions = _assert_shared_mailbox_available(identity, target)
     except MailboxUnavailable:
         _clear_active_mailbox(session)
         raise
@@ -253,7 +293,7 @@ def switch_active_mailbox(
         _clear_active_mailbox(session)
         return identity, MailboxPermissions.owner()
 
-    permissions = _assert_team_box_available(identity, target)
+    permissions = _assert_shared_mailbox_available(identity, target)
     session.active_mailbox = target
     session.save(update_fields=["active_mailbox"])
     return target, permissions
@@ -261,14 +301,14 @@ def switch_active_mailbox(
 
 def require_active_mailbox_permission(request, permission: str) -> None:
     """
-    Enforce one TeamBox permission after session authentication.
+    Enforce one cross-mailbox permission after session authentication.
 
-    Personal mailbox access is intrinsic. For TeamBoxes the grant is resolved
-    fresh on every request by PostBoxSessionAuthentication.
+    Personal mailbox access to itself is intrinsic. TeamBox and Delegation
+    grants are resolved fresh on every request by PostBoxSessionAuthentication.
     """
     if getattr(request, "postbox_active_mailbox_invalid", False):
         raise exceptions.PermissionDenied(
-            "Your TeamBox access changed. Retry this action from your personal mailbox."
+            "Your mailbox access changed. Retry this action from your personal mailbox."
         )
 
     identity = getattr(request, "identity_mailbox", None)
@@ -298,7 +338,7 @@ def require_active_mailbox_permission(request, permission: str) -> None:
 
     if not allowed:
         raise exceptions.PermissionDenied(
-            "Your TeamBox permission does not allow that action."
+            "Your mailbox permission does not allow that action."
         )
 
 
@@ -335,7 +375,7 @@ class PostBoxSessionAuthentication(authentication.BaseAuthentication):
         try:
             mailbox, permissions = active_mailbox_for_session(session)
         except MailboxUnavailable:
-            # The stale TeamBox selection has already been cleared. Keep the
+            # The stale shared-mailbox selection has already been cleared. Keep the
             # personal authentication capability alive for recovery endpoints
             # such as Me, mailbox switch and logout, but mark this request so
             # mailbox-content endpoints refuse it instead of accidentally
