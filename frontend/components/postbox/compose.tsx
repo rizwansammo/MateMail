@@ -78,6 +78,7 @@ export function Compose({
   onClose,
   onSent,
   inline = false,
+  draftsEnabled = true,
 }: {
   initial: ComposeInitial;
   identities: Identity[];
@@ -85,6 +86,7 @@ export function Compose({
   onClose: () => void;
   onSent: (message: string) => void;
   inline?: boolean;
+  draftsEnabled?: boolean;
 }) {
   // Two composers may coexist (inline reply and sidebar Compose). Form labels
   // and ARIA references must remain unique instead of targeting the other one.
@@ -241,6 +243,11 @@ export function Compose({
 
   const saveDraftNow = useCallback(
     async (closeAfter = false) => {
+      if (!draftsEnabled) {
+        if (closeAfter) onClose();
+        return true;
+      }
+
       const hasDraftMaterial = Boolean(
         to.trim() ||
           cc.trim() ||
@@ -290,6 +297,7 @@ export function Compose({
       includeOriginal,
       initial.quoted_text,
       draftUid,
+      draftsEnabled,
       existingAttachments.length,
       onClose,
       payload,
@@ -302,7 +310,7 @@ export function Compose({
   // one save rather than twenty, and short enough that a closed tab loses at
   // most a sentence.
   useEffect(() => {
-    if (!dirty.current || busy || saving) return;
+    if (!draftsEnabled || !dirty.current || busy || saving) return;
     const timer = window.setTimeout(async () => {
       const attachmentRevisionAtStart = attachmentRevision.current;
       const editRevisionAtStart = editRevision.current;
@@ -321,7 +329,7 @@ export function Compose({
       }
     }, 2000);
     return () => window.clearTimeout(timer);
-  }, [applySavedDraft, busy, payload, saving]);
+  }, [applySavedDraft, busy, draftsEnabled, payload, saving]);
 
 
 
@@ -397,7 +405,7 @@ export function Compose({
   );
 
   const discard = useCallback(async () => {
-    if (draftUid) {
+    if (draftsEnabled && draftUid) {
       try {
         await postbox.deleteDraft(draftUid);
       } catch {
@@ -405,7 +413,7 @@ export function Compose({
       }
     }
     onClose();
-  }, [draftUid, onClose]);
+  }, [draftUid, draftsEnabled, onClose]);
 
   useEffect(() => {
     if (inline) return;
@@ -878,7 +886,8 @@ export function Compose({
             Schedule
           </button>
 
-                      <button
+          {draftsEnabled && (
+            <button
               type="button"
               className="pb-btn pb-btn-ghost pb-compose-save-draft"
               disabled={saving || busy}
@@ -891,6 +900,7 @@ export function Compose({
               )}
               Save draft
             </button>
+          )}
 
 
           <button
