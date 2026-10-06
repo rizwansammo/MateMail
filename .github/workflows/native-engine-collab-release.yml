@@ -1,0 +1,57 @@
+name: Native Engine collaboration release 33c357a
+
+on:
+  push:
+    branches:
+      - ops/native-engine-collab-33c357a
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: rizwansammo
+  RELEASE_SHA: 33c357a6f44e6b6ab1f120f1e7d2e99c54cd1f99
+
+jobs:
+  build:
+    name: Build ${{ matrix.component }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [api, postfix]
+
+    steps:
+      - name: Check out exact merged release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push exact release
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.component == 'api' && '.' || format('deploy/native-engine/images/{0}', matrix.component) }}
+          file: deploy/native-engine/images/${{ matrix.component }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/matemail-native-${{ matrix.component }}:${{ env.RELEASE_SHA }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/matemail-native-${{ matrix.component }}:ne1
+          cache-from: type=gha,scope=native-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=native-${{ matrix.component }}
+
+      - name: Report digest
+        run: |
+          echo "COMPONENT=${{ matrix.component }}"
+          echo "DIGEST=${{ steps.push.outputs.digest }}"
+          echo "PIN=${{ env.REGISTRY }}/${{ env.OWNER }}/matemail-native-${{ matrix.component }}@${{ steps.push.outputs.digest }}"
