@@ -91,7 +91,11 @@ function CentredSpinner() {
 function Mailbox() {
   const router = useRouter();
   const params = useSearchParams();
-  const { preferences, updatePreferences } = usePostBox();
+  const { mailbox, permissions, preferences, updatePreferences } = usePostBox();
+  const canReadMailbox = permissions.can_read;
+  const canManageMailbox = permissions.can_manage;
+  const canSendMailbox = permissions.can_send_as || permissions.can_send_on_behalf;
+  const isTeamBox = mailbox?.kind === "team_box";
 
   const folder = params.get("folder") || "INBOX";
   const labelId = params.get("label");
@@ -215,8 +219,21 @@ function Mailbox() {
   }, [query]);
 
   const list = useAsyncData<MessagePage>(
-    () =>
-      labelId ? postbox.labeledMessages(labelId, {
+    () => {
+      if (!canReadMailbox) {
+        return Promise.resolve({
+          folder,
+          scope: "folder",
+          sort: sortMode,
+          uid_validity: 0,
+          page: 1,
+          page_size: preferences.messages_per_page || 25,
+          total: 0,
+          has_next: false,
+          results: [],
+        } as MessagePage);
+      }
+      return labelId ? postbox.labeledMessages(labelId, {
         page: pageNumber,
         q: search || undefined,
         sort: sortMode,
@@ -233,8 +250,11 @@ function Mailbox() {
         sort: sortMode,
         unread: unreadOnly ? "true" : undefined,
         starred: filteredStarredOnly ? "true" : undefined,
-      }),
+      });
+    },
     [
+      canReadMailbox,
+      folder,
       labelId,
       folder,
       pageNumber,
@@ -253,8 +273,21 @@ function Mailbox() {
   const loadList = list.reload;
 
   const directory = useAsyncData(
-    () => Promise.all([postbox.identities(), postbox.signatures(), postbox.folders(), postbox.labels()]),
-    [],
+    () => Promise.all([
+      canSendMailbox
+        ? postbox.identities()
+        : Promise.resolve({ results: [] }),
+      canSendMailbox
+        ? postbox.signatures()
+        : Promise.resolve({ results: [] }),
+      canReadMailbox
+        ? postbox.folders()
+        : Promise.resolve({ results: [] }),
+      canReadMailbox
+        ? postbox.labels()
+        : Promise.resolve({ results: [] }),
+    ]),
+    [canReadMailbox, canSendMailbox],
     "",
   );
   const identities = directory.data?.[0]?.results ?? [];
@@ -265,8 +298,10 @@ function Mailbox() {
     [directory.data],
   );
   const contacts = useAsyncData(
-    () => postbox.contacts(),
-    [],
+    () => canReadMailbox
+      ? postbox.contacts()
+      : Promise.resolve({ results: [] }),
+    [canReadMailbox],
     "",
   );
   const contactNameByEmail = useMemo(() => {
@@ -304,19 +339,21 @@ function Mailbox() {
     sortMode === "newest" && searchScope === "folder";
   const conversationMode = conversationEligible && listView === "conversations";
   const conversations = useAsyncData<ConversationPage>(
-    () => conversationMode
+    () => canReadMailbox && conversationMode
       ? postbox.conversations({ scope: "inbox", page: pageNumber, page_size: Math.min(100, preferences.messages_per_page || 25) })
       : Promise.resolve({
           scope: "inbox" as const, page: 1, page_size: 25, total: 0,
           has_next: false, results: [],
         }),
-    [conversationMode, pageNumber, preferences.messages_per_page],
+    [canReadMailbox, conversationMode, pageNumber, preferences.messages_per_page],
     "Conversation view is unavailable. Switch to Messages.",
   );
 
   const scheduledData = useAsyncData(
-    () => postbox.scheduled(),
-    [],
+    () => canReadMailbox
+      ? postbox.scheduled()
+      : Promise.resolve({ results: [] }),
+    [canReadMailbox],
     "",
   );
   const scheduledRows = scheduledData.data?.results ?? [];
@@ -343,14 +380,15 @@ function Mailbox() {
   // not need an effect that copies URL state into React state.
   const composeRequested = params.get("compose") === "new";
   const composeRecipient = params.get("to")?.trim() || "";
-  const compose =
-    explicitCompose ??
+  const compose = canSendMailbox
+    ? explicitCompose ??
     (composeRequested
       ? {
           mode: "new" as const,
           ...(composeRecipient ? { to: [composeRecipient] } : {}),
         }
-      : null);
+      : null)
+    : null;
 
   const closeCompose = useCallback(() => {
     setExplicitCompose(null);
@@ -434,7 +472,12 @@ function Mailbox() {
         setDetail(data);
         // Marking read is a separate, explicit call — the list does not mark
         // things seen as it scrolls past them.
-        if (!summary.seen && role !== "sent" && !summary.sent_origin) {
+        if (
+          canManageMailbox &&
+          !summary.seen &&
+          role !== "sent" &&
+          !summary.sent_origin
+        ) {
           await postbox.act("read", summary.folder, [summary.uid], {
             uid_validity: summary.uid_validity,
           });
@@ -469,7 +512,7 @@ function Mailbox() {
         if (requestId === openRequestId.current) setDetailLoading(false);
       }
     },
-    [loadList, mailFolders, conversationMode],
+    [canManageMailbox, loadList, mailFolders, conversationMode],
   );
 
   const applyLabel = async (labelIdToApply: string, remove: boolean, uids: number[], sourceFolder: string, uidValidity: number) => {
