@@ -524,7 +524,7 @@ class PostBoxSessionRevokeView(APIView):
 
     def delete(self, request, session_id):
         session = (
-            PostBoxSession.objects.for_mailbox(request.mailbox)
+            PostBoxSession.objects.for_mailbox(request.identity_mailbox)
             .filter(pk=session_id)
             .first()
         )
