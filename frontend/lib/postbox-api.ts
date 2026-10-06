@@ -119,6 +119,7 @@ export interface AvailablePostBoxMailbox {
   mailbox: MailboxProfile;
   permissions: MailboxPermissions;
   is_personal: boolean;
+  access_type: "personal" | "team_box" | "delegation";
 }
 
 export interface SavedPostBoxAccount {
