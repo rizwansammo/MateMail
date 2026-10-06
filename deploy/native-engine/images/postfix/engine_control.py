@@ -218,6 +218,70 @@ def release_message(queue_id):
     return {"queue_id": queue_id, "released": True}
 
 
+# ── Forward Group sender policy ─────────────────────────────────────────────
+
+
+def lookup_forward_group_policy(recipient):
+    """
+    Return one active Forward Group's sender policy and explicit sender set.
+
+    The view contains no tenant metadata and no mailbox secrets. MateMail has
+    already resolved product concepts (organization, members, selected senders)
+    into concrete authenticated mailbox addresses.
+    """
+    address = (recipient or "").strip().lower()
+    if not address:
+        return None
+
+    with psycopg2.connect(DB_DSN) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT sender_policy, sender "
+                "FROM postfix_forward_group_policy "
+                "WHERE address = %s",
+                (address,),
+            )
+            rows = cur.fetchall()
+
+    if not rows:
+        return None
+    return {
+        "policy": rows[0][0],
+        "allowed_senders": {row[1] for row in rows if row[1]},
+    }
+
+
+def forward_group_verdict(recipient, sasl_username):
+    """
+    Enforce Forward Group posting policy at RCPT time.
+
+    Restricted groups trust only an authenticated personal mailbox. The visible
+    MAIL FROM is deliberately irrelevant here: accepting a forged internal From
+    address from the public Internet would turn "organization only" into a
+    cosmetic check.
+    """
+    try:
+        group = lookup_forward_group_policy(recipient)
+    except Exception as exc:  # noqa: BLE001
+        # The same database backs Postfix's recipient/routing maps. If it is
+        # unavailable those maps already tempfail, so do not invent a different
+        # answer here.
+        log(f"Forward Group policy lookup failed ({type(exc).__name__}); "
+            "leaving delivery to the routing maps")
+        return "action=DUNNO"
+
+    if group is None or group["policy"] == "anyone":
+        return "action=DUNNO"
+
+    login = (sasl_username or "").strip().lower()
+    if login and login in group["allowed_senders"]:
+        return "action=DUNNO"
+
+    return (
+        "action=REJECT 5.7.1 You are not permitted to send to this Forward Group"
+    )
+
+
 # ── Rate limiting ───────────────────────────────────────────────────────────
 
 
@@ -351,7 +415,7 @@ class PolicyServer(threading.Thread):
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("127.0.0.1", POLICY_PORT))
         server.listen(64)
-        log(f"rate-limit policy service on 127.0.0.1:{POLICY_PORT}")
+        log(f"submission/Forward Group policy service on 127.0.0.1:{POLICY_PORT}")
         while True:
             try:
                 conn, _ = server.accept()
@@ -381,8 +445,17 @@ class PolicyServer(threading.Thread):
                             key, value = text.split("=", 1)
                             attributes[key.strip()] = value.strip()
                         continue
-                    # Blank line: the request is complete.
-                    verdict = rate_verdict(attributes.get("sasl_username", ""))
+                    # Blank line: the request is complete. The same loopback
+                    # service is called once at MAIL FROM for submission rate
+                    # limiting and again at RCPT for Forward Group posting
+                    # policy. A recipient is the unambiguous stage signal.
+                    if attributes.get("recipient", "").strip():
+                        verdict = forward_group_verdict(
+                            attributes.get("recipient", ""),
+                            attributes.get("sasl_username", ""),
+                        )
+                    else:
+                        verdict = rate_verdict(attributes.get("sasl_username", ""))
                     try:
                         conn.sendall((verdict + "\n\n").encode())
                     except Exception:            # noqa: BLE001
