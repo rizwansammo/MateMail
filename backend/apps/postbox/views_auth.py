@@ -61,6 +61,7 @@ def _available_mailboxes(identity):
             postbox_auth.MailboxPermissions.owner()
         ),
         "is_personal": True,
+        "access_type": "personal",
     }]
 
     grants = (
@@ -68,9 +69,11 @@ def _available_mailboxes(identity):
         .filter(
             tenant=identity.tenant,
             grantee_mailbox=identity,
-            grant_type=AccessGrantKind.TEAM_BOX,
+            grant_type__in=[
+                AccessGrantKind.TEAM_BOX,
+                AccessGrantKind.DELEGATION,
+            ],
             active=True,
-            target_mailbox__kind=MailboxKind.TEAM_BOX,
             target_mailbox__status=MailboxStatus.ACTIVE,
             target_mailbox__mail_engine_provisioned=True,
         )
@@ -79,24 +82,26 @@ def _available_mailboxes(identity):
             "target_mailbox__tenant",
             "target_mailbox__domain",
         )
-        .order_by("target_mailbox__email")
+        .order_by("grant_type", "target_mailbox__email")
     )
     for grant in grants:
-        permissions = postbox_auth._team_box_permissions(
-            identity,
-            grant.target_mailbox,
-        )
-        if not any((
-            permissions.can_read,
-            permissions.can_manage,
-            permissions.can_send_as,
-            permissions.can_send_on_behalf,
-        )):
+        try:
+            permissions = postbox_auth._assert_shared_mailbox_available(
+                identity,
+                grant.target_mailbox,
+            )
+        except postbox_auth.MailboxUnavailable:
             continue
+
         rows.append({
             "mailbox": MailboxProfileSerializer(grant.target_mailbox).data,
             "permissions": _permissions_json(permissions),
             "is_personal": False,
+            "access_type": (
+                "team_box"
+                if grant.grant_type == AccessGrantKind.TEAM_BOX
+                else "delegation"
+            ),
         })
     return rows
 
@@ -166,8 +171,9 @@ class PostBoxMailboxSwitchView(APIView):
     """
     Select the mailbox this authenticated personal session is operating on.
 
-    The request may name a TeamBox id, but the id is only a lookup key. The
-    session's personal mailbox plus a live TeamBox grant remain the authority.
+    The request may name a TeamBox or delegated personal mailbox id, but the id
+    is only a lookup key. The authenticated personal mailbox plus a live access
+    grant remain the authority.
     """
 
     permission_classes = [IsAuthenticated]
