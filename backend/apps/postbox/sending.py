@@ -59,27 +59,49 @@ class Identity:
     send_mode: str = "send_as"  # send_as | on_behalf
 
 
-def allowed_identities(mailbox: Mailbox) -> list[Identity]:
+def allowed_identities(
+    mailbox: Mailbox,
+    *,
+    actor_mailbox: Mailbox | None = None,
+) -> list[Identity]:
     """
-    Every address this mailbox may legitimately send as.
-
-    Two sources, both authoritative:
-
-      * the mailbox's own address;
-      * aliases that resolve to it and are active.
-
-    Nothing else. In particular a PostBox user cannot nominate an address:
-    if it is not in this list the submission is refused before it reaches
-    Postfix, and Postfix would refuse it again through
-    `reject_sender_login_mismatch`. Two independent refusals is the point —
-    this one produces a good error message, that one is the guarantee.
+    Every sender identity the authenticated personal mailbox may use while
+    operating on `mailbox`.
     """
+    actor = actor_mailbox or mailbox
+    send_mode = "send_as"
+
+    if mailbox.kind == MailboxKind.TEAM_BOX:
+        grant = (
+            MailboxAccessGrant.objects
+            .filter(
+                tenant=mailbox.tenant,
+                target_mailbox=mailbox,
+                grantee_mailbox=actor,
+                grant_type=AccessGrantKind.TEAM_BOX,
+                active=True,
+            )
+            .first()
+        )
+        if grant is None:
+            return []
+        if grant.can_send_as:
+            send_mode = "send_as"
+        elif grant.can_send_on_behalf:
+            send_mode = "on_behalf"
+        else:
+            return []
+    elif actor.pk != mailbox.pk:
+        # Delegated personal mailbox access is Phase F.
+        return []
+
     identities = [
         Identity(
             address=mailbox.email,
             name=mailbox.full_name or "",
             is_primary=True,
-            kind="mailbox",
+            kind="team_box" if mailbox.kind == MailboxKind.TEAM_BOX else "mailbox",
+            send_mode=send_mode,
         )
     ]
 
@@ -93,16 +115,26 @@ def allowed_identities(mailbox: Mailbox) -> list[Identity]:
     )
     for address in aliases:
         identities.append(
-            Identity(address=address, name=mailbox.full_name or "", kind="alias")
+            Identity(
+                address=address,
+                name=mailbox.full_name or "",
+                kind="alias",
+                send_mode=send_mode,
+            )
         )
 
     return identities
 
 
-def assert_may_send_as(mailbox: Mailbox, from_address: str) -> Identity:
+def assert_may_send_as(
+    mailbox: Mailbox,
+    from_address: str,
+    *,
+    actor_mailbox: Mailbox | None = None,
+) -> Identity:
     """The identity for this address, or a refusal. Never trusts the request."""
     wanted = (from_address or "").strip().lower()
-    for identity in allowed_identities(mailbox):
+    for identity in allowed_identities(mailbox, actor_mailbox=actor_mailbox):
         if identity.address.lower() == wanted:
             return identity
     logger.warning(
