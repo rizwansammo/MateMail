@@ -1,6 +1,6 @@
 # MateMail Collaboration Features
 
-Status: **Phase A + Phase B + Phase C + Phase D implemented on `feature/mail-collaboration`**.
+Status: **Phase A + Phase B + Phase C + Phase D + Phase E implemented on `feature/mail-collaboration`**.
 
 This document defines the product vocabulary and security boundaries for the
 next collaboration feature set. Later phases add customer surfaces; Phase A
@@ -16,6 +16,73 @@ only establishes the primitives they must share.
 | Forward Group (FG) | A distribution address that fans one message out to members. It has no Inbox, password or PostBox session. |
 | Delegation | Explicit permission for one personal mailbox identity to access another personal mailbox. |
 | Forwarding | The existing mailbox-to-destination forwarding rule. It remains separate from Forward Group. |
+
+## Phase E — Forward Groups (FG)
+
+Forward Group is now a first-class distribution feature, deliberately separate
+from both Mailbox Forwarding and Alias.
+
+### Product behaviour
+
+- A Forward Group has an address and display name but **no mailbox row, login,
+  password, Inbox, Sent folder or storage**.
+- At least one mailbox member is required. Members may be personal mailboxes or
+  TeamBoxes.
+- Each member receives its own delivery copy.
+- Membership is de-duplicated structurally by a database uniqueness constraint.
+- Member roles are `member` and `owner`; organization admins retain Hub-level
+  administrative control.
+- A Forward Group address is reserved through the same `AddressClaim` registry
+  as Mailboxes, TeamBoxes and Aliases, so cross-feature address collisions are
+  impossible.
+- Forward Group addresses never appear in PostBox sender identities and never
+  enter `postfix_sender_login`.
+
+### Sender policies
+
+Mail Hub exposes four posting policies:
+
+- **Anyone** — Internet and authenticated senders may post.
+- **Organization only** — any active personal mailbox in the organization.
+- **Members only** — active personal mailboxes that are group members.
+- **Selected senders** — explicit active personal mailboxes chosen by an admin.
+
+MateMail resolves those product policies to concrete authenticated mailbox
+addresses before sending the desired state to the engine.
+
+The Native Engine publishes `postfix_forward_group_policy`, and Postfix calls
+the loopback policy service at RCPT time. Restricted groups trust the
+**authenticated SASL mailbox**, not the visible MAIL FROM address, so an
+Internet sender cannot bypass "organization only" by forging an internal From.
+
+### Native Engine routing
+
+Engine schema v6 introduces dedicated `forward_group`,
+`forward_group_destination` and `forward_group_sender` tables.
+
+`postfix_virtual_alias` unions Forward Group destinations with Alias and
+Forwarding routes because Postfix asks one delivery-routing question. The
+product state remains separate in its own tables, and `postfix_sender_login`
+never references Forward Groups.
+
+The Forward Group desired-state operation is replace-not-merge and idempotent:
+member and sender sets are completely reconciled on every sync.
+
+### Loop protection
+
+Nested Forward Groups are not introduced in Phase E. The practical direct loop
+is therefore:
+
+`group -> member mailbox -> forwarding -> same group`
+
+MateMail blocks that shape in both directions:
+
+- adding a member whose active Forwarding already points back to the group;
+- creating or re-enabling Forwarding from a member back to its group.
+
+Deleting the last group member is also refused. Mailbox/TeamBox deletion is
+blocked when it would remove a group's last member, and mailbox lifecycle
+changes reconcile the affected distribution/sender state.
 
 ## Phase D — TeamBox access inside PostBox
 
