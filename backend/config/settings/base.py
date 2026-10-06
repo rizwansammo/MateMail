@@ -71,6 +71,7 @@ LOCAL_APPS = [
     "apps.domains",
     "apps.mail_directory",
     "apps.mailboxes",
+    "apps.team_boxes",
     "apps.autodiscover",
     "apps.dnshealth",
     "apps.aliases",
