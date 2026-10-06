@@ -3,7 +3,6 @@ import { Geist, Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
 import { headers } from "next/headers";
 import { AuthProvider } from "@/contexts/auth-context";
-import { IS_NETAMATE_EMAIL } from "@/lib/brand";
 import "./globals.css";
 import "./app/portal-premium.css";
 
@@ -30,29 +29,18 @@ const mateMailHubFont = localFont({
 
 export const metadata: Metadata = {
   title: {
-    default: IS_NETAMATE_EMAIL
-      ? "MailAdmin | MateMail"
-      : "MateMail · Organization Hub",
+    default: "MateMail · Organization Hub",
     template: "%s | MateMail",
   },
-  description: IS_NETAMATE_EMAIL
-    ? "Private MateMail administration for NetaMate Solutions."
-    : "Host domain-based inboxes, manage DNS health, monitor deliverability, and give your team MateMail PostBox.",
+  description:
+    "Host domain-based inboxes, manage DNS health, monitor deliverability, and give your team MateMail PostBox.",
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL ??
-      (IS_NETAMATE_EMAIL
-        ? "https://mailadmin.netamate.com"
-        : "https://matemail.online"),
+    process.env.NEXT_PUBLIC_APP_URL ?? "https://matemail.online",
   ),
   icons: {
     icon: "/assets/matemail-mark.svg",
     shortcut: "/assets/matemail-mark.svg",
   },
-  ...(IS_NETAMATE_EMAIL
-    ? {
-        robots: { index: false, follow: false },
-      }
-    : {}),
 };
 
 /**
