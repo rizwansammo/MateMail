@@ -76,6 +76,7 @@ LOCAL_APPS = [
     "apps.dnshealth",
     "apps.aliases",
     "apps.forwarding",
+    "apps.forward_groups",
     "apps.mailqueue",
     "apps.logs",
     "apps.quarantine",
