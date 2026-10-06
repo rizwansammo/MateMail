@@ -834,3 +834,43 @@ class PlainTextLinkificationRegressionTest(SimpleTestCase):
         block = self.css.split(".pb-plain-text-link {", 1)[1].split("}", 1)[0]
         self.assertIn("overflow-wrap:anywhere", block)
         self.assertIn("word-break:break-word", block)
+
+
+class TeamBoxPostBoxUiContractTest(SimpleTestCase):
+    """TeamBox switching stays distinct from account switching and permission-aware."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.layout = read("app", "postbox", "(app)", "layout.tsx")
+        cls.page = read("app", "postbox", "(app)", "page.tsx")
+        cls.context = read("contexts", "postbox-context.tsx")
+        cls.compose = read("components", "postbox", "compose.tsx")
+
+    def test_teamboxes_are_not_presented_as_device_accounts(self):
+        self.assertIn(">TeamBoxes</div>", self.layout)
+        self.assertIn("Accounts on this device", self.layout)
+        self.assertIn("switchMailbox(target.id)", self.layout)
+        self.assertIn("postbox.switchAccount(item.session_id)", self.layout)
+
+    def test_context_keeps_authenticated_and_active_mailboxes_separate(self):
+        self.assertIn("authenticatedMailbox", self.context)
+        self.assertIn("availableMailboxes", self.context)
+        self.assertIn("switchMailbox", self.context)
+
+    def test_send_only_teambox_does_not_load_mailbox_content(self):
+        self.assertIn("if (!canReadMailbox)", self.page)
+        self.assertIn('title={isTeamBox ? "Send-only TeamBox access"', self.page)
+        self.assertIn("draftsEnabled={false}", self.page)
+        self.assertIn("schedulingEnabled={false}", self.page)
+
+    def test_read_only_teambox_hides_mailbox_mutations(self):
+        self.assertIn("canManage={canManageMailbox}", self.page)
+        self.assertIn("disabled={!canManageMailbox}", self.page)
+        self.assertIn("canManage={permissions.can_manage}", self.layout)
+
+    def test_compose_has_explicit_draft_and_schedule_capabilities(self):
+        self.assertIn("draftsEnabled = true", self.compose)
+        self.assertIn("schedulingEnabled = true", self.compose)
+        self.assertIn("if (!draftsEnabled)", self.compose)
+        self.assertIn("if (schedule && !schedulingEnabled)", self.compose)
