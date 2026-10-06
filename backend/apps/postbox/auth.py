@@ -290,6 +290,10 @@ def require_active_mailbox_permission(request, permission: str) -> None:
             permissions.can_read
             and (permissions.can_send_as or permissions.can_send_on_behalf)
         ),
+        "manage_and_send": (
+            permissions.can_manage
+            and (permissions.can_send_as or permissions.can_send_on_behalf)
+        ),
     }.get(permission, False)
 
     if not allowed:
