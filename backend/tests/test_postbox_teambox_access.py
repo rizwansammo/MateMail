@@ -1,4 +1,5 @@
 from datetime import timedelta
+import uuid
 from unittest import mock
 
 from django.test import TestCase, override_settings
@@ -8,7 +9,16 @@ from rest_framework.test import APIClient
 from apps.mail_directory.models import AccessGrantKind, MailboxAccessGrant
 from apps.mailboxes.models import Mailbox, MailboxKind, MailboxStatus
 from apps.postbox import auth as postbox_auth
-from apps.postbox.models import Contact, PostBoxSession, ScheduledMessage
+from apps.postbox.models import (
+    Contact,
+    PostBoxPushDevice,
+    PostBoxSession,
+    PushPlatform,
+    PushProvider,
+    PushTokenType,
+    ScheduledMessage,
+)
+from apps.postbox import push
 from tests.factories import (
     FAST_PASSWORD_HASHERS,
     auth_client,
@@ -356,6 +366,34 @@ class PostBoxTeamBoxAccessTest(TestCase):
         self.assertEqual(
             self.alice.email,
             recovered.data["authenticated_mailbox"]["email"],
+        )
+
+    def test_teambox_push_registration_requires_live_read_grant(self):
+        grant = self.grant(can_read=True, can_manage=False)
+        _, session = self.client_for()
+        device = PostBoxPushDevice.objects.create(
+            mailbox=self.team_box,
+            session=session,
+            installation_id=uuid.uuid4(),
+            platform=PushPlatform.ANDROID,
+            provider=PushProvider.FCM,
+            token_type=PushTokenType.REGISTRATION_TOKEN,
+            token="test-device-token",
+        )
+
+        push.assert_mailbox_may_receive_push(self.team_box)
+        self.assertEqual(
+            [device.id],
+            list(push.active_devices(self.team_box).values_list("id", flat=True)),
+        )
+
+        grant.can_read = False
+        grant.can_send_as = True
+        grant.save()
+
+        self.assertEqual(
+            [],
+            list(push.active_devices(self.team_box).values_list("id", flat=True)),
         )
 
     def test_deleting_teambox_revokes_only_sessions_actively_using_it(self):
