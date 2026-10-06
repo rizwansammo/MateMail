@@ -41,6 +41,8 @@ interface ConversationReaderProps {
   onSuccess: (message: string) => void;
   onFloatingCompose: (initial: ComposeInitial) => void;
   labels: MailLabel[];
+  canManage: boolean;
+  canSend: boolean;
   onApplyLabel: (member: ConversationMember, labelId: string, remove: boolean) => void;
 }
 
@@ -80,7 +82,7 @@ function initials(name: string): string {
 export function ConversationReader({
   conversation, initialDetail, identities, signatures, onBack, onSingle,
   onInlineChange, onChanged, onNotice, onSuccess, onFloatingCompose,
-  labels, onApplyLabel,
+  labels, canManage, canSend, onApplyLabel,
 }: ConversationReaderProps) {
   const [inline, setInline] = useState<{
     key: string;
@@ -203,6 +205,8 @@ export function ConversationReader({
                   }}
                   onAction={(action) => void memberAction(member, action)}
                   labels={labels}
+                  canManage={canManage}
+                  canSend={canSend}
                   onApplyLabel={(id, remove) => onApplyLabel(member, id, remove)}
                   onReply={(mode) => void startReply(member, mode)}
                   preparing={Boolean(inline) || preparing === key + "reply" ||
@@ -221,6 +225,7 @@ export function ConversationReader({
               identities={identities}
               signatures={signatures}
               inline
+              draftsEnabled
               onClose={() => setInline(null)}
               onSent={(message) => {
                 setInline(null);
@@ -228,7 +233,7 @@ export function ConversationReader({
                 void onChanged();
               }}
             />
-          ) : (
+          ) : canSend ? (
             <div className="pb-thread-reply-prompt">
               <span>Continue the conversation</span>
               <div className="flex flex-wrap gap-2">
@@ -250,7 +255,7 @@ export function ConversationReader({
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     </article>
@@ -259,7 +264,7 @@ export function ConversationReader({
 
 function ThreadMessageCard({
   member, initialDetail, defaultOpen, seen, onSeen, onAction, onReply,
-  labels, onApplyLabel, preparing, onNotice,
+  labels, canManage, canSend, onApplyLabel, preparing, onNotice,
 }: {
   member: ConversationMember;
   initialDetail: MessageDetail | null;
@@ -268,6 +273,8 @@ function ThreadMessageCard({
   onSeen: () => void;
   onAction: (action: MessageAction) => void;
   labels: MailLabel[];
+  canManage: boolean;
+  canSend: boolean;
   onApplyLabel: (id: string, remove: boolean) => void;
   onReply: (mode: ReplyMode) => void;
   preparing: boolean;
@@ -311,7 +318,7 @@ function ThreadMessageCard({
   // A card is read only when the person explicitly expands it. This is not a
   // background "mark all read" when the thread's metadata is loaded.
   useEffect(() => {
-    if (!open || !detail || seen || marking.current) return;
+    if (!canManage || !open || !detail || seen || marking.current) return;
     marking.current = true;
     const mark = async () => {
       try {
@@ -330,7 +337,7 @@ function ThreadMessageCard({
       }
     };
     void mark();
-  }, [open, detail, seen, member.copies, onSeen, onNotice]);
+  }, [canManage, open, detail, seen, member.copies, onSeen, onNotice]);
 
   const reloadImages = async (trust: boolean) => {
     if (!detail) return;
@@ -382,6 +389,7 @@ function ThreadMessageCard({
             <ChevronDown className="h-4 w-4" aria-hidden="true" />}
         </button>
         <button type="button" className="pb-thread-card-star"
+          disabled={!canManage}
           aria-label={member.flagged ? "Unstar message" : "Star message"}
           aria-pressed={member.flagged} onClick={toggleStar}>
           <Star className="h-4 w-4" aria-hidden="true"
@@ -422,7 +430,7 @@ function ThreadMessageCard({
                   <div className="pb-premium-privacy-actions">
                     <button type="button" disabled={working}
                       onClick={() => void reloadImages(false)}>Display images</button>
-                    {detail.from.address && <button type="button" disabled={working}
+                    {canManage && detail.from.address && <button type="button" disabled={working}
                       onClick={() => void reloadImages(true)}>
                       Always display images from this sender
                     </button>}
@@ -470,51 +478,59 @@ function ThreadMessageCard({
             </section>}
           </>}
           <div className="pb-thread-card-actions">
-            <button type="button" className="pb-btn pb-btn-ghost"
-              disabled={preparing} onClick={() => onReply("reply")}>
-              <CornerUpLeft className="h-4 w-4" /> Reply
-            </button>
-            <button type="button" className="pb-btn pb-btn-ghost"
-              disabled={preparing} onClick={() => onReply("reply-all")}>
-              <CornerUpRight className="h-4 w-4" /> Reply all
-            </button>
-            <button type="button" className="pb-btn pb-btn-ghost"
-              disabled={preparing} onClick={() => onReply("forward")}>
-              <Forward className="h-4 w-4" /> Forward
-            </button>
-            <button type="button" className="pb-btn pb-btn-plain"
-              onClick={() => onAction(seen ? "unread" : "read")}>
-              <Mail className="h-4 w-4" /> {seen ? "Mark unread" : "Mark read"}
-            </button>
-            <details className="pb-label-menu">
-              <summary className="pb-btn pb-btn-plain" aria-label="Add label">
-                <Tag className="h-4 w-4" /> Add Label
-              </summary>
-              <div className="pb-label-panel">
-                {labels.length === 0 && <p className="pb-subtle text-xs p-2">Create a label using the sidebar +.</p>}
-                {labels.map((item) => {
-                  const applied = (member.labels || []).some((value) => value.id === item.id);
-                  return <button type="button" key={item.id} onClick={(event) => {
-                    event.currentTarget.closest("details")!.open = false;
-                    onApplyLabel(item.id, applied);
-                  }}>
-                    <Tag size={14} style={{ color: item.color || "#9333ea" }} /> {item.name} {applied ? "✓" : ""}
-                  </button>;
-                })}
-              </div>
-            </details>
-            <button type="button" className="pb-btn pb-btn-plain"
-              onClick={() => onAction("archive")}>
-              <Archive className="h-4 w-4" /> Archive
-            </button>
-            <button type="button" className="pb-btn pb-btn-plain"
-              onClick={() => onAction("spam")}>
-              <ShieldAlert className="h-4 w-4" /> Spam
-            </button>
-            <button type="button" className="pb-btn pb-btn-plain"
-              onClick={() => onAction("trash")}>
-              <Trash2 className="h-4 w-4" /> Trash
-            </button>
+            {canSend && (
+              <>
+                <button type="button" className="pb-btn pb-btn-ghost"
+                  disabled={preparing} onClick={() => onReply("reply")}>
+                  <CornerUpLeft className="h-4 w-4" /> Reply
+                </button>
+                <button type="button" className="pb-btn pb-btn-ghost"
+                  disabled={preparing} onClick={() => onReply("reply-all")}>
+                  <CornerUpRight className="h-4 w-4" /> Reply all
+                </button>
+                <button type="button" className="pb-btn pb-btn-ghost"
+                  disabled={preparing} onClick={() => onReply("forward")}>
+                  <Forward className="h-4 w-4" /> Forward
+                </button>
+              </>
+            )}
+            {canManage && (
+              <>
+                <button type="button" className="pb-btn pb-btn-plain"
+                  onClick={() => onAction(seen ? "unread" : "read")}>
+                  <Mail className="h-4 w-4" /> {seen ? "Mark unread" : "Mark read"}
+                </button>
+                <details className="pb-label-menu">
+                  <summary className="pb-btn pb-btn-plain" aria-label="Add label">
+                    <Tag className="h-4 w-4" /> Add Label
+                  </summary>
+                  <div className="pb-label-panel">
+                    {labels.length === 0 && <p className="pb-subtle text-xs p-2">Create a label using the sidebar +.</p>}
+                    {labels.map((item) => {
+                      const applied = (member.labels || []).some((value) => value.id === item.id);
+                      return <button type="button" key={item.id} onClick={(event) => {
+                        event.currentTarget.closest("details")!.open = false;
+                        onApplyLabel(item.id, applied);
+                      }}>
+                        <Tag size={14} style={{ color: item.color || "#9333ea" }} /> {item.name} {applied ? "✓" : ""}
+                      </button>;
+                    })}
+                  </div>
+                </details>
+                <button type="button" className="pb-btn pb-btn-plain"
+                  onClick={() => onAction("archive")}>
+                  <Archive className="h-4 w-4" /> Archive
+                </button>
+                <button type="button" className="pb-btn pb-btn-plain"
+                  onClick={() => onAction("spam")}>
+                  <ShieldAlert className="h-4 w-4" /> Spam
+                </button>
+                <button type="button" className="pb-btn pb-btn-plain"
+                  onClick={() => onAction("trash")}>
+                  <Trash2 className="h-4 w-4" /> Trash
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
