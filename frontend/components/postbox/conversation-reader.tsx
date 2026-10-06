@@ -225,7 +225,8 @@ export function ConversationReader({
               identities={identities}
               signatures={signatures}
               inline
-              draftsEnabled
+              draftsEnabled={canManage}
+              schedulingEnabled={canManage}
               onClose={() => setInline(null)}
               onSent={(message) => {
                 setInline(null);
