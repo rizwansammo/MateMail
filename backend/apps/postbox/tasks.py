@@ -165,6 +165,21 @@ def send_scheduled_message(scheduled_id: str) -> str:
         last_error="",
         updated_at=timezone.now(),
     )
+
+    if submission_mailbox.pk != mailbox.pk:
+        from apps.logs.utils import log_event
+
+        log_event(
+            mailbox.tenant,
+            "postbox_scheduled_mailbox_sent_by_actor",
+            source=submission_mailbox.email,
+            metadata={
+                "target_mailbox": mailbox.email,
+                "scheduled_message_id": str(row.id),
+                "message_id": message.get("Message-ID", "") or "",
+            },
+        )
+
     logger.info("PostBox scheduled %s sent for mailbox %s", scheduled_id, mailbox.pk)
     return "sent"
 
