@@ -25,6 +25,7 @@ import base64
 import binascii
 import logging
 from datetime import datetime
+from email.utils import formataddr
 
 from django.conf import settings
 from django.utils import timezone
@@ -225,8 +226,13 @@ def _attachment_refs_for_saved_message(
 class ComposeMixin:
     """Shared building of a message from a compose payload."""
 
-    def build(self, data, *, mailbox, draft=False):
-        identity = sending.assert_may_send_as(mailbox, data["from_address"])
+    def build(self, data, *, mailbox, actor_mailbox=None, draft=False):
+        actor = actor_mailbox or mailbox
+        identity = sending.assert_may_send_as(
+            mailbox,
+            data["from_address"],
+            actor_mailbox=actor,
+        )
 
         html = data.get("html") or ""
         text = data.get("text") or ""
@@ -307,10 +313,21 @@ class ComposeMixin:
             draft_signature_id=str(signature.id) if draft and signature else "",
             draft_quoted_text=quoted_text if draft else "",
         )
+        if (
+            identity.send_mode == "on_behalf"
+            and actor.pk != mailbox.pk
+            and not draft
+        ):
+            message["Sender"] = formataddr((
+                actor.full_name or "",
+                actor.email,
+            ))
         return message, identity
 
 
 class SendView(PostBoxView, ComposeMixin):
+    def required_team_box_permission(self, request) -> str:
+        return "send"
     """
     Send now, or schedule.
 
@@ -325,6 +342,7 @@ class SendView(PostBoxView, ComposeMixin):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         mailbox = self.mailbox
+        actor = request.identity_mailbox
 
         recipients = sending.envelope_recipients(
             data.get("to") or [], data.get("cc") or [], data.get("bcc") or []
@@ -351,18 +369,31 @@ class SendView(PostBoxView, ComposeMixin):
             # Store an EDITABLE source message in Scheduled: Bcc and the
             # selected signature remain draft metadata, while the signature
             # itself is not applied yet. The worker finalises it at send time.
-            scheduled_source, _ = self.build(data, mailbox=mailbox, draft=True)
+            scheduled_source, _ = self.build(
+                data,
+                mailbox=mailbox,
+                actor_mailbox=actor,
+                draft=True,
+            )
             return self._schedule(
                 scheduled_source,
                 data,
                 send_at,
                 recipients,
                 mailbox,
+                actor,
             )
 
-        message, identity = self.build(data, mailbox=mailbox)
+        message, identity = self.build(
+            data,
+            mailbox=mailbox,
+            actor_mailbox=actor,
+        )
         sending.submit(
-            message, mailbox=mailbox, envelope_from=identity.address, recipients=recipients
+            message,
+            mailbox=actor,
+            envelope_from=identity.address,
+            recipients=recipients,
         )
 
         # Only now. Submission succeeded, so this copy is true.
@@ -379,7 +410,15 @@ class SendView(PostBoxView, ComposeMixin):
             "filed_in_sent": appended,
         })
 
-    def _schedule(self, message, data, send_at, recipients, mailbox):
+    def _schedule(
+        self,
+        message,
+        data,
+        send_at,
+        recipients,
+        mailbox,
+        submission_mailbox,
+    ):
         if send_at <= timezone.now():
             return Response({"detail": "Choose a time in the future."}, status=400)
 
@@ -400,6 +439,7 @@ class SendView(PostBoxView, ComposeMixin):
 
         scheduled = ScheduledMessage.objects.create(
             mailbox=mailbox,
+            submission_mailbox=submission_mailbox,
             folder="Scheduled",
             uid_validity=uid_validity,
             uid=uid,
@@ -455,6 +495,8 @@ class SendView(PostBoxView, ComposeMixin):
 
 
 class DraftView(PostBoxView, ComposeMixin):
+    def required_team_box_permission(self, request) -> str:
+        return "send" if request.method == "POST" else "manage"
     """
     Save a draft, replacing a previous version.
 
@@ -470,7 +512,12 @@ class DraftView(PostBoxView, ComposeMixin):
 
         # The draft keeps its Bcc and its chosen signature as headers so it
         # reopens whole; it is never submitted as-is (see mime.build_message).
-        message, _ = self.build(data, mailbox=self.mailbox, draft=True)
+        message, _ = self.build(
+            data,
+            mailbox=self.mailbox,
+            actor_mailbox=request.identity_mailbox,
+            draft=True,
+        )
         previous = data.get("draft_uid")
 
         with imap.open_mailbox(self.mailbox.email) as connection:
