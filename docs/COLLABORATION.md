@@ -1,6 +1,6 @@
 # MateMail Collaboration Features
 
-Status: **Phase A + Phase B + Phase C implemented on `feature/mail-collaboration`**.
+Status: **Phase A + Phase B + Phase C + Phase D implemented on `feature/mail-collaboration`**.
 
 This document defines the product vocabulary and security boundaries for the
 next collaboration feature set. Later phases add customer surfaces; Phase A
@@ -16,6 +16,60 @@ only establishes the primitives they must share.
 | Forward Group (FG) | A distribution address that fans one message out to members. It has no Inbox, password or PostBox session. |
 | Delegation | Explicit permission for one personal mailbox identity to access another personal mailbox. |
 | Forwarding | The existing mailbox-to-destination forwarding rule. It remains separate from Forward Group. |
+
+## Phase D — TeamBox access inside PostBox
+
+A TeamBox is now usable from a member's ordinary PostBox login without ever
+becoming a login identity itself.
+
+### Session boundary
+
+- `PostBoxSession.mailbox` remains the immutable authenticated personal
+  mailbox.
+- `PostBoxSession.active_mailbox` may select an authorised TeamBox.
+- Every request re-resolves the live TeamBox grant server-side; a mailbox id
+  supplied by the browser is never authority.
+- PostBox exposes the active mailbox, authenticated personal mailbox, current
+  permissions and available TeamBoxes separately.
+- TeamBoxes and "Accounts on this device" remain separate UI concepts:
+  TeamBox switching uses grants, while account switching uses independent
+  authenticated sessions.
+
+If TeamBox access is revoked or the TeamBox becomes unavailable while selected,
+the stale selection is cleared. The current mailbox-content request is refused
+rather than replayed against the personal mailbox. Recovery endpoints can then
+continue with the still-valid personal session.
+
+### Permission behaviour
+
+- **Read** opens the shared Inbox, Sent, Drafts, folders, messages and
+  conversation history.
+- **Manage** permits shared state changes such as read/unread, star, labels,
+  folders, move, archive, spam and delete. Read-only access does not mark mail
+  read merely by opening it.
+- **Send As** submits with the TeamBox address as the visible sender.
+- **Send on behalf** uses the TeamBox as `From` and adds the authenticated
+  personal mailbox as the RFC `Sender`.
+- A send-only member gets a compose-only TeamBox surface and cannot read shared
+  mail.
+- Send-only access cannot create hidden Drafts or scheduled messages that the
+  member would be unable to review or cancel.
+- Shared TeamBox signatures may be read by members who can send; changing a
+  shared signature requires Manage.
+
+### Submission and audit
+
+SMTP authentication always uses the signed-in personal mailbox. The message
+identity and Sent copy belong to the TeamBox. This preserves Postfix's
+sender-login enforcement while keeping the shared mailbox passwordless.
+
+Scheduled TeamBox messages store the personal submission mailbox separately and
+re-check authorization at send time. Removing the grant before delivery causes
+the scheduled send to fail closed.
+
+TeamBox immediate sends, schedules and executed scheduled sends record the
+personal actor in the audit log. Deleting a TeamBox revokes sessions actively
+using it before the mailbox row is removed.
 
 ## Phase C — TeamBox management
 
