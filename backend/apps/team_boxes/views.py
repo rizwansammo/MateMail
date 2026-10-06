@@ -14,6 +14,7 @@ from apps.billing.utils import (
 )
 from apps.domains.models import Domain
 from apps.domains.verification import DomainNotVerified, assert_provisionable
+from apps.forward_groups.services import sync_all_groups_for_tenant
 from apps.mail_directory.models import AccessGrantKind, MailboxAccessGrant
 from apps.mail_directory.services import AddressConflict
 from apps.mail_engine.errors import MailEngineError
@@ -164,6 +165,19 @@ class TeamBoxDetailView(APIView):
         if not team_box:
             return Response({"detail": "Not found."}, status=404)
 
+        for membership in team_box.forward_group_memberships.select_related("group"):
+            if membership.group.members.count() <= 1:
+                return Response(
+                    {
+                        "detail": (
+                            f"{team_box.email} is the last member of Forward Group "
+                            f"{membership.group.address}. Add another member or "
+                            "delete the group first."
+                        )
+                    },
+                    status=409,
+                )
+
         if team_box.incoming_aliases.exists():
             return Response(
                 {
@@ -221,6 +235,7 @@ class TeamBoxDetailView(APIView):
             metadata={"active_postbox_sessions_revoked": revoked_sessions},
         )
         team_box.delete()
+        sync_all_groups_for_tenant(request.tenant)
         return Response(status=204)
 
 
@@ -260,6 +275,7 @@ class TeamBoxStatusView(APIView):
 
         team_box.status = new_status
         team_box.save(update_fields=["status", "updated_at"])
+        sync_all_groups_for_tenant(request.tenant)
         return Response(TeamBoxSerializer(team_box).data)
 
 
