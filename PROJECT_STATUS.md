@@ -29,7 +29,9 @@ Development branch: `feature/mail-collaboration`.
 
 Phase A establishes the shared-address and mailbox-access primitives for
 TeamBox, Forward Group and Delegation. Phase B normalizes Alias as an alternate
-address for exactly one existing MateMail mailbox.
+address for exactly one existing MateMail mailbox. Phase C adds full TeamBox
+Hub/backend/native-engine management, including passwordless storage and
+engine-enforced member sender authorization.
 
 - Central `AddressClaim` registry prevents cross-type address collisions.
 - Existing personal mailboxes and aliases are backfilled into the registry.
@@ -39,6 +41,7 @@ address for exactly one existing MateMail mailbox.
   Delegation.
 - Existing `ForwardingRule` remains separate from Forward Group.
 - Phase B removes external Alias destinations from the product contract; external delivery remains the existing Forwarding feature.
+- Phase C adds dedicated TeamBox Hub screens, member permissions, native-engine schema v5 and SMTP sender authorization; PostBox TeamBox switching remains Phase D.
 
 Design record: `docs/COLLABORATION.md`.
 
