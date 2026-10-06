@@ -6,7 +6,6 @@ import {
   AlertCircle,
   AtSign,
   CheckCircle2,
-  ExternalLink,
   Mail,
   Plus,
   RefreshCw,
@@ -42,15 +41,12 @@ interface Alias {
   source_address: string;
   domain: string;
   domain_name: string;
-  destination_mailbox: string | null;
-  destination_address: string;
+  destination_mailbox: string;
   destination_email: string;
   status: "active" | "disabled";
   mail_service_ready: boolean;
   created_at: string;
 }
-
-type DestinationType = "mailbox" | "external";
 
 function fieldError(value: unknown) {
   if (!value) return "";
@@ -74,9 +70,7 @@ export default function AliasesPage() {
 
   const [localPart, setLocalPart] = useState("");
   const [domainId, setDomainId] = useState("");
-  const [destinationType, setDestinationType] = useState<DestinationType>("mailbox");
   const [destinationMailboxId, setDestinationMailboxId] = useState("");
-  const [destinationAddress, setDestinationAddress] = useState("");
   const [addErrors, setAddErrors] = useState<Record<string, unknown>>({});
   const [adding, setAdding] = useState(false);
   const [toggling, setToggling] = useState("");
@@ -150,7 +144,7 @@ export default function AliasesPage() {
   }, [aliases, query]);
 
   const canAdmin = myRole === "owner" || myRole === "admin";
-  const canCreate = canAdmin && !!user?.email_verified && workspaceStatus === "active" && domains.length > 0;
+  const canCreate = canAdmin && !!user?.email_verified && workspaceStatus === "active" && domains.length > 0 && mailboxes.length > 0;
 
   async function createAlias(event: React.FormEvent) {
     event.preventDefault();
@@ -161,12 +155,8 @@ export default function AliasesPage() {
       const body: Record<string, unknown> = {
         source_local_part: localPart.trim().toLowerCase(),
         domain_id: domainId,
+        destination_mailbox_id: destinationMailboxId,
       };
-      if (destinationType === "mailbox") {
-        body.destination_mailbox_id = destinationMailboxId;
-      } else {
-        body.destination_address = destinationAddress.trim();
-      }
 
       const response = await apiRequest("/api/aliases/", {
         method: "POST",
@@ -176,7 +166,6 @@ export default function AliasesPage() {
 
       if (response.ok && data?.id) {
         setLocalPart("");
-        setDestinationAddress("");
         setAddOpen(false);
         if (response.status === 202 || data.detail) {
           setMessageTone("warn");
@@ -296,6 +285,18 @@ export default function AliasesPage() {
         </div>
       )}
 
+      {!loading && domains.length > 0 && mailboxes.length === 0 && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Create a mailbox before adding an alias.{" "}
+              <Link href="/app/mailboxes" className="auth-text-button">Create mailbox</Link>
+            </span>
+          </PortalNotice>
+        </div>
+      )}
+
       {message && (
         <div className="mb-5">
           <PortalNotice tone={messageTone}>{message}</PortalNotice>
@@ -306,7 +307,7 @@ export default function AliasesPage() {
         <PortalCard
           className="portal-form-card"
           title="Create an alias"
-          subtitle="An alias receives mail at another address and delivers it to exactly one existing mailbox or external address."
+          subtitle="An alias is an additional email address for exactly one existing MateMail mailbox."
         >
           <form onSubmit={createAlias}>
             {fieldError(addErrors.detail) && (
@@ -337,63 +338,25 @@ export default function AliasesPage() {
               </div>
 
               <div className="portal-field full">
-                <label>Deliver to</label>
-                <div className="portal-choice-grid">
-                  <button
-                    type="button"
-                    className="portal-choice"
-                    data-active={destinationType === "mailbox"}
-                    onClick={() => setDestinationType("mailbox")}
-                  >
-                    <Mail className="mb-2 h-4 w-4" />
-                    Internal mailbox
-                  </button>
-                  <button
-                    type="button"
-                    className="portal-choice"
-                    data-active={destinationType === "external"}
-                    onClick={() => setDestinationType("external")}
-                  >
-                    <ExternalLink className="mb-2 h-4 w-4" />
-                    External address
-                  </button>
-                </div>
-              </div>
-
-              {destinationType === "mailbox" ? (
-                <div className="portal-field full">
-                  <label>Destination mailbox</label>
-                  {mailboxes.length ? (
-                    <select
-                      value={destinationMailboxId}
-                      onChange={(event) => setDestinationMailboxId(event.target.value)}
-                      required
-                    >
-                      {mailboxes.map((mailbox) => (
-                        <option key={mailbox.id} value={mailbox.id}>{mailbox.email}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <PortalNotice tone="warn">
-                      No mailboxes are available.{" "}
-                      <Link href="/app/mailboxes" className="auth-text-button">Create a mailbox</Link>
-                    </PortalNotice>
-                  )}
-                  {fieldError(addErrors.destination_mailbox_id) && <div className="portal-field-error">{fieldError(addErrors.destination_mailbox_id)}</div>}
-                </div>
-              ) : (
-                <div className="portal-field full">
-                  <label>Destination email</label>
-                  <input
-                    type="email"
+                <label>Mailbox</label>
+                {mailboxes.length ? (
+                  <select
+                    value={destinationMailboxId}
+                    onChange={(event) => setDestinationMailboxId(event.target.value)}
                     required
-                    value={destinationAddress}
-                    onChange={(event) => setDestinationAddress(event.target.value)}
-                    placeholder="teammate@example.com"
-                  />
-                  {fieldError(addErrors.destination_address) && <div className="portal-field-error">{fieldError(addErrors.destination_address)}</div>}
-                </div>
-              )}
+                  >
+                    {mailboxes.map((mailbox) => (
+                      <option key={mailbox.id} value={mailbox.id}>{mailbox.email}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <PortalNotice tone="warn">
+                    No mailboxes are available.{" "}
+                    <Link href="/app/mailboxes" className="auth-text-button">Create a mailbox</Link>
+                  </PortalNotice>
+                )}
+                {fieldError(addErrors.destination_mailbox_id) && <div className="portal-field-error">{fieldError(addErrors.destination_mailbox_id)}</div>}
+              </div>
             </div>
 
             <div className="portal-detail-actions">
@@ -403,8 +366,7 @@ export default function AliasesPage() {
                   adding ||
                   !localPart.trim() ||
                   !domainId ||
-                  (destinationType === "mailbox" && !destinationMailboxId) ||
-                  (destinationType === "external" && !destinationAddress.trim())
+                  !destinationMailboxId
                 }
               >
                 {adding ? "Creating…" : "Create alias"}
@@ -454,7 +416,7 @@ export default function AliasesPage() {
         ) : aliases.length === 0 ? (
           <PortalEmptyState
             title="No aliases yet"
-            description="Create an additional address that delivers to an existing destination."
+            description="Create an additional address for an existing mailbox."
             action={canCreate ? <PortalButton type="button" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" />Create alias</PortalButton> : undefined}
           />
         ) : filteredAliases.length === 0 ? (
@@ -482,7 +444,7 @@ export default function AliasesPage() {
                     </td>
                     <td>
                       <span className="portal-destination-pill">
-                        {alias.destination_mailbox ? <Mail className="h-3 w-3" /> : <ExternalLink className="h-3 w-3" />}
+                        <Mail className="h-3 w-3" />
                         <span>{alias.destination_email}</span>
                       </span>
                     </td>
@@ -540,7 +502,7 @@ export default function AliasesPage() {
       <div className="mt-4">
         <PortalNotice tone="info">
           <AtSign className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Aliases do not have their own login or storage. The current backend supports one destination per alias; editing an existing alias requires a future update API.</span>
+          <span>Aliases do not have their own login or storage. Each alias belongs to one MateMail mailbox. Use Forwarding when mail should be delivered to an external address.</span>
         </PortalNotice>
       </div>
     </div>
