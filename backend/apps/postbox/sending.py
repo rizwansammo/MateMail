@@ -94,21 +94,6 @@ def allowed_identities(mailbox: Mailbox) -> list[Identity]:
             Identity(address=address, name=mailbox.full_name or "", kind="alias")
         )
 
-    # Also aliases written as a plain destination address rather than a FK.
-    literal = (
-        Alias.objects.filter(
-            tenant=mailbox.tenant,
-            destination_address__iexact=mailbox.email,
-            status=AliasStatus.ACTIVE,
-        )
-        .values_list("source_address", flat=True)
-    )
-    known = {i.address.lower() for i in identities}
-    for address in literal:
-        if address.lower() not in known:
-            identities.append(Identity(address=address, kind="alias"))
-            known.add(address.lower())
-
     return identities
 
 
