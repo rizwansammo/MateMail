@@ -266,6 +266,11 @@ def require_active_mailbox_permission(request, permission: str) -> None:
     Personal mailbox access is intrinsic. For TeamBoxes the grant is resolved
     fresh on every request by PostBoxSessionAuthentication.
     """
+    if getattr(request, "postbox_active_mailbox_invalid", False):
+        raise exceptions.PermissionDenied(
+            "Your TeamBox access changed. Retry this action from your personal mailbox."
+        )
+
     identity = getattr(request, "identity_mailbox", None)
     mailbox = getattr(request, "mailbox", None)
     if identity is None or mailbox is None or identity.pk == mailbox.pk:
@@ -318,16 +323,24 @@ class PostBoxSessionAuthentication(authentication.BaseAuthentication):
             session.revoke()
             raise exceptions.AuthenticationFailed(exc.message) from exc
 
+        active_mailbox_invalid = False
         try:
             mailbox, permissions = active_mailbox_for_session(session)
-        except MailboxUnavailable as exc:
-            raise exceptions.PermissionDenied(exc.message) from exc
+        except MailboxUnavailable:
+            # The stale TeamBox selection has already been cleared. Keep the
+            # personal authentication capability alive for recovery endpoints
+            # such as Me, mailbox switch and logout, but mark this request so
+            # mailbox-content endpoints refuse it instead of accidentally
+            # replaying an action against the personal mailbox.
+            active_mailbox_invalid = True
+            mailbox, permissions = identity, MailboxPermissions.owner()
 
         session.touch()
         request.postbox_session = session
         request.identity_mailbox = identity
         request.mailbox = mailbox
         request.mailbox_permissions = permissions
+        request.postbox_active_mailbox_invalid = active_mailbox_invalid
 
         # DRF's principal is always the mailbox that authenticated the session,
         # never the TeamBox currently being viewed.
