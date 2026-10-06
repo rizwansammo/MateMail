@@ -249,6 +249,43 @@ class PostBoxComposePhase3Test(TestCase):
         self.assertIsNone(sent[mime.DRAFT_STATE_HEADER])
         connection.delete_permanently.assert_called_once_with([41])
 
+    def test_collaboration_schedule_fails_closed_when_original_actor_was_deleted(self):
+        actor = Mailbox.objects.create(
+            tenant=self.mailbox.tenant,
+            domain=self.mailbox.domain,
+            local_part="assistant",
+            email="assistant@example.com",
+            full_name="Assistant",
+            status=MailboxStatus.ACTIVE,
+            mail_engine_provisioned=True,
+        )
+        row = ScheduledMessage.objects.create(
+            mailbox=self.mailbox,
+            submission_mailbox=actor,
+            requires_submission_mailbox=True,
+            folder="Scheduled",
+            uid_validity=9,
+            uid=41,
+            subject="Delegated later",
+            recipients="client@example.net",
+            scheduled_at=timezone.now() - timedelta(minutes=1),
+        )
+        actor.delete()
+        row.refresh_from_db()
+        self.assertIsNone(row.submission_mailbox_id)
+        self.assertTrue(row.requires_submission_mailbox)
+
+        with mock.patch("apps.postbox.sending.submit") as submit, \
+             mock.patch("apps.postbox.imap.open_mailbox") as opener:
+            outcome = tasks.send_scheduled_message(str(row.id))
+
+        self.assertEqual("failed", outcome)
+        submit.assert_not_called()
+        opener.assert_not_called()
+        row.refresh_from_db()
+        self.assertEqual(ScheduledMessage.State.FAILED, row.state)
+        self.assertIn("original sending account", row.last_error)
+
     def test_cancel_keeps_scheduled_state_when_move_to_drafts_fails(self):
         row = ScheduledMessage.objects.create(
             mailbox=self.mailbox,
