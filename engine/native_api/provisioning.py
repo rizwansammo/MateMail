@@ -673,6 +673,118 @@ def authorized_send_as(conn, mailbox_address: str) -> list[str]:
         return [r[0] for r in cur.fetchall()]
 
 
+# ── Forward Groups ──────────────────────────────────────────────────────────
+
+
+_FORWARD_GROUP_POLICIES = {"anyone", "organization", "members", "selected"}
+
+
+def ensure_forward_group(conn, spec: dict) -> dict:
+    address = validation.email_address(spec["address"])
+    destinations = validation.destinations(spec.get("destinations", []))
+    allowed_senders = validation.destinations(spec.get("allowed_senders", []))
+    sender_policy = str(spec.get("sender_policy") or "anyone").strip().lower()
+    active = validation.boolean(spec.get("active", True), "active")
+
+    if sender_policy not in _FORWARD_GROUP_POLICIES:
+        raise ValidationError("unsupported Forward Group sender policy", "sender_policy")
+    if active and not destinations:
+        raise ValidationError("an active Forward Group requires at least one destination", "destinations")
+    if address in destinations:
+        raise ValidationError("a Forward Group cannot deliver to itself", "destinations")
+
+    _, _, domain = address.rpartition("@")
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM domain WHERE name = %s", (domain,))
+        row = cur.fetchone()
+        if row is None:
+            raise NotFound(f"domain {domain} is not provisioned in the engine")
+        domain_id = row[0]
+
+        cur.execute(
+            """
+            INSERT INTO forward_group (domain_id, address, active, sender_policy)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (address) DO UPDATE SET
+                domain_id = EXCLUDED.domain_id,
+                active = EXCLUDED.active,
+                sender_policy = EXCLUDED.sender_policy,
+                updated_at = now()
+            RETURNING id
+            """,
+            (domain_id, address, active, sender_policy),
+        )
+        group_id = cur.fetchone()[0]
+
+        cur.execute("DELETE FROM forward_group_destination WHERE group_id = %s", (group_id,))
+        for position, destination in enumerate(destinations):
+            cur.execute(
+                "INSERT INTO forward_group_destination (group_id, destination, position) "
+                "VALUES (%s, %s, %s)",
+                (group_id, destination, position),
+            )
+
+        cur.execute("DELETE FROM forward_group_sender WHERE group_id = %s", (group_id,))
+        for position, sender in enumerate(allowed_senders):
+            cur.execute(
+                "SELECT id FROM mailbox WHERE address = %s AND active AND login_enabled",
+                (sender,),
+            )
+            if cur.fetchone() is None:
+                raise NotFound(f"allowed sender mailbox {sender} is not provisioned")
+            cur.execute(
+                "INSERT INTO forward_group_sender (group_id, sender, position) "
+                "VALUES (%s, %s, %s)",
+                (group_id, sender, position),
+            )
+
+    return {
+        "address": address,
+        "destinations": list(destinations),
+        "sender_policy": sender_policy,
+        "allowed_senders": list(allowed_senders),
+        "active": active,
+    }
+
+
+def delete_forward_group(conn, address: str) -> None:
+    address = validation.email_address(address)
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM forward_group WHERE address = %s", (address,))
+
+
+def get_forward_group(conn, address: str) -> dict | None:
+    address = validation.email_address(address)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, active, sender_policy FROM forward_group WHERE address = %s",
+            (address,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        group_id, active, sender_policy = row
+        cur.execute(
+            "SELECT destination FROM forward_group_destination "
+            "WHERE group_id = %s ORDER BY position",
+            (group_id,),
+        )
+        destinations = [r[0] for r in cur.fetchall()]
+        cur.execute(
+            "SELECT sender FROM forward_group_sender "
+            "WHERE group_id = %s ORDER BY position",
+            (group_id,),
+        )
+        allowed_senders = [r[0] for r in cur.fetchall()]
+    return {
+        "address": address,
+        "active": active,
+        "sender_policy": sender_policy,
+        "destinations": destinations,
+        "allowed_senders": allowed_senders,
+    }
+
+
 # ── Forwarding ───────────────────────────────────────────────────────────────
 
 
