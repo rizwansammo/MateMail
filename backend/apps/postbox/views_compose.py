@@ -466,6 +466,9 @@ class SendView(PostBoxView, ComposeMixin):
         scheduled = ScheduledMessage.objects.create(
             mailbox=mailbox,
             submission_mailbox=submission_mailbox,
+            requires_submission_mailbox=(
+                submission_mailbox.pk != mailbox.pk
+            ),
             folder="Scheduled",
             uid_validity=uid_validity,
             uid=uid,
