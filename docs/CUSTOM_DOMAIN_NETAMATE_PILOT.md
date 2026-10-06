@@ -24,7 +24,7 @@ The migration no longer depends on the former dedicated NetaMate layer:
 
 - `DEDICATED_TENANT_HOSTS` is empty;
 - `mailadmin.netamate.com` and `postbox.netamate.com` are not fixed Django hosts;
-- `MATEMAIL_CUSTOM_HOST_FRONTEND_OVERRIDES` is empty;
+- the temporary per-host frontend override mechanism has been removed from MateMail;
 - the dedicated frontend on `127.0.0.1:3060` is stopped and removed;
 - `/opt/NetaMate-Email` is removed from MateServer;
 - the old NetaMate-specific frontend image is removed from the host;
