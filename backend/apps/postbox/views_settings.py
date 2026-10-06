@@ -625,6 +625,7 @@ class PasswordChangeSerializer(serializers.Serializer):
 
 
 class PasswordChangeView(PostBoxView):
+    team_box_permission_scope = "identity"
     """
     Change the mailbox password.
 
@@ -644,7 +645,7 @@ class PasswordChangeView(PostBoxView):
         data = serializer.validated_data
 
         decision = ratelimit.hit(
-            POSTBOX_PASSWORD_CHANGE.bucket, str(self.mailbox.pk),
+            POSTBOX_PASSWORD_CHANGE.bucket, str(request.identity_mailbox.pk),
             limit=POSTBOX_PASSWORD_CHANGE.limit, window=POSTBOX_PASSWORD_CHANGE.window,
         )
         if not decision.allowed:
@@ -652,7 +653,7 @@ class PasswordChangeView(PostBoxView):
 
             raise Throttled(wait=decision.retry_after, detail="Too many attempts.")
 
-        if not imap.authenticate(self.mailbox.email, data["current_password"]):
+        if not imap.authenticate(request.identity_mailbox.email, data["current_password"]):
             return Response(
                 {"current_password": ["That is not your current password."]}, status=400
             )
@@ -669,19 +670,19 @@ class PasswordChangeView(PostBoxView):
         from apps.mail_engine.factory import get_adapter
 
         try:
-            get_adapter().set_mailbox_password(self.mailbox.email, data["new_password"])
+            get_adapter().set_mailbox_password(request.identity_mailbox.email, data["new_password"])
         except MailEngineError as exc:
             logger.error(
-                "PostBox password change failed for %s: %s", self.mailbox.pk, exc.log_message
+                "PostBox password change failed for %s: %s", request.identity_mailbox.pk, exc.log_message
             )
             return Response({"detail": exc.customer_message}, status=502)
 
         with transaction.atomic():
-            revoked = revoke_other_sessions(self.mailbox, keep=request.postbox_session)
+            revoked = revoke_other_sessions(request.identity_mailbox, keep=request.postbox_session)
 
         logger.info(
             "PostBox password changed for mailbox %s; %d other session(s) revoked",
-            self.mailbox.pk, revoked,
+            request.identity_mailbox.pk, revoked,
         )
         return Response({
             "detail": "Your password has been changed.",
