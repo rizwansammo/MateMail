@@ -1,6 +1,7 @@
 import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from rest_framework.exceptions import Throttled
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -196,12 +197,27 @@ class TeamBoxDetailView(APIView):
                     status=503,
                 )
 
+        # A deleted TeamBox cannot leave a browser with a session that silently
+        # falls back to the personal mailbox on its next destructive request.
+        # Revoke only sessions that were actively operating on this TeamBox;
+        # other sessions for the same personal mailbox stay valid.
+        from apps.postbox.models import PostBoxSession
+
+        revoked_sessions = PostBoxSession.objects.filter(
+            active_mailbox=team_box,
+            revoked_at__isnull=True,
+        ).update(
+            revoked_at=timezone.now(),
+            active_mailbox=None,
+        )
+
         from apps.logs.utils import log_event
         log_event(
             request.tenant,
             "teambox_deleted",
             request=request,
             team_box=team_box,
+            metadata={"active_postbox_sessions_revoked": revoked_sessions},
         )
         team_box.delete()
         return Response(status=204)
