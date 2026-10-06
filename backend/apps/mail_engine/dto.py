@@ -197,6 +197,30 @@ class AliasSpec:
 
 
 @dataclass(frozen=True)
+class ForwardGroupSpec:
+    """
+    A distribution address and its complete resolved delivery/sender policy.
+
+    Forward Groups are not mailboxes and never gain a sending identity. The
+    engine receives final destination and allowed-sender sets from MateMail and
+    enforces them independently from Alias and Forwarding state.
+    """
+
+    address: str
+    domain: str
+    destinations: tuple[str, ...] = field(default_factory=tuple)
+    sender_policy: str = "anyone"
+    allowed_senders: tuple[str, ...] = field(default_factory=tuple)
+    active: bool = True
+
+    def __post_init__(self):
+        if self.active and not self.destinations:
+            raise ValueError("An active Forward Group requires at least one destination")
+        if self.sender_policy not in {"anyone", "organization", "members", "selected"}:
+            raise ValueError("Unsupported Forward Group sender policy")
+
+
+@dataclass(frozen=True)
 class ForwardingSpec:
     """
     The complete forwarding state for one mailbox.
