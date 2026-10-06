@@ -92,9 +92,18 @@ def send_scheduled_message(scheduled_id: str) -> str:
         return "skipped"
 
     mailbox = row.mailbox
-    submission_mailbox = row.submission_mailbox or mailbox
 
     try:
+        if row.requires_submission_mailbox and row.submission_mailbox_id is None:
+            raise sending.SendFailed(
+                "The message could not be sent because the original sending account no longer exists.",
+                (
+                    "scheduled collaboration actor was deleted before send: "
+                    f"scheduled_id={row.id} target={mailbox.email}"
+                ),
+            )
+
+        submission_mailbox = row.submission_mailbox or mailbox
         # Re-checked at send time, not only when it was scheduled. An
         # organization suspended between scheduling and sending must not send.
         sending.assert_organization_may_send(mailbox)
