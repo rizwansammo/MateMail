@@ -1453,7 +1453,8 @@ function Mailbox() {
           initial={compose}
           identities={identities}
           signatures={signatures}
-          draftsEnabled={canReadMailbox}
+          draftsEnabled={!isTeamBox || canManageMailbox}
+          schedulingEnabled={!isTeamBox || canManageMailbox}
           onClose={closeCompose}
           onSent={(message) => {
             setNotice(null);
