@@ -615,7 +615,11 @@ class ReplyContextView(PostBoxView):
             raw = connection.fetch_raw(uid)
 
         parsed = mime.parse_message(raw, load_remote_images=False)
-        identities = {i.address.lower() for i in sending.allowed_identities(self.mailbox)}
+        sender_identities = sending.allowed_identities(
+            self.mailbox,
+            actor_mailbox=request.identity_mailbox,
+        )
+        identities = {i.address.lower() for i in sender_identities}
 
         quoted_text = ""
         if mode == "forward":
@@ -634,8 +638,25 @@ class ReplyContextView(PostBoxView):
                 parsed, identities, reply_all=(mode == "reply-all")
             )
 
-        preference, _ = PostBoxPreference.objects.get_or_create(mailbox=self.mailbox)
-        default_identity = preference.default_identity or self.mailbox.email
+        preference, _ = PostBoxPreference.objects.get_or_create(
+            mailbox=request.identity_mailbox
+        )
+        if self.mailbox.pk == request.identity_mailbox.pk:
+            permitted = {item.address.lower() for item in sender_identities}
+            default_identity = (
+                preference.default_identity
+                if preference.default_identity.lower() in permitted
+                else self.mailbox.email
+            )
+        else:
+            # A TeamBox reply defaults to its shared identity. A personal
+            # default sender (including a personal Alias) must never leak into
+            # a shared-mailbox reply.
+            default_identity = (
+                sender_identities[0].address
+                if sender_identities
+                else self.mailbox.email
+            )
 
         return Response({
             "mode": mode,
