@@ -86,11 +86,10 @@ class CustomHostnameHostGuardMiddleware:
                 return HttpResponseBadRequest("Invalid host.")
 
         if binding is not None:
-            # ACTIVE database state wins even if an operator accidentally left
+            # ACTIVE database state wins even if an operator accidentally leaves
             # this name in DJANGO_ALLOWED_HOSTS. That prevents a custom hostname
             # from becoming an unscoped shared surface through configuration
-            # drift, and also gives Phase 5 a safe path to migrate NetaMate from
-            # DEDICATED_TENANT_HOSTS into the normal table.
+            # drift.
             request.custom_hostname_binding = binding
             return self.get_response(request)
 
