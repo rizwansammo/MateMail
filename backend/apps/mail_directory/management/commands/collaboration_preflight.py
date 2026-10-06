@@ -116,7 +116,7 @@ class Command(BaseCommand):
         for group in ForwardGroup.objects.prefetch_related(
             "members__mailbox",
             "allowed_senders__mailbox",
-        ).iterator():
+        ).iterator(chunk_size=200):
             group_count += 1
             members = list(group.members.all())
             if group.status == ForwardGroupStatus.ACTIVE and not members:
