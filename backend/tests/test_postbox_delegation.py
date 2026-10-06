@@ -279,6 +279,44 @@ class PostBoxDelegationAccessTest(TestCase):
         self.assertEqual(200, recovered.status_code)
         self.assertEqual(self.delegate.email, recovered.data["mailbox"]["email"])
 
+    def test_delegate_cannot_list_or_delete_another_sessions_push_device(self):
+        self.grant(can_read=True)
+        client, delegate_session = self.client_for_delegate()
+        self.assertEqual(200, self.switch(client).status_code)
+
+        _, owner_session = PostBoxSession.issue(self.target)
+        owner_device = PostBoxPushDevice.objects.create(
+            mailbox=self.target,
+            session=owner_session,
+            installation_id=uuid.uuid4(),
+            platform=PushPlatform.ANDROID,
+            provider=PushProvider.FCM,
+            token_type=PushTokenType.REGISTRATION_TOKEN,
+            token="owner-device-token",
+        )
+        delegate_device = PostBoxPushDevice.objects.create(
+            mailbox=self.target,
+            session=delegate_session,
+            installation_id=uuid.uuid4(),
+            platform=PushPlatform.ANDROID,
+            provider=PushProvider.FCM,
+            token_type=PushTokenType.REGISTRATION_TOKEN,
+            token="delegate-device-token",
+        )
+
+        listed = client.get("/api/postbox/devices/")
+        self.assertEqual(200, listed.status_code)
+        self.assertEqual(
+            [str(delegate_device.id)],
+            [row["id"] for row in listed.data["results"]],
+        )
+
+        deleted = client.delete(f"/api/postbox/devices/{owner_device.id}/")
+        self.assertEqual(404, deleted.status_code)
+        self.assertTrue(
+            PostBoxPushDevice.objects.filter(pk=owner_device.id).exists()
+        )
+
     def test_push_visibility_stops_when_delegation_read_is_removed(self):
         grant = self.grant(can_read=True)
         _, session = self.client_for_delegate()
