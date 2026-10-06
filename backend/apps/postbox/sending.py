@@ -33,7 +33,8 @@ from email.message import EmailMessage
 from django.conf import settings
 
 from apps.aliases.models import Alias, AliasStatus
-from apps.mailboxes.models import Mailbox
+from apps.mail_directory.models import AccessGrantKind, MailboxAccessGrant
+from apps.mailboxes.models import Mailbox, MailboxKind
 
 from .mime import clean_header
 
@@ -54,7 +55,8 @@ class Identity:
     address: str
     name: str = ""
     is_primary: bool = False
-    kind: str = "mailbox"   # mailbox | alias
+    kind: str = "mailbox"   # mailbox | alias | team_box
+    send_mode: str = "send_as"  # send_as | on_behalf
 
 
 def allowed_identities(mailbox: Mailbox) -> list[Identity]:
