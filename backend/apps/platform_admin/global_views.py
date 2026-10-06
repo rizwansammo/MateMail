@@ -210,6 +210,7 @@ def serialise_mailbox(mailbox) -> dict:
         "id": str(mailbox.id),
         "email": mailbox.email,
         "full_name": mailbox.full_name,
+        "kind": mailbox.kind,
         "tenant": _tenant_brief(mailbox.tenant),
         "domain": mailbox.domain.domain if mailbox.domain else None,
         "status": mailbox.status,
