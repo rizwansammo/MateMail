@@ -1479,6 +1479,8 @@ function Reader({
   onLoadRemote,
   onTrustRemote,
   onReply,
+  canManage,
+  canSend,
   folders,
   labels,
   onApplyLabel,
@@ -1497,6 +1499,8 @@ function Reader({
   onLoadRemote: () => void;
   onTrustRemote: () => void;
   onReply: (mode: "reply" | "reply-all" | "forward") => void;
+  canManage: boolean;
+  canSend: boolean;
   folders: Folder[];
   labels: MailLabel[];
   onApplyLabel: (id: string, remove: boolean) => void;
@@ -1530,38 +1534,42 @@ function Reader({
           <span>Back</span>
         </button>
         <span className="pb-premium-toolbar-divider" aria-hidden="true" />
-        {!sentMessage && (
-          <ToolbarButton label="Archive" icon={Archive} onClick={() => onAction("archive")} />
-        )}
-        <ToolbarButton
-          label={isTrash ? "Permanently delete" : "Move to Trash"}
-          icon={Trash2}
-          onClick={() => {
-            if (!isTrash || window.confirm("Permanently delete this message? This cannot be undone.")) {
-              onAction(isTrash ? "delete" : "trash");
-            }
-          }}
-        />
-        {!sentMessage && (
-          <ToolbarButton
-            label={isSpam ? "Not spam" : "Mark as spam"}
-            icon={isSpam ? ShieldCheck : ShieldAlert}
-            onClick={() => onAction(isSpam ? "not-spam" : "spam")}
-          />
-        )}
-        {!sentMessage && (
-          <ToolbarButton label="Mark unread" icon={Mail} onClick={() => onAction("unread")} />
-        )}
-        <MoveMenu
-          folders={folders}
-          currentFolder={detail.folder}
-          sentMessage={sentMessage}
-          onMove={onMove}
-        />
-        <LabelMenu labels={labels} currentLabels={detail.labels}
-          onApply={onApplyLabel} />
-        {isTrash && (
-          <ToolbarButton label="Restore" icon={RotateCcw} onClick={() => onAction("restore")} />
+        {canManage && (
+          <>
+            {!sentMessage && (
+              <ToolbarButton label="Archive" icon={Archive} onClick={() => onAction("archive")} />
+            )}
+            <ToolbarButton
+              label={isTrash ? "Permanently delete" : "Move to Trash"}
+              icon={Trash2}
+              onClick={() => {
+                if (!isTrash || window.confirm("Permanently delete this message? This cannot be undone.")) {
+                  onAction(isTrash ? "delete" : "trash");
+                }
+              }}
+            />
+            {!sentMessage && (
+              <ToolbarButton
+                label={isSpam ? "Not spam" : "Mark as spam"}
+                icon={isSpam ? ShieldCheck : ShieldAlert}
+                onClick={() => onAction(isSpam ? "not-spam" : "spam")}
+              />
+            )}
+            {!sentMessage && (
+              <ToolbarButton label="Mark unread" icon={Mail} onClick={() => onAction("unread")} />
+            )}
+            <MoveMenu
+              folders={folders}
+              currentFolder={detail.folder}
+              sentMessage={sentMessage}
+              onMove={onMove}
+            />
+            <LabelMenu labels={labels} currentLabels={detail.labels}
+              onApply={onApplyLabel} />
+            {isTrash && (
+              <ToolbarButton label="Restore" icon={RotateCcw} onClick={() => onAction("restore")} />
+            )}
+          </>
         )}
         <span className="flex-1" />
         {onThread && (
@@ -1595,6 +1603,7 @@ function Reader({
             <button
               type="button"
               className="pb-premium-reader-star"
+              disabled={!canManage}
               aria-label={summary.flagged ? "Unstar message" : "Star message"}
               onClick={() => onAction(summary.flagged ? "unstar" : "star")}
             >
@@ -1643,7 +1652,7 @@ function Reader({
               <p>To protect your privacy, images from this sender are blocked.</p>
               <div className="pb-premium-privacy-actions">
                 <button type="button" onClick={onLoadRemote}>Display images</button>
-                {detail.from.address && (
+                {canManage && detail.from.address && (
                   <button type="button" onClick={onTrustRemote}>
                     Always display images from this sender
                   </button>
@@ -1721,7 +1730,7 @@ function Reader({
           </section>
         )}
 
-        {!isSpam && !isTrash && (
+        {canSend && !isSpam && !isTrash && (
           <div className="pb-premium-reply-actions">
             <button type="button" className="pb-btn pb-btn-ghost" onClick={() => onReply("reply")}>
               <CornerUpLeft className="h-4 w-4" aria-hidden="true" />
