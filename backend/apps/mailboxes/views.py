@@ -21,7 +21,7 @@ from apps.logs.models import LogEventType
 from apps.logs.utils import log_event
 from apps.mail_directory.services import AddressConflict
 from apps.tenants.permissions import IsEmailVerified, IsTenantAdmin, TenantReadAdminWrite
-from .models import Mailbox
+from .models import Mailbox, MailboxKind
 from .serializers import MailboxCreateSerializer, MailboxReProvisionSerializer, MailboxSerializer, MailboxStatusSerializer
 
 logger = logging.getLogger(__name__)
@@ -169,7 +169,13 @@ class MailboxDetailView(APIView):
     permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
     def _get_mailbox(self, request, pk):
-        return Mailbox.objects.for_tenant(request.tenant).select_related("domain").filter(pk=pk).first()
+        return (
+            Mailbox.objects
+            .for_tenant(request.tenant)
+            .select_related("domain")
+            .filter(pk=pk, kind=MailboxKind.PERSONAL)
+            .first()
+        )
 
     def get(self, request, pk):
         mb = self._get_mailbox(request, pk)
@@ -218,7 +224,13 @@ class MailboxStatusView(APIView):
     permission_classes = [IsAuthenticated, IsTenantAdmin]
 
     def patch(self, request, pk):
-        mb = Mailbox.objects.for_tenant(request.tenant).select_related("domain").filter(pk=pk).first()
+        mb = (
+            Mailbox.objects
+            .for_tenant(request.tenant)
+            .select_related("domain")
+            .filter(pk=pk, kind=MailboxKind.PERSONAL)
+            .first()
+        )
         if not mb:
             return Response({"detail": "Not found."}, status=404)
 
@@ -264,7 +276,13 @@ class MailboxReProvisionView(APIView):
     permission_classes = [IsAuthenticated, IsTenantAdmin, IsEmailVerified]
 
     def post(self, request, pk):
-        mb = Mailbox.objects.for_tenant(request.tenant).select_related("domain").filter(pk=pk).first()
+        mb = (
+            Mailbox.objects
+            .for_tenant(request.tenant)
+            .select_related("domain")
+            .filter(pk=pk, kind=MailboxKind.PERSONAL)
+            .first()
+        )
         if not mb:
             return Response({"detail": "Not found."}, status=404)
 
