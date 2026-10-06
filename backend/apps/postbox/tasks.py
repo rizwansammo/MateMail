@@ -182,6 +182,7 @@ def _scheduled_message_for_delivery(mailbox, raw: bytes, *, actor_mailbox=None):
     """
     import email as email_module
     import email.policy
+    import email.utils
 
     from . import mime, sending, signatures
 
