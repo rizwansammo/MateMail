@@ -67,43 +67,6 @@ class WorkerValidationTest(unittest.TestCase):
             worker.validate_job(bad)
 
 
-class FrontendOverrideTest(unittest.TestCase):
-    def test_branded_frontend_override_is_loopback_only(self):
-        parsed = worker.frontend_overrides(
-            "mailadmin.netamate.com=http://127.0.0.1:3060,"
-            "postbox.netamate.com=http://127.0.0.1:3060"
-        )
-        self.assertEqual(
-            parsed["mailadmin.netamate.com"],
-            "http://127.0.0.1:3060",
-        )
-
-        for unsafe in (
-            "mail.customer.com=http://example.com:3000",
-            "mail.customer.com=http://10.0.0.5:3000",
-            "mail.customer.com=http://127.0.0.1:80",
-            "mail.customer.com=http://127.0.0.1:70000",
-            "mail.customer.com=http://127.0.0.1:3060;include /tmp/x",
-        ):
-            with self.subTest(unsafe=unsafe):
-                with self.assertRaises(worker.ProvisioningError):
-                    worker.frontend_overrides(unsafe)
-
-    def test_active_vhost_uses_branded_override_only_for_exact_host(self):
-        original = worker.FRONTEND_OVERRIDES_RAW
-        try:
-            worker.FRONTEND_OVERRIDES_RAW = (
-                "mailadmin.netamate.com=http://127.0.0.1:3060"
-            )
-            branded = worker.active_vhost("mailadmin.netamate.com", "hub")
-            ordinary = worker.active_vhost("manage.customer.com", "hub")
-        finally:
-            worker.FRONTEND_OVERRIDES_RAW = original
-
-        self.assertIn("proxy_pass             http://127.0.0.1:3060;", branded)
-        self.assertIn("proxy_pass             http://matemail_frontend;", ordinary)
-
-
 class GeneratedNginxTest(unittest.TestCase):
     def test_bootstrap_is_acme_only(self):
         text = worker.bootstrap_vhost("mail.customer.com")
@@ -125,6 +88,15 @@ class GeneratedNginxTest(unittest.TestCase):
         self.assertNotIn("proxy_pass", text)
         self.assertIn('return 503 "MateMail custom domain is ready', text)
 
+
+    def test_active_vhosts_always_use_canonical_frontend(self):
+        for hostname, surface in (
+            ("manage.customer.com", "hub"),
+            ("inbox.customer.com", "postbox"),
+        ):
+            text = worker.active_vhost(hostname, surface)
+            self.assertIn("proxy_pass             http://matemail_frontend;", text)
+            self.assertNotIn("127.0.0.1:", text)
 
     def test_active_hub_vhost_routes_same_origin_and_blocks_other_surfaces(self):
         text = worker.active_vhost("manage.customer.com", "hub")
@@ -526,7 +498,6 @@ class HostInstallArtifactsTest(unittest.TestCase):
         self.assertNotIn('printf "%s" "$SECRET"', source)
         self.assertIn("chmod 0600", source)
         self.assertIn("--activate", source)
-        self.assertIn("MATEMAIL_CUSTOM_HOST_FRONTEND_OVERRIDES", source)
 
     def test_production_smoke_tool_is_valid_python_and_read_only_by_contract(self):
         source = SMOKE_PATH.read_text(encoding="utf-8")

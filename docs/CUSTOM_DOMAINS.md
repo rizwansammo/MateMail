@@ -359,20 +359,20 @@ old tenant mapping is still authorized.
 If DNS later moves away, the hostname may be marked unhealthy. Existing mail
 delivery is unaffected because this feature is web-only.
 
-## NetaMate pilot
+## NetaMate pilot — completed
 
-`mailadmin.netamate.com` and `postbox.netamate.com` are the first production
-pilot because they already exercise:
+NetaMate was the first production pilot. During the handover the old dedicated
+frontend on `127.0.0.1:3060` was preserved only long enough to prove the
+database-backed hostname lifecycle and edge automation safely.
 
-- customer-owned DNS;
-- individual Let's Encrypt certificates;
-- host-bound tenant isolation;
-- shared MateMail backend.
+The pilot completed on 2026-10-06. Its final state is:
 
-Phase 5 must preserve the current NetaMate frontend behavior during the pilot.
-The existing dedicated frontend on `127.0.0.1:3060` is not removed as an
-incidental part of custom-domain provisioning. Consolidating that frontend is a
-separate decision.
+- `mailhub.netamate.com` and `postbox.netamate.com` are normal ACTIVE
+  custom-host rows;
+- both proxy the canonical MateMail frontend;
+- the dedicated frontend, fixed-host bindings and hand-written vhosts are gone;
+- the temporary frontend-override mechanism used only for that transition has
+  been removed from the product.
 
 ## Revised implementation phases
 
@@ -640,31 +640,18 @@ root-owned worker then:
 Cleanup is allowed even when the tenant has since been suspended or DNS has
 moved away. Operator-owned nginx files are never deleted.
 
-### NetaMate pilot preparation
+### NetaMate pilot migration record
 
-The live audit confirmed the two intended pilot hostnames currently use
-hand-written nginx vhosts, existing certificates and the NetaMate-branded
-frontend on `127.0.0.1:3060`.
+The original production audit found hand-written nginx vhosts, fixed tenant
+bindings and a separate NetaMate frontend on port 3060. Those were migration
+inputs, not the desired architecture.
 
-The generic worker therefore gained a **root-owned, exact-host frontend
-override** for controlled adoption. It accepts only loopback HTTP high ports
-and is never customer-controlled. This preserves NetaMate branding while the
-same database/edge lifecycle is exercised.
-
-A guarded management command,
-`adopt_dedicated_custom_hostname`, can stage an existing
-`DEDICATED_TENANT_HOSTS` name at READY only when:
-
-- the deployment binding already maps it to the requested tenant;
-- the tenant is eligible;
-- the hostname now satisfies the same direct CNAME contract as every customer;
-- database uniqueness permits the mapping.
-
-The root worker still verifies the existing certificate and installs the final
-generated vhost before ACTIVE.
-
-The exact post-deploy handover, rollback and evidence checklist lives in
-`docs/CUSTOM_DOMAIN_NETAMATE_PILOT.md`.
+The pilot safely adopted the existing PostBox hostname, introduced
+`mailhub.netamate.com` through the normal Hub flow, validated TLS/routing, and
+then retired all dedicated compatibility state. The one-time adoption command
+and temporary frontend override were removed after acceptance so future custom
+hosts have exactly one path: database ownership, direct CNAME verification,
+automatic TLS provisioning, and the canonical MateMail frontend.
 
 ### Production smoke tooling
 
@@ -681,14 +668,9 @@ It does not log in or change application, DNS, nginx or certificate state.
 
 ### Phase 5 completion gate
 
-Phase 5 engineering is **complete**. The customer UI, lifecycle, removal,
-NetaMate adoption path, guarded branded-frontend override, non-destructive smoke
-tool, rollback runbook and read-only production baseline are all finished.
+Phase 5 is **complete and production-accepted**. The customer UI, hostname
+lifecycle, removal path, nginx/Certbot automation, surface isolation and
+read-only smoke tooling were exercised on NetaMate in production.
 
-The remaining NetaMate check is a **post-deploy acceptance gate**, not missing
-implementation: after the final release is deployed by the owner,
-`mailadmin.netamate.com` and `postbox.netamate.com` must pass the automated
-smoke test plus the manual authenticated/branding checks in the pilot runbook.
-
-That deferral is intentional; performing the live handover now would contradict
-the agreed rule that this branch is not deployed until all phases are finished.
+The temporary adoption-only compatibility pieces were removed after acceptance;
+they are not part of the steady-state architecture.
