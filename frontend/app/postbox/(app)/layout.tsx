@@ -470,6 +470,9 @@ function PremiumPostBoxShell({
     (item) => !item.is_personal && item.mailbox.id !== mailbox.id,
   );
 
+  const canReadMailbox = permissions.can_read;
+  const canSendMailbox = permissions.can_send_as || permissions.can_send_on_behalf;
+
   const themeOptions = [
     { value: "light" as const, Icon: Sun, label: "Light" },
     { value: "system" as const, Icon: Monitor, label: "System" },
@@ -487,14 +490,14 @@ function PremiumPostBoxShell({
       ) {
         return;
       }
-      if (event.key.toLowerCase() === "c") {
+      if (event.key.toLowerCase() === "c" && canSendMailbox) {
         event.preventDefault();
         router.push("/postbox?compose=new");
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [router]);
+  }, [canSendMailbox, router]);
 
   return (
     <div className={`pb pb-premium-shell ${
@@ -534,27 +537,35 @@ function PremiumPostBoxShell({
           <span className="pb-premium-wordmark">PostBox</span>
         </Link>
 
-        <div className="pb-premium-compose-wrap">
-          <Link href="/postbox?compose=new" className="pb-premium-compose" onClick={closeRail}>
-            <PenLine className="h-[18px] w-[18px]" aria-hidden="true" />
-            Compose
-            <kbd>C</kbd>
-          </Link>
-        </div>
+        {canSendMailbox && (
+          <div className="pb-premium-compose-wrap">
+            <Link href="/postbox?compose=new" className="pb-premium-compose" onClick={closeRail}>
+              <PenLine className="h-[18px] w-[18px]" aria-hidden="true" />
+              Compose
+              <kbd>C</kbd>
+            </Link>
+          </div>
+        )}
 
-        <nav className="pb-premium-nav" aria-label="Folders">
-          <Suspense fallback={null}>
-            <PremiumFolderNavigation
-              folders={folders}
-              byRole={byRole}
-              custom={custom}
-              labels={labels}
-              onNavigate={closeRail}
-              onCreate={openEditor}
-              onDelete={deleteEntry}
-            />
-          </Suspense>
-        </nav>
+        {canReadMailbox ? (
+          <nav className="pb-premium-nav" aria-label="Folders">
+            <Suspense fallback={null}>
+              <PremiumFolderNavigation
+                folders={folders}
+                byRole={byRole}
+                custom={custom}
+                labels={labels}
+                onNavigate={closeRail}
+                onCreate={openEditor}
+                onDelete={deleteEntry}
+              />
+            </Suspense>
+          </nav>
+        ) : (
+          <div className="px-4 py-3 text-sm pb-muted">
+            This TeamBox grants sending access only. Inbox and folders are not available.
+          </div>
+        )}
 
       </aside>
 
@@ -596,6 +607,9 @@ function PremiumPostBoxShell({
                   <div className="pb-premium-account-copy">
                     <strong>{mailbox.full_name || mailbox.email}</strong>
                     <span>{mailbox.email}</span>
+                    {mailbox.kind === "team_box" && authenticatedMailbox && (
+                      <small>TeamBox · signed in as {authenticatedMailbox.email}</small>
+                    )}
                   </div>
                   <Link
                     href="/postbox/settings?section=account"
@@ -605,6 +619,94 @@ function PremiumPostBoxShell({
                     Manage account
                   </Link>
                 </div>
+
+                {(mailbox.kind === "team_box" || teamBoxes.length > 0) && authenticatedMailbox && (
+                  <div className="pb-premium-account-switcher">
+                    <div className="pb-premium-account-section-label">TeamBoxes</div>
+
+                    {mailbox.kind === "team_box" && (
+                      <button
+                        type="button"
+                        className="pb-premium-account-row"
+                        disabled={Boolean(switchingMailbox)}
+                        onClick={async () => {
+                          setAccountMenuError(null);
+                          setSwitchingMailbox(authenticatedMailbox.id);
+                          try {
+                            await switchMailbox(null);
+                            window.location.assign("/postbox?folder=INBOX");
+                          } catch {
+                            setAccountMenuError("Your personal mailbox could not be opened.");
+                            setSwitchingMailbox(null);
+                          }
+                        }}
+                      >
+                        <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                          {accountInitials(authenticatedMailbox.full_name, authenticatedMailbox.email) || "PB"}
+                        </span>
+                        <span className="pb-premium-account-row-copy">
+                          <strong>{authenticatedMailbox.full_name || authenticatedMailbox.email}</strong>
+                          <small>{authenticatedMailbox.email} · My mailbox</small>
+                        </span>
+                        {switchingMailbox === authenticatedMailbox.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
+                        ) : (
+                          <span className="pb-premium-account-switch-label">Open</span>
+                        )}
+                      </button>
+                    )}
+
+                    {teamBoxes.map((entry) => {
+                      const target = entry.mailbox;
+                      const switching = switchingMailbox === target.id;
+                      const canRead = entry.permissions.can_read;
+                      const canSend =
+                        entry.permissions.can_send_as ||
+                        entry.permissions.can_send_on_behalf;
+                      return (
+                        <button
+                          key={target.id}
+                          type="button"
+                          className="pb-premium-account-row"
+                          disabled={Boolean(switchingMailbox)}
+                          onClick={async () => {
+                            setAccountMenuError(null);
+                            setSwitchingMailbox(target.id);
+                            try {
+                              await switchMailbox(target.id);
+                              window.location.assign(
+                                canRead
+                                  ? "/postbox?folder=INBOX"
+                                  : canSend
+                                    ? "/postbox?compose=new"
+                                    : "/postbox",
+                              );
+                            } catch {
+                              setAccountMenuError("You no longer have access to that TeamBox.");
+                              setSwitchingMailbox(null);
+                            }
+                          }}
+                        >
+                          <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                            <Users className="h-4 w-4" />
+                          </span>
+                          <span className="pb-premium-account-row-copy">
+                            <strong>{target.full_name || target.email}</strong>
+                            <small>
+                              {target.email}
+                              {!canRead && canSend ? " · Send only" : ""}
+                            </small>
+                          </span>
+                          {switching ? (
+                            <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
+                          ) : (
+                            <span className="pb-premium-account-switch-label">Open</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {otherAccounts.length > 0 && (
                   <div className="pb-premium-account-switcher">
