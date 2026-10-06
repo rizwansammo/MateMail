@@ -100,10 +100,12 @@ class DeviceListView(APIView):
     authentication_classes = [postbox_auth.PostBoxSessionAuthentication]
 
     def get(self, request):
+        postbox_auth.require_active_mailbox_permission(request, "read")
         devices = PostBoxPushDevice.objects.for_mailbox(request.mailbox)
         return Response({"results": [device_json(d) for d in devices]})
 
     def post(self, request):
+        postbox_auth.require_active_mailbox_permission(request, "read")
         serializer = DeviceRegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -141,6 +143,7 @@ class DeviceDetailView(APIView):
     authentication_classes = [postbox_auth.PostBoxSessionAuthentication]
 
     def delete(self, request, device_id):
+        postbox_auth.require_active_mailbox_permission(request, "read")
         deleted, _ = (
             PostBoxPushDevice.objects.for_mailbox(request.mailbox).filter(pk=device_id).delete()
         )
