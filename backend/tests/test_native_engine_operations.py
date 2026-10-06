@@ -435,16 +435,21 @@ class OperationsDatabaseTestCase(SimpleTestCase):
 
 
 class SchemaVersionTest(OperationsDatabaseTestCase):
-    def test_the_engine_is_at_version_four(self):
-        self.assertEqual(4, engine_db.REQUIRED_VERSION)
-        self.assertEqual(4, engine_db.current_version(self.conn))
+    def test_the_engine_is_at_the_required_version(self):
+        self.assertEqual(
+            engine_db.REQUIRED_VERSION,
+            engine_db.current_version(self.conn),
+        )
 
     def test_migrations_are_idempotent(self):
+        before = engine_db.current_version(self.conn)
         engine_db.apply_migrations(self.conn)
         engine_db.apply_migrations(self.conn)
-        self.assertEqual(4, engine_db.current_version(self.conn))
+        self.assertEqual(before, engine_db.current_version(self.conn))
         self.assertEqual(
-            4, self.rows("SELECT count(*) FROM schema_version")[0][0])
+            len(engine_db.available_migrations()),
+            self.rows("SELECT count(*) FROM schema_version")[0][0],
+        )
 
 
 class MailboxStorageIdentityTest(OperationsDatabaseTestCase):
