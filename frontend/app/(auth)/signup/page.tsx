@@ -8,7 +8,6 @@ import {
   AuthButton,
   AuthError,
   AuthField,
-  AuthNotice,
   PremiumAuthShell,
 } from "@/components/workspace/premium-auth";
 import { useAuth } from "@/contexts/auth-context";
