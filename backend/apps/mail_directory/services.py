@@ -29,6 +29,7 @@ def _existing_source_kind(address: str):
     Defense-in-depth for rows created before/beside the registry.
     """
     from apps.aliases.models import Alias
+    from apps.forward_groups.models import ForwardGroup
     from apps.mailboxes.models import Mailbox, MailboxKind
 
     mailbox = Mailbox.objects.filter(email__iexact=address).only("kind").first()
@@ -40,6 +41,8 @@ def _existing_source_kind(address: str):
         )
     if Alias.objects.filter(source_address__iexact=address).exists():
         return AddressKind.ALIAS
+    if ForwardGroup.objects.filter(address__iexact=address).exists():
+        return AddressKind.FORWARD_GROUP
     return None
 
 
