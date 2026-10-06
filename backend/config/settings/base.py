@@ -77,6 +77,7 @@ LOCAL_APPS = [
     "apps.aliases",
     "apps.forwarding",
     "apps.forward_groups",
+    "apps.delegations",
     "apps.mailqueue",
     "apps.logs",
     "apps.quarantine",
