@@ -1,6 +1,6 @@
 # MateMail Collaboration Features
 
-Status: **Phase A + Phase B + Phase C + Phase D + Phase E implemented on `feature/mail-collaboration`**.
+Status: **Phase A + Phase B + Phase C + Phase D + Phase E + Phase F implemented on `feature/mail-collaboration`**.
 
 This document defines the product vocabulary and security boundaries for the
 next collaboration feature set. Later phases add customer surfaces; Phase A
@@ -16,6 +16,76 @@ only establishes the primitives they must share.
 | Forward Group (FG) | A distribution address that fans one message out to members. It has no Inbox, password or PostBox session. |
 | Delegation | Explicit permission for one personal mailbox identity to access another personal mailbox. |
 | Forwarding | The existing mailbox-to-destination forwarding rule. It remains separate from Forward Group. |
+
+## Phase F — Delegation
+
+Delegation now gives one personal mailbox controlled access to another personal
+mailbox without sharing or replacing either mailbox password.
+
+### Management
+
+Mail Hub has a dedicated **Delegation** surface. Organization owners/admins can:
+
+- choose the personal mailbox being delegated;
+- choose the personal mailbox receiving access;
+- grant Read, Manage, Send As and/or Send on behalf;
+- pause/reactivate a delegation;
+- update permissions or remove the grant.
+
+Self-delegation, cross-organization delegation, TeamBox targets and TeamBox
+delegates are rejected. Manage still requires Read and an active delegation must
+retain at least one permission.
+
+### PostBox security boundary
+
+The delegate always signs into PostBox with their **own** personal mailbox.
+
+- `PostBoxSession.mailbox` remains the authenticated delegate identity.
+- `PostBoxSession.active_mailbox` may point at the delegated personal mailbox.
+- Delegated mailboxes appear in a dedicated **Delegated mailboxes** section,
+  separate from TeamBoxes and from independently authenticated
+  "Accounts on this device".
+- Every request re-checks the live `delegation` grant server-side.
+- Revoking the grant refuses the in-flight mailbox request and clears the stale
+  active target instead of replaying the action against the delegate's own
+  mailbox.
+- Deleting a delegated target revokes sessions actively operating on it before
+  the target row is removed.
+
+Read-only delegates can view mailbox state without gaining Manage actions.
+Send-only delegates get the same compose-only safety model as TeamBox users.
+Shared Draft/Scheduled state still requires Manage + Send.
+
+### Sending
+
+Delegation reuses the generic Native Engine
+`mailbox_sender_authorization` primitive introduced for TeamBox; no new engine
+schema is required beyond schema v6.
+
+For a personal target mailbox, `MailboxSpec.authorized_senders` is derived from
+active Delegation grants that contain Send As or Send on behalf.
+
+- **Send As** — the target mailbox (or one of its Aliases) is the visible
+  sender, while SMTP authentication remains the delegate's personal mailbox.
+- **Send on behalf** — the target mailbox is `From` and the delegate is the RFC
+  `Sender`.
+- The target remains directly login-capable with its original password.
+- Removing delegated sending rights replaces the engine sender set without
+  changing the target password or login state.
+- An Alias targeting the delegated mailbox inherits the same effective delegate
+  sender authorization through `postfix_sender_login`.
+
+Forwarding and Forward Groups do not create Delegation rights.
+
+### Push and audit
+
+Push registrations for a delegated mailbox are valid only while the personal
+session retains Delegation Read permission. Revoking Read stops future push
+delivery for that delegate without affecting the mailbox owner's own devices.
+
+Delegated immediate/scheduled sends already use the Phase D actor-aware audit
+path, so the authenticated personal actor remains visible even though the
+message belongs to the target mailbox.
 
 ## Phase E — Forward Groups (FG)
 
