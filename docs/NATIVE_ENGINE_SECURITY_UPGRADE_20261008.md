@@ -55,7 +55,7 @@ Production rollback pins are in the server-side root-owned `deploy/native-engine
 ## Phase 2 — candidate builds and isolated integration tests
 
 1. Start from this feature branch; prepare candidate Dockerfiles and Compose override **only** in nonproduction. Pin all upstream base images by immutable digest. Do not change live `.env`.
-2. For custom images, use GitHub Actions to build unique **candidate tags** and capture immutable digests. Never retag production's pinned references until the test gate passes.
+2. **Before running `native-engine-images.yml`**, change its tagging policy for this branch: it currently publishes both `:${{ github.sha }}` and the moving `:ne1` tag. Candidate builds must publish ONLY a unique branch/commit candidate tag and capture immutable digests; they must **not move `:ne1` or `:latest`** during testing. Never retag production's pinned references until the test gate passes.
 3. Isolated Compose project and network with **no published ports**, separately named temporary volumes and test-only DB/Redis/DKIM/maildirs; no mounts from live `matemail_native_*` volumes. Do not use `docker compose down -v` on production.
 4. Run dependency checks: Unbound → Dovecot/Postfix SASL/LMTP → Rspamd/DKIM/milter → Postfix queue/delivery; test pass and fail paths with synthetic message fixtures.
 5. Tests must exercise positive and negative SMTP AUTH, IMAP login, bounce/defer behavior, DKIM/DMARC alignment, spam/ham, Redis persistence, ClamAV/Olefy and DNSSEC/DANE. Verify restarts, re-creations and logs.
