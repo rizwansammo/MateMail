@@ -71,7 +71,7 @@ After each engine: exact executable version, ready/healthy, `docker logs`, relev
 
 ## Phase 4 — release acceptance
 
-Verify complete inbound/outbound synthetic email flow, message headers and DKIM, quarantine, PostBox/Hub integration, queue/defer/retry, Sieve/LMTP, DNSSEC/DANE, certificate renewal, fail2ban, vulnerability inventory, and monitoring. Only then merge implementation and perform the formal production update. The separately planned **final cleanliness + security audit** is a later task, not part of these four upgrade phases.
+Verify complete inbound/outbound synthetic email flow, message headers and DKIM, quarantine, PostBox/Hub integration, queue/defer/retry, Sieve/LMTP, DNSSEC/DANE, certificate renewal, fail2ban, vulnerability inventory, and monitoring. After successful Phase 3 rollout and Phase 4 acceptance, merge the fully tested implementation and verified production image pins to main; do not trigger an unnecessary second rollout. The separately planned **final cleanliness + security audit** is a later task, not part of these four upgrade phases.
 
 ## Primary upstream references (read 2026-10-08)
 
