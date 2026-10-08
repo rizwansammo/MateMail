@@ -520,7 +520,9 @@ export function CustomHostnamesSettings({ canEdit }: { canEdit: boolean }) {
           <strong>One CNAME per URL</strong>
           <span>
             You choose the hostname. MateMail verifies the CNAME, provisions HTTPS and
-            activates the route automatically.
+            activates the route automatically. Existing verified URLs that point to
+            custom.matemail.online remain supported during migration; do not delete
+            them until custom.matemail.pro is published and verified.
           </span>
         </div>
         <div>
