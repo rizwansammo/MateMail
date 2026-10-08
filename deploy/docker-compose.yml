@@ -42,7 +42,7 @@ x-backend-env: &backend_env
   # unchanged — that is what lets the frontend middleware tell the two
   # consoles apart, so Django must accept it or every Platform API call is
   # a 400 DisallowedHost.
-  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-portal.matemail.online,postbox.matemail.online,platform.matemail.online,autodiscover.matemail.online,app.matemail.online,matemail.online,backend,localhost,127.0.0.1}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-portal.matemail.pro,postbox.matemail.pro,platform.matemail.pro,autodiscover.matemail.pro,matemail.pro,www.matemail.pro,portal.matemail.online,postbox.matemail.online,platform.matemail.online,autodiscover.matemail.online,app.matemail.online,matemail.online,backend,localhost,127.0.0.1}
   # Customer-owned Hub/PostBox hostnames. Phase 4 activates the database-backed
   # Host/surface guards; unknown hosts remain fail-closed.
   CUSTOM_HOSTS_DYNAMIC_ENABLED: ${CUSTOM_HOSTS_DYNAMIC_ENABLED:-True}
