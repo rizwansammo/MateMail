@@ -10,6 +10,18 @@ def _mail_hostname():
     return getattr(settings, "MAIL_HOSTNAME", "mx.matemail.online")
 
 
+def _legacy_mail_hostname():
+    return getattr(settings, "LEGACY_MAIL_HOSTNAME", "mx.matemail.online")
+
+
+def _legacy_spf_include():
+    return getattr(settings, "LEGACY_SPF_INCLUDE_DOMAIN", "_spf.matemail.online")
+
+
+def _legacy_autodiscover_host():
+    return getattr(settings, "LEGACY_AUTODISCOVER_HOST", "autodiscover.matemail.online")
+
+
 def _mail_domain():
     return getattr(settings, "MAIL_DOMAIN", "matemail.online")
 
@@ -124,9 +136,10 @@ def _resolve_txt(hostname):
 
 def _evaluate_mx(detected):
     mh = _mail_hostname().lower()
+    accepted = {mh, _legacy_mail_hostname().lower()}
     for v in detected:
         parts = v.lower().split()
-        if len(parts) == 2 and parts[1] == mh:
+        if len(parts) == 2 and parts[1].rstrip(".") in accepted:
             return DNSCheckStatus.VERIFIED, v
     if not detected:
         return DNSCheckStatus.MISSING, ""
@@ -211,13 +224,31 @@ def check_dns_for_domain(domain_obj):
         elif rtype == "SRV":
             detected = _resolve_srv(host)
             status, detected_value = _evaluate_srv(detected, rec["match_contains"])
+            if status != DNSCheckStatus.VERIFIED:
+                legacy_status, legacy_value = _evaluate_srv(detected, _legacy_autodiscover_host())
+                if legacy_status == DNSCheckStatus.VERIFIED:
+                    status, detected_value = legacy_status, legacy_value
         else:
             detected = _resolve_txt(host)
-            status, detected_value = _evaluate_txt(
-                detected,
-                rec["match_contains"],
-                rec.get("record_prefix"),
-            )
+            if rec["label"] == "SPF":
+                # RFC 7208: two SPF policies at one hostname are invalid;
+                # never mark this valid just because one record includes us.
+                spf_records = [v for v in detected if v.lstrip().lower().startswith("v=spf1")]
+                if len(spf_records) > 1:
+                    status, detected_value = DNSCheckStatus.FAILED, "; ".join(spf_records[:2])
+                else:
+                    status, detected_value = _evaluate_txt(detected, rec["match_contains"], "v=spf1")
+                    if status != DNSCheckStatus.VERIFIED:
+                        legacy_token = "include:" + _legacy_spf_include()
+                        status_legacy, value_legacy = _evaluate_txt(detected, legacy_token, "v=spf1")
+                        if status_legacy == DNSCheckStatus.VERIFIED:
+                            status, detected_value = status_legacy, value_legacy
+            else:
+                status, detected_value = _evaluate_txt(
+                    detected,
+                    rec["match_contains"],
+                    rec.get("record_prefix"),
+                )
 
         DNSRecordCheck.objects.update_or_create(
             domain=domain_obj,

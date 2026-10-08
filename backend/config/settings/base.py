@@ -33,6 +33,11 @@ CUSTOM_HOST_CNAME_TARGET = env(
     "CUSTOM_HOST_CNAME_TARGET",
     default="custom.matemail.pro",
 ).strip().rstrip(".").lower()
+CUSTOM_HOST_LEGACY_CNAME_TARGETS = tuple(
+    item.strip().rstrip(".").lower()
+    for item in env("CUSTOM_HOST_LEGACY_CNAME_TARGETS", default="custom.matemail.online").split(",")
+    if item.strip()
+)
 CUSTOM_HOST_RESERVED_SUFFIXES = tuple(
     item.strip().rstrip(".").lower()
     for item in env(
@@ -332,6 +337,7 @@ NATIVE_ENGINE_API_SECRET = env("NATIVE_ENGINE_API_SECRET", default="")
 # MateMail platform settings
 MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.online")
 MAIL_HOSTNAME = env("MAIL_HOSTNAME", default="mx.matemail.online")
+LEGACY_MAIL_HOSTNAME = env("LEGACY_MAIL_HOSTNAME", default="mx.matemail.online")
 DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
 
 #: The host a customer's SPF record includes to authorise MateMail's
@@ -345,12 +351,14 @@ DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
 #: exists only to list sending IPs, which is the one thing an include target
 #: should do (DEC-056).
 SPF_INCLUDE_DOMAIN = env("SPF_INCLUDE_DOMAIN", default="_spf.matemail.online")
+LEGACY_SPF_INCLUDE_DOMAIN = env("LEGACY_SPF_INCLUDE_DOMAIN", default="_spf.matemail.online")
 
 #: The hostname serving the Outlook Autodiscover compatibility endpoint.
 #: Customers point an `_autodiscover._tcp` SRV record at it; it is one
 #: central host, never a per-customer hostname, because a per-customer name
 #: would need a per-customer certificate (DEC-057).
 AUTODISCOVER_HOST = env("AUTODISCOVER_HOST", default="autodiscover.matemail.online")
+LEGACY_AUTODISCOVER_HOST = env("LEGACY_AUTODISCOVER_HOST", default="autodiscover.matemail.online")
 
 # Frontend URLs
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")

@@ -28,8 +28,11 @@ set -euo pipefail
 umask 077
 
 HOST="${MAIL_CERT_HOSTNAME:-mx.matemail.online}"
+# Renewal identity is distinct from the hostnames covered by the certificate.
+CERT_NAME="${MAIL_CERT_NAME:-$HOST}"
+MAIL_CERT_EXTRA_HOSTNAMES="${MAIL_CERT_EXTRA_HOSTNAMES:-}"
 VOLUME="${MAIL_TLS_VOLUME:-matemail_native_tls}"
-LIVE="/etc/letsencrypt/live/${HOST}"
+LIVE="/etc/letsencrypt/live/${CERT_NAME}"
 POSTFIX_CONTAINER="${POSTFIX_CONTAINER:-matemail-native-postfix}"
 DOVECOT_CONTAINER="${DOVECOT_CONTAINER:-matemail-native-dovecot}"
 
@@ -48,8 +51,10 @@ die() { log "FAILED: $*" >&2; exit 1; }
 # Confirm the certificate actually covers the name Django will verify. A
 # certificate for the wrong host would install cleanly and fail only at the
 # first send, with a TLS error that points nowhere useful.
-openssl x509 -in "$LIVE/fullchain.pem" -noout -checkhost "$HOST" > /dev/null \
-    || die "$LIVE/fullchain.pem is not valid for $HOST"
+for hostname in "$HOST" ${MAIL_CERT_EXTRA_HOSTNAMES}; do
+    openssl x509 -in "$LIVE/fullchain.pem" -noout -checkhost "$hostname" > /dev/null \
+        || die "$LIVE/fullchain.pem is not valid for $hostname"
+done
 
 MOUNT=$(docker volume inspect "$VOLUME" --format '{{.Mountpoint}}') \
     || die "no such volume: $VOLUME"

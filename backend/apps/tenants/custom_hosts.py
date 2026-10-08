@@ -114,6 +114,15 @@ def cname_target() -> str:
     )
 
 
+def _accepted_cname_targets() -> set[str]:
+    """Legacy CNAMEs remain usable until every customer hostname has migrated."""
+    new_target = cname_target()
+    legacy = getattr(settings, "CUSTOM_HOST_LEGACY_CNAME_TARGETS", ("custom.matemail.online",))
+    if isinstance(legacy, str):
+        legacy = [part.strip() for part in legacy.split(",") if part.strip()]
+    return {new_target, *(normalize_hostname(item) for item in legacy)}
+
+
 def _lookup_cname_targets(hostname: str) -> tuple[list[str], str]:
     """
     Resolve the direct CNAME target.
@@ -171,6 +180,8 @@ def check_custom_hostname_dns(hostname: str) -> tuple[bool, str, str]:
 
     if expected in targets:
         return True, "Custom hostname verified.", ""
+    if any(value in _accepted_cname_targets() for value in targets):
+        return True, "Custom hostname verified (legacy CNAME target; migration can be scheduled).", ""
 
     return (
         False,
