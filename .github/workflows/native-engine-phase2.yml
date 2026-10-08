@@ -50,10 +50,17 @@ jobs:
             done < /etc/passwd
             test "$found_vmail" = 1 && test "$found_dovecot" = 1 && test "$found_dovenull" = 1
           '
-          # This checks the *real* production configuration only when the
-          # entrypoint can render its synthetic nonproduction DB credentials.
+          # These temporary self-signed certificates exist only on this GitHub
+          # runner, never touch the live Native TLS volume or a customer key.
+          mkdir -p "$RUNNER_TEMP/phase2-tls"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj '/CN=phase2.invalid' \
+            -keyout "$RUNNER_TEMP/phase2-tls/key.pem" \
+            -out "$RUNNER_TEMP/phase2-tls/cert.pem" >/dev/null 2>&1
+          # Real production Dovecot config, fake credentials and throwaway TLS.
           docker run -d --name phase2-dove \
             --network none \
+            -v "$RUNNER_TEMP/phase2-tls:/etc/ssl/mail:ro" \
             -e NATIVE_DOVECOT_DB_PASSWORD=Phase2FakeDatabaseCredential123 \
             -e NATIVE_POSTBOX_MASTER_PASSWORD=Phase2FakeMasterCredential123 \
             -v "$PWD/deploy/native-engine/dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro" \
