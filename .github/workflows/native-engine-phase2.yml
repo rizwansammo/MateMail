@@ -81,7 +81,7 @@ jobs:
           set -euo pipefail
           docker run --rm --entrypoint postconf matemail-phase2-postfix:ci mail_version | grep -E '3\\.10\\.'
           docker run --rm --entrypoint sh matemail-phase2-postfix:ci -c \
-            'dpkg-query -W -f="${Version}\\n" postfix postfix-pgsql; id postfix'
+            'dpkg-query -W postfix postfix-pgsql; id postfix'
           docker run --rm \
             -v "$PWD/deploy/native-engine/postfix/main.cf:/etc/postfix/main.cf:ro" \
             -v "$PWD/deploy/native-engine/postfix/master.cf:/etc/postfix/master.cf:ro" \
