@@ -60,14 +60,16 @@ class SpfIncludeTest(TestCase):
         spf = _label(_expected_records(self.domain), "SPF")
         self.assertEqual("v=spf1 include:_spf.example.test ~all", spf["expected_value"])
 
-    def test_dmarc_still_reports_to_the_product_domain(self):
+    def test_dmarc_reports_to_a_real_native_receive_mailbox(self):
         """
-        `MAIL_DOMAIN` and `SPF_INCLUDE_DOMAIN` are now different values, and
-        only SPF moved. A change that pointed DMARC reports at the SPF host
-        would send them to a name with no mailbox behind it.
+        Product apex matemail.pro has no MX. Reporting to dmarc@matemail.pro
+        silently loses reports. E4 provisioned an actual receiving-only
+        mailbox under mail.matemail.pro, whose MX is published.
         """
         dmarc = _label(_expected_records(self.domain), "DMARC")
-        self.assertIn("rua=mailto:dmarc@matemail.pro", dmarc["expected_value"])
+        self.assertIn(
+            "rua=mailto:dmarc@mail.matemail.pro", dmarc["expected_value"]
+        )
 
     def test_mx_is_unchanged(self):
         mx = _label(_expected_records(self.domain), "MX")
