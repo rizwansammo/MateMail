@@ -7,7 +7,7 @@ After=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/MateMailBackup/matemail-backup.sh
+ExecStart=/opt/MateMail/backup/matemail-backup.sh
 # The script stages unencrypted dumps and secrets under /run; these keep that
 # staging root-only even if the umask in the script were ever lost.
 UMask=0077

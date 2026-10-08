@@ -1,9 +1,9 @@
 # MateMail — PRODUCTION compose (MateServer)
 #
-# This file is self-contained. It is copied to /opt/MateMail/docker-compose.yml
+# This file is self-contained. It is copied to /opt/MateMail/app/docker-compose.yml
 # and needs no repository checkout, no build context and no override file.
 #
-#   /opt/MateMail/
+#   /opt/MateMail/app/
 #   ├── docker-compose.yml   ← this file
 #   ├── .env                 ← secrets and per-host settings, never committed
 #   └── secrets/
@@ -117,7 +117,7 @@ x-backend-env: &backend_env
   # (it must equal the engine's NATIVE_POSTBOX_PUSH_SECRET). Not INTERNAL_API_SECRET.
   POSTBOX_PUSH_INGEST_SECRET: ${POSTBOX_PUSH_INGEST_SECRET:-}
   # Android (FCM HTTP v1). The credentials file is a service-account JSON kept
-  # outside Git at /opt/MateMail/secrets/postbox-fcm.json, readable by uid 10001
+  # outside Git at /opt/MateMail/app/secrets/postbox-fcm.json, readable by uid 10001
   # (the image's user). Only backend and celery-worker mount it, read-only
   # (their `volumes:` below), so the path to set is
   #   POSTBOX_FCM_CREDENTIALS_FILE=/run/secrets/postbox-fcm.json
@@ -196,7 +196,7 @@ services:
     # The PostBox FCM credentials (POSTBOX_FCM_* above), read-only. Mounted
     # here and in celery-worker, and nowhere else.
     volumes:
-      - /opt/MateMail/secrets/postbox-fcm.json:/run/secrets/postbox-fcm.json:ro
+      - /opt/MateMail/app/secrets/postbox-fcm.json:/run/secrets/postbox-fcm.json:ro
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -239,7 +239,7 @@ services:
     environment: *backend_env
     # The PostBox FCM credentials, read-only: pushes are sent from here.
     volumes:
-      - /opt/MateMail/secrets/postbox-fcm.json:/run/secrets/postbox-fcm.json:ro
+      - /opt/MateMail/app/secrets/postbox-fcm.json:/run/secrets/postbox-fcm.json:ro
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

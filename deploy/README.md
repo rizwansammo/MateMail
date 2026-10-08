@@ -15,8 +15,8 @@ Mail Engine are both deployed; what follows is how they are configured.
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | Production stack. Copied to `/opt/MateMail/docker-compose.yml`. |
-| `env.production.example` | Template for `/opt/MateMail/.env`. Placeholders only. |
+| `docker-compose.yml` | Production stack. Copied to `/opt/MateMail/app/docker-compose.yml`. |
+| `env.production.example` | Template for `/opt/MateMail/app/.env`. Placeholders only. |
 | `nginx/portal.matemail.online.conf` | Host-nginx vhost **template** for the MateMail Workspace, and the legacy `app.matemail.online` redirect. Declares the shared upstreams. Not installed by P2. |
 | `nginx/postbox.matemail.online.conf` | Host-nginx vhost **template** for MateMail PostBox. |
 | `nginx/platform.matemail.online.conf` | Host-nginx vhost **template** for the Platform Console. |
@@ -68,7 +68,7 @@ ghcr.io/rizwansammo/matemail-backend:<commit-sha>
 ghcr.io/rizwansammo/matemail-frontend:<commit-sha>
 ```
 
-Built by CI, never on the server. Selected by two variables in `/opt/MateMail/.env`:
+Built by CI, never on the server. Selected by two variables in `/opt/MateMail/app/.env`:
 
 ```
 MATEMAIL_BACKEND_IMAGE
@@ -93,15 +93,15 @@ Run this only when bootstrapping MateMail on a new production host. Existing Mat
 
 ```bash
 sudo mkdir -p /opt/MateMail/backups
-sudo chown "$USER":"$USER" /opt/MateMail /opt/MateMail/backups
+sudo chown "$USER":"$USER" /opt/MateMail/app /opt/MateMail/backups
 
 # 1. Compose file (copied from the repo on a workstation, or fetched by hand).
 #    The server needs no git checkout — the image is the artifact.
-scp deploy/docker-compose.yml mateserver:/opt/MateMail/docker-compose.yml
+scp deploy/docker-compose.yml mateserver:/opt/MateMail/app/docker-compose.yml
 
 # 2. Environment. Create it in place with 0600 and fill it in on the server;
 #    generate secrets there, never on a laptop.
-install -m 0600 /dev/null /opt/MateMail/.env
+install -m 0600 /dev/null /opt/MateMail/app/.env
 #    then paste the contents of deploy/env.production.example and complete it
 #    python3 -c "import secrets; print(secrets.token_urlsafe(50))"
 
@@ -163,7 +163,7 @@ private path, and the checks required before every engine upgrade.
 Resulting layout — deliberately minimal:
 
 ```
-/opt/MateMail/
+/opt/MateMail/app/
 ├── docker-compose.yml          (installed by each deploy, from that release's commit)
 ├── .env                        (0600)
 ├── .env.bak.<timestamp>        (last 10, written by each deploy)
@@ -202,7 +202,7 @@ before backend, worker and beat start.
 ### Rolling back
 
 ```bash
-cd /opt/MateMail
+cd /opt/MateMail/app
 # Either restore the previous env file:
 cp .env.bak.<timestamp> .env
 # or set the two image variables to the previous SHA by hand, then:

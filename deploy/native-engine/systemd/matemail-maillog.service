@@ -7,7 +7,7 @@ After=docker.service
 
 [Service]
 Type=simple
-ExecStart=/opt/MateMailNative/deploy/native-engine/scripts/mail-log-shipper.sh matemail-native-postfix matemail-native-dovecot
+ExecStart=/opt/MateMail/engine/deploy/native-engine/scripts/mail-log-shipper.sh matemail-native-postfix matemail-native-dovecot
 Restart=always
 RestartSec=5
 # The file carries envelope addresses and client IPs, so it is not world

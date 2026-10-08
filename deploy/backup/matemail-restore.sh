@@ -18,7 +18,7 @@
 set -euo pipefail
 umask 077
 
-ENV_FILE="${MATEMAIL_BACKUP_ENV:-/opt/MateMailBackup/backup.env}"
+ENV_FILE="${MATEMAIL_BACKUP_ENV:-/opt/MateMail/backup/backup.env}"
 [ -r "$ENV_FILE" ] || { echo "restore: cannot read $ENV_FILE" >&2; exit 78; }
 set -a
 # shellcheck disable=SC1090
@@ -26,7 +26,7 @@ set -a
 set +a
 
 SNAPSHOT=latest
-WORKDIR=/opt/MateMailBackup/drill
+WORKDIR=/var/tmp/matemail-restore-drill
 KEEP=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -45,7 +45,7 @@ die()  { printf '  FAIL  %s\n' "$*" >&2; exit 1; }
 # A drill that can be pointed at the live system by editing one argument is a
 # loaded gun. These are the paths that would destroy something.
 case "$WORKDIR" in
-    /|/opt/MateMail|/opt/MateMail/*|/opt/MateMailNative|/opt/MateMailNative/*|/var/lib/docker|/var/lib/docker/*|/etc|/etc/*)
+    /|/opt/MateMail|/opt/MateMail/*|/var/lib/docker|/var/lib/docker/*|/etc|/etc/*)
         die "refusing to use $WORKDIR: that is production, not a drill area" ;;
 esac
 

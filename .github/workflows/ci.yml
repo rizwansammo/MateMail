@@ -209,7 +209,7 @@ jobs:
         run: |
           python3 -c "import base64, os; print('DKIM_ENCRYPTION_KEY=' + base64.urlsafe_b64encode(os.urandom(32)).decode())" >> "$GITHUB_ENV"
 
-      # Placeholders only. The real values live in /opt/MateMail/.env on the
+      # Placeholders only. The real values live in /opt/MateMail/app/.env on the
       # server; this proves the file is structurally valid and that every
       # required variable is actually declared.
       - name: docker compose config
@@ -267,7 +267,7 @@ jobs:
           FCM_MOUNT_SERVICES = {'backend', 'celery-worker'}
           FCM_MOUNT = {
               'type': 'bind',
-              'source': '/opt/MateMail/secrets/postbox-fcm.json',
+              'source': '/opt/MateMail/app/secrets/postbox-fcm.json',
               'target': '/run/secrets/postbox-fcm.json',
               'read_only': True,
           }

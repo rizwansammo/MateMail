@@ -106,7 +106,7 @@ class DeployRevisionSyncTest(SimpleTestCase):
     # ── staging, validation, atomic install ─────────────────────────────────
 
     def test_the_candidate_is_staged_rather_than_written_over_the_live_file(self):
-        self.assertIn("/opt/MateMail/.deploy/", self.script + str(self.steps))
+        self.assertIn("/opt/MateMail/app/.deploy/", self.script + str(self.steps))
         self.assertIn("docker-compose.${IMAGE_TAG}.yml", self.script)
 
     def test_the_candidate_is_validated_before_it_is_installed(self):

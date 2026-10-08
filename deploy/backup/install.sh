@@ -7,7 +7,7 @@
 set -euo pipefail
 umask 077
 
-DEST=/opt/MateMailBackup
+DEST=/opt/MateMail/backup
 SRC="$(cd "$(dirname "$0")" && pwd)"
 
 [ "$(id -u)" = 0 ] || { echo "install: must run as root" >&2; exit 1; }

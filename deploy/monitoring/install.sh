@@ -7,7 +7,7 @@
 set -euo pipefail
 umask 077
 
-DEST=/opt/MateMailMonitoring
+DEST=/opt/MateMail/monitoring
 SRC="$(cd "$(dirname "$0")" && pwd)"
 TEXTFILE=/var/lib/node_exporter/textfile_collector
 
@@ -64,9 +64,9 @@ chmod 600 "$DEST/.env"
 # The collector needs the backup repository's location to report snapshot age.
 cat > "$DEST/collector.env" <<'ENV'
 # Passed to the collector by systemd. Paths only; no secrets live here.
-NATIVE_DIR=/opt/MateMailNative/deploy/native-engine
-MATEMAIL_DIR=/opt/MateMail
-BACKUP_ENV=/opt/MateMailBackup/backup.env
+NATIVE_DIR=/opt/MateMail/engine/deploy/native-engine
+MATEMAIL_DIR=/opt/MateMail/app
+BACKUP_ENV=/opt/MateMail/backup/backup.env
 MATEMAIL_HEALTH_URL=http://127.0.0.1:8020/api/internal/health/
 MAIL_HOSTNAME=mx.matemail.pro
 MAIL_DOMAIN=matemail.pro

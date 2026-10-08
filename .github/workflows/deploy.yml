@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEPLOY_DIR: /opt/MateMail
+  DEPLOY_DIR: /opt/MateMail/app
   BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend
   FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend
 
@@ -206,7 +206,7 @@ jobs:
           command_timeout: 5m
           script: |
             set -euo pipefail
-            DEPLOY_DIR=/opt/MateMail
+            DEPLOY_DIR=/opt/MateMail/app
             cd "$DEPLOY_DIR"
 
             if ! docker system info > /dev/null 2>&1; then
@@ -340,7 +340,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
           source: candidate/docker-compose.${{ inputs.image_tag }}.yml
-          target: /opt/MateMail/.deploy/
+          target: /opt/MateMail/app/.deploy/
           strip_components: 1
           overwrite: true
 
@@ -352,7 +352,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
           source: candidate/custom-hosts.${{ inputs.image_tag }}.tar.gz
-          target: /opt/MateMail/.deploy/
+          target: /opt/MateMail/app/.deploy/
           strip_components: 1
           overwrite: true
 
@@ -373,7 +373,7 @@ jobs:
           script: |
             set -Eeuo pipefail
 
-            DEPLOY_DIR=/opt/MateMail
+            DEPLOY_DIR=/opt/MateMail/app
             BACKEND_IMAGE=ghcr.io/rizwansammo/matemail-backend
             FRONTEND_IMAGE=ghcr.io/rizwansammo/matemail-frontend
             STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
