@@ -28,7 +28,7 @@
 set -euo pipefail
 umask 077
 
-ENV_FILE="${MATEMAIL_BACKUP_ENV:-/opt/MateMailBackup/backup.env}"
+ENV_FILE="${MATEMAIL_BACKUP_ENV:-/opt/MateMail/backup/backup.env}"
 [ -r "$ENV_FILE" ] || { echo "backup: cannot read $ENV_FILE" >&2; exit 78; }
 set -a
 # shellcheck disable=SC1090
