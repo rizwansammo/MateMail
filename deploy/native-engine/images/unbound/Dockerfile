@@ -31,7 +31,6 @@ RUN apk add --no-cache ca-certificates openssl libevent expat bind-tools drill \
     && mkdir -p /var/lib/unbound \
     && chown 100:101 /var/lib/unbound
 COPY --from=builder /stage/usr/sbin/ /usr/sbin/
-COPY --from=builder /stage/usr/bin/ /usr/bin/
 COPY --from=builder /stage/usr/lib/ /usr/lib/
 RUN set -eux; \
     unbound -V | grep 'Version 1.26.1'; \
