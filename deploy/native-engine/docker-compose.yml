@@ -451,6 +451,8 @@ services:
           # The certificate MateMail validates must match the name it dialled.
           # This alias is the whole reason EMAIL_HOST stays `mx.matemail.online`
           # and no container IP ever enters a settings file.
+          - mx.matemail.pro
+          # Retained until E5: existing app clients can still connect during cutover.
           - mx.matemail.online
     # Deliberately no `ports:`. Publishing 587 would rebuild the exact hole
     # that NE7, not NE6, is allowed to open.
