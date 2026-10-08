@@ -336,6 +336,9 @@ NATIVE_ENGINE_API_SECRET = env("NATIVE_ENGINE_API_SECRET", default="")
 
 # MateMail platform settings
 MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.pro")
+# Aggregate reports use the already-MX-enabled Native Engine sender subdomain.
+# The public apex matemail.pro has no MX: never point report mail there.
+DMARC_REPORT_ADDRESS = env("DMARC_REPORT_ADDRESS", default="dmarc@mail.matemail.pro")
 MAIL_HOSTNAME = env("MAIL_HOSTNAME", default="mx.matemail.pro")
 LEGACY_MAIL_HOSTNAME = env("LEGACY_MAIL_HOSTNAME", default="mx.matemail.online")
 DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
