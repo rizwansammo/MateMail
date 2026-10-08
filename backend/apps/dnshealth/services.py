@@ -22,8 +22,8 @@ def _legacy_autodiscover_host():
     return getattr(settings, "LEGACY_AUTODISCOVER_HOST", "autodiscover.matemail.online")
 
 
-def _mail_domain():
-    return getattr(settings, "MAIL_DOMAIN", "matemail.online")
+def _dmarc_report_address():
+    return getattr(settings, "DMARC_REPORT_ADDRESS", "dmarc@mail.matemail.pro")
 
 
 def _spf_include():
@@ -48,7 +48,7 @@ def _expected_records(domain_obj):
     d = domain_obj.domain
     sel = domain_obj.dkim_selector
     mh = _mail_hostname()
-    md = _mail_domain()
+    dmarc_report_address = _dmarc_report_address()
     spf = _spf_include()
     pub = domain_obj.dkim_public_key
 
@@ -79,7 +79,7 @@ def _expected_records(domain_obj):
         {
             "record_type": "TXT",
             "host": f"_dmarc.{d}",
-            "expected_value": f"v=DMARC1; p=none; rua=mailto:dmarc@{md}",
+            "expected_value": f"v=DMARC1; p=none; rua=mailto:{dmarc_report_address}",
             "label": "DMARC",
             "match_contains": "v=DMARC1",
             "record_prefix": "v=DMARC1",
