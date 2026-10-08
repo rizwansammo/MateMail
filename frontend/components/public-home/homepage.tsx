@@ -21,8 +21,8 @@ import { api, ApiError } from "@/lib/api";
 
 type ThemeChoice = "light" | "dark" | "system";
 
-const WORKSPACE_URL = "https://portal.matemail.online/login";
-const POSTBOX_URL = "https://postbox.matemail.online/login";
+const WORKSPACE_URL = "https://portal.matemail.pro/login";
+const POSTBOX_URL = "https://postbox.matemail.pro/login";
 const THEME_STORAGE_KEY = "matemail.public.theme";
 
 const themeOptions: Array<{
@@ -651,13 +651,13 @@ export function MateMailPublicHome() {
                 <span className="mm-access-type">ORGANIZATION ADMINISTRATOR</span>
                 <h3>Open MateMail Workspace</h3>
                 <p>Manage your organization&apos;s domains, mailboxes and email configuration.</p>
-                <strong>portal.matemail.online <ArrowUpRight aria-hidden="true" /></strong>
+                <strong>portal.matemail.pro <ArrowUpRight aria-hidden="true" /></strong>
               </a>
               <a className="mm-access-card" href={POSTBOX_URL}>
                 <span className="mm-access-type">MAILBOX USER</span>
                 <h3>Open MateMail PostBox</h3>
                 <p>Open your inbox, send mail and manage your mailbox.</p>
-                <strong>postbox.matemail.online <ArrowUpRight aria-hidden="true" /></strong>
+                <strong>postbox.matemail.pro <ArrowUpRight aria-hidden="true" /></strong>
               </a>
             </div>
           </div>

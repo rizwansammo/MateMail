@@ -111,7 +111,7 @@ const POSTBOX_HOST = process.env.NEXT_PUBLIC_POSTBOX_HOST ?? "";
 const WORKSPACE_HOST = process.env.NEXT_PUBLIC_WORKSPACE_HOST ?? "";
 
 /** The canonical public product website. */
-const PUBLIC_HOST = process.env.NEXT_PUBLIC_PUBLIC_HOST ?? "matemail.online";
+const PUBLIC_HOST = process.env.NEXT_PUBLIC_PUBLIC_HOST ?? "matemail.pro";
 
 function isPublicHost(host: string): boolean {
   return host === PUBLIC_HOST.toLowerCase();

@@ -31,13 +31,13 @@ ALLOWED_HOSTS = ["*"] if CUSTOM_HOSTS_DYNAMIC_ENABLED else list(CUSTOM_HOST_FIXE
 
 CUSTOM_HOST_CNAME_TARGET = env(
     "CUSTOM_HOST_CNAME_TARGET",
-    default="custom.matemail.online",
+    default="custom.matemail.pro",
 ).strip().rstrip(".").lower()
 CUSTOM_HOST_RESERVED_SUFFIXES = tuple(
     item.strip().rstrip(".").lower()
     for item in env(
         "CUSTOM_HOST_RESERVED_SUFFIXES",
-        default="matemail.online",
+        default="matemail.online,matemail.pro",
     ).split(",")
     if item.strip()
 )

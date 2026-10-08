@@ -42,12 +42,12 @@ x-backend-env: &backend_env
   # unchanged — that is what lets the frontend middleware tell the two
   # consoles apart, so Django must accept it or every Platform API call is
   # a 400 DisallowedHost.
-  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-portal.matemail.online,postbox.matemail.online,platform.matemail.online,autodiscover.matemail.online,app.matemail.online,matemail.online,backend,localhost,127.0.0.1}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-portal.matemail.pro,postbox.matemail.pro,platform.matemail.pro,autodiscover.matemail.pro,matemail.pro,www.matemail.pro,portal.matemail.online,postbox.matemail.online,platform.matemail.online,autodiscover.matemail.online,app.matemail.online,matemail.online,backend,localhost,127.0.0.1}
   # Customer-owned Hub/PostBox hostnames. Phase 4 activates the database-backed
   # Host/surface guards; unknown hosts remain fail-closed.
   CUSTOM_HOSTS_DYNAMIC_ENABLED: ${CUSTOM_HOSTS_DYNAMIC_ENABLED:-True}
-  CUSTOM_HOST_CNAME_TARGET: ${CUSTOM_HOST_CNAME_TARGET:-custom.matemail.online}
-  CUSTOM_HOST_RESERVED_SUFFIXES: ${CUSTOM_HOST_RESERVED_SUFFIXES:-matemail.online}
+  CUSTOM_HOST_CNAME_TARGET: ${CUSTOM_HOST_CNAME_TARGET:-custom.matemail.pro}
+  CUSTOM_HOST_RESERVED_SUFFIXES: ${CUSTOM_HOST_RESERVED_SUFFIXES:-matemail.online,matemail.pro}
   CUSTOM_HOST_PROVISIONER_SECRET: ${CUSTOM_HOST_PROVISIONER_SECRET:-}
   CUSTOM_HOST_CACHE_TTL: ${CUSTOM_HOST_CACHE_TTL:-30}
   DATABASE_URL: postgres://${POSTGRES_USER:-matemail}:${POSTGRES_PASSWORD:?required}@postgres:5432/${POSTGRES_DB:-matemail}
@@ -79,11 +79,11 @@ x-backend-env: &backend_env
   # (domains.E001) rather than silently storing signing keys in plaintext.
   # Must be distinct from DJANGO_SECRET_KEY.
   DKIM_ENCRYPTION_KEY: ${DKIM_ENCRYPTION_KEY:?required}
-  FRONTEND_URL: ${FRONTEND_URL:-https://portal.matemail.online}
-  APP_BASE_URL: ${APP_BASE_URL:-https://portal.matemail.online}
+  FRONTEND_URL: ${FRONTEND_URL:-https://portal.matemail.pro}
+  APP_BASE_URL: ${APP_BASE_URL:-https://portal.matemail.pro}
   # Where a platform administrator signs in. The organization login uses it
   # to redirect staff rather than issuing them a tenant session.
-  PLATFORM_BASE_URL: ${PLATFORM_BASE_URL:-https://platform.matemail.online}
+  PLATFORM_BASE_URL: ${PLATFORM_BASE_URL:-https://platform.matemail.pro}
   # ── MateMail PostBox (P11) ────────────────────────────────────────────────
   # PostBox reaches Dovecot through the Native Engine's private gateway, which
   # carries the `mx.matemail.online` alias — so the certificate validated is
@@ -123,7 +123,7 @@ x-backend-env: &backend_env
   POSTBOX_WNS_TENANT_ID: ${POSTBOX_WNS_TENANT_ID:-}
   POSTBOX_WNS_CLIENT_ID: ${POSTBOX_WNS_CLIENT_ID:-}
   POSTBOX_WNS_CLIENT_SECRET: ${POSTBOX_WNS_CLIENT_SECRET:-}
-  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://portal.matemail.online,https://postbox.matemail.online,https://platform.matemail.online,https://matemail.online}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://portal.matemail.pro,https://postbox.matemail.pro,https://platform.matemail.pro,https://matemail.pro,https://portal.matemail.online,https://postbox.matemail.online,https://platform.matemail.online,https://matemail.online}
   JWT_ACCESS_TOKEN_LIFETIME_MINUTES: ${JWT_ACCESS_TOKEN_LIFETIME_MINUTES:-15}
   JWT_REFRESH_TOKEN_LIFETIME_DAYS: ${JWT_REFRESH_TOKEN_LIFETIME_DAYS:-7}
   EMAIL_HOST: ${EMAIL_HOST:?required}
@@ -289,13 +289,13 @@ services:
       NODE_ENV: production
       # NEXT_PUBLIC_* are compiled into the bundle at image build time; these are
       # present only for any server-side read and must match the build args.
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://portal.matemail.online}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://portal.matemail.online}
-      NEXT_PUBLIC_WORKSPACE_HOST: ${NEXT_PUBLIC_WORKSPACE_HOST:-portal.matemail.online}
-      NEXT_PUBLIC_PLATFORM_HOST: ${NEXT_PUBLIC_PLATFORM_HOST:-platform.matemail.online}
-      NEXT_PUBLIC_POSTBOX_HOST: ${NEXT_PUBLIC_POSTBOX_HOST:-postbox.matemail.online}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-https://portal.matemail.pro}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://portal.matemail.pro}
+      NEXT_PUBLIC_WORKSPACE_HOST: ${NEXT_PUBLIC_WORKSPACE_HOST:-portal.matemail.pro}
+      NEXT_PUBLIC_PLATFORM_HOST: ${NEXT_PUBLIC_PLATFORM_HOST:-platform.matemail.pro}
+      NEXT_PUBLIC_POSTBOX_HOST: ${NEXT_PUBLIC_POSTBOX_HOST:-postbox.matemail.pro}
       # Retired hostnames. Redirected to the Workspace host, never served.
-      NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS: ${NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS:-app.matemail.online}
+      NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS: ${NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS:-app.matemail.online,portal.matemail.online}
     depends_on:
       backend: {condition: service_healthy}
     ports:

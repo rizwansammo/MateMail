@@ -87,7 +87,7 @@ def validate_customer_hostname(value: str) -> str:
     reserved_suffixes = getattr(
         settings,
         "CUSTOM_HOST_RESERVED_SUFFIXES",
-        ("matemail.online",),
+        ("matemail.online", "matemail.pro"),
     )
     for suffix in reserved_suffixes:
         suffix = normalize_hostname(suffix)
