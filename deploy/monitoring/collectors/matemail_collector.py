@@ -64,7 +64,7 @@ SENDER_DOMAIN = os.environ.get("SENDER_DOMAIN", "mail.matemail.pro")
 # The product apex has no inbound mailbox MX; the transactional sender does.
 MX_CHECK_DOMAIN = os.environ.get("MX_CHECK_DOMAIN", SENDER_DOMAIN)
 # Let's Encrypt certificate lineage differs from the hostname after E2 dual-SAN cutover.
-MAIL_CERT_NAME = os.environ.get("MAIL_CERT_NAME", "matemail-mail-dual")
+MAIL_CERT_NAME = os.environ.get("MAIL_CERT_NAME", "matemail-mail-pro")
 DKIM_SELECTOR = os.environ.get("DKIM_SELECTOR", "mm1")
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "169.58.114.252")
 
