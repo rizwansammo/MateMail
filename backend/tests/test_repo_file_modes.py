@@ -66,6 +66,8 @@ MUST_BE_EXECUTABLE = {
 
 # These are invoked in a way that supplies the mode, or never executed at all.
 MUST_NOT_BE_EXECUTABLE = {
+    "deploy/native-engine/scripts/security-upgrade-preflight.sh":
+        "read-only operator preflight invoked explicitly with bash; no executable bit needed",
     "deploy/backup/lib/guard.sh":
         "sourced, never executed; install.sh places it 0600 deliberately",
     "deploy/native-engine/images/dovecot/entrypoint.sh":
