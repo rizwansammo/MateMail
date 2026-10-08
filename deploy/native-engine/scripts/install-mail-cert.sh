@@ -11,7 +11,8 @@
 #   Django verifies the certificate and the hostname — its SMTP backend uses
 #   ssl.create_default_context() — so a self-signed certificate is not an
 #   option either. It has to be the real Let's Encrypt certificate for
-#   mx.matemail.online, which certbot already maintains on this host.
+#   mx.matemail.pro and the temporary legacy mx.matemail.online SAN, which
+#   Certbot maintains under the matemail-mail-dual renewal lineage.
 #
 # WHY A COPY RATHER THAN A BIND MOUNT
 #   Mounting /etc/letsencrypt into the container would hand the mail engine
@@ -27,10 +28,10 @@
 set -euo pipefail
 umask 077
 
-HOST="${MAIL_CERT_HOSTNAME:-mx.matemail.online}"
+HOST="${MAIL_CERT_HOSTNAME:-mx.matemail.pro}"
 # Renewal identity is distinct from the hostnames covered by the certificate.
-CERT_NAME="${MAIL_CERT_NAME:-$HOST}"
-MAIL_CERT_EXTRA_HOSTNAMES="${MAIL_CERT_EXTRA_HOSTNAMES:-}"
+CERT_NAME="${MAIL_CERT_NAME:-matemail-mail-dual}"
+MAIL_CERT_EXTRA_HOSTNAMES="${MAIL_CERT_EXTRA_HOSTNAMES:-mx.matemail.online}"
 VOLUME="${MAIL_TLS_VOLUME:-matemail_native_tls}"
 LIVE="/etc/letsencrypt/live/${CERT_NAME}"
 POSTFIX_CONTAINER="${POSTFIX_CONTAINER:-matemail-native-postfix}"
