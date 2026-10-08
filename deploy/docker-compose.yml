@@ -47,6 +47,7 @@ x-backend-env: &backend_env
   # Host/surface guards; unknown hosts remain fail-closed.
   CUSTOM_HOSTS_DYNAMIC_ENABLED: ${CUSTOM_HOSTS_DYNAMIC_ENABLED:-True}
   CUSTOM_HOST_CNAME_TARGET: ${CUSTOM_HOST_CNAME_TARGET:-custom.matemail.pro}
+  CUSTOM_HOST_LEGACY_CNAME_TARGETS: ${CUSTOM_HOST_LEGACY_CNAME_TARGETS:-custom.matemail.online}
   CUSTOM_HOST_RESERVED_SUFFIXES: ${CUSTOM_HOST_RESERVED_SUFFIXES:-matemail.online,matemail.pro}
   CUSTOM_HOST_PROVISIONER_SECRET: ${CUSTOM_HOST_PROVISIONER_SECRET:-}
   CUSTOM_HOST_CACHE_TTL: ${CUSTOM_HOST_CACHE_TTL:-30}
@@ -68,11 +69,14 @@ x-backend-env: &backend_env
   NATIVE_ENGINE_API_SECRET: ${NATIVE_ENGINE_API_SECRET:-}
   MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
   MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.online}
+  LEGACY_MAIL_HOSTNAME: ${LEGACY_MAIL_HOSTNAME:-mx.matemail.online}
   # The host a customer's SPF includes. Deliberately not MAIL_DOMAIN —
   # see DEC-056.
   SPF_INCLUDE_DOMAIN: ${SPF_INCLUDE_DOMAIN:-_spf.matemail.online}
+  LEGACY_SPF_INCLUDE_DOMAIN: ${LEGACY_SPF_INCLUDE_DOMAIN:-_spf.matemail.online}
   # The Autodiscover compatibility host customers aim an SRV record at.
   AUTODISCOVER_HOST: ${AUTODISCOVER_HOST:-autodiscover.matemail.online}
+  LEGACY_AUTODISCOVER_HOST: ${LEGACY_AUTODISCOVER_HOST:-autodiscover.matemail.online}
   DKIM_SELECTOR: ${DKIM_SELECTOR:-mm1}
   # INTERIM (DEC-007r, removed in P4): encrypts the DKIM private keys Django
   # still stores. Required — `manage.py check --deploy` fails without it
