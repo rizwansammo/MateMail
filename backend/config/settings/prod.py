@@ -101,7 +101,7 @@ EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=10)
 # has an authentication story independent of customer mail and a reputation
 # problem on one cannot sink the other.
 DEFAULT_FROM_EMAIL = env(
-    "DEFAULT_FROM_EMAIL", default="MateMail <noreply@mail.matemail.online>"
+    "DEFAULT_FROM_EMAIL", default="MateMail <noreply@mail.matemail.pro>"
 )
 SERVER_EMAIL = env("SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
 
