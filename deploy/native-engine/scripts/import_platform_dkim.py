@@ -5,7 +5,7 @@ NE6 one-time utility: adopt an EXISTING DKIM private key into the Native Engine.
 WHY THIS EXISTS AT ALL
     The engine's normal lifecycle is that it generates its own keys and nothing
     ever hands it private material (DEC-007r). NE6 needs one deliberate
-    exception. `mm1._domainkey.mail.matemail.online` is already published in
+    exception. `mm1._domainkey.mail.matemail.pro` is already published in
     public DNS and already signing MateMail's transactional mail through
     Mailcow. Generating a fresh key would mean a DNS change, and a window in
     which mail is signed with a key the world has not seen yet. Adopting the
@@ -36,7 +36,7 @@ NEVER LOGGED
 
 USAGE (inside the API container, key on stdin)
     docker exec -i matemail-native-api python3 /tmp/import_platform_dkim.py \
-        --domain mail.matemail.online --selector mm1 \
+        --domain mail.matemail.pro --selector mm1 \
         --expect-public-sha256 <hex> < key.pem
 """
 from __future__ import annotations
