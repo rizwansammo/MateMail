@@ -60,6 +60,7 @@ jobs:
           # Real production Dovecot config, fake credentials and throwaway TLS.
           docker run -d --name phase2-dove \
             --network none \
+            --tmpfs /run/dovecot-auth:rw,mode=0775 \
             -v "$RUNNER_TEMP/phase2-tls:/etc/ssl/mail:ro" \
             -e NATIVE_DOVECOT_DB_PASSWORD=Phase2FakeDatabaseCredential123 \
             -e NATIVE_POSTBOX_MASTER_PASSWORD=Phase2FakeMasterCredential123 \
@@ -68,6 +69,7 @@ jobs:
             matemail-phase2-dovecot:ci
           sleep 3
           docker exec phase2-dove doveconf -n >/dev/null
+          docker exec phase2-dove /bin/sh -c 'test -S /run/dovecot-auth/auth-client'
           docker inspect phase2-dove --format '{{.State.Status}}' | grep -q running
       - name: Build candidate Postfix 3.10 (never push)
         run: |
