@@ -48,7 +48,11 @@ def _expected_records(domain_obj):
     d = domain_obj.domain
     sel = domain_obj.dkim_selector
     mh = _mail_hostname()
-    dmarc_report_address = _dmarc_report_address()
+    dmarc_value = "v=DMARC1; p=none"
+    if getattr(settings, "DMARC_AGGREGATE_REPORTING_ENABLED", False):
+        # Optional platform-wide feature: external reporting authorization is
+        # set up once for the receiver domain, never once per tenant domain.
+        dmarc_value += f"; rua=mailto:{_dmarc_report_address()}"
     spf = _spf_include()
     pub = domain_obj.dkim_public_key
 
