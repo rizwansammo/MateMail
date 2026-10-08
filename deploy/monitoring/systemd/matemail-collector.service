@@ -12,8 +12,8 @@ After=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/MateMailMonitoring/collectors/matemail_collector.py
-EnvironmentFile=-/opt/MateMailMonitoring/collector.env
+ExecStart=/opt/MateMail/monitoring/collectors/matemail_collector.py
+EnvironmentFile=-/opt/MateMail/monitoring/collector.env
 # The collector reads a restic password FILE path from backup.env; the file
 # itself stays 0600 and is never read into a metric.
 UMask=0022
