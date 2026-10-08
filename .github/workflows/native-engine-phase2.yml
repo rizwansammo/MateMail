@@ -79,7 +79,7 @@ jobs:
       - name: Validate Postfix Debian 13 package and production config
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint postconf matemail-phase2-postfix:ci mail_version | grep -E '3\\.10\\.'
+          docker run --rm --entrypoint postconf matemail-phase2-postfix:ci mail_version | grep -F '3.10.'
           docker run --rm --entrypoint sh matemail-phase2-postfix:ci -c \
             'dpkg-query -W postfix postfix-pgsql; id postfix'
           docker run --rm \
