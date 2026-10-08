@@ -36,7 +36,7 @@ class SieveDeploymentContractTest(SimpleTestCase):
         self.assertIn("server dovecot dovecot:4190", gateway)
         self.assertNotIn(":4190:4190", native_compose)
         self.assertIn("POSTBOX_SIEVE_STARTTLS: ${POSTBOX_SIEVE_STARTTLS:-True}", app_compose)
-        self.assertIn("POSTBOX_SIEVE_TLS_SERVER_NAME: ${POSTBOX_SIEVE_TLS_SERVER_NAME:-mx.matemail.online}", app_compose)
+        self.assertIn("POSTBOX_SIEVE_TLS_SERVER_NAME: ${POSTBOX_SIEVE_TLS_SERVER_NAME:-mx.matemail.pro}", app_compose)
 
     def test_no_new_engine_network_or_image_build_is_needed(self):
         image = source("deploy", "native-engine", "images", "dovecot", "Dockerfile")
