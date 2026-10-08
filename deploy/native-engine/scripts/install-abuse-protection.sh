@@ -34,7 +34,7 @@ fail2ban-client --version 2>/dev/null | head -1 | sed 's/^/  /'
 log "installing the mail log shipper"
 mkdir -p /var/log/matemail
 chmod 750 /var/log/matemail
-SHIPPER=/opt/MateMailNative/deploy/native-engine/scripts/mail-log-shipper.sh
+SHIPPER=/opt/MateMail/engine/deploy/native-engine/scripts/mail-log-shipper.sh
 # This installer normally runs FROM the deployed tree, which makes the source
 # and the destination the same path. `install` refuses that outright —
 # "are the same file", exit 1 — and the `2>/dev/null || true` that used to be
