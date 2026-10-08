@@ -72,3 +72,6 @@ def test_e4_dmarc_report_address_passes_through_compose():
     assert 'DMARC_REPORT_ADDRESS = env("DMARC_REPORT_ADDRESS", default="dmarc@mail.matemail.pro")' in base
     assert 'DMARC_REPORT_ADDRESS: ${DMARC_REPORT_ADDRESS:-dmarc@mail.matemail.pro}' in compose
     assert "DMARC_REPORT_ADDRESS=dmarc@mail.matemail.pro" in env
+    assert "DMARC_AGGREGATE_REPORTING_ENABLED=False" in env
+    assert "DMARC_AGGREGATE_REPORTING_ENABLED:" in compose
+    assert 'DMARC_AGGREGATE_REPORTING_ENABLED = env.bool("DMARC_AGGREGATE_REPORTING_ENABLED", default=False)' in base
