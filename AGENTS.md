@@ -127,17 +127,17 @@ The production VPS should not require a Git checkout of the application reposito
 
 Preferred domains:
 
-* `matemail.online` — public MateMail website
-* `portal.matemail.online` — MateMail Workspace (customer console)
-* `platform.matemail.online` — Platform Console (NetaMate staff only)
-* `app.matemail.online` — **legacy redirect to the Workspace only.**
-  Never a surface, never canonical, never a build argument.
-* `webmail.matemail.online` — webmail
-* `mx.matemail.online` — mail server hostname
+* `matemail.pro` — canonical public MateMail website
+* `hub.matemail.pro` — customer Hub (portal.matemail.pro redirects here)
+* `postbox.matemail.pro` — PostBox
+* `platform.matemail.pro` — Platform Console
+* `autodiscover.matemail.pro` — mail-client discovery
+* `mx.matemail.pro` — mail transport hostname (A and PTR)
+* `mail.matemail.pro` — dedicated native platform sender/report mailbox domain
 
-Host-native nginx is the authority for `matemail.online`,
-`portal.matemail.online`, `postbox.matemail.online` and
-`platform.matemail.online`.
+The `matemail.online` names are legacy compatibility routes **until E5**, never new
+product endpoints. Host-native nginx handles web routing; Caddy handles
+verified tenant custom hostnames.
 
 Do not introduce a second containerized nginx architecture for the MateMail SaaS app.
 
@@ -145,17 +145,15 @@ Do not introduce a second containerized nginx architecture for the MateMail SaaS
 
 ## Mail engine
 
-The current `docker-compose.mailengine.yml` is only a stub and MUST NOT be treated as a production mail server.
+The production mail engine is **MateMail Native Engine**, deployed separately
+at `/opt/MateMailNative/deploy/native-engine/` using Postfix, Dovecot, Rspamd,
+Redis, PostgreSQL and the Native provisioning/control API. The old mailcow
+stack was retired; do not reinstall or accidentally bind its volumes.
 
-The intended mail engine is mailcow unless we explicitly change that architectural decision.
-
-Do not install or deploy mailcow until the application security, ownership-verification, and deployment architecture phases have been completed.
-
-Mailcow may ultimately run on a separate dedicated mail VPS. Do not assume it will share MateServer.
-
-The Django application must communicate with the mail engine through a clearly defined adapter/API boundary.
-
-Customers must never be exposed to the mailcow administration interface.
+The Django application communicates with the mail engine through its
+adapter/API boundary. Production mail ports 25, 587 and 993 are intentionally
+published on the dedicated server IP; all other mail administration interfaces
+stay private. Never expose the Native Engine administration API publicly.
 
 ---
 
