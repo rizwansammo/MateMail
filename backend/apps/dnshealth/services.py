@@ -83,7 +83,7 @@ def _expected_records(domain_obj):
         {
             "record_type": "TXT",
             "host": f"_dmarc.{d}",
-            "expected_value": f"v=DMARC1; p=none; rua=mailto:{dmarc_report_address}",
+            "expected_value": dmarc_value,
             "label": "DMARC",
             "match_contains": "v=DMARC1",
             "record_prefix": "v=DMARC1",
