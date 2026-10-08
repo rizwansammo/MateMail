@@ -31,42 +31,69 @@ The certificate must be selected by renewal lineage, not SMTP DNS name.
 Collector config: `/opt/MateMailMonitoring/collector.env`. The existing
 `matemail-collector.timer` continues to run, no new scheduler needed.
 
-## Aggregate DMARC reporting
+## Dynamic onboarding and optional DMARC reporting
 
-Native Engine has a separate **receiving-only, login-disabled** mailbox
-`dmarc@mail.matemail.pro` with 128 MB quota under the existing
-`mail.matemail.pro` transport domain (MX 10 `mx.matemail.pro`).
-Do not use `dmarc@matemail.pro`: apex `matemail.pro` does not have an MX.
+**Normal onboarding does not require a new TXT record in the MateMail provider
+zone for each new customer domain.** Hub generates MX, SPF, DKIM, DMARC and
+optional Autodiscover instructions from the domain's actual name, its DKIM key,
+and the platform-wide SMTP/SPF configuration. There is no list of company names
+or provider-side per-customer authorization records in application code.
 
-To authorize external aggregate DMARC reports from all three owned domains,
-publish the following three **TXT** records at the Spaceship
-`matemail.pro` zone. Use `v=DMARC1` as the complete TXT value.
-Spaceship automatically appends `.matemail.pro` to each Host.
+By default (`DMARC_AGGREGATE_REPORTING_ENABLED=False`), the DNS instruction
+for any new customer domain is simply:
 
-| Host in Spaceship | Type | Value |
-| --- | --- | --- |
-| `netamate.com._report._dmarc.mail` | TXT | `v=DMARC1` |
-| `matedesk.pro._report._dmarc.mail` | TXT | `v=DMARC1` |
-| `rizwansammo.me._report._dmarc.mail` | TXT | `v=DMARC1` |
+```text
+Host: _dmarc
+Type: TXT
+Value: v=DMARC1; p=none
+```
 
-After all three authorization records are publicly verified, edit **only**
-the existing DMARC TXT record on each domain (Namecheap, Cloudflare,
-Spaceship respectively):
+This is valid DMARC, with no external aggregate report destination to authorize.
+The existing `rua` records at the three owned domains are *not* removed by
+this application change; their cleanup remains a distinct DNS edit during E5.
+Changing a domain's records must be coordinated, not inferred from the UI.
 
-| Domain | Host | Type | Complete new TXT value |
+### Future centralized aggregate reporting — one-time provider setup
+
+Native Engine already contains `dmarc@mail.matemail.pro`, a 128 MB
+receiving-only, login-disabled mailbox. The report domain
+`mail.matemail.pro` has MX `mx.matemail.pro`; the product apex
+`matemail.pro` does **not** have an MX.
+
+When aggregate ingestion, retention, abuse-volume limits and report
+authorization are operational, the platform operator may **once** publish a
+wildcard TXT under the `matemail.pro` zone:
+
+| DNS zone | Host | Type | TXT |
 | --- | --- | --- | --- |
-| `netamate.com` | `_dmarc` | TXT | `v=DMARC1; p=none; rua=mailto:dmarc@mail.matemail.pro` |
-| `matedesk.pro` | `_dmarc` | TXT | `v=DMARC1; p=none; rua=mailto:dmarc@mail.matemail.pro` |
-| `rizwansammo.me` | `_dmarc` | TXT | `v=DMARC1; p=none; rua=mailto:dmarc@mail.matemail.pro` |
+| `matemail.pro` | `*._report._dmarc.mail` | TXT | `v=DMARC1` |
 
-Do NOT add duplicate DMARC TXT records, change DKIM, delete the original
-mailbox, change policy `p=none`, or change web A records. Confirmation gate:
-authoritative DNS (not a screenshot only) shows all six changes. Then
-run a fresh MateMail DNS health sweep. The old `rua` is a separate .online
-dependency, so E5 cannot retire it until these checks pass.
+This publishes `*._report._dmarc.mail.matemail.pro`. RFC 7489 §7.1 and
+RFC 9990 permit this wildcard to authorize external aggregate reporting
+for *any* sending domain. It removes per-customer manual provider-side
+records, but **accepts reports from third parties too**. Deploy only with
+volume/rate monitoring, bounds on incoming report sizes, safe parsing and
+retention policy. DNS authorization alone neither validates the report's
+sender nor processes its contents.
 
-Authentication-Results at Gmail or Microsoft and a delivered aggregate report
-are additional deliverability/reporting checks, not established solely by DNS.
+After the wildcard is published **and tested** with arbitrary DNS names,
+and the ingestion controls are ready, set
+`DMARC_AGGREGATE_REPORTING_ENABLED=True`. The platform-wide configurable
+`DMARC_REPORT_ADDRESS` (currently `dmarc@mail.matemail.pro`) then makes
+Hub generate this record for **any** new customer domain:
+
+```text
+Host: _dmarc
+Type: TXT
+Value: v=DMARC1; p=none; rua=mailto:dmarc@mail.matemail.pro
+```
+
+Existing customers can then edit *their own* existing `_dmarc` TXT records
+if they want aggregate reporting; no additional MateMail-provider-zone record
+is needed per domain. Never add duplicate DMARC policy records.
+
+**No immediate DNS action** is required solely for E4 code and monitoring
+cleanup, and no mailbox/data deletion is authorized by this phase.
 
 ## E5 retirement gates
 
@@ -74,8 +101,10 @@ Before removing any `.online` alias, DNS record, Native domain/mailbox, old
 DKIM selector/map entry or TLS SAN:
 1. Verify 3 owned domain MX/SPF/SRV and all four custom CNAMEs resolve only
    to the new targets.
-2. Verify all reporting TXT recipients and authorization records are published,
-   the recipient mailbox exists, and no live platform sender uses .online.
+2. Ensure any existing owned-domain DMARC `rua` values referencing .online are
+   either removed while retaining `v=DMARC1; p=none`, or migrated to a proven
+   optional reporting service. Do not block ordinary onboarding on reports.
+   Confirm no live platform sender uses .online.
 3. Inventory old Native mailbox message counts, forwarders and attachment
    retention; export/archive before deleting. Confirm no client still uses
    `mx.matemail.online`.

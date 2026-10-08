@@ -39,15 +39,30 @@ def test_e4_monitor_installer_deploys_canonical_dns_expectations():
     assert "MAIL_HOSTNAME=mx.matemail.online" not in script
 
 
-@override_settings(DMARC_REPORT_ADDRESS="dmarc@mail.matemail.pro")
-def test_e4_dmarc_dns_instruction_uses_real_report_receiver():
-    domain = SimpleNamespace(domain="sample.example", dkim_selector="mm1", dkim_public_key="PUBLIC")
-    records = _expected_records(domain)
-    dmarc = next(r for r in records if r["label"] == "DMARC")
-    assert dmarc["expected_value"] == (
-        "v=DMARC1; p=none; rua=mailto:dmarc@mail.matemail.pro"
-    )
-    assert "dmarc@matemail.pro" not in dmarc["expected_value"]
+@override_settings(DMARC_AGGREGATE_REPORTING_ENABLED=False)
+def test_e4_onboarding_is_dynamic_without_external_reporting_authorization():
+    for domain_name in ("customer-a.example", "customer-b.example", "future-c.example"):
+        domain = SimpleNamespace(domain=domain_name, dkim_selector="mm1", dkim_public_key="PUBLIC")
+        records = _expected_records(domain)
+        dmarc = next(r for r in records if r["label"] == "DMARC")
+        assert dmarc["host"] == f"_dmarc.{domain_name}"
+        assert dmarc["expected_value"] == "v=DMARC1; p=none"
+        assert not any("_report._dmarc." in r["host"] for r in records)
+
+
+@override_settings(
+    DMARC_AGGREGATE_REPORTING_ENABLED=True,
+    DMARC_REPORT_ADDRESS="dmarc@mail.matemail.pro",
+)
+def test_e4_optional_central_reporting_uses_one_configured_mailbox_for_any_domain():
+    for domain_name in ("customer-a.example", "customer-b.example"):
+        domain = SimpleNamespace(domain=domain_name, dkim_selector="mm1", dkim_public_key="PUBLIC")
+        records = _expected_records(domain)
+        dmarc = next(r for r in records if r["label"] == "DMARC")
+        assert dmarc["host"] == f"_dmarc.{domain_name}"
+        assert dmarc["expected_value"] == (
+            "v=DMARC1; p=none; rua=mailto:dmarc@mail.matemail.pro"
+        )
 
 
 def test_e4_dmarc_report_address_passes_through_compose():
@@ -57,3 +72,6 @@ def test_e4_dmarc_report_address_passes_through_compose():
     assert 'DMARC_REPORT_ADDRESS = env("DMARC_REPORT_ADDRESS", default="dmarc@mail.matemail.pro")' in base
     assert 'DMARC_REPORT_ADDRESS: ${DMARC_REPORT_ADDRESS:-dmarc@mail.matemail.pro}' in compose
     assert "DMARC_REPORT_ADDRESS=dmarc@mail.matemail.pro" in env
+    assert "DMARC_AGGREGATE_REPORTING_ENABLED=False" in env
+    assert "DMARC_AGGREGATE_REPORTING_ENABLED:" in compose
+    assert 'DMARC_AGGREGATE_REPORTING_ENABLED = env.bool("DMARC_AGGREGATE_REPORTING_ENABLED", default=False)' in base

@@ -60,16 +60,16 @@ class SpfIncludeTest(TestCase):
         spf = _label(_expected_records(self.domain), "SPF")
         self.assertEqual("v=spf1 include:_spf.example.test ~all", spf["expected_value"])
 
-    def test_dmarc_reports_to_a_real_native_receive_mailbox(self):
-        """
-        Product apex matemail.pro has no MX. Reporting to dmarc@matemail.pro
-        silently loses reports. E4 provisioned an actual receiving-only
-        mailbox under mail.matemail.pro, whose MX is published.
-        """
+    def test_dmarc_does_not_require_external_reporting_for_normal_onboarding(self):
+        """Without report ingestion, standard DMARC is valid on any new domain."""
+        with override_settings(DMARC_AGGREGATE_REPORTING_ENABLED=False):
+            dmarc = _label(_expected_records(self.domain), "DMARC")
+        self.assertEqual("v=DMARC1; p=none", dmarc["expected_value"])
+
+    @override_settings(DMARC_AGGREGATE_REPORTING_ENABLED=True)
+    def test_enabled_reporting_uses_the_configured_receive_mailbox(self):
         dmarc = _label(_expected_records(self.domain), "DMARC")
-        self.assertIn(
-            "rua=mailto:dmarc@mail.matemail.pro", dmarc["expected_value"]
-        )
+        self.assertIn("rua=mailto:dmarc@mail.matemail.pro", dmarc["expected_value"])
 
     def test_mx_is_unchanged(self):
         mx = _label(_expected_records(self.domain), "MX")

@@ -339,6 +339,10 @@ MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.pro")
 # Aggregate reports use the already-MX-enabled Native Engine sender subdomain.
 # The public apex matemail.pro has no MX: never point report mail there.
 DMARC_REPORT_ADDRESS = env("DMARC_REPORT_ADDRESS", default="dmarc@mail.matemail.pro")
+# Reporting is opt-in until the central receiver is operational and externally
+# authorized. Ordinary tenant DNS onboarding must never require a provider-side
+# authorization record for each customer domain.
+DMARC_AGGREGATE_REPORTING_ENABLED = env.bool("DMARC_AGGREGATE_REPORTING_ENABLED", default=False)
 MAIL_HOSTNAME = env("MAIL_HOSTNAME", default="mx.matemail.pro")
 LEGACY_MAIL_HOSTNAME = env("LEGACY_MAIL_HOSTNAME", default="mx.matemail.online")
 DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
