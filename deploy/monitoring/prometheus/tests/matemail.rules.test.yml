@@ -174,7 +174,7 @@ tests:
   - interval: 1m
     name: certificate expiry escalates from warning to critical
     input_series:
-      - series: 'matemail_certificate_days_remaining{host="mx.matemail.online"}'
+      - series: 'matemail_certificate_days_remaining{host="mx.matemail.pro"}'
         values: '15+0x200'
     alert_rule_test:
       # 15 days: warning only. Critical is for renewal having actually failed.
@@ -186,14 +186,14 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
-              host: mx.matemail.online
+              host: mx.matemail.pro
             exp_annotations:
-              summary: "Certificate for mx.matemail.online expires in 15 days"
+              summary: "Certificate for mx.matemail.pro expires in 15 days"
 
   - interval: 1m
     name: a certificate about to expire is critical
     input_series:
-      - series: 'matemail_certificate_days_remaining{host="mx.matemail.online"}'
+      - series: 'matemail_certificate_days_remaining{host="mx.matemail.pro"}'
         values: '3+0x60'
     alert_rule_test:
       - eval_time: 30m
@@ -201,9 +201,9 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
-              host: mx.matemail.online
+              host: mx.matemail.pro
             exp_annotations:
-              summary: "Certificate for mx.matemail.online expires in 3 days"
+              summary: "Certificate for mx.matemail.pro expires in 3 days"
               description: "Automatic renewal should have happened at 30 days. It has not."
 
   # ── Exposure: the one that must not wait ─────────────────────────────────

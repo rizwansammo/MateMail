@@ -72,7 +72,7 @@ MAIL_HOSTNAME=mx.matemail.pro
 MAIL_DOMAIN=matemail.pro
 SENDER_DOMAIN=mail.matemail.pro
 MX_CHECK_DOMAIN=mail.matemail.pro
-MAIL_CERT_NAME=matemail-mail-dual
+MAIL_CERT_NAME=matemail-mail-pro
 DKIM_SELECTOR=mm1
 PUBLIC_IP=169.58.114.252
 ENV
