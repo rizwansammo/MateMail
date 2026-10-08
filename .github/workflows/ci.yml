@@ -409,12 +409,12 @@ jobs:
           context: ./frontend
           push: true
           build-args: |
-            NEXT_PUBLIC_API_URL=https://portal.matemail.pro
-            NEXT_PUBLIC_APP_URL=https://portal.matemail.pro
-            NEXT_PUBLIC_WORKSPACE_HOST=portal.matemail.pro
+            NEXT_PUBLIC_API_URL=https://hub.matemail.pro
+            NEXT_PUBLIC_APP_URL=https://hub.matemail.pro
+            NEXT_PUBLIC_WORKSPACE_HOST=hub.matemail.pro
             NEXT_PUBLIC_PLATFORM_HOST=platform.matemail.pro
             NEXT_PUBLIC_POSTBOX_HOST=postbox.matemail.pro
-            NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS=app.matemail.online,portal.matemail.online
+            NEXT_PUBLIC_LEGACY_WORKSPACE_HOSTS=app.matemail.online,portal.matemail.online,portal.matemail.pro
           tags: |
             ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
             ${{ env.FRONTEND_IMAGE }}:main
