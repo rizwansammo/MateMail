@@ -58,9 +58,13 @@ BACKUP_ENV = os.environ.get("BACKUP_ENV", "/opt/MateMailBackup/backup.env")
 MATEMAIL_HEALTH_URL = os.environ.get(
     "MATEMAIL_HEALTH_URL", "http://127.0.0.1:8020/api/internal/health/")
 
-MAIL_HOSTNAME = os.environ.get("MAIL_HOSTNAME", "mx.matemail.online")
-MAIL_DOMAIN = os.environ.get("MAIL_DOMAIN", "matemail.online")
-SENDER_DOMAIN = os.environ.get("SENDER_DOMAIN", "mail.matemail.online")
+MAIL_HOSTNAME = os.environ.get("MAIL_HOSTNAME", "mx.matemail.pro")
+MAIL_DOMAIN = os.environ.get("MAIL_DOMAIN", "matemail.pro")
+SENDER_DOMAIN = os.environ.get("SENDER_DOMAIN", "mail.matemail.pro")
+# The product apex has no inbound mailbox MX; the transactional sender does.
+MX_CHECK_DOMAIN = os.environ.get("MX_CHECK_DOMAIN", SENDER_DOMAIN)
+# Let's Encrypt certificate lineage differs from the hostname after E2 dual-SAN cutover.
+MAIL_CERT_NAME = os.environ.get("MAIL_CERT_NAME", "matemail-mail-dual")
 DKIM_SELECTOR = os.environ.get("DKIM_SELECTOR", "mm1")
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "169.58.114.252")
 
@@ -818,7 +822,7 @@ def sec_backups():
 
 def sec_tls():
     out = run(["openssl", "x509", "-enddate", "-noout", "-in",
-               "/etc/letsencrypt/live/%s/fullchain.pem" % MAIL_HOSTNAME])
+               "/etc/letsencrypt/live/%s/fullchain.pem" % MAIL_CERT_NAME])
     when = out.split("=", 1)[1].strip()
     secs = try_run(["date", "-d", when, "+%s"]).strip()
     if secs.isdigit():
@@ -848,7 +852,7 @@ def sec_dns_identity():
     how a mail system quietly stops being deliverable, and it is checked
     without changing anything.
     """
-    mx = _dig("MX", MAIL_DOMAIN)
+    mx = _dig("MX", MX_CHECK_DOMAIN)
     metric("matemail_dns_mx_correct",
            1 if MAIL_HOSTNAME in mx else 0, {},
            "1 when the domain's MX points at the expected mail host")

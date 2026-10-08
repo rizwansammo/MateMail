@@ -68,9 +68,11 @@ NATIVE_DIR=/opt/MateMailNative/deploy/native-engine
 MATEMAIL_DIR=/opt/MateMail
 BACKUP_ENV=/opt/MateMailBackup/backup.env
 MATEMAIL_HEALTH_URL=http://127.0.0.1:8020/api/internal/health/
-MAIL_HOSTNAME=mx.matemail.online
-MAIL_DOMAIN=matemail.online
-SENDER_DOMAIN=mail.matemail.online
+MAIL_HOSTNAME=mx.matemail.pro
+MAIL_DOMAIN=matemail.pro
+SENDER_DOMAIN=mail.matemail.pro
+MX_CHECK_DOMAIN=mail.matemail.pro
+MAIL_CERT_NAME=matemail-mail-dual
 DKIM_SELECTOR=mm1
 PUBLIC_IP=169.58.114.252
 ENV
