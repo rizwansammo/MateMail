@@ -20,7 +20,7 @@ RUN set -eux; \
     tar -xzf unbound.tar.gz; \
     cd "unbound-${UNBOUND_VERSION}"; \
     ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
-        --with-ssl --with-libevent --with-libexpat --with-pthreads; \
+        --with-ssl --with-libevent --with-libexpat=/usr --with-pthreads; \
     make -j2; \
     make DESTDIR=/stage install
 
