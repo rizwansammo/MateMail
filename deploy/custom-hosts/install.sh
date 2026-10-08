@@ -24,7 +24,7 @@ case "${1:-}" in
 esac
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-DEPLOY_DIR=/opt/MateMail
+DEPLOY_DIR=/opt/MateMail/app
 ENV_FILE="$DEPLOY_DIR/.env"
 RUNTIME_DIR=/etc/matemail
 RUNTIME_ENV="$RUNTIME_DIR/custom-host-provisioner.env"
