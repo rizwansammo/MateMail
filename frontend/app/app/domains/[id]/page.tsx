@@ -80,14 +80,14 @@ function recordHelp(record: DNSRecord) {
   if (record.record_type === "SRV") {
     return "Optional. Helps Outlook and other mail apps configure the mailbox automatically. Email still sends and receives without this record.";
   }
-  if (record.record_type === "MX") return "Routes incoming email for this domain to MateMail.";
+  if (record.record_type === "MX") return "Routes incoming email for this domain to MateMail. A working legacy .online MX can remain during the transition; replace it only after the new mail host is verified.";
   if (record.host.startsWith("_dmarc")) return "Publishes the policy receiving servers use for email authentication results.";
   if (record.host.includes("._domainkey")) {
     return record.expected_value.includes("<pending>")
       ? "MateMail is preparing the DKIM value. You do not need to add this record until the value is ready."
       : "Publishes the public key used to verify signed outgoing email.";
   }
-  if (record.expected_value.startsWith("v=spf1")) return "Authorizes MateMail to send email for this domain.";
+  if (record.expected_value.startsWith("v=spf1")) return "Authorizes MateMail to send email for this domain. Edit the existing SPF TXT record; never publish two separate v=spf1 records.";
   return "";
 }
 
@@ -138,6 +138,20 @@ function displayFields(record: DNSRecord, domain: string): DisplayField[] {
   ];
 }
 
+function dnsMigrationState(record: DNSRecord): string | null {
+  const canonical = record.expected_value.toLowerCase();
+  const detected = record.detected_value.toLowerCase();
+  const relevant = record.record_type === "MX" ||
+    record.record_type === "SRV" ||
+    (record.record_type === "TXT" && canonical.startsWith("v=spf1"));
+  if (!relevant || !canonical.includes(".matemail.pro")) return null;
+  if (detected.includes(".matemail.online") && !detected.includes(".matemail.pro") &&
+      record.status === "verified") return "Old detected — still working. Migrate when ready.";
+  if (record.status === "verified") return "New verified";
+  if (record.status === "failed" || record.status === "missing") return "Missing / mismatched";
+  return "Pending DNS verification";
+}
+
 function displayStatus(record: DNSRecord) {
   if (record.status === "verified") return "Verified";
   if (record.status === "failed") return "Failed";
@@ -175,6 +189,12 @@ function RecordRow({ record, domain }: { record: DNSRecord; domain: string }) {
         </span>
         <PortalStatus value={displayStatus(record)} />
       </div>
+
+      {dnsMigrationState(record) && (
+        <p className="portal-detected" role="status">
+          DNS migration: {dnsMigrationState(record)}
+        </p>
+      )}
 
       <div className="portal-dns-fields">
         {fields.map((field) => (
