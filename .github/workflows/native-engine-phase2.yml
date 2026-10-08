@@ -1,0 +1,147 @@
+name: Native Engine Phase 2 candidate integration
+
+# Isolated candidates only. No GHCR push, no production deploy, no persistent
+# MateServer resources or secrets. Runs on ephemeral GitHub-hosted runners.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/native-engine-phase2.yml'
+      - 'deploy/native-engine/images/dovecot/**'
+      - 'deploy/native-engine/images/postfix/**'
+      - 'deploy/native-engine/images/unbound/**'
+      - 'deploy/native-engine/rspamd/**'
+      - 'deploy/native-engine/unbound/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase2-candidates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dovecot-postfix:
+    name: Candidate Dovecot + Postfix builds and contract tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build candidate Dovecot (never push)
+        run: |
+          set -euo pipefail
+          DOCKER_BUILDKIT=1 docker build --progress=plain \
+            -t matemail-phase2-dovecot:ci deploy/native-engine/images/dovecot
+      - name: Validate Dovecot 2.4.5 version, identities and master auth scheme
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint dovecot matemail-phase2-dovecot:ci --version | grep '^2.4.5'
+          docker run --rm --entrypoint doveadm matemail-phase2-dovecot:ci pw -l | grep -q 'BLF-CRYPT'
+          docker run --rm --entrypoint /bin/sh matemail-phase2-dovecot:ci -c '
+            found_vmail=; found_dovecot=; found_dovenull=
+            while IFS=: read -r user rest uid gid remainder; do
+              case "$user:$uid:$gid" in
+                vmail:5000:5000) found_vmail=1 ;;
+                dovecot:*) found_dovecot=1 ;;
+                dovenull:*) found_dovenull=1 ;;
+              esac
+            done < /etc/passwd
+            test "$found_vmail" = 1 && test "$found_dovecot" = 1 && test "$found_dovenull" = 1
+          '
+          # This checks the *real* production configuration only when the
+          # entrypoint can render its synthetic nonproduction DB credentials.
+          docker run -d --name phase2-dove \
+            --network none \
+            -e NATIVE_DOVECOT_DB_PASSWORD=Phase2FakeDatabaseCredential123 \
+            -e NATIVE_POSTBOX_MASTER_PASSWORD=Phase2FakeMasterCredential123 \
+            -v "$PWD/deploy/native-engine/dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro" \
+            -v "$PWD/deploy/native-engine/dovecot/postbox-push.lua:/etc/dovecot/postbox-push.lua:ro" \
+            matemail-phase2-dovecot:ci
+          sleep 3
+          docker exec phase2-dove doveconf -n >/dev/null
+          docker inspect phase2-dove --format '{{.State.Status}}' | grep -q running
+      - name: Build candidate Postfix 3.10 (never push)
+        run: |
+          set -euo pipefail
+          DOCKER_BUILDKIT=1 docker build --progress=plain \
+            -t matemail-phase2-postfix:ci deploy/native-engine/images/postfix
+      - name: Validate Postfix Debian 13 package and production config
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint postconf matemail-phase2-postfix:ci mail_version | grep -E '3\\.10\\.'
+          docker run --rm --entrypoint sh matemail-phase2-postfix:ci -c \
+            'dpkg-query -W -f="${Version}\\n" postfix postfix-pgsql; id postfix'
+          docker run --rm \
+            -v "$PWD/deploy/native-engine/postfix/main.cf:/etc/postfix/main.cf:ro" \
+            -v "$PWD/deploy/native-engine/postfix/master.cf:/etc/postfix/master.cf:ro" \
+            --entrypoint postconf matemail-phase2-postfix:ci -n > "$RUNNER_TEMP/postfix-effective.conf"
+          grep -q '^smtpd_sasl_type = dovecot$' "$RUNNER_TEMP/postfix-effective.conf"
+          grep -q '^milter_default_action = tempfail$' "$RUNNER_TEMP/postfix-effective.conf"
+          grep -q '^smtp_tls_security_level = dane$' "$RUNNER_TEMP/postfix-effective.conf"
+      - name: Ephemeral Docker cleanup
+        if: always()
+        run: |
+          docker logs phase2-dove --tail 30 2>&1 || true
+          docker rm -f phase2-dove >/dev/null 2>&1 || true
+
+  unbound-rspamd:
+    name: Candidate Unbound + Rspamd isolated DNSSEC/milter checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build pinned Unbound 1.26.1 from verified source (never push)
+        run: |
+          set -euo pipefail
+          DOCKER_BUILDKIT=1 docker build --progress=plain \
+            -t matemail-phase2-unbound:ci deploy/native-engine/images/unbound
+          docker run --rm --entrypoint unbound matemail-phase2-unbound:ci -V | grep 'Version 1.26.1'
+          docker run --rm --entrypoint id matemail-phase2-unbound:ci | grep 'uid=100(unbound) gid=101(unbound)'
+          docker run --rm -v "$PWD/deploy/native-engine/unbound/unbound.conf:/etc/unbound/unbound.conf:ro" \
+            --entrypoint unbound-checkconf matemail-phase2-unbound:ci /etc/unbound/unbound.conf
+      - name: Prepare isolated private candidate bridge (no published ports)
+        run: |
+          set -euo pipefail
+          docker network create --subnet 172.27.0.0/16 phase2-native-test
+          docker run -d --name phase2-unbound \
+            --network phase2-native-test --ip 172.27.0.53 \
+            -v "$PWD/deploy/native-engine/unbound/unbound.conf:/etc/unbound/unbound.conf:ro" \
+            matemail-phase2-unbound:ci
+          docker run -d --name phase2-redis --network phase2-native-test redis:7-alpine
+      - name: Test DNSSEC positive and negative paths
+        run: |
+          set -euo pipefail
+          ready=0
+          for n in $(seq 1 24); do
+            if docker exec phase2-unbound drill -D @127.0.0.1 cloudflare.com A 2>/dev/null | grep -Eqi 'flags:.* ad'; then ready=1; break; fi
+            sleep 5
+          done
+          test "$ready" = 1 || { docker logs phase2-unbound --tail 60; exit 1; }
+          docker exec phase2-unbound drill @127.0.0.1 dnssec-failed.org A 2>&1 \
+            | grep -qi 'rcode: SERVFAIL'
+      - name: Pull immutable official Rspamd 4.2.1 and validate Native config
+        run: |
+          set -euo pipefail
+          image="rspamd/rspamd:4.2.1@sha256:dfb8176e560c178faa4e18ebf9c9b43d0d60c2d2fa03f748c34a27e5c3418dc4"
+          docker pull "$image"
+          docker run --rm --entrypoint rspamd "$image" --version | grep '4.2.1'
+          docker run --rm --entrypoint id "$image" | grep -E 'uid=11333|gid=11333'
+          docker run --rm \
+            -v "$PWD/deploy/native-engine/rspamd/local.d:/etc/rspamd/local.d:ro" \
+            --entrypoint rspamadm "$image" configtest
+          docker run -d --name phase2-rspamd --network phase2-native-test \
+            -v "$PWD/deploy/native-engine/rspamd/local.d:/etc/rspamd/local.d:ro" \
+            "$image"
+          sleep 5
+          docker inspect phase2-rspamd --format '{{.State.Status}}' | grep -q running
+      - name: Ephemeral Docker cleanup
+        if: always()
+        run: |
+          for name in phase2-rspamd phase2-unbound phase2-redis; do
+            docker logs "$name" --tail 35 2>&1 || true
+            docker rm -f "$name" >/dev/null 2>&1 || true
+          done
+          docker network rm phase2-native-test >/dev/null 2>&1 || true
