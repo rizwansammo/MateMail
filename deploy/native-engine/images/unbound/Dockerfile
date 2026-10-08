@@ -20,7 +20,8 @@ RUN set -eux; \
     tar -xzf unbound.tar.gz; \
     cd "unbound-${UNBOUND_VERSION}"; \
     ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
-        --with-ssl --with-libevent --with-libexpat=/usr --with-pthreads; \
+        --with-ssl --with-libevent --with-libexpat=/usr --with-pthreads \
+        --with-chroot-dir= --with-run-dir=; \
     make -j2; \
     make DESTDIR=/stage install
 
@@ -35,6 +36,7 @@ COPY --from=builder /stage/usr/lib/ /usr/lib/
 RUN set -eux; \
     unbound -V | grep 'Version 1.26.1'; \
     unbound-anchor -a /var/lib/unbound/root.key || true; \
+    test -s /var/lib/unbound/root.key; \
     chown -R 100:101 /var/lib/unbound
 USER unbound
 EXPOSE 53/udp 53/tcp
