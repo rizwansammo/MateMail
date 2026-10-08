@@ -23,19 +23,19 @@ class PhaseE2IdentityContractTest(SimpleTestCase):
         self.assertIn("DEFAULT_FROM_EMAIL:", compose)
         self.assertIn("noreply@mail.matemail.pro", compose)
 
-    def test_postfix_identity_and_gateway_dual_alias_for_transition(self):
+    def test_postfix_identity_and_gateway_pro_alias_after_reset(self):
         postfix = self._source("deploy/native-engine/postfix/main.cf")
         gateway = self._source("deploy/native-engine/docker-compose.yml")
         self.assertIn("myhostname = mx.matemail.pro", postfix)
         self.assertIn("mydomain = matemail.pro", postfix)
         self.assertIn("          - mx.matemail.pro", gateway)
-        self.assertIn("          - mx.matemail.online", gateway)
+        self.assertNotIn("          - mx.matemail.online", gateway)
 
-    def test_mail_tls_installer_uses_dual_certificate(self):
+    def test_mail_tls_installer_uses_pro_only_certificate(self):
         installer = self._source("deploy/native-engine/scripts/install-mail-cert.sh")
         self.assertIn('HOST=', installer)
-        self.assertIn("matemail-mail-dual", installer)
-        self.assertIn("mx.matemail.online", installer)
+        self.assertIn("matemail-mail-pro", installer)
+        self.assertNotIn("mx.matemail.online", installer)
         self.assertIn("mx.matemail.pro", installer)
 
     def test_cutover_instructions_require_dns_and_ptr_gate(self):
