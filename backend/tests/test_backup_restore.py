@@ -259,7 +259,7 @@ def fake_env(tmp_path: Path) -> Path:
 @needs_bash
 @pytest.mark.parametrize(
     "workdir",
-    ["/", "/opt/MateMail", "/opt/MateMail/deploy", "/opt/MateMailNative",
+    ["/", "/opt/MateMail", "/opt/MateMail/deploy", "/opt/MateMail/engine",
      "/var/lib/docker/volumes", "/etc"],
 )
 def test_drill_refuses_to_aim_at_production(fake_env, workdir):
