@@ -22,7 +22,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/guard.sh
 . "$HERE/lib/guard.sh"
 
-ENV_FILE="${MATEMAIL_BACKUP_ENV:-/opt/MateMailBackup/backup.env}"
+ENV_FILE="${MATEMAIL_BACKUP_ENV:-/opt/MateMail/backup/backup.env}"
 [ -r "$ENV_FILE" ] || { echo "restore-mailbox: cannot read $ENV_FILE" >&2; exit 78; }
 set -a
 # shellcheck disable=SC1090
