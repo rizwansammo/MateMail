@@ -45,7 +45,7 @@ die()  { printf '  FAIL  %s\n' "$*" >&2; exit 1; }
 # A drill that can be pointed at the live system by editing one argument is a
 # loaded gun. These are the paths that would destroy something.
 case "$WORKDIR" in
-    /|/opt/MateMail|/opt/MateMail/app/*|/opt/MateMail/engine|/opt/MateMail/engine/*|/var/lib/docker|/var/lib/docker/*|/etc|/etc/*)
+    /|/opt/MateMail|/opt/MateMail/*|/var/lib/docker|/var/lib/docker/*|/etc|/etc/*)
         die "refusing to use $WORKDIR: that is production, not a drill area" ;;
 esac
 
