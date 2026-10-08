@@ -3,7 +3,7 @@ The provider SPF include, and keeping Autodiscover out of the health score.
 
 TWO SEPARATE INVARIANTS
 
-    1. Customer SPF says `include:_spf.matemail.online`, never
+    1. Customer SPF says `include:_spf.matemail.pro`, never
        `include:matemail.online`. The old form made the product's website
        domain double as the provider's SPF authorisation record, so every
        customer's ability to send depended on a TXT record living on a domain
@@ -31,6 +31,7 @@ def _label(records, label):
     raise AssertionError(f"no {label} record")
 
 
+@override_settings(MAIL_DOMAIN="matemail.pro", MAIL_HOSTNAME="mx.matemail.pro", SPF_INCLUDE_DOMAIN="_spf.matemail.pro", AUTODISCOVER_HOST="autodiscover.matemail.pro")
 class SpfIncludeTest(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -40,9 +41,9 @@ class SpfIncludeTest(TestCase):
     def test_customer_spf_includes_the_provider_host(self):
         spf = _label(_expected_records(self.domain), "SPF")
         self.assertEqual(
-            "v=spf1 include:_spf.matemail.online ~all", spf["expected_value"]
+            "v=spf1 include:_spf.matemail.pro ~all", spf["expected_value"]
         )
-        self.assertEqual("include:_spf.matemail.online", spf["match_contains"])
+        self.assertEqual("include:_spf.matemail.pro", spf["match_contains"])
 
     def test_customer_spf_never_includes_the_website_domain(self):
         """
@@ -66,13 +67,14 @@ class SpfIncludeTest(TestCase):
         would send them to a name with no mailbox behind it.
         """
         dmarc = _label(_expected_records(self.domain), "DMARC")
-        self.assertIn("rua=mailto:dmarc@matemail.online", dmarc["expected_value"])
+        self.assertIn("rua=mailto:dmarc@matemail.pro", dmarc["expected_value"])
 
     def test_mx_is_unchanged(self):
         mx = _label(_expected_records(self.domain), "MX")
-        self.assertEqual("10 mx.matemail.online", mx["expected_value"])
+        self.assertEqual("10 mx.matemail.pro", mx["expected_value"])
 
 
+@override_settings(MAIL_DOMAIN="matemail.pro", MAIL_HOSTNAME="mx.matemail.pro", SPF_INCLUDE_DOMAIN="_spf.matemail.pro", AUTODISCOVER_HOST="autodiscover.matemail.pro")
 class DiscoveryRecordTest(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -83,7 +85,7 @@ class DiscoveryRecordTest(TestCase):
         srv = _label(_discovery_records(self.domain), "AUTODISCOVER")
         self.assertEqual("SRV", srv["record_type"])
         self.assertEqual("_autodiscover._tcp.customer.example", srv["host"])
-        self.assertEqual("0 0 443 autodiscover.matemail.online.", srv["expected_value"])
+        self.assertEqual("0 0 443 autodiscover.matemail.pro.", srv["expected_value"])
 
     @override_settings(AUTODISCOVER_HOST="autodiscover.example.test")
     def test_the_target_is_configuration(self):
@@ -105,6 +107,7 @@ def _no_dns(*_args, **_kwargs):
     raise Exception("no resolver in tests")
 
 
+@override_settings(MAIL_DOMAIN="matemail.pro", MAIL_HOSTNAME="mx.matemail.pro", SPF_INCLUDE_DOMAIN="_spf.matemail.pro", AUTODISCOVER_HOST="autodiscover.matemail.pro")
 class ScoreIsolationTest(TestCase):
     """Autodiscover must not be able to move the mail health score."""
 
@@ -128,11 +131,11 @@ class ScoreIsolationTest(TestCase):
             return ["v=DMARC1; p=none;"]
         if "._domainkey." in host:
             return ["v=DKIM1; k=rsa; p=PUBKEY"]
-        return ["v=spf1 include:_spf.matemail.online ~all"]
+        return ["v=spf1 include:_spf.matemail.pro ~all"]
 
     def test_a_missing_srv_record_still_scores_one_hundred(self):
         domain = self._check_with(
-            mx=["10 mx.matemail.online"],
+            mx=["10 mx.matemail.pro"],
             txt=self._all_mail_records_present,
             srv=[],
         )
@@ -141,9 +144,9 @@ class ScoreIsolationTest(TestCase):
 
     def test_a_present_srv_record_does_not_push_the_score_past_one_hundred(self):
         domain = self._check_with(
-            mx=["10 mx.matemail.online"],
+            mx=["10 mx.matemail.pro"],
             txt=self._all_mail_records_present,
-            srv=["0 0 443 autodiscover.matemail.online."],
+            srv=["0 0 443 autodiscover.matemail.pro."],
         )
         self.assertEqual(100, domain.dns_health_score)
 
@@ -155,16 +158,16 @@ class ScoreIsolationTest(TestCase):
         domain = self._check_with(
             mx=[],
             txt=lambda host: [],
-            srv=["0 0 443 autodiscover.matemail.online."],
+            srv=["0 0 443 autodiscover.matemail.pro."],
         )
         self.assertEqual(0, domain.dns_health_score)
         self.assertEqual(DomainStatus.PENDING, domain.status)
 
     def test_the_srv_result_is_recorded_and_flagged_unscored(self):
         domain = self._check_with(
-            mx=["10 mx.matemail.online"],
+            mx=["10 mx.matemail.pro"],
             txt=self._all_mail_records_present,
-            srv=["0 0 443 autodiscover.matemail.online."],
+            srv=["0 0 443 autodiscover.matemail.pro."],
         )
         srv = DNSRecordCheck.objects.get(domain=domain, record_type="SRV")
         self.assertEqual(DNSCheckStatus.VERIFIED, srv.status)
@@ -182,9 +185,9 @@ class ScoreIsolationTest(TestCase):
         client stops looking.
         """
         domain = self._check_with(
-            mx=["10 mx.matemail.online"],
+            mx=["10 mx.matemail.pro"],
             txt=self._all_mail_records_present,
-            srv=["0 0 80 autodiscover.matemail.online."],
+            srv=["0 0 80 autodiscover.matemail.pro."],
         )
         srv = DNSRecordCheck.objects.get(domain=domain, record_type="SRV")
         self.assertEqual(DNSCheckStatus.FAILED, srv.status)
@@ -196,7 +199,7 @@ class ScoreIsolationTest(TestCase):
         provisioning. ACTIVE with a missing SRV is the proof.
         """
         domain = self._check_with(
-            mx=["10 mx.matemail.online"],
+            mx=["10 mx.matemail.pro"],
             txt=self._all_mail_records_present,
             srv=[],
         )

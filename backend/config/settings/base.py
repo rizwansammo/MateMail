@@ -335,8 +335,8 @@ NATIVE_ENGINE_API_URL = env("NATIVE_ENGINE_API_URL", default="")
 NATIVE_ENGINE_API_SECRET = env("NATIVE_ENGINE_API_SECRET", default="")
 
 # MateMail platform settings
-MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.online")
-MAIL_HOSTNAME = env("MAIL_HOSTNAME", default="mx.matemail.online")
+MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.pro")
+MAIL_HOSTNAME = env("MAIL_HOSTNAME", default="mx.matemail.pro")
 LEGACY_MAIL_HOSTNAME = env("LEGACY_MAIL_HOSTNAME", default="mx.matemail.online")
 DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
 
@@ -350,14 +350,14 @@ DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
 #: changed for one purpose without affecting the other. `_spf.matemail.online`
 #: exists only to list sending IPs, which is the one thing an include target
 #: should do (DEC-056).
-SPF_INCLUDE_DOMAIN = env("SPF_INCLUDE_DOMAIN", default="_spf.matemail.online")
+SPF_INCLUDE_DOMAIN = env("SPF_INCLUDE_DOMAIN", default="_spf.matemail.pro")
 LEGACY_SPF_INCLUDE_DOMAIN = env("LEGACY_SPF_INCLUDE_DOMAIN", default="_spf.matemail.online")
 
 #: The hostname serving the Outlook Autodiscover compatibility endpoint.
 #: Customers point an `_autodiscover._tcp` SRV record at it; it is one
 #: central host, never a per-customer hostname, because a per-customer name
 #: would need a per-customer certificate (DEC-057).
-AUTODISCOVER_HOST = env("AUTODISCOVER_HOST", default="autodiscover.matemail.online")
+AUTODISCOVER_HOST = env("AUTODISCOVER_HOST", default="autodiscover.matemail.pro")
 LEGACY_AUTODISCOVER_HOST = env("LEGACY_AUTODISCOVER_HOST", default="autodiscover.matemail.online")
 
 # Frontend URLs
@@ -383,7 +383,7 @@ PLATFORM_BASE_URL = env("PLATFORM_BASE_URL", default="http://localhost:3000")
 # The host is the gateway's network alias, which is the name on the certificate
 # Dovecot presents — so TLS verification is real verification of Dovecot, not
 # of a proxy.
-POSTBOX_IMAP_HOST = env("POSTBOX_IMAP_HOST", default="mx.matemail.online")
+POSTBOX_IMAP_HOST = env("POSTBOX_IMAP_HOST", default="mx.matemail.pro")
 POSTBOX_IMAP_PORT = env.int("POSTBOX_IMAP_PORT", default=993)
 POSTBOX_IMAP_TIMEOUT = env.int("POSTBOX_IMAP_TIMEOUT", default=20)
 POSTBOX_IMAP_VERIFY = env.bool("POSTBOX_IMAP_VERIFY", default=True)
@@ -444,7 +444,7 @@ POSTBOX_WNS_CLIENT_SECRET = env("POSTBOX_WNS_CLIENT_SECRET", default="")
 # Django's global "webmaster@localhost", which names no product and would be a
 # confusing From address in a console-backend dev message.
 DEFAULT_FROM_EMAIL = env(
-    "DEFAULT_FROM_EMAIL", default="MateMail <noreply@mail.matemail.online>"
+    "DEFAULT_FROM_EMAIL", default="MateMail <noreply@mail.matemail.pro>"
 )
 
 # ── The platform sender (P5) ─────────────────────────────────────────────────
@@ -464,7 +464,7 @@ DEFAULT_FROM_EMAIL = env(
 # sender == sasl_username, so a stolen credential cannot send as anyone else,
 # and it has its own rate limit below.
 PLATFORM_SENDER_ADDRESSES = env.list(
-    "PLATFORM_SENDER_ADDRESSES", default=["noreply@mail.matemail.online"]
+    "PLATFORM_SENDER_ADDRESSES", default=["noreply@mail.matemail.pro"]
 )
 
 # The platform sender's own hourly cap. Deliberately finite: "we trust this

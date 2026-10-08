@@ -67,15 +67,15 @@ x-backend-env: &backend_env
   # (mail_engine.E011/E012) before any customer action could.
   NATIVE_ENGINE_API_URL: ${NATIVE_ENGINE_API_URL:-}
   NATIVE_ENGINE_API_SECRET: ${NATIVE_ENGINE_API_SECRET:-}
-  MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.online}
-  MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.online}
+  MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.pro}
+  MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.pro}
   LEGACY_MAIL_HOSTNAME: ${LEGACY_MAIL_HOSTNAME:-mx.matemail.online}
   # The host a customer's SPF includes. Deliberately not MAIL_DOMAIN —
   # see DEC-056.
-  SPF_INCLUDE_DOMAIN: ${SPF_INCLUDE_DOMAIN:-_spf.matemail.online}
+  SPF_INCLUDE_DOMAIN: ${SPF_INCLUDE_DOMAIN:-_spf.matemail.pro}
   LEGACY_SPF_INCLUDE_DOMAIN: ${LEGACY_SPF_INCLUDE_DOMAIN:-_spf.matemail.online}
   # The Autodiscover compatibility host customers aim an SRV record at.
-  AUTODISCOVER_HOST: ${AUTODISCOVER_HOST:-autodiscover.matemail.online}
+  AUTODISCOVER_HOST: ${AUTODISCOVER_HOST:-autodiscover.matemail.pro}
   LEGACY_AUTODISCOVER_HOST: ${LEGACY_AUTODISCOVER_HOST:-autodiscover.matemail.online}
   DKIM_SELECTOR: ${DKIM_SELECTOR:-mm1}
   # INTERIM (DEC-007r, removed in P4): encrypts the DKIM private keys Django
@@ -92,12 +92,12 @@ x-backend-env: &backend_env
   # PostBox reaches Dovecot through the Native Engine's private gateway, which
   # carries the `mx.matemail.online` alias — so the certificate validated is
   # Dovecot's own, end to end, and no container address appears here.
-  POSTBOX_IMAP_HOST: ${POSTBOX_IMAP_HOST:-mx.matemail.online}
+  POSTBOX_IMAP_HOST: ${POSTBOX_IMAP_HOST:-mx.matemail.pro}
   POSTBOX_IMAP_PORT: ${POSTBOX_IMAP_PORT:-993}
-  POSTBOX_SIEVE_HOST: ${POSTBOX_SIEVE_HOST:-mx.matemail.online}
+  POSTBOX_SIEVE_HOST: ${POSTBOX_SIEVE_HOST:-mx.matemail.pro}
   POSTBOX_SIEVE_PORT: ${POSTBOX_SIEVE_PORT:-4190}
   POSTBOX_SIEVE_STARTTLS: ${POSTBOX_SIEVE_STARTTLS:-True}
-  POSTBOX_SIEVE_TLS_SERVER_NAME: ${POSTBOX_SIEVE_TLS_SERVER_NAME:-mx.matemail.online}
+  POSTBOX_SIEVE_TLS_SERVER_NAME: ${POSTBOX_SIEVE_TLS_SERVER_NAME:-mx.matemail.pro}
   # The Dovecot master identity. A mailbox user still signs in with their own
   # password; this is how the server keeps reading that one mailbox afterwards
   # without MateMail storing what they typed. Required: every path that needs
@@ -137,7 +137,10 @@ x-backend-env: &backend_env
   EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
   EMAIL_USE_SSL: ${EMAIL_USE_SSL:-False}
   EMAIL_TIMEOUT: ${EMAIL_TIMEOUT:-10}
-  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-MateMail <noreply@mail.matemail.online>}
+  DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-MateMail <noreply@mail.matemail.pro>}
+  # Explicit Compose passthrough: otherwise Django silently uses the stale default
+  # and the policy may reject the newly provisioned platform sender.
+  PLATFORM_SENDER_ADDRESSES: ${PLATFORM_SENDER_ADDRESSES:-noreply@mail.matemail.pro}
 
   # ── Abuse controls (P3b) ─────────────────────────────────────────────────
   # Proxy hops whose X-Forwarded-For may be trusted. Host-native nginx is one.

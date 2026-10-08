@@ -42,9 +42,9 @@ DKIM_SCRIPT = NATIVE / "scripts" / "import_platform_dkim.py"
 MAIN_CF = NATIVE / "postfix" / "main.cf"
 MASTER_CF = NATIVE / "postfix" / "master.cf"
 
-PLATFORM_DOMAIN = "mail.matemail.online"
-PLATFORM_SENDER = "noreply@mail.matemail.online"
-MAIL_HOST = "mx.matemail.online"
+PLATFORM_DOMAIN = "mail.matemail.online"  # NE6 legacy import fixture, not the new sender
+PLATFORM_SENDER = "noreply@mail.matemail.pro"
+MAIL_HOST = "mx.matemail.pro"
 DKIM_SELECTOR = "mm1"
 
 MAIL_PORTS = {25, 110, 143, 465, 587, 993, 995}
@@ -72,12 +72,12 @@ def test_the_gateway_bridges_exactly_two_networks():
 
 def test_the_gateway_carries_the_certificate_hostname_as_an_alias():
     """
-    Django dials `mx.matemail.online` and verifies the hostname. The alias is
-    why EMAIL_HOST needs no change and why no container IP ever reaches a
-    settings file.
+    Django dials `mx.matemail.pro` and verifies the hostname. The new alias
+    is required for the E2 transition, without exposing container IPs.
     """
     nets = compose()["services"]["submission-gateway"]["networks"]
     assert MAIL_HOST in nets["matemail_engine_link"]["aliases"]
+    assert "mx.matemail.online" in nets["matemail_engine_link"]["aliases"]
 
 
 def test_the_submission_gateway_never_publishes_a_host_port():
@@ -590,11 +590,8 @@ def test_no_application_module_hardcodes_an_smtp_endpoint_it_sends_through():
                 raise AssertionError(f"{path.name}:{n} dials a hardcoded host")
 
 
-def test_the_platform_identity_is_unchanged_by_ne6():
-    """
-    The whole point of preserving the DKIM key and the alias: the sender the
-    world sees, and the domain it aligns under, are exactly what they were.
-    """
+def test_the_platform_identity_matches_the_e2_sender_cutover_template():
+    """After E2 DNS validation, the staged sender and SMTP host must match."""
     example = REPO / "deploy" / "env.production.example"
     assert example.is_file(), (
         "deploy/env.production.example is committed configuration; "

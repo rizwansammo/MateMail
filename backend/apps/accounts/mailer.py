@@ -4,8 +4,8 @@ Transactional application email.
 Four messages have to reach a customer before MateMail can host any mail at
 all: verify your address, reset your password, you have been invited, and
 security notices. They are sent through **MateMail's own Mail Engine** (DEC-013)
-using a dedicated service identity, `noreply@mail.matemail.online`, over
-authenticated SMTP submission on `mx.matemail.online:587` with STARTTLS.
+using a dedicated service identity, `noreply@mail.matemail.pro`, over
+authenticated SMTP submission on `mx.matemail.pro:587` with STARTTLS.
 
 An earlier version of this module said the opposite — that these must never
 depend on MateMail's own engine and had to go through an external provider.
@@ -16,7 +16,7 @@ that cannot send a password reset while its own mail system is down is a
 platform nobody can recover an account on. Two things separate the two failure
 domains:
 
-- the sending identity lives on `mail.matemail.online`, a subdomain distinct
+- the sending identity lives on `mail.matemail.pro`, a subdomain distinct
   from every customer domain, with its own SPF, DKIM and DMARC, so a customer
   who damages their own domain's reputation cannot take account recovery with
   them;
@@ -100,7 +100,7 @@ def send_transactional(
         logger.error(
             "Transactional email (%s) NOT sent: EMAIL_HOST is unset or points at "
             "this machine. Set EMAIL_HOST to the Mail Engine's submission "
-            "hostname (mx.matemail.online:587, STARTTLS) with the platform "
+            "hostname (mx.matemail.pro:587, STARTTLS) with the platform "
             "service credential in EMAIL_HOST_USER/EMAIL_HOST_PASSWORD — see "
             "docs/DEPLOYMENT.md and DEC-013.",
             purpose,
@@ -154,7 +154,7 @@ def message_id_domain(from_address: str = "") -> str:
     """
     address = from_address or transactional_from_address()
     if "@" in address:
-        # `MateMail <noreply@mail.matemail.online>` -> mail.matemail.online
+        # `MateMail <noreply@mail.matemail.pro>` -> mail.matemail.online
         domain = address.rsplit("@", 1)[1].strip().rstrip(">").strip()
         if domain:
             return domain

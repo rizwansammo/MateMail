@@ -18,8 +18,8 @@
 
 compatibility_level = 3.6
 
-myhostname = mx.matemail.online
-mydomain = matemail.online
+myhostname = mx.matemail.pro
+mydomain = matemail.pro
 myorigin = $myhostname
 inet_interfaces = all
 # IPv4 ONLY, deliberately.
