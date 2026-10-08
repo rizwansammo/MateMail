@@ -52,9 +52,9 @@ STATE = Path(os.environ.get(
     "MATEMAIL_COLLECTOR_STATE",
     "/var/lib/matemail-monitoring/state.json"))
 
-NATIVE_DIR = os.environ.get("NATIVE_DIR", "/opt/MateMailNative/deploy/native-engine")
-MATEMAIL_DIR = os.environ.get("MATEMAIL_DIR", "/opt/MateMail")
-BACKUP_ENV = os.environ.get("BACKUP_ENV", "/opt/MateMailBackup/backup.env")
+NATIVE_DIR = os.environ.get("NATIVE_DIR", "/opt/MateMail/engine/deploy/native-engine")
+MATEMAIL_DIR = os.environ.get("MATEMAIL_DIR", "/opt/MateMail/app")
+BACKUP_ENV = os.environ.get("BACKUP_ENV", "/opt/MateMail/backup/backup.env")
 MATEMAIL_HEALTH_URL = os.environ.get(
     "MATEMAIL_HEALTH_URL", "http://127.0.0.1:8020/api/internal/health/")
 
@@ -748,7 +748,7 @@ def sec_storage():
             pass
     try:
         metric("matemail_backup_repository_bytes",
-               int(run(["du", "-sb", "/opt/MateMailBackup/repo"],
+               int(run(["du", "-sb", "/opt/MateMail/backup/repo"],
                        timeout=120).split()[0]), {},
                "Bytes used by the Restic backup repository")
     except Exception:                                   # noqa: BLE001
