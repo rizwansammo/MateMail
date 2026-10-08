@@ -10,7 +10,7 @@ do I put in these boxes?".
 | | Incoming | Outgoing |
 |---|---|---|
 | Protocol | IMAP | SMTP |
-| Server | `mx.matemail.online` | `mx.matemail.online` |
+| Server | `mx.matemail.pro` | `mx.matemail.pro` |
 | Port | **993** | **587** |
 | Encryption | **SSL/TLS** (from connect) | **STARTTLS** |
 | Authentication | Normal password | Normal password, **required** |
@@ -46,12 +46,15 @@ configuration being wrong, not the server being down.
 
 ## Certificate
 
-`mx.matemail.online`, issued by Let's Encrypt, valid for that exact name.
+`mx.matemail.pro` and the legacy `mx.matemail.online`, covered by the same valid Let's Encrypt SAN certificate.
 Clients validate it normally — there is nothing to accept manually, and a
 client prompting to trust an unknown certificate means it is not talking to
 this server.
 
 Renewal is automatic and installs into both the SMTP and IMAP services.
+Existing clients set to `mx.matemail.online` continue to work during migration;
+there is no mailbox migration or password change. PTR and outgoing SMTP
+identity may remain on the legacy hostname until coordinated provider changes.
 
 ---
 
@@ -76,14 +79,14 @@ Abuse protection, including how to release a blocked address:
 ### Automatic configuration
 
 **Outlook Autodiscover**: implemented, as a compatibility endpoint at
-`autodiscover.matemail.online`. It returns the IMAP and SMTP settings above
+`autodiscover.matemail.pro`. It returns the IMAP and SMTP settings above
 and nothing else — no Exchange, MAPI, EWS or ActiveSync, because MateMail
 does not serve those (DEC-057).
 
 A customer domain opts in with one optional DNS record:
 
 ```
-_autodiscover._tcp.<domain>.   SRV   0 0 443 autodiscover.matemail.online.
+_autodiscover._tcp.<domain>.   SRV   0 0 443 autodiscover.matemail.pro.
 ```
 
 It is optional in the real sense: mail is delivered, signed and authorised
