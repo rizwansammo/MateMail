@@ -69,6 +69,7 @@ x-backend-env: &backend_env
   NATIVE_ENGINE_API_SECRET: ${NATIVE_ENGINE_API_SECRET:-}
   MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.pro}
   DMARC_REPORT_ADDRESS: ${DMARC_REPORT_ADDRESS:-dmarc@mail.matemail.pro}
+  DMARC_AGGREGATE_REPORTING_ENABLED: ${DMARC_AGGREGATE_REPORTING_ENABLED:-False}
   MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mx.matemail.pro}
   LEGACY_MAIL_HOSTNAME: ${LEGACY_MAIL_HOSTNAME:-mx.matemail.online}
   # The host a customer's SPF includes. Deliberately not MAIL_DOMAIN —
