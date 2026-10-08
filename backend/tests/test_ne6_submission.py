@@ -77,7 +77,7 @@ def test_the_gateway_carries_the_certificate_hostname_as_an_alias():
     """
     nets = compose()["services"]["submission-gateway"]["networks"]
     assert MAIL_HOST in nets["matemail_engine_link"]["aliases"]
-    assert "mx.matemail.online" in nets["matemail_engine_link"]["aliases"]
+    assert "mx.matemail.online" not in nets["matemail_engine_link"]["aliases"]
 
 
 def test_the_submission_gateway_never_publishes_a_host_port():
