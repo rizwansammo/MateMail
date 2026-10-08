@@ -132,7 +132,7 @@ Secrets are generated on the server and never committed:
 python3 -c "import secrets; print(secrets.token_urlsafe(40))"
 ```
 
-Production runtime directory is `/opt/MateMailNative/`, following the NetaMate
+Production runtime directory is `/opt/MateMail/engine/deploy/native-engine/`, following the NetaMate
 convention: config under `/opt/<AppName>/`, `.env` at 0600, named volumes, no
 source checkout and no builds on the VPS. It must **not** live inside
 `/opt/mailcow-dockerized` or `/opt/MateMail`.
@@ -363,7 +363,7 @@ NE4 runtime   schema v3 -> v4, 10/10 healthy, adapter 26/26 verified through
 ```
 
 ```
-runtime                /opt/MateMailNative/   (no git checkout on the VPS;
+runtime                /opt/MateMail/engine/deploy/native-engine/   (no git checkout on the VPS;
                        .env is 0600 root:root, secrets generated server-side)
 NE1 release            commit a303b7b, CI green, images run 34730345422
 NE1 services           10 / 10 healthy, restart-recovered, isolated,
@@ -394,7 +394,7 @@ production engine      Native Engine. MAIL_ENGINE_ADAPTER="native".
 ### Deploying — always use `./deploy.sh`
 
 ```bash
-cd /opt/MateMailNative/deploy/native-engine
+cd /opt/MateMail/engine/deploy/native-engine
 ./deploy.sh          # bring the stack up with current configuration
 ./deploy.sh pull     # pull pinned images first, then up
 ```
@@ -435,7 +435,7 @@ NATIVE_POSTBOX_MASTER_PASSWORD  the Dovecot master identity PostBox reads
 `NATIVE_POSTBOX_MASTER_PASSWORD` is the one credential that can open any
 mailbox, so it is worth being explicit about what it is and is not:
 
-* It lives only in `/opt/MateMailNative/.env` (root-owned, 0600) and in the
+* It lives only in `/opt/MateMail/engine/deploy/native-engine/.env` (root-owned, 0600) and in the
   MateMail application's own runtime environment. It is never in Git, never in
   an image, and never reaches a browser.
 * It is a *service* identity. A PostBox user still signs in with their own
