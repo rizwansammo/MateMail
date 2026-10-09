@@ -115,7 +115,7 @@ def parse_xml(raw: bytes) -> ParsedReport:
         raise InvalidReport("Not a DMARC aggregate report")
     meta = _single(root, "report_metadata")
     policy = _single(root, "policy_published")
-    reporter = _text(meta, "org_name")
+    reporter = _text(meta, "org_name", limit=253)
     report_id = _text(meta, "report_id")
     domain = _domain(_text(policy, "domain"))
     window = _single(meta, "date_range")
