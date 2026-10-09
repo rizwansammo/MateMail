@@ -1,0 +1,69 @@
+name: Phase 3 stage vetted Native Engine images on MateServer
+
+# Manually limited to this upgrade branch and immutable candidate tag.
+# Stages image layers only. NO container recreation or production env change.
+on:
+  push:
+    branches: [security/native-engine-upgrade-phase1-20261008]
+    paths: ['.github/workflows/native-engine-phase3-stage.yml']
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: native-engine-phase3-stage
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    if: github.repository == 'rizwansammo/MateMail' && github.ref == 'refs/heads/security/native-engine-upgrade-phase1-20261008'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: phase3-ece64bd2273a9b24ed502932ba93fc6bd62061cc
+    steps:
+      - name: Verify all three candidate tags exist in GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+          unset GHCR_TOKEN
+          for component in unbound dovecot postfix; do
+            docker manifest inspect "ghcr.io/rizwansammo/matemail-native-$component:$RELEASE_TAG" >/dev/null
+            echo "GHCR_CANDIDATE_EXISTS $component"
+          done
+          docker logout ghcr.io >/dev/null
+      - name: Pull three private candidate images onto MateServer (do not run)
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          RELEASE_TAG: phase3-ece64bd2273a9b24ed502932ba93fc6bd62061cc
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: RELEASE_TAG,GHCR_TOKEN,GHCR_USER
+          timeout: 60s
+          command_timeout: 12m
+          script: |
+            set -Eeuo pipefail
+            DOCKER_CONFIG="$(mktemp -d)"
+            export DOCKER_CONFIG
+            cleanup() {
+              docker logout ghcr.io >/dev/null 2>&1 || true
+              rm -rf "$DOCKER_CONFIG"
+            }
+            trap cleanup EXIT
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+            unset GHCR_TOKEN
+            for component in unbound dovecot postfix; do
+              image="ghcr.io/rizwansammo/matemail-native-$component:$RELEASE_TAG"
+              docker pull "$image" >/dev/null
+              docker image inspect "$image" --format 'STAGED {{.RepoTags}} {{.Id}}'
+            done
+            echo 'CANDIDATE_IMAGES_STAGED_NO_CONTAINERS_CHANGED'
