@@ -51,8 +51,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #
 # musl wheels exist for all three dependencies, so there is no compiler in
 # the final image and nothing to strip afterwards.
+# Patch and pin installer tooling within the native API image as well.
+# A vulnerable installer or build backend is still part of the shipped image.
+RUN python -m pip install --no-cache-dir --upgrade \
+        "pip==26.2.1" "setuptools==84.0.0"
+
 COPY deploy/native-engine/images/api/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
+RUN python -m pip install --no-cache-dir -r /tmp/requirements.txt \
+ && python -m pip check \
  && rm -f /tmp/requirements.txt
 
 # ── The uid is load-bearing ─────────────────────────────────────────────────
