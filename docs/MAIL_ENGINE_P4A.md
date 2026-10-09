@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Historical Mailcow-era architecture study; do not deploy from these instructions. Current engine is the standalone Native Engine under `/opt/MateMail/engine/deploy/native-engine/`.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # Mail Engine — P4A Architecture and Integration Design
 
 **Product:** MateMail

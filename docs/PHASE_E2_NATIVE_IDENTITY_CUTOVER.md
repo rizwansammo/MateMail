@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Historical identity cutover report. Current platform sender is `noreply@mail.matemail.pro`; mail identity `mx.matemail.pro`; do not re-enable old domains.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # Phase E2 — Native Mail Identity Cutover (runbook)
 
 ## Target / rollback boundary

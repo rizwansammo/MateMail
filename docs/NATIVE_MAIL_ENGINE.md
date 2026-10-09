@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** The original NE0–NE8 migration proposal below is a chronological design/rollout history. Its opening claim that Mailcow is live is obsolete. Production uses MateMail Native Engine on `/opt/MateMail/engine/deploy/native-engine/` with Postfix 3.10.13, Dovecot 2.4.5, Rspamd 4.2.1 and Unbound 1.26.1 as of 2026-10-09.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # NATIVE_MAIL_ENGINE.md — MateMail Native Engine Migration (NE0–NE8)
 
 **Status:** **NE0 COMPLETE** · **NE1 IN PROGRESS** (2026-09-13) — foundation built and

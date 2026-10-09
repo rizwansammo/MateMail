@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Architectural decision history: decisions reflect the date they were written and may have been superseded by the Fresh reset and Native Engine deployment. Current topology and identity live in the canonical architecture and deployment guides.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # DECISIONS.md — Architecture and Product Decisions
 
 **Product:** MateMail  

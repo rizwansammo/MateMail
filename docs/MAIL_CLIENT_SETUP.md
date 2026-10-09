@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Current user-facing mail settings are `mx.matemail.pro`, IMAPS 993/SSL and SMTP submission 587/STARTTLS. The retired hostnames are not certified by this document.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # MateMail — Mail Client Settings
 
 Written for whoever configures a mail client, and for support answering "what

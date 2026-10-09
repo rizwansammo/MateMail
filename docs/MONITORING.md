@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Operational commands below have been aligned to consolidated `/opt/MateMail` paths and `.pro` DNS identity. Independent Azure DR is separate from the local Restic offsite warning; monitoring rules may still contain this legacy alert name.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # MateMail — Monitoring and Observability
 
 Written for the operator on call. It answers, in order: how do I look at this,
@@ -57,7 +64,7 @@ node-exporter v1.8.2.
 **Retention:** 15 days *and* 2 GB, whichever comes first. Both are set because
 a time-only retention is a promise about disk that depends on how many series
 appear later. Change `PROM_RETENTION_TIME` / `PROM_RETENTION_SIZE` in
-`/opt/MateMailMonitoring/.env` and restart Prometheus.
+`/opt/MateMail/monitoring/.env` and restart Prometheus.
 
 ---
 
@@ -86,7 +93,7 @@ Grafana credentials: user `admin`; the password was generated at install and
 never printed. Read it on the server:
 
 ```bash
-sudo grep GRAFANA_ADMIN_PASSWORD /opt/MateMailMonitoring/.env
+sudo grep GRAFANA_ADMIN_PASSWORD /opt/MateMail/monitoring/.env
 ```
 
 Do not create a public monitoring domain. Monitoring data says which services
@@ -154,7 +161,7 @@ Full definitions: `deploy/monitoring/prometheus/rules/matemail.rules.yml`.
 
 | Alert | Means | First thing to check |
 |---|---|---|
-| `NativeServiceDown` | A Native component stopped | `docker compose ps` in `/opt/MateMailNative/deploy/native-engine` |
+| `NativeServiceDown` | A Native component stopped | `docker compose ps` in `/opt/MateMail/engine/deploy/native-engine` |
 | `NativeEngineNotFullyHealthy` | Not 10/10 | `matemail_native_service_healthy == 0` |
 | `NativeApiDown` | Control plane cannot provision | `docker logs matemail-native-api` |
 | `NativeSchemaMismatch` | Deployed schema ≠ code requirement | `/ready` on the Native API |
@@ -176,12 +183,15 @@ Full definitions: `deploy/monitoring/prometheus/rules/matemail.rules.yml`.
 
 ### Permanent, known, deliberate
 
-`BackupOffsiteNotConfigured` is **currently firing and expected to**. The only
-copy of the backups is on this host. That survives deletion, corruption and
-operator error but not the loss of the machine: retention, not disaster
-recovery. It re-notifies weekly rather than daily so it stays visible without
-teaching anyone to ignore alerts. Do not silence it — fix it by setting
-`OFFSITE_REPOSITORY` in `/opt/MateMailBackup/backup.env`.
+The MateMail-local `BackupOffsiteNotConfigured` alert may correctly fire because
+`OFFSITE_REPOSITORY` is not configured on the **local Restic job**. The local
+repository is on the same VPS. This does **not** mean there is no system-wide
+offsite backup: the independent daily MateServer Azure Blob DR job includes the
+MateMail databases, mail data and current configuration. Check both timers:
+`matemail-backup.timer` **and** `mateserver-backup.timer`.
+
+This alert should not be silenced without changing its intended scope to
+"local Restic offsite not configured"; never misstate Azure DR as absent.
 
 ### Why the `for:` windows exist
 
@@ -218,7 +228,7 @@ Rules:
 ## 8. Inspecting mail queues
 
 ```bash
-cd /opt/MateMailNative/deploy/native-engine
+cd /opt/MateMail/engine/deploy/native-engine
 
 # Human readable
 docker compose exec -T postfix postqueue -p </dev/null
@@ -242,12 +252,12 @@ wants explaining.
 ## 9. Verifying DNS, PTR and TLS
 
 ```bash
-dig +short MX matemail.online              # -> mx.matemail.online
-dig +short A  mx.matemail.online           # -> 169.58.114.252
-dig +short -x 169.58.114.252               # -> mx.matemail.online
-dig +short TXT mail.matemail.online        # -> v=spf1 ...
-dig +short TXT mm1._domainkey.mail.matemail.online
-dig +short TXT _dmarc.mail.matemail.online
+dig +short MX matemail.pro              # -> mx.matemail.pro
+dig +short A  mx.matemail.pro           # -> 169.58.114.252
+dig +short -x 169.58.114.252               # -> mx.matemail.pro
+dig +short TXT mail.matemail.pro        # -> v=spf1 ...
+dig +short TXT mm1._domainkey.mail.matemail.pro
+dig +short TXT _dmarc.mail.matemail.pro
 
 # The NE1 DNSSEC property, through the engine's own resolver
 docker exec matemail-native-unbound dig @127.0.0.1 +dnssec cloudflare.com A | grep flags
@@ -255,7 +265,7 @@ docker exec matemail-native-unbound dig @127.0.0.1 dnssec-failed.org A | grep st
 #   expected: "ad" present on the first, SERVFAIL on the second
 
 # Certificate
-openssl x509 -enddate -noout -in /etc/letsencrypt/live/mx.matemail.online/fullchain.pem
+openssl x509 -enddate -noout -in /etc/letsencrypt/live/matemail-mail-pro/fullchain.pem
 systemctl list-timers certbot.timer
 ```
 
@@ -270,7 +280,7 @@ systemctl list-timers matemail-backup.timer
 systemctl status matemail-backup.service
 journalctl -u matemail-backup.service -n 50
 
-set -a; . /opt/MateMailBackup/backup.env; set +a
+set -a; . /opt/MateMail/backup/backup.env; set +a
 restic snapshots
 restic check
 ```
@@ -290,7 +300,7 @@ represented anywhere in this monitoring. See `docs/TODO.md`.
 ```bash
 ss -lntu | grep -vE '127\.0\.0\.1|\[::1\]'      # what is publicly bound
 ufw status numbered
-cd /opt/MateMailNative/deploy/native-engine && docker compose ps --format '{{.Ports}}'
+cd /opt/MateMail/engine/deploy/native-engine && docker compose ps --format '{{.Ports}}'
 ```
 
 Expected public ports are **22, 80, 443** and **4000** (TalkRoom legacy).
@@ -337,7 +347,7 @@ goes to 0, and `MonitoringCollectorSectionFailing` fires. A collector that said
 | ClamAV | `docker logs --tail 200 matemail-native-clamav` |
 | Unbound | `docker logs --tail 200 matemail-native-unbound` |
 | Native API | `docker logs --tail 200 matemail-native-api` |
-| MateMail | `cd /opt/MateMail && docker compose logs --tail 200 backend` |
+| MateMail | `cd /opt/MateMail/app && docker compose logs --tail 200 backend` |
 | Backups | `journalctl -u matemail-backup.service` |
 | Collector | `journalctl -u matemail-collector.service` |
 | Alerts | Alertmanager UI, or `curl -s localhost:9093/api/v2/alerts` |
@@ -382,7 +392,7 @@ stricter and includes both of those gaps.
 ## 15. Routine operations
 
 ```bash
-cd /opt/MateMailMonitoring
+cd /opt/MateMail/monitoring
 
 docker compose ps
 docker compose logs --tail 100 prometheus
@@ -401,7 +411,7 @@ docker stats --no-stream matemail-prometheus matemail-grafana \
 ```
 
 Configuration is deployed from `deploy/monitoring/` in the repository by
-`install.sh`. Editing files under `/opt/MateMailMonitoring/` directly means the
+`install.sh`. Editing files under `/opt/MateMail/monitoring/` directly means the
 next install overwrites them.
 
 ---
@@ -439,7 +449,7 @@ marking a series stale, which is what makes
 | Gap | Status |
 |---|---|
 | `OFFSITE_BACKUP_CONFIGURED = NO` | Pre-beta requirement. Local repository is retention, not disaster recovery. |
-| `ALERT_RECEIVER_CONFIGURED = NO` | Pre-beta requirement. Alerts fire and are visible in Alertmanager over the tunnel, but nothing is delivered off the host. Set `ALERT_WEBHOOK_URL` in `/opt/MateMailMonitoring/.env` and re-run `install.sh`. The destination must not be served by Native Postfix or MateMail's transactional sender — those are the things being monitored. |
+| `ALERT_RECEIVER_CONFIGURED = NO` | Pre-beta requirement. Alerts fire and are visible in Alertmanager over the tunnel, but nothing is delivered off the host. Set `ALERT_WEBHOOK_URL` in `/opt/MateMail/monitoring/.env` and re-run `install.sh`. The destination must not be served by Native Postfix or MateMail's transactional sender — those are the things being monitored. |
 
 Neither blocks NE6 technical readiness. Both block Private Beta.
 

@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Historical transition plan for `.pro` DNS. Cutover actions have already taken place; do not run destructive/retirement tasks from this plan against current production.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # MateMail .online → .pro: customer DNS migration register
 
 Status: **planned / not yet activated**. This checklist is part of the migration acceptance criteria, not an instruction to switch DNS during Phase C.

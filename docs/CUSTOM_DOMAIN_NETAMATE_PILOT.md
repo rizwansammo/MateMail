@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Historical custom-host pilot under the retired identity; preserved for audit. Any old DNS CNAME target, dedicated tenant deployment, or certificate procedure below is NOT an instruction for the current `matemail.pro` Fresh environment.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # NetaMate Custom-Hostname Production Migration
 
 **Status:** COMPLETE  
