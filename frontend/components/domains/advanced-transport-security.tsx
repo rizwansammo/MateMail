@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { AlertCircle, CheckCircle2, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import {
@@ -228,6 +229,8 @@ export function AdvancedTransportSecurity({
           </div>
         ))}
       </div>
+
+      {canAdmin && <div className="flex justify-end"><Link href={"/app/domains/" + domainId + "/tls-reports"} className="portal-button secondary">View TLS failure reports</Link></div>}
 
       <PortalCard title="Policy controls" subtitle="Only workspace owners and administrators may change this setting.">
         <div className="flex flex-wrap items-center justify-between gap-3">
