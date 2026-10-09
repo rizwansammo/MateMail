@@ -7,6 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from apps.postbox.imap import open_mailbox
+from .authentication import require_authenticated_report
 from .models import TlsIngestCursor
 from .parser import InvalidTlsReport, MAX_ARCHIVE, MAX_PARTS, parse_json, unpack
 from .services import store_policy
@@ -24,6 +25,9 @@ def ingest_raw_message(raw):
         message = BytesParser(policy=policy.default).parsebytes(raw)
     except (ValueError, TypeError) as exc:
         raise InvalidTlsReport("Invalid MIME") from exc
+    # RFC8460 requires a valid reporting-domain DKIM signature. Untrusted
+    # sender headers or Rspamd Authentication-Results alone are not proof.
+    require_authenticated_report(raw, message)
     attachments = list(message.iter_attachments())
     if not 1 <= len(attachments) <= MAX_PARTS:
         raise InvalidTlsReport("No supported attachments")
