@@ -592,10 +592,35 @@ def sec_log_counters():
            "Active Dovecot sessions (count only; no usernames)")
 
 
+# Rspamd 4.2.x sometimes puts bare lowercase "nan" into scan_times even
+# with --json. It is not legal JSON; json.loads() then rolls back the entire
+# scanner section, falsely leaving Rspamd/ClamAV/Olefy status unknown.
+#
+# Match complete JSON strings FIRST, so textual "nan" *inside* a quoted value
+# is never replaced. Only unquoted tokens become null; the operational
+# counters/actions are preserved and malformed JSON still fails closed.
+_RSPAMD_JSON_TOKENS = re.compile(
+    r'"(?:\\.|[^"\\])*"|(?<![A-Za-z0-9_.-])nan(?![A-Za-z0-9_.-])'
+)
+
+
+def _parse_rspamd_stat(out):
+    if "{" not in out:
+        return {}
+    raw = out[out.index("{"):]
+    cleaned = _RSPAMD_JSON_TOKENS.sub(
+        lambda match: match.group(0) if match.group(0).startswith('"')
+        else "null", raw)
+    data = json.loads(cleaned)
+    if not isinstance(data, dict):
+        raise ValueError("Rspamd stats must be an object")
+    return data
+
+
 def sec_scanners():
     out = dexec_try("matemail-native-rspamd", "rspamc", "--json", "stat",
                     timeout=20)
-    stat = json.loads(out[out.index("{"):]) if "{" in out else {}
+    stat = _parse_rspamd_stat(out)
     if stat:
         metric("matemail_rspamd_up", 1, {}, "1 when Rspamd answers rspamc")
         metric("matemail_rspamd_scanned_total", stat.get("scanned", 0), {},
@@ -1001,11 +1026,76 @@ def sec_dns_identity():
            "1 when the sender domain publishes DMARC")
 
 
+def _is_loopback_bind(host):
+    host = str(host).strip("[]")
+    return host == "::1" or host == "localhost" or host.startswith("127.")
+
+
+def _docker_public_bindings():
+    """Docker-published ports can bypass UFW's INPUT policy.
+
+    Do not silently bless a publicly published container port just because
+    'ufw status' does not list an ALLOW rule for it.
+    """
+    ports = set()
+    for container in CONTAINERS.values():
+        if not container.get("State", {}).get("Running"):
+            continue
+        bindings = (container.get("HostConfig", {}).get("PortBindings") or {})
+        for entries in bindings.values():
+            for entry in entries or ():
+                host = str(entry.get("HostIp") or "0.0.0.0")
+                port = str(entry.get("HostPort") or "")
+                if port.isdigit() and not _is_loopback_bind(host):
+                    ports.add(int(port))
+    return ports
+
+
+def _ufw_exposed_unexpected(unexpected, output):
+    """Conservative UFW ingress interpretation, not an external port scan.
+
+    The ordinary UFW default-deny INPUT path protects locally bound services
+    such as Hermes on 9119. Any explicit ALLOW IN, disabled/unknown firewall,
+    or permissive default keeps the alert active. Docker-published ports are
+    handled separately because Docker can bypass this path.
+    """
+    if ("Status: active" not in output or not re.search(
+            r"Default:\s*deny\s*\(incoming\)", output, re.I)):
+        return set(unexpected)
+
+    allowed = set()
+    for line in output.splitlines():
+        match = re.match(r"^\s*(.*?)\s+ALLOW IN\s+(.+)$", line)
+        if not match:
+            continue
+        destination = re.sub(r"\s+\(v6\)$", "", match.group(1)).strip()
+        if destination.lower() == "anywhere":
+            return set(unexpected)
+        # UFW supports ranges (1000:2000/tcp) and protocol-qualified ports.
+        # Unknown destination syntax is treated as a possible broad allow.
+        ports = destination.split(",")
+        for value in ports:
+            value = value.strip()
+            m = re.fullmatch(r"(\d+)(?::(\d+))?(?:/(tcp|udp))?", value)
+            if not m:
+                # Common named applications such as OpenSSH may appear in UFW.
+                # Unknown names cannot be safely interpreted here, so retain
+                # the warning rather than masking a possible allow rule.
+                return set(unexpected)
+            lower, upper, protocol = m.groups()
+            if protocol == "udp":
+                continue
+            lo = int(lower)
+            hi = int(upper) if upper else lo
+            allowed.update(p for p in unexpected if lo <= p <= hi)
+    return allowed
+
+
 def sec_exposure():
     """
-    Detection only. This never edits a firewall rule: a monitoring system that
-    rewrites the firewall is a monitoring system that can lock you out of the
-    box at three in the morning.
+    Detection only. Never modify Hermes, Nginx, Docker or firewall rules.
+    Distinguish 'bound to an interface' from 'permitted inbound through UFW'.
+    This is best-effort host firewall inspection, not proof of external reachability.
     """
     listeners = try_run(["ss", "-lntH"], timeout=15)
     public_ports = set()
@@ -1018,7 +1108,7 @@ def sec_exposure():
         host = addr.rsplit(":", 1)[0]
         if not port.isdigit():
             continue
-        if host in ("127.0.0.1", "[::1]") or host.startswith("127."):
+        if _is_loopback_bind(host):
             continue
         public_ports.add(int(port))
 
@@ -1026,26 +1116,26 @@ def sec_exposure():
         metric("matemail_mail_port_public", 1 if port in public_ports else 0,
                {"port": str(port)}, "1 when this mail port is publicly bound")
 
-    # The signal that still means "something is wrong". NE7 made 25, 587
-    # and 993 intended, so counting every public mail port would now alert
-    # on the design itself.
     forbidden = sorted(p for p in public_ports if p in FORBIDDEN_MAIL_PORTS)
     metric("matemail_forbidden_mail_ports_public", len(forbidden), {},
-           "Mail ports that must never be public (110, 143, 465, 995) that "
-           "are; must be 0")
+           "Mail ports 110/143/465/995 bound to non-loopback addresses; must be 0")
 
-    # The other half, which did not exist before NE7: an intended port that
-    # has STOPPED listening is an outage, and nothing could say so.
     missing = sorted(INTENDED_PUBLIC_MAIL_PORTS - public_ports)
     metric("matemail_intended_mail_ports_missing", len(missing), {},
            "Public mail ports that should be listening and are not")
 
-    metric("matemail_unexpected_public_ports",
-           len(public_ports - EXPECTED_PUBLIC), {},
-           "Publicly bound ports beyond the expected set")
+    ufw = try_run(["ufw", "status", "verbose"], timeout=15)
+    metric("matemail_ufw_active", 1 if "Status: active" in ufw else 0, {},
+           "1 when the host firewall is active")
 
-    # Native now publishes exactly three. Anything beyond that is a port
-    # somebody added without deciding to.
+    unexpected = public_ports - EXPECTED_PUBLIC
+    docker_public = _docker_public_bindings()
+    exposed = _ufw_exposed_unexpected(unexpected, ufw) | (unexpected & docker_public)
+    metric("matemail_unexpected_bound_ports", len(unexpected), {},
+           "Unexpected ports bound to non-loopback addresses, even if UFW denies ingress")
+    metric("matemail_unexpected_public_ports", len(exposed), {},
+           "Unexpected TCP listeners not protected by UFW default-deny or published by Docker")
+
     published = try_run(["docker", "compose", "ps", "--format", "{{.Ports}}"],
                         timeout=30, cwd=NATIVE_DIR)
     native_public = 0
@@ -1061,12 +1151,7 @@ def sec_exposure():
             if port.isdigit() and int(port) not in INTENDED_PUBLIC_MAIL_PORTS:
                 native_public += 1
     metric("matemail_native_unintended_published_ports", native_public, {},
-           "Native container ports published publicly that are not one of "
-           "the three NE7 intended; must be 0")
-
-    ufw = try_run(["ufw", "status"], timeout=15)
-    metric("matemail_ufw_active", 1 if "Status: active" in ufw else 0, {},
-           "1 when the host firewall is active")
+           "Native container ports published publicly beyond 25/587/993; must be 0")
 
 
 def sec_abuse_protection():
