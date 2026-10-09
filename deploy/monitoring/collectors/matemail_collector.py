@@ -1012,7 +1012,7 @@ def _spf_policies_from_dig(output):
             continue
         chunks = re.findall(r'"([^"]*)"', raw)
         value = "".join(chunks) if chunks else raw
-        if re.match(r"(?i)^v=spf1(?:\\s|$)", value):
+        if re.match(r"(?i)^v=spf1(?:\s|$)", value):
             records.append(value)
     return records
 
