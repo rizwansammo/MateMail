@@ -11,7 +11,7 @@ import {
   PremiumAuthShell,
 } from "@/components/workspace/premium-auth";
 import { useAuth } from "@/contexts/auth-context";
-import { apiRequest, ApiError } from "@/lib/api";
+import { apiRequest, ApiError, rateLimitMessage } from "@/lib/api";
 
 function message(value: unknown): string {
   if (Array.isArray(value)) return value.map(String).join(" ");
@@ -81,6 +81,10 @@ export default function SignupPage() {
       router.push("/verify-email?sent=1");
     } catch (caught) {
       if (caught instanceof ApiError) {
+        if (caught.status === 429) {
+          setErrors({ _: rateLimitMessage(caught) });
+          return;
+        }
         try {
           const body = JSON.parse(caught.message);
           if (body && typeof body === "object") {
