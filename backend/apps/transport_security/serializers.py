@@ -86,6 +86,7 @@ def describe_transport_security(domain, config=None) -> dict:
         "ownership_verified": domain.is_ownership_verified,
         "optional": True,
         "enabled": enabled,
+        "self_service_available": bool(getattr(settings, "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", False)),
         "lifecycle": lifecycle,
         "certificate_status": config.certificate_status if config else "not_requested",
         "policy_mode": "testing",  # enforce must never be user-writable.
