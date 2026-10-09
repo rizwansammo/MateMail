@@ -1,22 +1,29 @@
 # MateMail Custom Hub/PostBox Domains
 
-**Status:** Production live; NetaMate acceptance and legacy retirement complete  
-**Date:** 2026-10-06
+**Current identity: `matemail.pro` · 2026-10-09**
 
-## Production acceptance — 2026-10-06
+## Current operating model
 
-The first production tenant is live on the normal custom-host path:
+- To attach a customer Hub/PostBox domain, create the hostname in Hub and publish
+  `your-host.example CNAME custom.matemail.pro` at the customer's DNS provider.
+- The backend verifies ownership, authorizes the bound tenant/surface, and the
+  root-owned Nginx/Certbot provisioner installs and activates the exact hostname.
+- The browser remains on the customer's custom Host; this is **not** a redirect
+  and it does not change email MX, SPF, DKIM or IMAP/SMTP configuration.
+- Current worker: `/usr/local/libexec/matemail-custom-host-provisioner` with
+  root-only configuration in `/etc/matemail/custom-host-provisioner.env`.
+- **Fresh environment caveat:** previous NetaMate pilot acceptance preceded the
+  October 2026 Fresh reset; it is historical evidence, not current tenant-level
+  acceptance. Customer-domain onboarding must be re-tested on a newly created
+  tenant before the capability is called fully accepted.
 
-- Hub: `mailhub.netamate.com CNAME custom.matemail.online`
-- PostBox: `postbox.netamate.com CNAME custom.matemail.online`
-- both rows are DNS verified, HTTPS active and routing active;
-- both generated vhosts use the canonical MateMail frontend on `127.0.0.1:3020`;
-- legacy `DEDICATED_TENANT_HOSTS`, fixed-host entries, the port-3060 frontend,
-  legacy NetaMate nginx vhosts and the `/opt/NetaMate-Email` deployment were retired;
-- the obsolete `mailadmin.netamate.com` certificate lineage was revoked and deleted.
+## Historical implementation, pilot and migration notes
 
-The Phase 1 section below is retained as historical audit evidence; statements
-there describe the pre-migration production state, not the current topology.
+The material below records the earlier `.online` pilot, former custom CNAME
+and retired URL setup. **Do not copy those DNS targets or host commands into
+new production work.** Current runbook: `docs/DEPLOYMENT.md`.
+
+---
 
 ## Goal
 

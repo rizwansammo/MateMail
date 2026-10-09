@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 #: The cookie name is prefixed `__Host-` deliberately. A browser only accepts
 #: that prefix when the cookie is Secure, has Path=/ and carries NO Domain
-#: attribute — which means it is locked to exactly postbox.matemail.online and
+#: attribute — which means it is locked to exactly postbox.matemail.pro and
 #: cannot be set by, or sent to, any other subdomain. It is the one cookie
 #: attribute a sibling host cannot override.
 SESSION_COOKIE_NAME = "__Host-postbox_session"
@@ -437,7 +437,7 @@ def set_session_cookie(response, raw_token: str, session: PostBoxSession):
     SameSite=Lax so a cross-site form post cannot act as the signed-in
     mailbox while ordinary navigation to PostBox still works. No Domain
     attribute, which is what `__Host-` requires and what keeps the cookie off
-    every other matemail.online host.
+    every other hostname.
     """
     from django.conf import settings
 

@@ -35,7 +35,7 @@ export const metadata: Metadata = {
   description:
     "Host domain-based inboxes, manage DNS health, monitor deliverability, and give your team MateMail PostBox.",
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL ?? "https://matemail.online",
+    process.env.NEXT_PUBLIC_APP_URL ?? "https://matemail.pro",
   ),
   icons: {
     icon: "/assets/matemail-mark.svg",

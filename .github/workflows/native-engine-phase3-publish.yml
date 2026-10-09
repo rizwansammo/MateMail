@@ -1,0 +1,54 @@
+name: Phase 3 Native Engine candidate GHCR publication
+
+# Publish ONLY immutable candidate tags from the dedicated upgrade branch.
+# Never update the legacy :ne1 tag, never deploy, never use production secrets.
+on:
+  push:
+    branches:
+      - security/native-engine-upgrade-phase1-20261008
+    paths:
+      - '.github/workflows/native-engine-phase3-publish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: native-engine-phase3-publish
+  cancel-in-progress: false
+
+jobs:
+  candidate-images:
+    if: github.repository == 'rizwansammo/MateMail' && github.ref == 'refs/heads/security/native-engine-upgrade-phase1-20261008'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [unbound, dovecot, postfix]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate to GHCR using ephemeral repository token
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish unique candidate tag (no moving tag)
+        id: publish
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/native-engine/images/${{ matrix.component }}
+          file: deploy/native-engine/images/${{ matrix.component }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/rizwansammo/matemail-native-${{ matrix.component }}:phase3-${{ github.sha }}
+          cache-from: type=gha,scope=phase3-${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=phase3-${{ matrix.component }}
+      - name: Record immutable image digest
+        run: |
+          echo '### matemail-native-${{ matrix.component }}' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Pin exact digest, not a mutable tag:' >> "$GITHUB_STEP_SUMMARY"
+          echo '`ghcr.io/rizwansammo/matemail-native-${{ matrix.component }}@${{ steps.publish.outputs.digest }}`' >> "$GITHUB_STEP_SUMMARY"

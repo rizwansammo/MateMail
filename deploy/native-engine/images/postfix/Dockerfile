@@ -17,7 +17,7 @@
 # WHICH PHASE OWNS IT
 #   NE1 defines the image. NE3 supplies the real maps and mail flow.
 
-FROM debian:12-slim
+FROM debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \

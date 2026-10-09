@@ -1,29 +1,43 @@
-# MateMail Native Engine — Unbound image.
+# MateMail Native Engine — Unbound security candidate for Phase 2.
 #
-# WHAT THIS CONFIGURES
-#   A minimal validating resolver image built from Alpine's packaged Unbound.
+# Upstream Unbound 1.26.1, not the older Alpine 3.24 stable 1.25.x package.
+# Fetch from NLnet Labs over TLS and verify the exact source SHA256 BEFORE
+# unpacking. Multi-stage keeps build tools out of the runtime image.
+# Never build on MateServer: isolated PR CI verifies this candidate first.
 #
-# WHY IT IS SHAPED THIS WAY
-#   NLnet Labs publishes no official image, and a DNSSEC validator is too
-#   security-critical to take from an unvetted community image (NE0.18, Step 8).
-#   So we build our own, from a distribution package with a maintained security
-#   feed, under repository control.
-#
-#   Built by GitHub Actions and published to GHCR — never built on MateServer.
-#
-# WHICH PHASE OWNS IT
-#   NE1.
+# Runtime invariants carried from the existing 1.22.0 deployment:
+# unbound uid:gid 100:101, /var/lib/unbound trust-anchor volume,
+# UDP/TCP 53, no root process, DNSSEC validation (config is bind mounted).
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS builder
+RUN apk add --no-cache build-base ca-certificates curl expat-dev libevent-dev openssl-dev
+WORKDIR /usr/src
+ARG UNBOUND_VERSION=1.26.1
+ARG UNBOUND_SHA256=35a6dc0e425a9282c3426d9a3043144011bf0534aed4b73ab62c52aee0af1503
+RUN set -eux; \
+    curl --fail --location --silent --show-error --retry 3 \
+      "https://nlnetlabs.nl/downloads/unbound/unbound-${UNBOUND_VERSION}.tar.gz" -o unbound.tar.gz; \
+    echo "${UNBOUND_SHA256}  unbound.tar.gz" | sha256sum -c -; \
+    tar -xzf unbound.tar.gz; \
+    cd "unbound-${UNBOUND_VERSION}"; \
+    ./configure --prefix=/usr --sysconfdir=/etc --localstatedir=/var \
+        --with-ssl --with-libevent --with-libexpat=/usr --with-pthreads \
+        --with-chroot-dir= --with-run-dir=; \
+    make -j2; \
+    make DESTDIR=/stage install
 
-FROM alpine:3.21
-
-RUN apk add --no-cache unbound bind-tools drill \
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+RUN apk add --no-cache ca-certificates openssl libevent expat bind-tools drill \
+    && addgroup -S -g 101 unbound \
+    && adduser -S -D -H -u 100 -G unbound -s /sbin/nologin unbound \
     && mkdir -p /var/lib/unbound \
-    && chown -R unbound:unbound /var/lib/unbound
-
-# Bootstrap the trust anchor at build time; the runtime volume keeps it current.
-RUN unbound-anchor -a /var/lib/unbound/root.key || true \
-    && chown unbound:unbound /var/lib/unbound/root.key
-
+    && chown 100:101 /var/lib/unbound
+COPY --from=builder /stage/usr/sbin/ /usr/sbin/
+COPY --from=builder /stage/usr/lib/ /usr/lib/
+RUN set -eux; \
+    unbound -V | grep 'Version 1.26.1'; \
+    unbound-anchor -a /var/lib/unbound/root.key || true; \
+    test -s /var/lib/unbound/root.key; \
+    chown -R 100:101 /var/lib/unbound
 USER unbound
 EXPOSE 53/udp 53/tcp
 ENTRYPOINT ["unbound", "-d", "-c", "/etc/unbound/unbound.conf"]

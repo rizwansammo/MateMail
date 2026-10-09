@@ -145,7 +145,8 @@ class PlatformBackupStatusView(APIView):
 
     THE HONEST ANSWER, AND WHY IT IS THE RIGHT ONE
         MateMail's real backups are the P6 restic system: a nightly systemd
-        timer on the host, with restore drills, retention and offsite copies.
+        timer on the host, with its own restore tools and retention. Its configured repository is local;
+        a separate MateServer Azure Blob DR job supplies offsite coverage.
         It is deliberately outside the application — a backup system that the
         application could write to is a backup system that a compromise of the
         application can destroy.
@@ -173,14 +174,17 @@ class PlatformBackupStatusView(APIView):
                 "status": UNKNOWN,
                 "observable_from_application": False,
                 "detail": (
-                    "Platform disaster-recovery backups are taken by the "
-                    "restic system on the host (matemail-backup.timer). That "
-                    "system is intentionally outside this application, so its "
-                    "state cannot be read from here and is not guessed."
+                    "MateMail local Restic backups run on the host via "
+                    "matemail-backup.timer. Independent whole-server Azure Blob "
+                    "disaster-recovery backups run via mateserver-backup.timer. "
+                    "Neither backup job is observable by this application, "
+                    "so the current success of either is not guessed."
                 ),
                 "where_to_look": [
                     "systemctl status matemail-backup.timer",
-                    "/opt/MateMailBackup/matemail-restore.sh  (restore drill)",
+                    "/opt/MateMail/backup/matemail-restore.sh  (local restore validation)",
+                    "systemctl status mateserver-backup.timer",
+                    "/opt/mateserver-backup/DR-RUNBOOK.md  (Azure disaster recovery)",
                     "Prometheus: matemail_backup_* metrics from the P7 collector",
                     "docs/BACKUP_RESTORE.md",
                 ],

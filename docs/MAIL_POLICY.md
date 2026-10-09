@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Policy development ledger. Production Native Engine is already live; earlier Mailcow-specific policy examples and sender identities are archival. Current sender domain is `mail.matemail.pro`.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # MAIL_POLICY.md — Sending policy, deliverability and abuse response
 
 **Product:** MateMail

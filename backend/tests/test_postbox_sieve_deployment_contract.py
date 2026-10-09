@@ -41,7 +41,7 @@ class SieveDeploymentContractTest(SimpleTestCase):
     def test_no_new_engine_network_or_image_build_is_needed(self):
         image = source("deploy", "native-engine", "images", "dovecot", "Dockerfile")
         native = source("deploy", "native-engine", "docker-compose.yml")
-        self.assertIn("FROM dovecot/dovecot:2.4.1@", image)
+        self.assertIn("FROM dovecot/dovecot:2.4.5@", image)
         self.assertIn("matemail_engine_link:", native)
 
     def test_folder_warning_is_independent_of_mail_rules_transport(self):

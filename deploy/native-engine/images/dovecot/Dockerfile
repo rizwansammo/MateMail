@@ -9,7 +9,7 @@
 #       dovenull  system      pre-auth/login identity, owns no mail
 #
 # WHY IT IS SHAPED THIS WAY
-#   MEASURED, not assumed. `dovecot/dovecot:2.4.1` ships exactly one mail
+#   MEASURED, not assumed. `dovecot/dovecot:2.4.5` ships exactly one mail
 #   account, `vmail` at 1000:1000, and no `dovecot` or `dovenull` at all, and it
 #   runs the daemon as that unprivileged account. Three consequences follow, all
 #   of them observed during NE1 rather than predicted:
@@ -58,7 +58,7 @@ RUN set -eux; \
                        /layout/var/vmail /layout/var/vmail_index
 
 # ── Stage 2: the upstream image, with corrected identities ───────────────────
-FROM dovecot/dovecot:2.4.1@sha256:1296e0f1029cdd95e6849fb82f5d142a6e2a46218451773316cea678de75254b
+FROM dovecot/dovecot:2.4.5@sha256:43c14def08a57f25107593cbcf64a0a6fbae84a7b9de7aa038513c9b21e91914
 
 USER root
 

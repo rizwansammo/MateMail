@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Current user-facing mail settings are `mx.matemail.pro`, IMAPS 993/SSL and SMTP submission 587/STARTTLS. The retired hostnames are not certified by this document.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # MateMail — Mail Client Settings
 
 Written for whoever configures a mail client, and for support answering "what
@@ -46,13 +53,13 @@ configuration being wrong, not the server being down.
 
 ## Certificate
 
-`mx.matemail.pro` and the legacy `mx.matemail.online`, covered by the same valid Let's Encrypt SAN certificate.
+`mx.matemail.pro`, covered by the production Let's Encrypt certificate.
 Clients validate it normally — there is nothing to accept manually, and a
 client prompting to trust an unknown certificate means it is not talking to
 this server.
 
 Renewal is automatic and installs into both the SMTP and IMAP services.
-Existing clients set to `mx.matemail.online` continue to work during migration;
+Retired hostnames are not supported client configuration; update clients to `mx.matemail.pro`.
 there is no mailbox migration or password change. PTR and outgoing SMTP
 identity may remain on the legacy hostname until coordinated provider changes.
 

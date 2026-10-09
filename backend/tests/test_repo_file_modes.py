@@ -45,7 +45,7 @@ MUST_BE_EXECUTABLE = {
     "deploy/backup/install.sh":
         "operator entry point, run from a copy of the directory on the server",
     "deploy/backup/matemail-backup.sh":
-        "systemd ExecStart=/opt/MateMailBackup/matemail-backup.sh",
+        "systemd ExecStart=/opt/MateMail/backup/matemail-backup.sh",
     "deploy/backup/matemail-restore.sh":
         "docs/BACKUP_RESTORE.md invokes it by absolute path during an incident",
     "deploy/backup/matemail-restore-mailbox.sh":
@@ -66,6 +66,8 @@ MUST_BE_EXECUTABLE = {
 
 # These are invoked in a way that supplies the mode, or never executed at all.
 MUST_NOT_BE_EXECUTABLE = {
+    "deploy/native-engine/scripts/security-upgrade-preflight.sh":
+        "read-only operator preflight invoked explicitly with bash; no executable bit needed",
     "deploy/backup/lib/guard.sh":
         "sourced, never executed; install.sh places it 0600 deliberately",
     "deploy/native-engine/images/dovecot/entrypoint.sh":

@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Historical cleanup runbook. Some safety prohibitions were specific to the migration window, not an order to retain retired resources forever. See current architecture.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # Phase E4 — Legacy dependency retirement (pre-E5)
 
 ## Scope and safety

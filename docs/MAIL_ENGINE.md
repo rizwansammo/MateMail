@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** This file describes the earlier Mailcow-era engine and historical implementation decisions. Mailcow is no longer deployed. The active Native Engine lives at `/opt/MateMail/engine/deploy/native-engine/`; use the current architecture and deployment guides rather than commands below.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # MAIL_ENGINE.md — MateMail Mail Engine
 
 **Product:** MateMail

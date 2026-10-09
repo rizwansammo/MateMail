@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Historical P0–P9 roadmap and old hostnames. It is retained to explain product-development decisions; it is not a current hosting or domain configuration guide.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # PHASES.md — MateMail Build Phases
 
 **Product:** MateMail  

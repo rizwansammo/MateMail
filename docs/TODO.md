@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Historical/backlog notes, not a source of truth for deployed production components, domain names or release readiness. Consult the current project snapshot and active PRs first.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # TODO.md — MateMail Task Tracker
 
 **Product:** MateMail

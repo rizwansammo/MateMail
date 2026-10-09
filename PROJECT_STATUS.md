@@ -1,3 +1,32 @@
+# Current operational snapshot — 2026-10-09
+
+**Canonical domain:** `matemail.pro`. **Current deployment:** consolidated
+`/opt/MateMail/{app,engine,monitoring,backup}`. **Production engine:** Native
+Postfix 3.10.13, Dovecot 2.4.5, Rspamd 4.2.1, Unbound 1.26.1.
+Twenty-one MateMail containers healthy at audit; Gmail round-trip and
+receiver-side SPF/DKIM/DMARC all PASS; tenant-level collaboration acceptance
+still pending. Native engine upgrade is tracked in PR #64 until merged.
+
+**Disaster recovery:** MateMail local Restic remains same-host. Independent
+MateServer Azure DR snapshot was re-uploaded and restored to disposable test
+containers (two real PostgreSQL dumps) on 2026-10-09; full blank-VPS rehearsal
+deferred. See `docs/BACKUP_RESTORE.md`.
+
+**Authoritative operating references:** `README.md`, `docs/DEPLOYMENT.md`,
+`docs/ARCHITECTURE.md` and `docs/BACKUP_RESTORE.md`.
+
+---
+
+## Historical project status ledger (archive, not current operating procedure)
+
+**Everything below is a chronological migration/development record.** Earlier
+statements such as "Mailcow is live", "no mail port open", obsolete hostname
+assignments, and dated deployment outcomes describe the *then-current*
+state, NOT the current production system. Do not copy old procedures into
+a new deployment.
+
+---
+
 # PROJECT_STATUS.md
 
 **Product:** MateMail  

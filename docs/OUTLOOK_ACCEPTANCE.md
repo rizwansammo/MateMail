@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** Acceptance checklist from the old hosting period. The current Autodiscover endpoint is `autodiscover.matemail.pro` and mail client server is `mx.matemail.pro`; historical test outcomes below are not evidence of current Outlook compatibility.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # Outlook acceptance — what has actually been observed
 
 Written for whoever tests a real Outlook client against MateMail, and for
@@ -12,7 +19,7 @@ settings are in `MAIL_CLIENT_SETUP.md` and they work in every client that
 accepts typed-in IMAP settings.
 
 **MateMail provides an Autodiscover compatibility endpoint** at
-`autodiscover.matemail.online`, which returns IMAP and SMTP settings to clients
+`autodiscover.matemail.pro`, which returns IMAP and SMTP settings to clients
 that ask for them.
 
 **No Outlook build is currently claimed to configure automatically.** Not one
@@ -44,10 +51,10 @@ The only evidence that a client configures automatically is watching it do so.
 The endpoint must be live. Until it is deployed, every client below will fall
 through to manual setup and the test proves nothing:
 
-- [ ] `autodiscover.matemail.online` A record resolves
+- [ ] `autodiscover.matemail.pro` A record resolves
 - [ ] certificate issued and valid for that name
 - [ ] nginx vhost installed, `nginx -t` clean
-- [ ] `curl -sS -X POST https://autodiscover.matemail.online/autodiscover/autodiscover.xml
+- [ ] `curl -sS -X POST https://autodiscover.matemail.pro/autodiscover/autodiscover.xml
       -H 'Content-Type: text/xml' --data @request.xml` returns an IMAP block
 - [ ] the test domain's `_autodiscover._tcp` SRV record is published and resolves
 - [ ] a real mailbox exists on that domain, with a known password
@@ -84,7 +91,7 @@ record:
 |---|----------|-------------|
 | 1 | Did it query the SRV record? | DNS query log, or `tcpdump`/Wireshark on port 53 during setup |
 | 2 | Did it request the Autodiscover endpoint? | nginx access log on the autodiscover vhost |
-| 3 | Did it consume the IMAP settings? | account shows server `mx.matemail.online` port 993 without typing them |
+| 3 | Did it consume the IMAP settings? | account shows server `mx.matemail.pro` port 993 without typing them |
 | 4 | Did it consume the SMTP settings? | outgoing shows port 587 STARTTLS without typing them |
 | 5 | Did it still require Advanced/manual setup? | whether you had to choose IMAP yourself |
 | 6 | Did authentication succeed? | account added without a repeated password prompt |

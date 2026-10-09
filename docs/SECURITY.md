@@ -1,3 +1,10 @@
+> **CURRENT DOCUMENTATION NOTICE (2026-10-09):** This long-running security audit ledger includes findings from previous domains and Mailcow production. Date each claim before reusing it. Current mail-engine versions, sender domain, TLS/ports and DR arrangements are in the current architecture/deployment/backup guides and Native Engine security-upgrade reports. Do not interpret historical `matemail.online` or Mailcow steps as current operating instructions.
+> Authoritative current references: [Architecture](ARCHITECTURE.md),
+> [Deployment](DEPLOYMENT.md), and [Backup/Azure DR](BACKUP_RESTORE.md).
+> Sections below may describe historical migration states or retired domains.
+
+---
+
 # SECURITY.md — Security Architecture and Controls
 
 **Product:** MateMail

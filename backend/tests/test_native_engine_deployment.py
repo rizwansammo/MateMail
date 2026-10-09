@@ -842,8 +842,8 @@ class DovecotImageContractTest(unittest.TestCase):
         identical to upstream, which is the artifact actually worth trusting.
         """
         self.assertIn(
-            "FROM dovecot/dovecot:2.4.1@sha256:"
-            "1296e0f1029cdd95e6849fb82f5d142a6e2a46218451773316cea678de75254b",
+            "FROM dovecot/dovecot:2.4.5@sha256:"
+            "43c14def08a57f25107593cbcf64a0a6fbae84a7b9de7aa038513c9b21e91914",
             self.directives)
 
     def test_the_container_is_not_privileged(self):

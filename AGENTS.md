@@ -77,7 +77,7 @@ Production server:
 * healthchecks are required
 * internal databases and Redis must publish no host ports
 
-Current MateServer application ports are already allocated through 8016/3015.
+Before reserving any new host port, inspect the current allocation on MateServer.
 
 MateMail therefore reserves:
 
@@ -116,7 +116,10 @@ Celery worker and Celery beat should reuse the backend image unless there is a s
 Production application configuration should live under:
 
 ```
-/opt/MateMail/
+/opt/MateMail/app/             # Application Compose (Django, Next.js, Celery)
+/opt/MateMail/engine/          # Native Engine
+/opt/MateMail/monitoring/      # Monitoring services
+/opt/MateMail/backup/          # Local Restic backup
 ```
 
 The production VPS should not require a Git checkout of the application repository.
@@ -135,9 +138,9 @@ Preferred domains:
 * `mx.matemail.pro` — mail transport hostname (A and PTR)
 * `mail.matemail.pro` — dedicated native platform sender/report mailbox domain
 
-The `matemail.online` names are legacy compatibility routes **until E5**, never new
-product endpoints. Host-native nginx handles web routing; Caddy handles
-verified tenant custom hostnames.
+Retired `.online` hostnames are not canonical or operational targets.
+Host-native nginx and Certbot serve fixed hosts and verified customer custom
+Hub/PostBox hostnames through the root-owned provisioner. Caddy is not installed.
 
 Do not introduce a second containerized nginx architecture for the MateMail SaaS app.
 
@@ -146,7 +149,7 @@ Do not introduce a second containerized nginx architecture for the MateMail SaaS
 ## Mail engine
 
 The production mail engine is **MateMail Native Engine**, deployed separately
-at `/opt/MateMailNative/deploy/native-engine/` using Postfix, Dovecot, Rspamd,
+at `/opt/MateMail/engine/deploy/native-engine/` using Postfix, Dovecot, Rspamd,
 Redis, PostgreSQL and the Native provisioning/control API. The old mailcow
 stack was retired; do not reinstall or accidentally bind its volumes.
 
