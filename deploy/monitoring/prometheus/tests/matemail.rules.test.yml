@@ -492,3 +492,48 @@ tests:
             exp_annotations:
               summary: "Collector section backups is failing"
               description: "That section publishes no metrics while it fails, so anything it covers is unmonitored rather than healthy."
+
+  # ─── P4 shared SPF provider dependency: no false-green status ──────────
+  - interval: 1m
+    name: missing SPF provider record triggers after sustained failure
+    input_series:
+      - series: 'matemail_dns_spf_provider_usable'
+        values: '0+0x35'
+      - series: 'matemail_dns_spf_sender_chain_usable'
+        values: '0+0x35'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ProviderSpfAuthorizationBroken
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: ProviderSpfAuthorizationBroken
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "MateMail provider SPF chain is broken"
+              description: "The platform sender or shared _spf.matemail.pro policy no longer resolves to one strict SPF policy authorising the live SMTP IPv4. Check authoritative DNS and multiple resolvers. Do not edit tenant DNS or mail routing blindly."
+
+  - interval: 1m
+    name: a brief negative DNS cache response cannot page
+    input_series:
+      - series: 'matemail_dns_spf_provider_usable'
+        values: '0+0x7 1+0x40'
+      - series: 'matemail_dns_spf_sender_chain_usable'
+        values: '0+0x7 1+0x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: ProviderSpfAuthorizationBroken
+        exp_alerts: []
+
+  - interval: 1m
+    name: healthy provider DNS does not alert
+    input_series:
+      - series: 'matemail_dns_spf_provider_usable'
+        values: '1+0x40'
+      - series: 'matemail_dns_spf_sender_chain_usable'
+        values: '1+0x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: ProviderSpfAuthorizationBroken
+        exp_alerts: []
