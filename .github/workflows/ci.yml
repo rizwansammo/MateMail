@@ -251,6 +251,7 @@ jobs:
       - name: docker compose config
         working-directory: deploy
         env:
+          DMARC_REPORT_INGEST_ENABLED: "true"
           MATEMAIL_BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend:ci-placeholder
           MATEMAIL_FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend:ci-placeholder
           DJANGO_SECRET_KEY: ci-placeholder
@@ -267,6 +268,7 @@ jobs:
       - name: Assert NetaMate standard (network isolation, ports, images)
         working-directory: deploy
         env:
+          DMARC_REPORT_INGEST_ENABLED: "true"
           MATEMAIL_BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend:ci-placeholder
           MATEMAIL_FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend:ci-placeholder
           DJANGO_SECRET_KEY: ci-placeholder
@@ -287,6 +289,15 @@ jobs:
           services = cfg['services']
           networks = cfg.get('networks', {})
           failures = []
+
+          # P4-B: the feature flag must reach the Celery worker through
+          # Compose, not merely exist in .env/Django code. Testing both
+          # the enabled path and the default-off setting prevents a
+          # deceptively successful deployment with ingestion always OFF.
+          for name in ("backend", "celery-worker", "celery-beat"):
+              passed = services[name].get("environment", {}).get("DMARC_REPORT_INGEST_ENABLED")
+              if passed != "true":
+                  failures.append(f"{name}: P4-B DMARC ingest flag was not forwarded")
 
           DATASTORES = {'postgres', 'redis'}
           INTERNAL_NET = 'matemail_internal'
