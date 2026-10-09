@@ -100,6 +100,7 @@ LOCAL_APPS = [
     "apps.autodiscover",
     "apps.dnshealth",
     "apps.dmarc_reports",
+    "apps.tls_reports",
     "apps.transport_security",
     "apps.aliases",
     "apps.forwarding",
@@ -302,6 +303,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "dmarc_reports.prune",
         "schedule": crontab(hour="4", minute="40"),
     },
+    "tls-rpt-mailbox-poll": {
+        "task": "tls_reports.poll_mailbox",
+        "schedule": crontab(minute="*/30"),
+    },
+    "tls-rpt-retention": {
+        "task": "tls_reports.prune",
+        "schedule": crontab(hour="4", minute="45"),
+    },
 }
 
 # DRF
@@ -382,6 +391,12 @@ DMARC_AGGREGATE_REPORTING_ENABLED = env.bool("DMARC_AGGREGATE_REPORTING_ENABLED"
 DMARC_REPORT_INGEST_ENABLED = env.bool("DMARC_REPORT_INGEST_ENABLED", default=False)
 DMARC_REPORT_PLATFORM_DOMAIN = env("DMARC_REPORT_PLATFORM_DOMAIN", default="mail.matemail.pro")
 DMARC_REPORT_RETENTION_DAYS = env.int("DMARC_REPORT_RETENTION_DAYS", default=90)
+# P4-C.E: independent TLS-RPT read-only ingestion, off until P4-C.F.
+TLS_RPT_INGEST_ENABLED = env.bool("TLS_RPT_INGEST_ENABLED", default=False)
+TLS_RPT_RETENTION_DAYS = env.int("TLS_RPT_RETENTION_DAYS", default=90)
+# Publication is a SEPARATE gate from reading email; both remain OFF.
+TLS_RPT_DNS_PUBLICATION_ENABLED = env.bool("TLS_RPT_DNS_PUBLICATION_ENABLED", default=False)
+TLS_RPT_RECEIVER_VERIFIED = env.bool("TLS_RPT_RECEIVER_VERIFIED", default=False)
 MAIL_HOSTNAME = env("MAIL_HOSTNAME", default="mx.matemail.pro")
 LEGACY_MAIL_HOSTNAME = env("LEGACY_MAIL_HOSTNAME", default="mx.matemail.online")
 DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")
