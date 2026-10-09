@@ -240,7 +240,7 @@ tests:
     name: a fresh Azure upload produces no stale alert
     input_series:
       - series: 'matemail_central_dr_last_success_timestamp_seconds'
-        values: '0+0x60'
+        values: '1+0x60'
     alert_rule_test:
       - eval_time: 40m
         alertname: CentralDRBackupStale
