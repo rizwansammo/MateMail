@@ -711,6 +711,10 @@ def test_the_three_operator_dashboards_cover_what_p7_asks_for():
 
     overview = seen["matemail-overview"]
     for expr in ("matemail_native_services_healthy", "matemail_app_all_healthy",
+                 "matemail_backup_offsite_coverage_ok",
+                 "matemail_central_dr_verified_recent",
+                 "matemail_central_dr_last_result_ok",
+                 "matemail_central_dr_matemail_script_coverage_ok",
                  "matemail_backup_latest_snapshot_age_seconds",
                  "matemail_certificate_days_remaining",
                  "matemail_dns_ptr_correct",
