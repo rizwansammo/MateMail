@@ -14,7 +14,7 @@ Two problems with the stock classes as this project had them configured:
    `INTERNAL_API_SECRET`, so a request-count limit there protects nothing and
    breaks delivery. Health checks are exempt for the same reason.
 """
-from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle, UserRateThrottle
 
 from .client_ip import get_client_ip
 
@@ -61,7 +61,7 @@ class AuthEndpointThrottle(MateMailAnonThrottle):
     scope = "auth"
 
 
-class AuthRefreshThrottle(MateMailAnonThrottle):
+class AuthRefreshThrottle(_TrustedIdentMixin, SimpleRateThrottle):
     """
     A separate per-IP budget for refresh-cookie exchanges.
 
@@ -71,6 +71,14 @@ class AuthRefreshThrottle(MateMailAnonThrottle):
     """
 
     scope = "auth_refresh"
+
+    def get_cache_key(self, request, view):
+        # Unlike AnonRateThrottle this must apply even when a caller also
+        # supplies a valid bearer token. Only the refresh cookie is exchanged.
+        return self.cache_format % {
+            "scope": self.scope,
+            "ident": self.get_ident(request),
+        }
 
 
 class AuthenticatedActionThrottle(UserRateThrottle):
