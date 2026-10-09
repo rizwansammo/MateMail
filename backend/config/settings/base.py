@@ -49,6 +49,19 @@ CUSTOM_HOST_RESERVED_SUFFIXES = tuple(
 CUSTOM_HOST_PROVISIONER_SECRET = env("CUSTOM_HOST_PROVISIONER_SECRET", default="")
 CUSTOM_HOST_CACHE_TTL = env.int("CUSTOM_HOST_CACHE_TTL", default=30)
 
+# P4-C.B is configuration-only. Customer opt-in is intentionally disabled
+# until the dynamic HTTPS/SSL worker and safe report ingestion are operational.
+TRANSPORT_SECURITY_SELF_SERVICE_ENABLED = env.bool(
+    "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", default=False,
+)
+# Phase C will supply a validated MTA-STS policy gateway. Do NOT assume the
+# existing Hub/PostBox custom-host CNAME target serves TLS policy files.
+MTA_STS_POLICY_EDGE_TARGET = env("MTA_STS_POLICY_EDGE_TARGET", default="")
+TLS_RPT_REPORT_ADDRESS = env(
+    "TLS_RPT_REPORT_ADDRESS", default="tlsrpt@mail.matemail.pro",
+)
+
+
 
 
 DJANGO_APPS = [
@@ -80,6 +93,7 @@ LOCAL_APPS = [
     "apps.autodiscover",
     "apps.dnshealth",
     "apps.dmarc_reports",
+    "apps.transport_security",
     "apps.aliases",
     "apps.forwarding",
     "apps.forward_groups",
