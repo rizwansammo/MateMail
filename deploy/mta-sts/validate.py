@@ -3,7 +3,7 @@
 import pathlib
 import sys
 
-ALLOWED_DOMAINS = {"mail.matemail.pro", "netamate.com", "matedesk.pro"}
+ALLOWED_DOMAINS = {"mail.matemail.pro", "netamate.com", "matedesk.pro", "myrightbd.org"}
 EXPECTED_MX = "mx.matemail.pro"
 
 
