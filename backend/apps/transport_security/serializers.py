@@ -70,7 +70,7 @@ def describe_transport_security(domain, config=None) -> dict:
     # CNAME becomes displayable only when the platform operator has confirmed
     # that the dedicated policy gateway resolves to the HTTPS provisioner.
     edge_ready = bool(getattr(settings, "MTA_STS_POLICY_EDGE_READY", False))
-    if enabled and records and edge_configured and edge_ready:
+    if enabled and domain.is_ownership_verified and records and edge_configured and edge_ready:
         records[0]["publish_ready"] = True
         records[0]["requirement"] = "Create this CNAME, then verify DNS in MateMail Hub."
     # TLS-RPT TXT is separately gated by an operator-tested recipient and
@@ -83,7 +83,7 @@ def describe_transport_security(domain, config=None) -> dict:
         records[2]["requirement"] = "Verified central TLS report intake; publish this TXT when approved."
     # STS TXT must remain withheld until the worker has actually served and
     # TLS-verified the requested hostname (never use an optimistic status).
-    if enabled and config and config.lifecycle in (
+    if enabled and domain.is_ownership_verified and config and config.lifecycle in (
         TransportSecurityLifecycle.READY,
         TransportSecurityLifecycle.ACTIVE,
     ) and config.certificate_status == TransportSecurityCertificateStatus.ACTIVE and config.cert_verified_at:
