@@ -302,6 +302,8 @@ REST_FRAMEWORK = {
         # previous 120/min predates that plan.
         "user": "60/min",
         "auth": "5/min",
+        # Automatic cookie-based session restoration has its own IP budget.
+        "auth_refresh": "30/min",
         # Authenticated auth actions: resend verification, 2FA enrol, 2FA
         # disable. Previously unlimited — see AuthenticatedActionThrottle.
         "auth_action": "10/min",

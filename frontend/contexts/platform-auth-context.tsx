@@ -21,7 +21,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, rateLimitMessage, restoreAccessToken } from "@/lib/api";
 import { clearTokens, setAccessToken } from "@/lib/auth";
 
 export interface PlatformUser {
@@ -78,9 +78,8 @@ export function PlatformAuthProvider({ children }: { children: React.ReactNode }
 
     (async () => {
       try {
-        const refreshed = await api.post<{ access: string }>("/api/auth/refresh/");
-        if (cancelled) return;
-        setAccessToken(refreshed.access);
+        const access = await restoreAccessToken();
+        if (!access || cancelled) return;
 
         const me = await api.get<PlatformUser>("/api/auth/me/");
         if (cancelled) return;
@@ -157,6 +156,7 @@ export function usePlatformAuth(): PlatformAuthValue {
 /** The message an API failure should show, without leaking a stack trace. */
 export function describeError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
+    if (error.status === 429) return rateLimitMessage(error);
     try {
       const parsed = JSON.parse(error.message) as Record<string, unknown>;
       if (typeof parsed.detail === "string") return parsed.detail;

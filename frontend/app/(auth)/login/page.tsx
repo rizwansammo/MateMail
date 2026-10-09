@@ -13,10 +13,11 @@ import {
   PremiumAuthShell,
 } from "@/components/workspace/premium-auth";
 import { useAuth } from "@/contexts/auth-context";
-import { ApiError } from "@/lib/api";
+import { ApiError, rateLimitMessage } from "@/lib/api";
 
 function readApiDetail(caught: unknown, fallback: string) {
   if (!(caught instanceof ApiError)) return fallback;
+  if (caught.status === 429) return rateLimitMessage(caught);
   try {
     const body = JSON.parse(caught.message);
     return body.detail ?? fallback;
