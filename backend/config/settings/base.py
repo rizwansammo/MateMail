@@ -79,6 +79,7 @@ LOCAL_APPS = [
     "apps.team_boxes",
     "apps.autodiscover",
     "apps.dnshealth",
+    "apps.dmarc_reports",
     "apps.aliases",
     "apps.forwarding",
     "apps.forward_groups",
@@ -270,6 +271,16 @@ CELERY_BEAT_SCHEDULE = {
         "task": "postbox.prune_push_events",
         "schedule": crontab(hour="4", minute="20"),
     },
+    # P4-B: no-op unless DMARC_REPORT_INGEST_ENABLED=true. Mailbox is read-only
+    # and reports are stored only for ownership-verified tenant domains.
+    "dmarc-report-poll": {
+        "task": "dmarc_reports.poll_mailbox",
+        "schedule": crontab(minute="*/30"),
+    },
+    "dmarc-report-retention": {
+        "task": "dmarc_reports.prune",
+        "schedule": crontab(hour="4", minute="40"),
+    },
 }
 
 # DRF
@@ -345,6 +356,11 @@ DMARC_REPORT_ADDRESS = env("DMARC_REPORT_ADDRESS", default="dmarc@mail.matemail.
 # authorized. Ordinary tenant DNS onboarding must never require a provider-side
 # authorization record for each customer domain.
 DMARC_AGGREGATE_REPORTING_ENABLED = env.bool("DMARC_AGGREGATE_REPORTING_ENABLED", default=False)
+# Separate gate: reading a dedicated IMAP mailbox does not enable DNS RUA
+# publication. Keep both OFF until controlled rollout and validation.
+DMARC_REPORT_INGEST_ENABLED = env.bool("DMARC_REPORT_INGEST_ENABLED", default=False)
+DMARC_REPORT_PLATFORM_DOMAIN = env("DMARC_REPORT_PLATFORM_DOMAIN", default="mail.matemail.pro")
+DMARC_REPORT_RETENTION_DAYS = env.int("DMARC_REPORT_RETENTION_DAYS", default=90)
 MAIL_HOSTNAME = env("MAIL_HOSTNAME", default="mx.matemail.pro")
 LEGACY_MAIL_HOSTNAME = env("LEGACY_MAIL_HOSTNAME", default="mx.matemail.online")
 DKIM_SELECTOR = env("DKIM_SELECTOR", default="mm1")

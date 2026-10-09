@@ -578,6 +578,11 @@ export default function DomainDetailPage() {
           >
             Domain details
           </button>
+          {canAdmin && (
+            <Link href={`/app/domains/${params.id}/dmarc`} className="portal-domain-tab">
+              DMARC reports
+            </Link>
+          )}
         </div>
 
         {tab === "dns" ? (
