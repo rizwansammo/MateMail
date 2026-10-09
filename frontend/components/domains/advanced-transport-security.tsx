@@ -337,7 +337,7 @@ export function AdvancedTransportSecurity({
               <div className="portal-fact"><span>Policy mode</span><strong>Testing (fixed)</strong></div>
               <div className="portal-fact"><span>Expected MX</span><code className="break-all">{data.mx}</code></div>
               <div className="portal-fact"><span>Cache duration</span><strong>{data.max_age_seconds} seconds</strong></div>
-              <div className="portal-fact"><span>TLS reporting</span><strong>Pending secured report ingestion</strong></div>
+              <div className="portal-fact"><span>TLS reporting</span><strong>{data.dns_records.find((record) => record.host.startsWith("_smtp._tls."))?.publish_ready ? "Reporting DNS ready" : "Reporting setup pending"}</strong></div>
             </div>
             {data.policy_url && (
               <p className="mt-3 break-all text-[11px] text-[var(--portal-muted)]">
