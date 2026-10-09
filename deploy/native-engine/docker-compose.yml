@@ -170,7 +170,7 @@ services:
   rspamd:
     <<: [*common, *native-dns]
     container_name: matemail-native-rspamd
-    image: rspamd/rspamd:3.11@sha256:116c2e05bb03073f5ff3b41f407fb5f9ac13ae726e8f8d0cd56231e97d49d7b7
+    image: rspamd/rspamd:4.2.1@sha256:dfb8176e560c178faa4e18ebf9c9b43d0d60c2d2fa03f748c34a27e5c3418dc4
     environment:
       # NE4: Compose cannot see a change to a bind-mounted config FILE, so
       # deploy.sh hashes rspamd/ and passes the result here. A configuration
