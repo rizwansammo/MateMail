@@ -349,6 +349,41 @@ tests:
               summary: "A public mail port has stopped listening"
               description: "1 of 25/587/993 are not listening. Inbound mail, client submission or mailbox access is down."
 
+  # ── Shared-host exposure: bound does not imply permitted ───────────────
+  - interval: 1m
+    name: Hermes on 9119 bound to all interfaces but blocked by UFW stays visible without a false alert
+    input_series:
+      - series: 'matemail_unexpected_bound_ports'
+        values: '1+0x60'
+      - series: 'matemail_unexpected_public_ports'
+        values: '0+0x60'
+      - series: 'matemail_ufw_active'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: UnexpectedPublicPort
+        exp_alerts: []
+
+  - interval: 1m
+    name: unexpectedly permitting an ingress port still raises an alert
+    input_series:
+      - series: 'matemail_unexpected_bound_ports'
+        values: '1+0x60'
+      - series: 'matemail_unexpected_public_ports'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: UnexpectedPublicPort
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: UnexpectedPublicPort
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "1 unexpected TCP listener(s) may be exposed"
+              description: "Unexpected TCP listeners with a permissive/missing UFW gate or Docker-public binding. The raw bound-port count is reported separately. Investigate exposure; do not restart unrelated services."
+
   # ── Abuse protection ────────────────────────────────────────────────────
   - interval: 1m
     name: fail2ban running against a stale log is reported, not treated as healthy

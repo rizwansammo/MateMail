@@ -552,12 +552,16 @@ groups:
           summary: "A Native container port beyond 25/587/993 is published publicly"
 
       - alert: UnexpectedPublicPort
+        # Not every non-loopback listener is Internet-accessible. Host processes
+        # blocked by active UFW default-deny stay visible in the separate
+        # unexpected_bound_ports metric; explicit UFW allows, permissive/failed
+        # firewall state and Docker-published ports continue to alert.
         expr: matemail_unexpected_public_ports > 0
         for: 5m
         labels: {severity: warning}
         annotations:
-          summary: "{{ $value }} unexpected publicly bound port(s)"
-          description: "Expected public ports are 22, 80, 443 and 4000 (TalkRoom legacy)."
+          summary: "{{ $value }} unexpected TCP listener(s) may be exposed"
+          description: "Unexpected TCP listeners with a permissive/missing UFW gate or Docker-public binding. The raw bound-port count is reported separately. Investigate exposure; do not restart unrelated services."
 
       - alert: FirewallInactive
         expr: matemail_ufw_active == 0
