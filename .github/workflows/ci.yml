@@ -251,6 +251,7 @@ jobs:
       - name: docker compose config
         working-directory: deploy
         env:
+          DMARC_REPORT_INGEST_ENABLED: "true"
           MATEMAIL_BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend:ci-placeholder
           MATEMAIL_FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend:ci-placeholder
           DJANGO_SECRET_KEY: ci-placeholder
