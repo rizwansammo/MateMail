@@ -132,6 +132,7 @@ jobs:
           fetch-depth: 0
 
       - name: Extract the Compose file from the exact release commit
+        id: release_bundle
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -186,6 +187,31 @@ jobs:
             | tar -x -C "$BUNDLE_DIR" --strip-components=2
           tar -C candidate -czf "candidate/custom-hosts.${IMAGE_TAG}.tar.gz" \
             "custom-hosts.${IMAGE_TAG}"
+
+          # Dynamic MTA-STS worker is an OPTIONAL, source-only P4-C.F asset.
+          # Preserve the ability to manually roll back to pre-P4-C releases.
+          # Stage its exact SHA only when the requested commit contains it.
+          if git cat-file -e "${IMAGE_TAG}:deploy/transport-security/install.sh" 2>/dev/null; then
+            for required in \
+              deploy/transport-security/provisioner.py \
+              deploy/transport-security/systemd/matemail-transport-sts-provisioner.service \
+              deploy/transport-security/systemd/matemail-transport-sts-provisioner.timer; do
+              if ! git cat-file -e "${IMAGE_TAG}:${required}" 2>/dev/null; then
+                echo "::error::Required ${required} is missing from release ${IMAGE_TAG}."
+                exit 1
+              fi
+            done
+            TS_BUNDLE_DIR="candidate/transport-security.${IMAGE_TAG}"
+            mkdir -p "$TS_BUNDLE_DIR"
+            git archive "${IMAGE_TAG}" deploy/transport-security \
+              | tar -x -C "$TS_BUNDLE_DIR" --strip-components=2
+            tar -C candidate -czf "candidate/transport-security.${IMAGE_TAG}.tar.gz" \
+              "transport-security.${IMAGE_TAG}"
+            echo "transport_sts_bundle=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "transport_sts_bundle=false" >> "$GITHUB_OUTPUT"
+            echo "Older revision; no dynamic transport worker bundle (rollback supported)."
+          fi
 
           echo "Extracted from ${IMAGE_TAG}:"
           sha256sum "candidate/docker-compose.${IMAGE_TAG}.yml"
@@ -356,18 +382,34 @@ jobs:
           strip_components: 1
           overwrite: true
 
+      # Files-only staging. The worker is NOT installed or started by this
+      # application deploy; P4-C.F requires a separately approved host action.
+      - name: Stage exact-revision dynamic MTA-STS worker on MateServer
+        if: steps.release_bundle.outputs.transport_sts_bundle == 'true'
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: candidate/transport-security.${{ inputs.image_tag }}.tar.gz
+          target: /opt/MateMail/app/.deploy/
+          strip_components: 1
+          overwrite: true
+
       - name: Deploy to MateServer
         uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRANSPORT_STS_BUNDLE: ${{ steps.release_bundle.outputs.transport_sts_bundle }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN,TRANSPORT_STS_BUNDLE
           timeout: 60s
           command_timeout: 15m
           script: |
@@ -380,6 +422,8 @@ jobs:
             CANDIDATE="$DEPLOY_DIR/.deploy/docker-compose.${IMAGE_TAG}.yml"
             CUSTOM_HOST_BUNDLE="$DEPLOY_DIR/.deploy/custom-hosts.${IMAGE_TAG}.tar.gz"
             CUSTOM_HOST_DIR="$DEPLOY_DIR/.deploy/custom-hosts.${IMAGE_TAG}"
+            TRANSPORT_STS_ARCHIVE="$DEPLOY_DIR/.deploy/transport-security.${IMAGE_TAG}.tar.gz"
+            TRANSPORT_STS_DIR="$DEPLOY_DIR/.deploy/transport-security.${IMAGE_TAG}"
             COMPOSE_BACKUP="$DEPLOY_DIR/backups/docker-compose.${STAMP}.yml"
             ENV_BACKUP="$DEPLOY_DIR/.env.bak.${STAMP}"
 
@@ -412,6 +456,19 @@ jobs:
               echo "ERROR: custom-host installer is missing."
               exit 1
             }
+
+            # Validate and unpack staged host worker but DO NOT install it.
+            # Archive is from the same immutable Git SHA as the images.
+            if [ "${TRANSPORT_STS_BUNDLE:-false}" = "true" ]; then
+              [ -f "$TRANSPORT_STS_ARCHIVE" ] || { echo "ERROR: missing staged MTA-STS worker archive"; exit 1; }
+              rm -rf "$TRANSPORT_STS_DIR"
+              tar -xzf "$TRANSPORT_STS_ARCHIVE" -C "$DEPLOY_DIR/.deploy"
+              [ -f "$TRANSPORT_STS_DIR/install.sh" ] || { echo "ERROR: missing MTA-STS install.sh"; exit 1; }
+              [ -f "$TRANSPORT_STS_DIR/provisioner.py" ] || { echo "ERROR: missing MTA-STS provisioner.py"; exit 1; }
+              python3 -m py_compile "$TRANSPORT_STS_DIR/provisioner.py"
+              bash -n "$TRANSPORT_STS_DIR/install.sh"
+              echo "Dynamic MTA-STS host files staged only; no install, timer or DNS activation."
+            fi
 
             # ── 1. Validate the candidate BEFORE it replaces anything ────────
             #
