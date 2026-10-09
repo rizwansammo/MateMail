@@ -20,5 +20,5 @@
 # is not the image validated this month, which is the whole reason the Compose
 # file pins digests.
 bcrypt==4.2.1
-cryptography==44.0.0
+cryptography==50.0.2
 psycopg[binary]==3.2.3
