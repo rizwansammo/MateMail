@@ -61,6 +61,18 @@ class AuthEndpointThrottle(MateMailAnonThrottle):
     scope = "auth"
 
 
+class AuthRefreshThrottle(MateMailAnonThrottle):
+    """
+    A separate per-IP budget for refresh-cookie exchanges.
+
+    Session restoration may happen automatically on page load. It must never
+    consume the 5/min sign-in/signup budget. This is still rate limited so a
+    client cannot flood token validation with unlimited requests.
+    """
+
+    scope = "auth_refresh"
+
+
 class AuthenticatedActionThrottle(UserRateThrottle):
     """
     Per-user limit for authenticated auth actions — resending verification
