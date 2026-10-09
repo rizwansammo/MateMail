@@ -325,3 +325,32 @@ class EngineLinkPreflightTest(SimpleTestCase):
             line_of("docker compose pull"),
             "the preflight must fail before the deploy does any work",
         )
+
+
+class ProductionDependencySecurityPolicyTest(SimpleTestCase):
+    """Regression gates against silently disabling supply-chain checks."""
+
+    def test_backend_image_has_patched_installer_and_compatibility_gate(self):
+        source = (REPO / "backend" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("pip==26.2.1", source)
+        self.assertIn("setuptools==84.0.0", source)
+        self.assertIn("python -m pip check", source)
+        self.assertNotIn("--trusted-host", source)
+
+    def test_ci_fail_closed_dependency_audits(self):
+        source = CI.read_text(encoding="utf-8")
+        self.assertIn("python -m pip_audit --strict", source)
+        self.assertIn("npm audit --omit=dev --audit-level=moderate", source)
+        self.assertNotIn("pip_audit --strict || true", source)
+        self.assertNotIn("npm audit --omit=dev --audit-level=moderate || true", source)
+
+    def test_supported_lts_tracks_do_not_regress(self):
+        import json
+        import re
+        required = (REPO / "backend" / "requirements.txt").read_text(encoding="utf-8")
+        self.assertRegex(required, r"(?m)^Django==5\.2\.\d+$")
+        self.assertRegex(required, r"(?m)^djangorestframework==3\.17\.\d+$")
+        frontend = json.loads((REPO / "frontend" / "package.json").read_text(encoding="utf-8"))
+        self.assertRegex(frontend["dependencies"]["next"], r"^16\.3\.\d+$")
+        self.assertEqual(frontend["dependencies"]["next"],
+                         frontend["devDependencies"]["eslint-config-next"])
