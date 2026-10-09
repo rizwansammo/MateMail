@@ -180,9 +180,20 @@ ln -sfn "$SITE" "$LINK"
 nginx -t
 systemctl reload nginx
 
-# Do not use -k/--insecure. Validate the exact public host and body.
-curl --fail --silent --show-error --max-time 15 \
-  "https://$HOST/.well-known/mta-sts.txt" \
-  | python3 "$SCRIPT_DIR/validate.py" - "$DOMAIN"
+# nginx reload is asynchronous: existing wildcard vhost workers may still
+# answer the first HTTPS request for this newly added SNI hostname. Retry
+# a bounded number of times before declaring failure and rolling back.
+# No -k/--insecure; every attempt validates the public certificate and body.
+verified=0
+for attempt in 1 2 3 4 5 6; do
+  if curl --fail --silent --show-error --max-time 10 \
+      "https://$HOST/.well-known/mta-sts.txt" \
+      | python3 "$SCRIPT_DIR/validate.py" - "$DOMAIN"; then
+    verified=1
+    break
+  fi
+  sleep 2
+done
+[ "$verified" = 1 ]
 ARMED=0
 echo "HTTPS MTA-STS ACTIVE FOR $DOMAIN (testing mode; no DNS TXT published)"
