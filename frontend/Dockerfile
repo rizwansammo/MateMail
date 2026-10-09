@@ -48,6 +48,16 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
+# Next.js standalone runs directly under node, not npm. The stock Node image
+# includes the *global npm CLI* and its dependency tree in the final runtime,
+# even though npm was only needed in the separate deps/builder stages. Those
+# packages have known HIGH advisories (brace-expansion, undici, tar, etc.); do
+# not ship an unused package manager into the public-facing production image.
+# The node executable and the application node_modules are NOT removed.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+           /usr/local/bin/npm \
+           /usr/local/bin/npx
+
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
