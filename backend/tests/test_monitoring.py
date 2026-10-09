@@ -976,14 +976,14 @@ def test_recreating_containers_cannot_lose_monitoring_history():
     [
         ('"v=spf1 ip4:169.58.114.252 -all"', True),
         ('"v=spf1 ip4:169.58.114.0/24 -all"', True),
-        ('"unrelated=verification"\\n"v=spf1 ip4:169.58.114.252 -all"', True),
+        ('"unrelated=verification"\n"v=spf1 ip4:169.58.114.252 -all"', True),
         ('"v=spf1 ip4:169.58.114." "252 -all"', True),
         ("", False),  # NXDOMAIN/NODATA or transient resolver failure
         ('"v=spf1 ip4:169.58.114.253 -all"', False),
         ('"v=spf1 ip4:169.58.114.252 +all"', False),
         ('"v=spf1 ip4:169.58.114.252 ~all"', False),
         ('"v=spf1 ip4:invalid -all"', False),
-        ('"v=spf1 ip4:169.58.114.252 -all"\\n"v=spf1 ip4:169.58.114.252 -all"', False),
+        ('"v=spf1 ip4:169.58.114.252 -all"\n"v=spf1 ip4:169.58.114.252 -all"', False),
     ],
 )
 def test_p4_provider_spf_usable_not_only_present(provider_answer, ok):
@@ -1000,7 +1000,7 @@ def test_p4_provider_spf_usable_not_only_present(provider_answer, ok):
         ('"v=spf1 include:_spf.matemail.online -all"', False),
         ('"v=spf1 ip4:169.58.114.252 -all"', False),
         ("", False),
-        ('"v=spf1 include:_spf.matemail.pro -all"\\n"v=spf1 -all"', False),
+        ('"v=spf1 include:_spf.matemail.pro -all"\n"v=spf1 -all"', False),
     ],
 )
 def test_p4_platform_sender_spf_references_exact_provider(answer, ok):
