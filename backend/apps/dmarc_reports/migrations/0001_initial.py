@@ -36,7 +36,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="AggregateRecord",
             fields=[
-                ("id", models.BigAutoField(primary_key=True, serialize=False)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("source_ip", models.GenericIPAddressField()),
                 ("count", models.PositiveBigIntegerField()),
                 ("disposition", models.CharField(max_length=16)),
@@ -49,7 +49,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="IngestCursor",
             fields=[
-                ("id", models.BigAutoField(primary_key=True, serialize=False)),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("address", models.EmailField(max_length=254, unique=True)),
                 ("uid_validity", models.PositiveBigIntegerField(default=0)),
                 ("last_uid", models.PositiveBigIntegerField(default=0)),
