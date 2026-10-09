@@ -116,6 +116,10 @@ class DmarcTenantIsolationTest(TestCase):
         self.tenant_b = make_tenant(self.owner_b, "B", "b-dmarc")
         self.domain_a = make_domain(self.tenant_a, "a.test")
         self.domain_b = make_domain(self.tenant_b, "b.test")
+        # Fixtures represent mail activity only after the domains were owned.
+        for domain in (self.domain_a, self.domain_b):
+            domain.ownership_verified_at = timezone.now() - timedelta(days=30)
+            domain.save(update_fields=["ownership_verified_at"])
         self.client_a = auth_client(self.owner_a, self.tenant_a)
         self.client_b = auth_client(self.owner_b, self.tenant_b)
 
@@ -130,6 +134,12 @@ class DmarcTenantIsolationTest(TestCase):
         self.assertEqual(row.message_count, 4)
         self.assertEqual(AggregateRecord.objects.count(), 1)
         self.assertFalse(any("xml" in f.name and f.name != "xml_sha256" for f in AggregateReport._meta.fields))
+
+    def test_reports_from_before_a_domain_was_verified_are_not_exposed(self):
+        self.domain_a.ownership_verified_at = timezone.now()
+        self.domain_a.save(update_fields=["ownership_verified_at"])
+        self.assertEqual(store_report(parse_xml(report_xml("a.test"))).status, "unmanaged")
+        self.assertFalse(AggregateReport.objects.exists())
 
     def test_unverified_or_unknown_domains_cannot_be_bound_to_any_tenant(self):
         make_unverified_domain(self.tenant_b, "pending.test")
