@@ -2,7 +2,7 @@
 
 ## What is and is not complete
 
-The first-party receiving domains are **mail.matemail.pro**, **netamate.com**, and **matedesk.pro**. All three currently point MX to **mx.matemail.pro**. The apex **matemail.pro** has no inbound MX by design; do not publish a false MTA-STS inbound policy there. When additional customer domains join, their owner must explicitly opt in and verify actual MX and certificates.
+The four currently active Native Engine receiving domains (verified on MateServer 2026-10-09) are **mail.matemail.pro**, **netamate.com**, **matedesk.pro** and **myrightbd.org**. All four currently point MX to **mx.matemail.pro**. The apex **matemail.pro** has no inbound MX by design; do not publish a false MTA-STS inbound policy there. When additional customer domains join, their owner must explicitly opt in and verify actual MX and certificates.
 
 The repository contains a restricted MTA-STS **mode: testing** HTTPS policy and a DNS-independent installer. Publishing _mta-sts DNS TXT is a **separate, manual gate**, AFTER the exact HTTPS URL publicly answers with a trusted certificate, text/plain and the correct MX. Never publish \`mode: enforce\` automatically.
 
@@ -15,11 +15,12 @@ sudo bash deploy/mta-sts/install.sh prepare matedesk.pro
 sudo bash deploy/mta-sts/install.sh activate matedesk.pro
 sudo bash deploy/mta-sts/install.sh prepare mail.matemail.pro
 sudo bash deploy/mta-sts/install.sh prepare netamate.com
+sudo bash deploy/mta-sts/install.sh prepare myrightbd.org
 \`\`\`
 
 - Existing \`mta-sts.matedesk.pro\` A points to MateServer and the current Certbot wildcard covers it. The script verifies both before opening HTTPS.
 - \`mta-sts.mail.matemail.pro\` and \`mta-sts.netamate.com\` need **A=169.58.114.252** first, DNS-only/unproxied; a fresh Certbot webroot certificate is issued only after A exists and HTTP-01 bootstrap is active. After DNS has propagated, run \`activate\` for each.
-- All three serve exactly \`/.well-known/mta-sts.txt\`; all other HTTPS application paths return 404. Hosted policy is in a separate \`/var/www/matemail/mta-sts\` webroot. No proxy, redirect, mail-engine modification, or customer app restart.
+- All four serve exactly \`/.well-known/mta-sts.txt\`; all other HTTPS application paths return 404. Hosted policy is in a separate \`/var/www/matemail/mta-sts\` webroot. No proxy, redirect, mail-engine modification, or customer app restart.
 - Existing \`/etc/nginx/sites-available/matemail-mta-sts-<domain>\` managed configs get backed up and are automatically rolled back if verification/reload fails. The script refuses to overwrite unmanaged configs and checks \`nginx -t\` before reload.
 - Do not edit Certbot renewal settings, DKIM keys, Port 25, Postfix, Dovecot, DNS MX, or Caddy.
 
@@ -38,6 +39,9 @@ All values are exactly as follows. Keep existing SPF/DKIM/DMARC TXT records. Do 
 | **matedesk.pro** | \`mta-sts\` | A | ALREADY points to \`169.58.114.252\` | Leave unchanged |
 | **matedesk.pro** | \`_mta-sts\` | TXT | \`v=STSv1; id=20261009t1\` | After HTTPS |
 | **matedesk.pro** | \`_smtp._tls\` | TXT | \`v=TLSRPTv1; rua=mailto:tlsrpt@mail.matemail.pro\` | After verified TLS-RPT receiver |
+| **myrightbd.org** | `mta-sts` | A | `169.58.114.252` | Needed before Certbot (Namecheap active DNS) |
+| **myrightbd.org** | `_mta-sts` | TXT | `v=STSv1; id=20261009t1` | After HTTPS |
+| **myrightbd.org** | `_smtp._tls` | TXT | `v=TLSRPTv1; rua=mailto:tlsrpt@mail.matemail.pro` | After verified TLS-RPT receiver |
 
 **DNS authority matters:** Matemail presently delegates nameservers to Spaceship; the operator must determine which UI controls that **active** zone. A registrar panel that is not serving the authoritative NS will not affect public DNS. For every record verify **authoritative** and **two independent public resolvers** before calling it done.
 
@@ -46,7 +50,7 @@ TLS-RPT (RFC 8460) uses \`_smtp._tls\` and mailto/HTTPS RUA; this is a *differen
 ## Verification & safe state
 
 \`\`\`bash
-for d in mail.matemail.pro netamate.com matedesk.pro; do
+for d in mail.matemail.pro netamate.com matedesk.pro myrightbd.org; do
   echo "Domain $d"
   dig +short MX "$d"
   dig +short TXT "_mta-sts.$d"
