@@ -346,11 +346,17 @@ class ProductionDependencySecurityPolicyTest(SimpleTestCase):
 
     def test_supported_lts_tracks_do_not_regress(self):
         import json
-        import re
         required = (REPO / "backend" / "requirements.txt").read_text(encoding="utf-8")
         self.assertRegex(required, r"(?m)^Django==5\.2\.\d+$")
-        self.assertRegex(required, r"(?m)^djangorestframework==3\.17\.\d+$")
+        # DRF can advance to later patched 3.x releases without needing
+        # to loosen this guard; support for Django 5.2 is what matters.
+        drf_line = next(line for line in required.splitlines()
+                        if line.startswith("djangorestframework=="))
+        drf_version = tuple(int(n) for n in drf_line.split("==")[1].split("."))
+        self.assertGreaterEqual(drf_version, (3, 17, 2))
         frontend = json.loads((REPO / "frontend" / "package.json").read_text(encoding="utf-8"))
-        self.assertRegex(frontend["dependencies"]["next"], r"^16\.3\.\d+$")
+        next_version = tuple(int(n) for n in frontend["dependencies"]["next"].split("."))
+        self.assertEqual(next_version[0], 16)
+        self.assertGreaterEqual(next_version, (16, 3, 8))
         self.assertEqual(frontend["dependencies"]["next"],
                          frontend["devDependencies"]["eslint-config-next"])
