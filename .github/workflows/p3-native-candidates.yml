@@ -1,0 +1,133 @@
+name: Publish vetted P3 Native API and Olefy candidate images
+
+# Immutable candidate publication only. Does NOT modify production .env,
+# recreate Native Engine containers, change customer mail or ship :ne1.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p3-native-candidates.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p3-native-candidates
+  cancel-in-progress: false
+
+jobs:
+  build-audit-publish:
+    name: Build audited ${{ matrix.component }} candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [api, olefy]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set context
+        id: location
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          if [ "$COMPONENT" = api ]; then
+            echo 'context=.' >> "$GITHUB_OUTPUT"
+          else
+            echo 'context=deploy/native-engine/images/olefy' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build local candidate only
+        run: |
+          docker build --pull \
+            -f deploy/native-engine/images/${{ matrix.component }}/Dockerfile \
+            -t matemail-p3-${{ matrix.component }}:verify \
+            "${{ steps.location.outputs.context }}"
+      - name: Validate Python dependency compatibility
+        run: |
+          docker run --rm --entrypoint python3 matemail-p3-${{ matrix.component }}:verify -m pip check
+      - name: Verify core crypto and malware parser imports
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          if [ "$COMPONENT" = api ]; then
+            docker run --rm --entrypoint python3 matemail-p3-api:verify -c '
+          from cryptography.hazmat.primitives.asymmetric import rsa,padding
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.fernet import Fernet
+          import bcrypt, psycopg
+          k=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+          data=b"p3-native-api-crypto"
+          sig=k.sign(data,padding.PKCS1v15(),hashes.SHA256())
+          k.public_key().verify(sig,data,padding.PKCS1v15(),hashes.SHA256())
+          f=Fernet(Fernet.generate_key())
+          assert f.decrypt(f.encrypt(data))==data
+          print("API cryptography, bcrypt, psycopg verified")'
+          else
+            docker run --rm --entrypoint python3 matemail-p3-olefy:verify -c '
+          import oletools,sys
+          assert sys.version_info[:2]==(3,13)
+          print("Olefy parser import verified")'
+          fi
+      - name: Fail closed on known Python vulnerabilities
+        run: |
+          docker run --rm --user 0 --entrypoint sh matemail-p3-${{ matrix.component }}:verify -ec '
+            python3 -m pip install --no-cache-dir "pip-audit==2.10.1"
+            python3 -m pip_audit --strict'
+      - name: Publish immutable GHCR tag
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          COMPONENT: ${{ matrix.component }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+          unset GHCR_TOKEN
+          target="ghcr.io/rizwansammo/matemail-native-${COMPONENT}:p3-${SHA}"
+          docker tag "matemail-p3-${COMPONENT}:verify" "$target"
+          docker push "$target"
+          docker logout ghcr.io >/dev/null
+          echo "## ${COMPONENT}: immutable P3 candidate" >> "$GITHUB_STEP_SUMMARY"
+          echo "${target}" >> "$GITHUB_STEP_SUMMARY"
+          echo "NOT DEPLOYED. No :ne1 tag updated." >> "$GITHUB_STEP_SUMMARY"
+
+  stage-only:
+    name: Stage vetted images on MateServer (no container changes)
+    runs-on: ubuntu-latest
+    needs: [build-audit-publish]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Transfer image layers only via short-lived registry login
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: GHCR_USER,GHCR_TOKEN,SHA
+          timeout: 60s
+          command_timeout: 12m
+          script: |
+            set -Eeuo pipefail
+            DOCKER_CONFIG="$(mktemp -d)"
+            export DOCKER_CONFIG
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true; rm -rf "$DOCKER_CONFIG"' EXIT
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+            unset GHCR_TOKEN
+            for component in api olefy; do
+              image="ghcr.io/rizwansammo/matemail-native-${component}:p3-${SHA}"
+              docker pull "$image" >/dev/null
+              docker image inspect "$image" --format "STAGED ${component} {{.Id}}"
+            done
+            echo 'P3_STAGED_ONLY_NO_PRODUCTION_CONTAINERS_CHANGED'
