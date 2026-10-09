@@ -1,4 +1,5 @@
 import { clearTokens, getAccessToken, isTokenExpired, setAccessToken } from "./auth";
+import { needsAccessToken } from "./auth-request-policy";
 
 /**
  * Where the API lives, from wherever this code is running.
@@ -32,7 +33,7 @@ const API_BASE =
     : CONFIGURED_API_BASE;
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public retryAfterSeconds: number | null = null) {
     super(message);
     this.name = "ApiError";
   }
@@ -80,8 +81,27 @@ async function getValidAccessToken(): Promise<string | null> {
   return access;
 }
 
+/** Restore a session using the same single-flight refresh as protected API calls. */
+export async function restoreAccessToken(): Promise<string | null> {
+  return getValidAccessToken();
+}
+
+function retryAfterSeconds(header: string | null): number | null {
+  if (!header || !/^\d+$/.test(header.trim())) return null;
+  const seconds = Number(header.trim());
+  return Number.isSafeInteger(seconds) && seconds >= 0 ? seconds : null;
+}
+
+export function rateLimitMessage(error: ApiError): string {
+  if (error.retryAfterSeconds !== null) {
+    return `Too many requests. Please wait ${error.retryAfterSeconds} seconds and try again.`;
+  }
+  return "Too many requests. Please wait a moment and try again.";
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = await getValidAccessToken();
+  // Authentication/bootstrap requests cannot require a token to obtain a token.
+  const token = needsAccessToken(path) ? await getValidAccessToken() : null;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
@@ -102,7 +122,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const body = await res.text();
-    throw new ApiError(res.status, body || res.statusText);
+    throw new ApiError(res.status, body || res.statusText, retryAfterSeconds(res.headers.get("Retry-After")));
   }
 
   const text = await res.text();
@@ -114,7 +134,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
  * Callers check res.ok themselves. Use `api.*` helpers when you want auto-parse + throw on error.
  */
 export async function apiRequest(path: string, options: RequestInit = {}): Promise<Response> {
-  const token = await getValidAccessToken();
+  const token = needsAccessToken(path) ? await getValidAccessToken() : null;
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
   };
