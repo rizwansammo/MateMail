@@ -44,3 +44,25 @@ DNS Verify before another ACME attempt. A crash after certificate issuance
 leaves the row READY; activation retries idempotently without reissuing the
 certificate. The final database transition to ACTIVE occurs only after the
 surface-aware nginx vhost has passed `nginx -t` and reloaded successfully.
+
+## Production identity and privileged validation (2026-10-09)
+
+The privileged host worker independently rejects `matemail.pro` and **all**
+`*.matemail.pro` hostnames, alongside the retired `matemail.online` suffix.
+This mirrors the backend reserved-suffix policy and prevents an invalid job
+from changing the platform's own Nginx site or obtaining a certificate for it.
+The worker also refuses IP literals and malformed/non-public TLDs.
+
+The canonical customer CNAME target is `custom.matemail.pro`. The standalone
+read-only smoke test defaults to this target and rejects redirects that move a
+customer to **any** other hostname. Older `.online` CNAME acceptance in the
+Django service is an explicit temporary legacy compatibility setting, not the
+canonical configuration for a new customer.
+
+Rollout is separate from the application image deployment: after GitHub CI,
+back up the installed root worker, verify its exact revision and install the
+validated worker atomically; keep its existing root-only environment and the
+active timer intact. A read-only function-level validation and an empty-queue
+systemd poll can verify it **without adding any customer domain or issuing an
+unnecessary certificate**. The full DNS + Let's Encrypt + tenant lifecycle
+acceptance still needs an actual customer-owned hostname later.
