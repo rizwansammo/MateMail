@@ -248,6 +248,9 @@ jobs:
       # Placeholders only. The real values live in /opt/MateMail/app/.env on the
       # server; this proves the file is structurally valid and that every
       # required variable is actually declared.
+      - name: Validate P4-C MTA-STS policy and safe installation rules
+        run: python3 -m unittest discover -s deploy/mta-sts -p 'test_*.py' -v
+
       - name: docker compose config
         working-directory: deploy
         env:
