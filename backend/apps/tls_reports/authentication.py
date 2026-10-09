@@ -41,7 +41,7 @@ def verified_report_sender(raw: bytes, message) -> bool:
         if from_domain != signing_domain and not from_domain.endswith("." + signing_domain):
             continue
         try:
-            if dkim.DKIM(raw).verify(idx=index, timeout=5):
+            if dkim.DKIM(raw).verify(idx=index, tlsrpt=True):
                 return True
         except Exception:
             # Treat DNS timeouts, invalid signatures and malformed headers as
