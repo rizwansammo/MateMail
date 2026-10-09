@@ -13,6 +13,15 @@ from django.utils import timezone
 from apps.tls_reports.parser import InvalidTlsReport, parse_json, unpack
 from apps.tls_reports.ingest import ingest_mailbox_once, ingest_raw_message
 from apps.tls_reports.authentication import verified_report_sender
+from apps.tls_reports import authentication as tls_authentication
+# Native Engine test modules intentionally import engine/native_api/dkim.py
+# under the plain "dkim" name. Their sys.path/module cache is global during
+# Django test discovery. Reuse the NE3 test's real pinned dkimpy verifier
+# (loaded without that engine shadow), only in this isolated test module.
+from tests.test_native_engine_mail_flow import dkimpy as _real_dkimpy
+
+if _real_dkimpy is not None:
+    tls_authentication.dkim = _real_dkimpy
 from apps.tls_reports.models import TlsAggregateReport, TlsFailureBucket, TlsIngestCursor
 from apps.tls_reports.services import store_policy, prune_old_reports
 from apps.transport_security.models import DomainTransportSecurity
@@ -87,8 +96,8 @@ class ParserSecurityTest(SimpleTestCase):
 
     def test_pinned_dkimpy_supports_rfc8460_verification_mode(self):
         import inspect
-        import dkim
-        self.assertIn("tlsrpt", inspect.signature(dkim.DKIM.verify).parameters)
+        self.assertIsNotNone(_real_dkimpy)
+        self.assertIn("tlsrpt", inspect.signature(_real_dkimpy.DKIM.verify).parameters)
 
     def test_unauthenticated_tls_reports_are_rejected(self):
         # A structurally valid report with an attacker-supplied From or
