@@ -36,6 +36,7 @@ OUTPUT
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -80,6 +81,7 @@ MX_CHECK_DOMAIN = os.environ.get("MX_CHECK_DOMAIN", SENDER_DOMAIN)
 MAIL_CERT_NAME = os.environ.get("MAIL_CERT_NAME", "matemail-mail-pro")
 DKIM_SELECTOR = os.environ.get("DKIM_SELECTOR", "mm1")
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "169.58.114.252")
+SPF_INCLUDE_HOST = os.environ.get("SPF_INCLUDE_DOMAIN", "_spf.matemail.pro")
 
 #: The ten Native services, named exactly once. Everything that iterates the
 #: engine iterates this, so a service added to the stack but not to this list
@@ -995,6 +997,62 @@ def _dig(*args):
                    timeout=20).strip()
 
 
+def _spf_policies_from_dig(output):
+    """Parse TXT answers as *whole records*, joining split DNS TXT chunks.
+
+    TXT answers can contain unrelated verification strings. Never confuse
+    several SPF records with one: RFC 7208 treats duplicates as a PermError.
+    This parser intentionally does not evaluate the whole SPF language; its
+    purpose is to verify our documented provider policy and exact include.
+    """
+    records = []
+    for raw in output.splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        chunks = re.findall(r'"([^"]*)"', raw)
+        value = "".join(chunks) if chunks else raw
+        if re.match(r"(?i)^v=spf1(?:\s|$)", value):
+            records.append(value)
+    return records
+
+
+def _provider_spf_authorizes_ip(output, address):
+    """True only for one strict provider SPF policy authorising our sender IP.
+
+    Scope: the current dedicated IPv4 MX with explicit ip4 mechanisms and
+    -all. Do not claim a general recursive SPF evaluation from string matching.
+    A missing TXT, multiple v=spf1 records, broad +all or any syntax error
+    must not produce an affirmative metric.
+    """
+    policies = _spf_policies_from_dig(output)
+    if len(policies) != 1:
+        return False
+    tokens = policies[0].lower().split()
+    if not tokens or tokens[0] != "v=spf1" or tokens[-1] != "-all":
+        return False
+    try:
+        ip = ipaddress.IPv4Address(address)
+        return any(
+            ip in ipaddress.IPv4Network(tok[4:], strict=False)
+            for tok in tokens[1:-1] if tok.startswith("ip4:")
+        )
+    except ValueError:
+        return False
+
+
+def _sender_spf_uses_provider(output, provider):
+    """Require exactly one SPF policy and the exact provider include token."""
+    policies = _spf_policies_from_dig(output)
+    if len(policies) != 1:
+        return False
+    tokens = policies[0].lower().split()
+    return (
+        tokens[0] == "v=spf1"
+        and f"include:{provider.lower().rstrip('.')}" in tokens[1:]
+    )
+
+
 def sec_dns_identity():
     """
     The production mail identity, checked rather than assumed. Drift here is
@@ -1015,6 +1073,18 @@ def sec_dns_identity():
     spf = try_run(["dig", "+short", "TXT", SENDER_DOMAIN], timeout=20)
     metric("matemail_dns_spf_present", 1 if "v=spf1" in spf else 0, {},
            "1 when the sender domain publishes SPF")
+    # P4: an SPF record containing include:_spf.matemail.pro is NOT enough.
+    # If that provider TXT disappears, every tenant using the include can
+    # return SPF PermError while the old 'present' metric stays green. Verify
+    # that the source authorises our actual outbound IPv4 and has -all, then
+    # that the platform sender references it. Neither check mutates any DNS.
+    provider_txt = _dig("TXT", SPF_INCLUDE_HOST)
+    provider_ok = _provider_spf_authorizes_ip(provider_txt, PUBLIC_IP)
+    sender_ok = _sender_spf_uses_provider(spf, SPF_INCLUDE_HOST)
+    metric("matemail_dns_spf_provider_usable", int(provider_ok), {},
+           "1 when the provider SPF has one strict policy authorising the outbound IP")
+    metric("matemail_dns_spf_sender_chain_usable", int(provider_ok and sender_ok), {},
+           "1 when platform sender SPF references a working provider include")
     dkim = try_run(["dig", "+short", "TXT",
                     "%s._domainkey.%s" % (DKIM_SELECTOR, SENDER_DOMAIN)],
                    timeout=20)

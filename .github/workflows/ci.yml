@@ -137,6 +137,20 @@ jobs:
             tests/test_ne6_submission.py \
             tests/test_ne7_public_mail.py
 
+      - name: Validate monitoring alerts with promtool
+        # YAML parsing alone does not test whether a critical DNS alert actually
+        # fires, or pages on a transient DNS cache miss. Use the same Prometheus
+        # version as the deployed monitoring stack, with no network or writes.
+        run: |
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev \
+            -v "$PWD/deploy/monitoring/prometheus:/etc/prometheus:ro" \
+            --entrypoint /bin/promtool prom/prometheus:v3.1.0 \
+            check rules /etc/prometheus/rules/matemail.rules.yml
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,nosuid,nodev \
+            -v "$PWD/deploy/monitoring/prometheus:/etc/prometheus:ro" \
+            --entrypoint /bin/promtool prom/prometheus:v3.1.0 \
+            test rules /etc/prometheus/tests/matemail.rules.test.yml
+
   # ── Frontend gates ──────────────────────────────────────────────────────────
   frontend:
     name: Frontend lint and build

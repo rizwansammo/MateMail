@@ -295,6 +295,18 @@ groups:
         annotations:
           summary: "SPF, DKIM or DMARC is missing for the sender domain"
 
+      - alert: ProviderSpfAuthorizationBroken
+        # A customer TXT containing include:_spf.matemail.pro can look
+        # correct while the target is missing or stopped authorising our IP.
+        # This is more serious than a missing marketing DNS TXT: it can make
+        # SPF return PermError for every affected sending tenant.
+        expr: matemail_dns_spf_provider_usable == 0 or matemail_dns_spf_sender_chain_usable == 0
+        for: 20m
+        labels: {severity: critical}
+        annotations:
+          summary: "MateMail provider SPF chain is broken"
+          description: "The platform sender or shared _spf.matemail.pro policy no longer resolves to one strict SPF policy authorising the live SMTP IPv4. Check authoritative DNS and multiple resolvers. Do not edit tenant DNS or mail routing blindly."
+
   # ── Databases and Redis ─────────────────────────────────────────────────
   - name: datastores
     rules:
