@@ -7,7 +7,7 @@ from .models import DNSCheckStatus, DNSRecordCheck
 
 
 def _mail_hostname():
-    return getattr(settings, "MAIL_HOSTNAME", "mx.matemail.online")
+    return getattr(settings, "MAIL_HOSTNAME", "mx.matemail.pro")
 
 
 def _legacy_mail_hostname():
@@ -37,11 +37,11 @@ def _spf_include():
     IPs, so it can change when the sending estate changes without touching a
     domain that serves a website.
     """
-    return getattr(settings, "SPF_INCLUDE_DOMAIN", "_spf.matemail.online")
+    return getattr(settings, "SPF_INCLUDE_DOMAIN", "_spf.matemail.pro")
 
 
 def _autodiscover_host():
-    return getattr(settings, "AUTODISCOVER_HOST", "autodiscover.matemail.online")
+    return getattr(settings, "AUTODISCOVER_HOST", "autodiscover.matemail.pro")
 
 
 def _expected_records(domain_obj):

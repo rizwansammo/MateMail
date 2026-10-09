@@ -154,7 +154,7 @@ def message_id_domain(from_address: str = "") -> str:
     """
     address = from_address or transactional_from_address()
     if "@" in address:
-        # `MateMail <noreply@mail.matemail.pro>` -> mail.matemail.online
+        # `MateMail <noreply@mail.matemail.pro>` -> mail.matemail.pro
         domain = address.rsplit("@", 1)[1].strip().rstrip(">").strip()
         if domain:
             return domain
