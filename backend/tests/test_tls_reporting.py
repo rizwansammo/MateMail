@@ -85,6 +85,11 @@ class ParserSecurityTest(SimpleTestCase):
         with self.assertRaises(InvalidTlsReport):
             unpack(raw, "anything.zip", "application/zip")
 
+    def test_pinned_dkimpy_supports_rfc8460_verification_mode(self):
+        import inspect
+        import dkim
+        self.assertIn("tlsrpt", inspect.signature(dkim.DKIM.verify).parameters)
+
     def test_unauthenticated_tls_reports_are_rejected(self):
         # A structurally valid report with an attacker-supplied From or
         # Authentication-Results header is not authenticated evidence.
