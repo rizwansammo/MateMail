@@ -837,8 +837,8 @@ def sec_backups():
 # See /opt/mateserver-backup/bin/backup.sh. No SAS URL, mailbox data, archive
 # or credentials are ever read by the collector.
 _CENTRAL_DR_COMPLETE = re.compile(
-    r"^\\[(?P<timestamp>[^]\\n]+)\\] backup complete "
-    r"latest_bytes=(?P<size>\\d+) daily_full=(?P<date>\\d{4}-\\d{2}-\\d{2})$",
+    r"^\[(?P<timestamp>[^\n]+?)\] backup complete "
+    r"latest_bytes=(?P<size>\d+) daily_full=(?P<date>\d{4}-\d{2}-\d{2})$",
     re.MULTILINE,
 )
 
