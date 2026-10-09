@@ -1462,6 +1462,9 @@
 .portal-premium .portal-record-type {
   display: inline-flex;
   min-width: 38px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  align-items: center;
   justify-content: center;
   padding: 4px 6px;
   border-radius: 5px !important;
@@ -1720,9 +1723,28 @@
 
 .portal-premium .portal-ownership-record {
   display: grid;
-  grid-template-columns: 70px minmax(140px, .7fr) minmax(0, 1.4fr);
+  grid-template-columns: 110px minmax(140px, .7fr) minmax(0, 1.4fr);
   gap: 10px;
   margin-top: 13px;
+}
+
+/* One-line DNS type codes (TXT, MX, CNAME, SRV), even with a copy icon. */
+.portal-premium .portal-dns-type-value {
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.portal-premium .portal-dns-type-value code {
+  flex: 0 0 auto;
+  min-width: max-content;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.portal-premium .portal-dns-type-value .portal-copy-button {
+  flex-shrink: 0;
 }
 
 @media (max-width: 1050px) {

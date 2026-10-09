@@ -40,10 +40,11 @@ export async function verifyDomainOwnership(domainId: string): Promise<VerifyRes
 }
 
 function RecordField({ label, value }: { label: string; value: string }) {
+  const isType = label === "Type";
   return (
-    <div className="portal-dns-field">
+    <div className={isType ? "portal-dns-field portal-dns-type-field" : "portal-dns-field"}>
       <span>{label}</span>
-      <div className="portal-code-field">
+      <div className={isType ? "portal-code-field portal-dns-type-value" : "portal-code-field"}>
         <code>{value}</code>
         <PortalCopyButton value={value} label={`Copy ${label.toLowerCase()}`} />
       </div>
