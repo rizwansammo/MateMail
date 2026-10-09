@@ -125,7 +125,7 @@ services:
       start_period: 45s
     deploy:
       resources:
-        limits: {memory: 200M}
+        limits: {memory: 400M}
         reservations: {memory: 64M}
     logging: *logging
 
