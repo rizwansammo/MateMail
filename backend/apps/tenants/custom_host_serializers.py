@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from apps.domains.models import DomainOwnership
+
 from .custom_hosts import (
     CustomHostnameValueError,
     cname_target,
@@ -11,6 +13,8 @@ from .models import CustomHostname, CustomHostnameSurface
 class CustomHostnameSerializer(serializers.ModelSerializer):
     cname_record_type = serializers.SerializerMethodField()
     cname_target = serializers.SerializerMethodField()
+    cname_zone = serializers.SerializerMethodField()
+    cname_host = serializers.SerializerMethodField()
     setup_instructions = serializers.SerializerMethodField()
 
     class Meta:
@@ -29,6 +33,8 @@ class CustomHostnameSerializer(serializers.ModelSerializer):
             "deactivated_at",
             "cname_record_type",
             "cname_target",
+            "cname_zone",
+            "cname_host",
             "setup_instructions",
             "created_at",
             "updated_at",
@@ -40,6 +46,23 @@ class CustomHostnameSerializer(serializers.ModelSerializer):
 
     def get_cname_target(self, obj) -> str:
         return cname_target()
+
+    def get_cname_zone(self, obj) -> str | None:
+        """Use only a verified DNS zone for this tenant, never a guessed TLD."""
+        hostname = obj.hostname.rstrip(".").lower()
+        zones = obj.tenant.domains.filter(
+            ownership_status=DomainOwnership.VERIFIED,
+        ).values_list("domain", flat=True)
+        matches = [
+            zone.rstrip(".").lower()
+            for zone in zones
+            if hostname.endswith("." + zone.rstrip(".").lower())
+        ]
+        return max(matches, key=len) if matches else None
+
+    def get_cname_host(self, obj) -> str | None:
+        zone = self.get_cname_zone(obj)
+        return obj.hostname[: -(len(zone) + 1)] if zone else None
 
     def get_setup_instructions(self, obj) -> str:
         if obj.is_dns_verified:

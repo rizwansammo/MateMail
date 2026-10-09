@@ -26,9 +26,9 @@ import {
 } from "@/lib/postbox-api";
 
 const DEFAULT_PREFERENCES: Preferences = {
-  theme: "system",
-  density: "comfortable",
-  reading_pane: "right",
+  theme: "light",
+  density: "extra_compact",
+  reading_pane: "off",
   list_view: "conversations",
   reader_view: "thread",
   load_remote_images: false,
@@ -91,7 +91,7 @@ export function PostBoxProvider({ children }: { children: React.ReactNode }) {
     setAvailableMailboxes(data.available_mailboxes);
     setPermissions(data.permissions);
     setPreferences({ ...DEFAULT_PREFERENCES, ...data.preferences });
-    applyTheme(data.preferences?.theme ?? "system");
+    applyTheme(data.preferences?.theme ?? DEFAULT_PREFERENCES.theme);
   }, []);
 
   useEffect(() => {
@@ -147,7 +147,7 @@ export function PostBoxProvider({ children }: { children: React.ReactNode }) {
     setAvailableMailboxes(data.available_mailboxes);
     setPermissions(data.permissions);
     setPreferences({ ...DEFAULT_PREFERENCES, ...data.preferences });
-    applyTheme(data.preferences?.theme ?? "system");
+    applyTheme(data.preferences?.theme ?? DEFAULT_PREFERENCES.theme);
   }, []);
 
   const updatePreferences = useCallback(

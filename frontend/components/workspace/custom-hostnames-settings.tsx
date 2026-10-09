@@ -50,6 +50,8 @@ interface CustomHostname {
   deactivated_at: string | null;
   cname_record_type: "CNAME";
   cname_target: string;
+  cname_zone: string | null;
+  cname_host: string | null;
   setup_instructions: string;
   created_at: string;
   updated_at: string;
@@ -125,6 +127,9 @@ function CustomHostnamePanel({
 }) {
   const Icon = surface.icon;
   const isBusy = Boolean(busy);
+  // DNS providers often append their managed zone; only copy an API-confirmed
+  // relative label, never guess the zone from a public suffix.
+  const copyableHost = row?.cname_host ?? null;
 
   return (
     <article className="portal-custom-host">
@@ -207,7 +212,7 @@ function CustomHostnamePanel({
               <div className="portal-custom-host-dns-head">
                 <div>
                   <strong>Add this DNS record</strong>
-                  <span>At the DNS provider that manages {row.hostname}.</span>
+                  <span>At the DNS provider that manages {row.cname_zone ?? row.hostname}.</span>
                 </div>
                 {row.dns_status === "verified" && (
                   <span className="portal-custom-host-verified">
@@ -220,13 +225,15 @@ function CustomHostnamePanel({
               <div className="portal-custom-host-record">
                 <div>
                   <span>Type</span>
-                  <div className="portal-code-field"><code>{row.cname_record_type}</code></div>
+                  <div className="portal-code-field portal-dns-type-value"><code>{row.cname_record_type}</code></div>
                 </div>
                 <div>
-                  <span>Name / Host</span>
+                  <span>Name / Host{copyableHost ? " (copy this)" : ""}</span>
                   <div className="portal-code-field">
-                    <code>{row.hostname}</code>
-                    <PortalCopyButton value={row.hostname} label="Copy hostname" />
+                    <code>{copyableHost ?? "Check your DNS zone"}</code>
+                    {copyableHost && (
+                      <PortalCopyButton value={copyableHost} label="Copy relative DNS host" />
+                    )}
                   </div>
                 </div>
                 <div>
@@ -237,6 +244,24 @@ function CustomHostnamePanel({
                   </div>
                 </div>
               </div>
+              <p className="portal-dns-provider-note">
+                {row.cname_zone ? (
+                  <>
+                    Most providers append <strong>{row.cname_zone}</strong> automatically.
+                    Copy <code>{row.cname_host}</code> into Host/Name, not the full
+                    <code> {row.hostname}</code>. If your provider explicitly requests
+                    a full hostname, use <code>{row.hostname}</code>.
+                  </>
+                ) : (
+                  <>
+                    Full hostname: <code>{row.hostname}</code>. This organization has
+                    no matching verified DNS zone, so MateMail cannot safely
+                    suggest a shortened name. Check your provider&apos;s zone:
+                    enter the portion before that zone in Host/Name, or the full
+                    hostname only if the provider explicitly requires it.
+                  </>
+                )}
+              </p>
             </div>
           )}
 

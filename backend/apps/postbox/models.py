@@ -179,12 +179,12 @@ class PostBoxPreference(models.Model):
         "mailboxes.Mailbox", on_delete=models.CASCADE, related_name="postbox_preference"
     )
 
-    theme = models.CharField(max_length=10, choices=Theme.choices, default=Theme.SYSTEM)
+    theme = models.CharField(max_length=10, choices=Theme.choices, default=Theme.LIGHT)
     density = models.CharField(
-        max_length=13, choices=Density.choices, default=Density.COMFORTABLE
+        max_length=13, choices=Density.choices, default=Density.EXTRA_COMPACT
     )
     reading_pane = models.CharField(
-        max_length=8, choices=ReadingPane.choices, default=ReadingPane.RIGHT
+        max_length=8, choices=ReadingPane.choices, default=ReadingPane.OFF
     )
     # Mailbox-wide choices; list grouping and the opened reader are independent.
     list_view = models.CharField(
