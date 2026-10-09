@@ -7,7 +7,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { api, ApiError } from "@/lib/api";
+import { api, restoreAccessToken } from "@/lib/api";
 import { clearTokens, purgeLegacyRefreshToken, setAccessToken } from "@/lib/auth";
 
 export interface AuthUser {
@@ -73,33 +73,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // code, so the only way to know whether a session exists is to ask. A 401
   // simply means "not signed in" and is not an error worth surfacing.
   useEffect(() => {
+    let cancelled = false;
     const restore = async () => {
       // A browser that used a pre-P3c build still holds a live refresh token
       // in localStorage. Clear it on the first load of the new build.
       purgeLegacyRefreshToken();
       try {
-        const data = await api.post<{ access: string }>("/api/auth/refresh/");
-        setAccessToken(data.access);
+        const access = await restoreAccessToken();
+        if (!access || cancelled) return;
         const me = await api.get<AuthUser>("/api/auth/me/");
+        if (cancelled) return;
         setUser(me);
         // Restore tenant from stored token payload
         const { getTokenPayload } = await import("@/lib/auth");
-        const payload = getTokenPayload(data.access);
+        const payload = getTokenPayload(access);
         if (payload?.tenant_id) {
           try {
             const ws = await api.get<AuthTenant>(`/api/workspaces/${payload.tenant_id}/`);
-            setTenant(ws);
+            if (!cancelled) setTenant(ws);
           } catch {
             // tenant lookup failed — leave as null
           }
         }
       } catch {
-        clearTokens();
+        if (!cancelled) clearTokens();
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
     restore();
+    return () => { cancelled = true; };
   }, []);
 
   const login = useCallback(
