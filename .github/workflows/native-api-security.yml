@@ -1,0 +1,69 @@
+name: Native API dependency security and crypto smoke tests
+
+# Candidate validation only. No image publishing, production credentials,
+# deployments, firewall changes, or mail-engine service restarts.
+on:
+  pull_request:
+    paths:
+      - 'deploy/native-engine/images/api/**'
+      - 'engine/native_api/**'
+      - '.github/workflows/native-api-security.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/native-engine/images/api/**'
+      - 'engine/native_api/**'
+      - '.github/workflows/native-api-security.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-api-image:
+    name: Build, check and audit Native API candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # The published :ne1 and production digest are intentionally not touched.
+      - name: Build local candidate image (never publish)
+        run: |
+          docker build \
+            --file deploy/native-engine/images/api/Dockerfile \
+            --tag matemail-native-api-security-test:ci \
+            .
+
+      - name: Resolve packages without dependency conflicts
+        run: |
+          docker run --rm --entrypoint python \
+            matemail-native-api-security-test:ci -m pip check
+
+      - name: RSA signing and encryption compatibility smoke checks
+        run: |
+          docker run --rm --entrypoint python \
+            matemail-native-api-security-test:ci -c '
+          from cryptography.hazmat.primitives.asymmetric import rsa, padding
+          from cryptography.hazmat.primitives import hashes
+          from cryptography.fernet import Fernet
+
+          key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+          payload = b"native-api-dkim-signature-regression"
+          signature = key.sign(payload, padding.PKCS1v15(), hashes.SHA256())
+          key.public_key().verify(signature, payload, padding.PKCS1v15(), hashes.SHA256())
+
+          fernet = Fernet(Fernet.generate_key())
+          assert fernet.decrypt(fernet.encrypt(payload)) == payload
+          print("Native API RSA and Fernet smoke checks passed")
+          '
+
+      - name: Vulnerability audit of full resolved candidate image
+        run: |
+          # Only this throwaway container installs the scanning tool.
+          # Never modify the candidate image or an actual production container.
+          docker run --rm --user 0 --entrypoint sh \
+            matemail-native-api-security-test:ci -ec '
+              python -m pip install --no-cache-dir "pip-audit==2.10.1"
+              python -m pip_audit --strict
+            '
