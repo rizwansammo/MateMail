@@ -1735,7 +1735,7 @@
   justify-content: space-between;
 }
 
-.portal-premium .portal-dns-type-value code {
+.portal-premium .portal-code-field.portal-dns-type-value code {
   flex: 0 0 auto;
   min-width: max-content;
   white-space: nowrap;
