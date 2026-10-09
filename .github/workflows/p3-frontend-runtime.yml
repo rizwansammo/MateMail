@@ -1,0 +1,58 @@
+name: Frontend production image runtime security smoke
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/p3-frontend-runtime.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/Dockerfile'
+      - '.github/workflows/p3-frontend-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: Build/test standalone runner without npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build candidate locally (no GHCR publishing)
+        run: |
+          docker build -f frontend/Dockerfile -t matemail-frontend-p3:verify frontend
+
+      - name: Assert Node and standalone app remain, npm CLI is absent
+        run: |
+          docker run --rm --entrypoint sh matemail-frontend-p3:verify -ec '
+            node --version
+            test -f /app/server.js
+            test -d /app/node_modules/next
+            test ! -e /usr/local/bin/npm
+            test ! -e /usr/local/bin/npx
+            test ! -d /usr/local/lib/node_modules/npm
+            echo "Frontend production image has no global npm CLI"
+          '
+
+      - name: Start candidate and smoke-check login route
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d matemail-frontend-p3:verify)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          healthy=0
+          for attempt in $(seq 1 35); do
+            if docker exec "$cid" node -e "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" >/dev/null 2>&1; then
+              healthy=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$healthy" != 1 ]; then
+            docker logs --tail=70 "$cid"
+            exit 1
+          fi
+          echo 'Standalone Next.js login endpoint OK without global npm'
