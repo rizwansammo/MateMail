@@ -40,10 +40,17 @@
 # WHICH PHASE OWNS IT
 #   NE2.
 
-FROM python:3.13-alpine@sha256:7415fbc3c9e4979cc717d92377ab2bc7b2b4a2af1ac03cc52b5f3f88efedaf3a
+# Updated official Python 3.13 image digest, scanned independently before
+# use. The earlier digest shipped libuuid with known fixable vulnerabilities.
+# Pin the immutable image: :3.13-alpine by itself drifts between CI builds.
+FROM python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+
+# Apply Alpine security updates in the candidate build. Runtime images are
+# tested and published by GitHub Actions only; production remains digest-pinned.
+RUN apk upgrade --no-cache
 
 # BUILD CONTEXT IS THE REPOSITORY ROOT, not this directory, because the
 # application source copied below lives outside it. The workflow passes

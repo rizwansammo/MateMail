@@ -15,10 +15,15 @@
 # WHICH PHASE OWNS IT
 #   NE1 (service foundation). NE3 wires Rspamd's external_services to it.
 
-FROM python:3.13-alpine
+# The previous floating image reference silently changed every build and
+# carried a stale libuuid package in the production image. Review/pin each
+# updated official Python digest and apply supported Alpine patch updates.
+FROM python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
 
-RUN apk add --no-cache tini \
-    && pip install --no-cache-dir oletools==0.60.2
+RUN apk upgrade --no-cache \
+    && apk add --no-cache tini \
+    && python -m pip install --no-cache-dir oletools==0.60.2 \
+    && python -m pip check
 
 WORKDIR /app
 COPY olefy.py /app/olefy.py
