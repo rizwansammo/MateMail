@@ -86,6 +86,34 @@ class EdgeContractTests(TestCase):
                     with self.assertRaises(module.EdgeError):
                         module.check_dns(self.make_job())
 
+    def test_public_policy_path_traversable_despite_strict_umask(self):
+        # The real systemd unit uses UMask=0077, so mkdir creates 0700.
+        # Nginx must reach the public policy file without directory listing.
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "transport-sts"
+            root.mkdir(mode=0o700)
+            host = "mta-sts.customer.example"
+            policy_dir = root / host / ".well-known"
+            policy_dir.mkdir(parents=True, mode=0o700)
+            (root / host).chmod(0o700)
+            policy_file = policy_dir / "mta-sts.txt"
+            policy_file.write_bytes(module.policy("mx.matemail.pro"))
+            policy_file.chmod(0o644)
+            with mock.patch.object(module, "POLICIES", root):
+                module.expose_public_policy_path(host)
+            for directory in (root, root / host, policy_dir):
+                self.assertEqual(directory.stat().st_mode & 0o777, 0o711)
+            self.assertEqual(policy_file.stat().st_mode & 0o777, 0o644)
+
+    def test_public_policy_path_rejects_directory_symlink(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "transport-sts"
+            root.mkdir()
+            (root / "mta-sts.customer.example").symlink_to(Path(temp))
+            with mock.patch.object(module, "POLICIES", root):
+                with self.assertRaises(module.EdgeError):
+                    module.expose_public_policy_path("mta-sts.customer.example")
+
     def test_installer_never_enables_service(self):
         script = (path.parent / "install.sh").read_text()
         self.assertNotIn("systemctl enable", script)
