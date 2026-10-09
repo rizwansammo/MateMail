@@ -40,6 +40,11 @@ def store_report(parsed: ParsedReport) -> ImportResult:
         )
         if domain is None:
             return ImportResult("unmanaged", name)
+        # A verified claim gives access to CURRENT reports, never to another
+        # owner's historical sending telemetry from before the claim.
+        if (domain.ownership_verified_at is None
+                or parsed.period_end < domain.ownership_verified_at):
+            return ImportResult("unmanaged", name)
         tenant = domain.tenant
 
     obj, created = AggregateReport.objects.get_or_create(
