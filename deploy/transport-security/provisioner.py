@@ -248,6 +248,20 @@ def cert_ok(host):
     return True
 
 
+def expose_public_policy_path(host):
+    """Let Nginx traverse public policy directories despite systemd UMask=0077.
+
+    The report policy is deliberately public. Keep directories non-listable and
+    non-writable to non-root processes; grant execute/traversal only (0711).
+    Never relax permissions outside the dedicated policy subtree.
+    """
+    for directory in (POLICIES, POLICIES / host, POLICIES / host / ".well-known"):
+        if directory.is_symlink() or not directory.is_dir():
+            raise EdgeError("Unsafe MTA-STS policy directory")
+        directory.chmod(0o711)
+
+
+
 def policy_http_ok(data):
     url = "https://" + data["hostname"] + "/.well-known/mta-sts.txt"
     opener = urllib.request.build_opener(
@@ -289,6 +303,7 @@ def provision(data):
             raise EdgeError("Certificate issuance or hostname validation failed")
     destination = POLICIES / host / ".well-known" / "mta-sts.txt"
     atomic(destination, policy(data["mx"]))
+    expose_public_policy_path(host)
     authorize(data)
     check_dns(data)
     install_site(host, https_site(host))
