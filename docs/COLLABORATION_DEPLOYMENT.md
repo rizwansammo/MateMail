@@ -41,7 +41,7 @@ same release's `deploy/native-engine/postfix/main.cf` and the matching
 `deploy.sh`. Preserve the root-only production `.env`; never replace it with
 a repository template.
 
-Production runtime is documented under `/opt/MateMailNative/`. Use the
+Production runtime is under `/opt/MateMail/engine/deploy/native-engine/`. Use the
 existing Native Engine deployment process, not bare `docker compose up -d`.
 
 ## 3. Deploy the Native Engine

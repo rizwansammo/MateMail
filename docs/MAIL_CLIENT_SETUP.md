@@ -46,13 +46,13 @@ configuration being wrong, not the server being down.
 
 ## Certificate
 
-`mx.matemail.pro` and the legacy `mx.matemail.online`, covered by the same valid Let's Encrypt SAN certificate.
+`mx.matemail.pro`, covered by the production Let's Encrypt certificate.
 Clients validate it normally — there is nothing to accept manually, and a
 client prompting to trust an unknown certificate means it is not talking to
 this server.
 
 Renewal is automatic and installs into both the SMTP and IMAP services.
-Existing clients set to `mx.matemail.online` continue to work during migration;
+Retired hostnames are not supported client configuration; update clients to `mx.matemail.pro`.
 there is no mailbox migration or password change. PTR and outgoing SMTP
 identity may remain on the legacy hostname until coordinated provider changes.
 

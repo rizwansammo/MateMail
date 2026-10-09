@@ -24,7 +24,7 @@ only then reports the hostname ACTIVE.
 - systemd: `matemail-custom-host-provisioner.timer`
 
 The shared secret is purpose-specific. It must equal
-`CUSTOM_HOST_PROVISIONER_SECRET` in `/opt/MateMail/.env` and is copied into
+`CUSTOM_HOST_PROVISIONER_SECRET` in `/opt/MateMail/app/.env` and is copied into
 the worker's root-only environment file by `install.sh`. It is never printed.
 
 ## Removal
