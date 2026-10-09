@@ -31,6 +31,25 @@ class DeployWorkflowTest(SimpleTestCase):
     def test_deploy_is_manual_only(self):
         self.assertEqual(list(self.wf["on"]), ["workflow_dispatch"])
 
+    def test_p4cf_transport_worker_is_staged_only_and_old_sha_rollback_supported(self):
+        # The bundle must come from the same SHA as image/compose and never
+        # silently install, start or enable a new root-owned systemd service.
+        steps = self.wf["jobs"]["deploy"]["steps"]
+        extract = next(step for step in steps if step.get("id") == "release_bundle")
+        self.assertIn('git archive "${IMAGE_TAG}" deploy/transport-security', extract["run"])
+        self.assertIn('transport_sts_bundle=false', extract["run"])
+        stage = next(step for step in steps if step.get("name", "").startswith(
+            "Stage exact-revision dynamic MTA-STS worker"))
+        self.assertEqual(stage["if"], "steps.release_bundle.outputs.transport_sts_bundle == 'true'")
+        deploy_step = next(step for step in steps if step.get("name") == "Deploy to MateServer")
+        shell_script = deploy_step["with"]["script"]
+        self.assertIn("TRANSPORT_STS_BUNDLE", deploy_step["with"]["envs"])
+        self.assertIn("python3 -m py_compile", shell_script)
+        self.assertIn("bash -n", shell_script)
+        self.assertNotIn('bash "$TRANSPORT_STS_DIR/install.sh"', shell_script)
+        self.assertNotIn('systemctl enable --now matemail-transport-sts-provisioner.timer', self.raw)
+        self.assertNotIn('systemctl start matemail-transport-sts-provisioner.service', self.raw)
+
     def test_deploy_requires_a_sha_and_confirmation(self):
         inputs = self.wf["on"]["workflow_dispatch"]["inputs"]
         self.assertIn("image_tag", inputs)
