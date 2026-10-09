@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll verified dynamic MTA-STS HTTPS requests
+
+[Timer]
+OnBootSec=4min
+OnUnitInactiveSec=5min
+Unit=matemail-transport-sts-provisioner.service
+Persistent=false
+
+[Install]
+WantedBy=timers.target

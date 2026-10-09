@@ -2,7 +2,7 @@ from django.urls import path
 
 from apps.dnshealth.views import DomainCheckDNSView, DomainDNSRecordsView
 from apps.dmarc_reports.views import DomainDmarcReportsView
-from apps.transport_security.views import DomainTransportSecurityView
+from apps.transport_security.views import DomainTransportSecurityView, DomainTransportSecurityDNSVerifyView
 from .views import (
     DomainDetailView,
     DomainListCreateView,
@@ -17,6 +17,7 @@ urlpatterns = [
     path("<uuid:pk>/records/", DomainDNSRecordsView.as_view(), name="domain-dns-records"),
     path("<uuid:pk>/dmarc-reports/", DomainDmarcReportsView.as_view(), name="domain-dmarc-reports"),
     path("<uuid:pk>/transport-security/", DomainTransportSecurityView.as_view(), name="domain-transport-security"),
+    path("<uuid:pk>/transport-security/verify-dns/", DomainTransportSecurityDNSVerifyView.as_view(), name="domain-transport-security-dns-verify"),
     path("<uuid:pk>/check/", DomainCheckDNSView.as_view(), name="domain-check-dns"),
     path("<uuid:pk>/provision/", DomainProvisionView.as_view(), name="domain-provision"),
     path(

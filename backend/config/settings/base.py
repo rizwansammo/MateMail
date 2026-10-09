@@ -57,6 +57,13 @@ TRANSPORT_SECURITY_SELF_SERVICE_ENABLED = env.bool(
 # Phase C will supply a validated MTA-STS policy gateway. Do NOT assume the
 # existing Hub/PostBox custom-host CNAME target serves TLS policy files.
 MTA_STS_POLICY_EDGE_TARGET = env("MTA_STS_POLICY_EDGE_TARGET", default="")
+MTA_STS_POLICY_EDGE_READY = env.bool("MTA_STS_POLICY_EDGE_READY", default=False)
+TRANSPORT_SECURITY_PROVISIONING_ENABLED = env.bool(
+    "TRANSPORT_SECURITY_PROVISIONING_ENABLED", default=False,
+)
+TRANSPORT_SECURITY_PROVISIONER_SECRET = env(
+    "TRANSPORT_SECURITY_PROVISIONER_SECRET", default="",
+)
 TLS_RPT_REPORT_ADDRESS = env(
     "TLS_RPT_REPORT_ADDRESS", default="tlsrpt@mail.matemail.pro",
 )

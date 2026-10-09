@@ -16,6 +16,11 @@ from .serializers import (
     TransportSecurityToggleSerializer, describe_transport_security,
 )
 from django.conf import settings
+from django.utils import timezone
+from rest_framework.exceptions import Throttled
+from apps.security import ratelimit
+from apps.security.limits import DOMAIN_CHECK_PER_DOMAIN
+from .dns import check_domain_policy_dns
 
 
 class DomainTransportSecurityView(APIView):
@@ -92,3 +97,49 @@ class DomainTransportSecurityView(APIView):
                 config.save(update_fields=["enabled", "lifecycle", "updated_at"])
 
         return Response(describe_transport_security(domain, config))
+
+class DomainTransportSecurityDNSVerifyView(APIView):
+    """Owner/Admin requested DNS verification. NEVER creates a certificate itself."""
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite, IsEmailVerified]
+
+    @transaction.atomic
+    def post(self, request, pk):
+        domain = get_object_or_404(
+            Domain.objects.for_tenant(request.tenant).select_for_update(), pk=pk
+        )
+        if not getattr(settings, "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", False):
+            return Response({"detail": "Advanced transport security is not available."}, status=503)
+        try:
+            assert_can_use_mail(request.tenant)
+        except MailNotPermitted as exc:
+            return Response({"detail": exc.customer_message}, status=403)
+
+        row = DomainTransportSecurity.objects.filter(domain=domain, enabled=True).first()
+        if row is None:
+            return Response({"detail": "Enable advanced transport security first."}, status=409)
+        if row.lifecycle not in (
+            TransportSecurityLifecycle.PENDING_DNS,
+            TransportSecurityLifecycle.ERROR,
+        ):
+            return Response({"detail": "This domain is already being provisioned or is ready."}, status=409)
+
+        decision = ratelimit.hit(
+            DOMAIN_CHECK_PER_DOMAIN.bucket,
+            "transport-security:" + str(domain.id),
+            limit=DOMAIN_CHECK_PER_DOMAIN.limit,
+            window=DOMAIN_CHECK_PER_DOMAIN.window,
+        )
+        if not decision.allowed:
+            raise Throttled(wait=decision.retry_after, detail="Too many DNS checks. Try later.")
+
+        verified, message = check_domain_policy_dns(domain)
+        if not verified:
+            row.dns_verified_at = None
+            row.save(update_fields=["dns_verified_at", "updated_at"])
+            return Response({"verified": False, "detail": message}, status=409)
+
+        row.dns_verified_at = timezone.now()
+        row.lifecycle = TransportSecurityLifecycle.PENDING_DNS
+        row.last_error = ""
+        row.save(update_fields=["dns_verified_at", "lifecycle", "last_error", "updated_at"])
+        return Response({"verified": True, "detail": message})
