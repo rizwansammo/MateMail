@@ -62,7 +62,7 @@ from apps.security.limits import (
     TWO_FACTOR_MANAGE_PER_USER,
     TWO_FACTOR_PER_USER,
 )
-from apps.security.throttling import AuthenticatedActionThrottle, AuthEndpointThrottle
+from apps.security.throttling import AuthenticatedActionThrottle, AuthEndpointThrottle, AuthRefreshThrottle
 from .mailer import send_transactional
 from .cookies import (
     clear_refresh_cookie,
@@ -430,7 +430,7 @@ class RefreshView(APIView):
     """
 
     permission_classes = [AllowAny]
-    throttle_classes = [AuthThrottle]
+    throttle_classes = [AuthRefreshThrottle]
 
     def post(self, request):
         raw = read_refresh_cookie(request)
