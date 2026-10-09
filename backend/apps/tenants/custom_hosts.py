@@ -110,7 +110,7 @@ def validate_customer_hostname(value: str) -> str:
 def cname_target() -> str:
     """The one target every customer CNAME must point at."""
     return normalize_hostname(
-        getattr(settings, "CUSTOM_HOST_CNAME_TARGET", "custom.matemail.online")
+        getattr(settings, "CUSTOM_HOST_CNAME_TARGET", "custom.matemail.pro")
     )
 
 

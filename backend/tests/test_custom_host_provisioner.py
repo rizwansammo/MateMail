@@ -41,6 +41,17 @@ class WorkerValidationTest(unittest.TestCase):
             "*.example.com",
             "matemail.online",
             "custom.matemail.online",
+            "matemail.pro",
+            "hub.matemail.pro",
+            "postbox.matemail.pro",
+            "platform.matemail.pro",
+            "mx.matemail.pro",
+            "custom.matemail.pro",
+            "mail.matemail.pro",
+            "other.deep.matemail.pro",
+            "192.0.2.1",
+            "mail.example.123",
+            "mail.example.x",
         ):
             with self.subTest(value=value):
                 with self.assertRaises(worker.ProvisioningError):
@@ -50,6 +61,16 @@ class WorkerValidationTest(unittest.TestCase):
             worker.validate_hostname("MAIL.Customer-Example.COM."),
             "mail.customer-example.com",
         )
+
+    def test_root_worker_fails_closed_on_reserved_host_in_backend_job(self):
+        job = {
+            "id": "0a410cf7-b655-466e-929f-727ed6444309",
+            "hostname": "postbox.matemail.pro",
+            "surface": "postbox",
+            "tenant_id": "0e40081a-b654-4901-afec-d6cb741acdf6",
+        }
+        with self.assertRaises(worker.ProvisioningError):
+            worker.validate_job(job)
 
     def test_job_requires_uuid_surface_and_tenant(self):
         good = worker.validate_job(

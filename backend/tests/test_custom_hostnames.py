@@ -73,6 +73,18 @@ class CustomHostnameTenantAPITest(TestCase):
                 response = self.create(hostname)
                 self.assertEqual(response.status_code, 400)
 
+    @override_settings(CUSTOM_HOST_RESERVED_SUFFIXES=("matemail.online", "matemail.pro"))
+    def test_current_production_suffix_is_reserved_in_backend(self):
+        for hostname in (
+            "matemail.pro",
+            "hub.matemail.pro",
+            "postbox.matemail.pro",
+            "custom.matemail.pro",
+            "nested.platform.matemail.pro",
+        ):
+            with self.subTest(hostname=hostname):
+                self.assertEqual(self.create(hostname).status_code, 400)
+
     def test_only_one_live_hostname_per_surface_per_tenant(self):
         self.assertEqual(self.create("mail.customer.com").status_code, 201)
         response = self.create("inbox.customer.com")

@@ -21,6 +21,7 @@ import ssl
 import subprocess
 import sys
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 
 @dataclass
@@ -123,9 +124,14 @@ def check_host(
     try:
         status, headers = https_request(hostname, "/")
         location = headers.get("location", "")
-        redirect_leaked = (
-            "matemail.online" in location.lower()
-            and hostname.lower() not in location.lower()
+        # Both a canonical MateMail redirect and a redirect to any unrelated
+        # host violate custom-host browser URL preservation. Relative redirects
+        # and same-host absolute redirects remain valid.
+        parsed_redirect = urlsplit(location)
+        redirect_leaked = bool(
+            parsed_redirect.netloc
+            and (parsed_redirect.hostname or "").rstrip(".").lower()
+            != hostname.rstrip(".").lower()
         )
         checks.append(
             result(
@@ -192,7 +198,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--postbox-host", required=True)
     parser.add_argument(
         "--cname-target",
-        default="custom.matemail.online",
+        default="custom.matemail.pro",
     )
     parser.add_argument(
         "--skip-dns",

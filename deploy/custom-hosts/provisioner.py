@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import ipaddress
 import json
 import os
 import re
@@ -52,6 +53,10 @@ LOCK_PATH = Path(
 )
 HTTP_TIMEOUT = float(os.environ.get("MATEMAIL_CUSTOM_HOST_HTTP_TIMEOUT", "10"))
 GENERATED_MARKER = "# MATEMAIL CUSTOM HOST v1"
+# Root worker must enforce this independently of the Django API. Neither a
+# stale backend response nor a future configuration mistake may authorize
+# changes to MateMail's own nginx/certificate hostnames.
+RESERVED_DOMAIN_SUFFIXES = frozenset(("matemail.pro", "matemail.online"))
 HOST_RE = re.compile(
     r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
@@ -81,7 +86,21 @@ def validate_hostname(value: object) -> str:
         raise ProvisioningError("backend returned a non-ASCII hostname") from exc
     if not HOST_RE.fullmatch(hostname):
         raise ProvisioningError("backend returned an invalid hostname")
-    if hostname == "matemail.online" or hostname.endswith(".matemail.online"):
+    # Keep the privileged worker's policy at least as restrictive as Django's
+    # validate_customer_hostname. Reject IP literals and invalid public TLDs.
+    terminal_label = hostname.rsplit(".", 1)[-1]
+    if len(terminal_label) < 2 or terminal_label.isdigit():
+        raise ProvisioningError("backend returned a non-public hostname")
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        raise ProvisioningError("refusing an IP address as a custom hostname")
+    if any(
+        hostname == suffix or hostname.endswith("." + suffix)
+        for suffix in RESERVED_DOMAIN_SUFFIXES
+    ):
         raise ProvisioningError("refusing a MateMail-owned hostname")
     return hostname
 
