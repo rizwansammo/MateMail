@@ -1,4 +1,4 @@
-name: Native API dependency security and crypto smoke tests
+name: Native Python engine candidate security and crypto tests
 
 # Candidate validation only. No image publishing, production credentials,
 # deployments, firewall changes, or mail-engine service restarts.
@@ -6,12 +6,16 @@ on:
   pull_request:
     paths:
       - 'deploy/native-engine/images/api/**'
+      - 'deploy/native-engine/images/olefy/**'
+      - 'deploy/native-engine/docker-compose.yml'
       - 'engine/native_api/**'
       - '.github/workflows/native-api-security.yml'
   push:
     branches: [main]
     paths:
       - 'deploy/native-engine/images/api/**'
+      - 'deploy/native-engine/images/olefy/**'
+      - 'deploy/native-engine/docker-compose.yml'
       - 'engine/native_api/**'
       - '.github/workflows/native-api-security.yml'
   workflow_dispatch:
@@ -66,4 +70,34 @@ jobs:
             matemail-native-api-security-test:ci -ec '
               python -m pip install --no-cache-dir "pip-audit==2.10.1"
               python -m pip_audit --strict
+            '
+
+  native-olefy-image:
+    name: Build and audit Olefy candidate (no publish/deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build candidate from pinned supported Python image
+        run: |
+          docker build \
+            --file deploy/native-engine/images/olefy/Dockerfile \
+            --tag matemail-native-olefy-security-test:ci \
+            deploy/native-engine/images/olefy
+
+      - name: Verify parser dependencies and startup imports
+        run: |
+          docker run --rm --entrypoint python3 \
+            matemail-native-olefy-security-test:ci -c \
+            'import oletools; import sys; assert sys.version_info[:2] == (3, 13); print("Olefy parser import OK")'
+          docker run --rm --entrypoint python3 \
+            matemail-native-olefy-security-test:ci -m pip check
+
+      - name: Audit installed Python dependencies
+        run: |
+          docker run --rm --user 0 --entrypoint sh \
+            matemail-native-olefy-security-test:ci -ec '
+              python3 -m pip install --no-cache-dir "pip-audit==2.10.1"
+              python3 -m pip_audit --strict
             '
