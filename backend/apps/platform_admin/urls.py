@@ -1,4 +1,5 @@
 from django.urls import path
+from apps.dmarc_reports.views import PlatformDmarcReportsView
 
 from .auth_views import (
     PlatformForgotPasswordView,
@@ -60,6 +61,7 @@ urlpatterns = [
          name="platform-auth-reset-password"),
 
     path("stats/", AdminStatsView.as_view(), name="admin-stats"),
+    path("dmarc-reports/", PlatformDmarcReportsView.as_view(), name="platform-dmarc-reports"),
     path("tenants/", AdminTenantListView.as_view(), name="admin-tenant-list"),
     # Before <uuid:pk>/ so "pending" is never parsed as an id.
     path("tenants/pending/", AdminPendingTenantsView.as_view(), name="admin-tenant-pending"),
