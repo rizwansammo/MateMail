@@ -3,8 +3,8 @@ pytest==8.3.4
 pytest-django==4.9.0
 pytest-cov==6.0.0
 factory-boy==3.3.1
-django-stubs==5.1.1
-djangorestframework-stubs==3.15.1
+django-stubs==5.2.9
+djangorestframework-stubs==3.17.1
 
 # Test-only. tests/test_deployment_workflow.py parses .github/workflows/*.yml
 # and deploy/docker-compose.yml to assert the deployment invariants — that the
