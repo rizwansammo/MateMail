@@ -967,3 +967,71 @@ def test_recreating_containers_cannot_lose_monitoring_history():
         vols = compose["services"][name]["volumes"]
         assert any(v.endswith(":" + mount) and not v.startswith((".", "/"))
                    for v in vols), f"{name} keeps {mount} outside a named volume"
+
+
+# ─── P4: provider SPF include must be healthy, not merely mentioned ─────────
+
+@pytest.mark.parametrize(
+    ("provider_answer", "ok"),
+    [
+        ('"v=spf1 ip4:169.58.114.252 -all"', True),
+        ('"v=spf1 ip4:169.58.114.0/24 -all"', True),
+        ('"unrelated=verification"\\n"v=spf1 ip4:169.58.114.252 -all"', True),
+        ('"v=spf1 ip4:169.58.114." "252 -all"', True),
+        ("", False),  # NXDOMAIN/NODATA or transient resolver failure
+        ('"v=spf1 ip4:169.58.114.253 -all"', False),
+        ('"v=spf1 ip4:169.58.114.252 +all"', False),
+        ('"v=spf1 ip4:169.58.114.252 ~all"', False),
+        ('"v=spf1 ip4:invalid -all"', False),
+        ('"v=spf1 ip4:169.58.114.252 -all"\\n"v=spf1 ip4:169.58.114.252 -all"', False),
+    ],
+)
+def test_p4_provider_spf_usable_not_only_present(provider_answer, ok):
+    mod = _collector_module()
+    assert mod._provider_spf_authorizes_ip(provider_answer, "169.58.114.252") is ok
+
+
+@pytest.mark.parametrize(
+    ("answer", "ok"),
+    [
+        ('"v=spf1 include:_spf.matemail.pro -all"', True),
+        ('"v=spf1 include:_spf.matemail.pro ~all"', True),
+        ('"v=spf1 include:_spf.matemail.pro.evil.example -all"', False),
+        ('"v=spf1 include:_spf.matemail.online -all"', False),
+        ('"v=spf1 ip4:169.58.114.252 -all"', False),
+        ("", False),
+        ('"v=spf1 include:_spf.matemail.pro -all"\\n"v=spf1 -all"', False),
+    ],
+)
+def test_p4_platform_sender_spf_references_exact_provider(answer, ok):
+    mod = _collector_module()
+    assert mod._sender_spf_uses_provider(answer, "_spf.matemail.pro") is ok
+
+
+def test_p4_collector_catches_broken_provider_even_when_sender_spf_exists(monkeypatch):
+    mod = _collector_module()
+    observed = {}
+    monkeypatch.setattr(
+        mod, "metric", lambda name, value, labels, help_text, *args: observed.__setitem__(name, value))
+    monkeypatch.setattr(
+        mod, "_dig",
+        lambda *parts: (
+            '' if parts == ("TXT", "_spf.matemail.pro")
+            else "mx.matemail.pro." if parts[0] in ("MX", "-x")
+            else "169.58.114.252" if parts[0] == "A"
+            else ""
+        ))
+    monkeypatch.setattr(
+        mod, "try_run",
+        lambda parts, **kwargs: (
+            '"v=spf1 include:_spf.matemail.pro -all"'
+            if parts[-1] == "mail.matemail.pro" and parts[-2] == "TXT"
+            else '"v=DKIM1; p=public-placeholder"' if "._domainkey." in parts[-1]
+            else '"v=DMARC1; p=none"' if "_dmarc." in parts[-1]
+            else ""
+        ))
+    mod.sec_dns_identity()
+    assert observed["matemail_dns_spf_present"] == 1
+    assert observed["matemail_dns_spf_provider_usable"] == 0
+    assert observed["matemail_dns_spf_sender_chain_usable"] == 0
+
