@@ -180,6 +180,70 @@ class DmarcTenantIsolationTest(TestCase):
         self.assertGreater(prune_old_reports(), 0)
         self.assertFalse(AggregateRecord.objects.exists())
 
+    @override_settings(DMARC_REPORT_INGEST_ENABLED=True)
+    def test_read_only_imap_polling_uid_cursor_and_uidvalidity_reset(self):
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+
+        raw = mail_with_attachment(report_xml("a.test"))
+
+        class FakeMailbox:
+            validity = 10
+            select_count = 0
+
+            def select(self, folder, *, readonly=False):
+                self.select_count += 1
+                assert folder == "INBOX" and readonly is True
+                return SimpleNamespace(uid_validity=self.validity, messages=1)
+
+            def search_uids(self, criteria, *, newest):
+                assert criteria[0] == "UID" and newest is False
+                return [5]
+
+            def fetch_summaries(self, uids):
+                assert uids == [5]
+                return [SimpleNamespace(size=len(raw))]
+
+            def fetch_raw(self, uid):
+                assert uid == 5
+                return raw
+
+            def store_flags(self, *args, **kwargs):
+                raise AssertionError("Polling must NEVER mutate mail flags")
+
+            def move(self, *args, **kwargs):
+                raise AssertionError("Polling must NEVER move mail")
+
+        box = FakeMailbox()
+
+        @contextmanager
+        def opened(address):
+            self.assertEqual(address, "dmarc@mail.matemail.pro")
+            yield box
+
+        with mock.patch("apps.dmarc_reports.ingest.open_mailbox", opened):
+            first = ingest_mailbox_once()
+            self.assertEqual(first["stored"], 1)
+            self.assertEqual(first["processed"], 1)
+            cursor = IngestCursor.objects.get()
+            self.assertEqual(cursor.last_uid, 5)
+            self.assertEqual(cursor.uid_validity, 10)
+
+            again = ingest_mailbox_once()
+            self.assertEqual(again["processed"], 0)
+            self.assertEqual(AggregateReport.objects.count(), 1)
+
+            # A recreated IMAP INBOX resets UID numbering. Re-read with
+            # content hash deduplication instead of skipping newly delivered
+            # messages because the UID itself has been reused.
+            box.validity = 11
+            restarted = ingest_mailbox_once()
+            self.assertEqual(restarted["duplicate"], 1)
+            self.assertEqual(AggregateReport.objects.count(), 1)
+            cursor.refresh_from_db()
+            self.assertEqual(cursor.uid_validity, 11)
+            self.assertEqual(cursor.last_uid, 5)
+
     @override_settings(DMARC_REPORT_INGEST_ENABLED=False)
     def test_disabled_ingest_never_creates_cursor(self):
         self.assertEqual(ingest_mailbox_once(), {"disabled": 1})
