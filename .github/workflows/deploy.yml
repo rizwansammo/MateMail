@@ -551,7 +551,8 @@ jobs:
             echo "  installed from ${IMAGE_TAG}, mode $(stat -c '%a %U:%G' docker-compose.yml)"
             sha256sum docker-compose.yml
 
-            echo "▸ Backing up the database before migrating..."\n             install -d -m 0700 /opt/MateMail/backup/pre-deploy
+            echo "▸ Backing up the database before migrating..."
+            install -d -m 0700 /opt/MateMail/backup/pre-deploy
             docker compose exec -T postgres \
               pg_dump -U "${POSTGRES_USER:-matemail}" "${POSTGRES_DB:-matemail}" \
               | gzip > "/opt/MateMail/backup/pre-deploy/pre-deploy-$(date -u +%Y%m%dT%H%M%SZ).sql.gz" \
