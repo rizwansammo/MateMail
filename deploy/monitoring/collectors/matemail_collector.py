@@ -55,6 +55,19 @@ STATE = Path(os.environ.get(
 NATIVE_DIR = os.environ.get("NATIVE_DIR", "/opt/MateMail/engine/deploy/native-engine")
 MATEMAIL_DIR = os.environ.get("MATEMAIL_DIR", "/opt/MateMail/app")
 BACKUP_ENV = os.environ.get("BACKUP_ENV", "/opt/MateMail/backup/backup.env")
+
+# The host-wide Azure DR job is independent of MateMail's local Restic job.
+# Only public-safe paths/units are inspected. The Azure SAS URL is NEVER read.
+CENTRAL_DR_SERVICE = os.environ.get(
+    "CENTRAL_DR_SERVICE", "mateserver-backup.service")
+CENTRAL_DR_TIMER = os.environ.get(
+    "CENTRAL_DR_TIMER", "mateserver-backup.timer")
+CENTRAL_DR_LOG_DIR = Path(os.environ.get(
+    "CENTRAL_DR_LOG_DIR", "/opt/mateserver-backup/logs"))
+CENTRAL_DR_SCRIPT = Path(os.environ.get(
+    "CENTRAL_DR_SCRIPT", "/opt/mateserver-backup/bin/backup.sh"))
+CENTRAL_DR_MAX_AGE_SECONDS = 36 * 60 * 60
+
 MATEMAIL_HEALTH_URL = os.environ.get(
     "MATEMAIL_HEALTH_URL", "http://127.0.0.1:8020/api/internal/health/")
 
@@ -820,6 +833,117 @@ def sec_backups():
                "Age of the newest backup snapshot")
 
 
+# A completion marker appears only AFTER the four Azure Blob uploads finish.
+# See /opt/mateserver-backup/bin/backup.sh. No SAS URL, mailbox data, archive
+# or credentials are ever read by the collector.
+_CENTRAL_DR_COMPLETE = re.compile(
+    r"^\\[(?P<timestamp>[^]\\n]+)\\] backup complete "
+    r"latest_bytes=(?P<size>\\d+) daily_full=(?P<date>\\d{4}-\\d{2}-\\d{2})$",
+    re.MULTILINE,
+)
+
+# This checks CURRENT operator backup-script intent, not archive contents.
+# A successful upload is separately established by the completion marker and
+# the systemd exit status. Actual restorable data needs a restore rehearsal.
+_CENTRAL_DR_REQUIRED_SCRIPT = (
+    "dumpc matemail-postgres-1 matemail",
+    "dumpc matemail-native-db matemail-native",
+    "matemail_native_vmail",
+    "matemail_native_dkim",
+    'blob_put "$ARCHIVE" "latest/mateserver-latest.tar.gz"',
+    'blob_put "$ARCHIVE.sha256" "latest/mateserver-latest.tar.gz.sha256"',
+    'blob_put "$ARCHIVE" "daily/$STAMP/mateserver-full.tar.gz"',
+    'blob_put "$ARCHIVE.sha256" "daily/$STAMP/mateserver-full.tar.gz.sha256"',
+)
+
+
+def _central_dr_newest_success(log_dir: Path):
+    """(timestamp, bytes), or (0, 0) when no valid upload completion exists."""
+    newest = (0, 0)
+    # The backup's filename uses its UTC day, while its completion marker has
+    # the local UTC offset. Never assume the host's local date is the UTC day.
+    for path in sorted(log_dir.glob("backup-????-??-??.log"), reverse=True)[:3]:
+        if path.stat().st_size > 2_000_000:
+            raise ValueError("Central DR log unreasonably large")
+        for match in _CENTRAL_DR_COMPLETE.finditer(
+                path.read_text(encoding="utf-8", errors="replace")):
+            try:
+                ts = int(_parse_iso_offset(match.group("timestamp")))
+                size = int(match.group("size"))
+                if (size > 0 and match.group("date") == path.stem[7:]
+                        and ts > newest[0]):
+                    newest = ts, size
+            except ValueError:
+                continue
+    return newest
+
+
+def sec_central_dr():
+    """Read-only verification of the EXISTING MateServer -> Azure DR process.
+
+    Never claim offsite coverage merely because a local Restic repository
+    exists, or because a timer was enabled. Require a real completion marker,
+    matching successful systemd execution, freshness and script coverage.
+    This does NOT claim to have performed a restore or to have downloaded
+    the remote archive.
+    """
+    enabled = try_run(["systemctl", "is-enabled", CENTRAL_DR_TIMER]).strip()
+    metric("matemail_central_dr_timer_enabled", int(enabled == "enabled"), {},
+           "1 when the MateServer Azure DR backup timer is enabled")
+
+    props = run(["systemctl", "show", CENTRAL_DR_SERVICE,
+                 "-p", "ExecMainStatus", "-p", "ExecMainExitTimestamp",
+                 "-p", "Result"], timeout=15)
+    vals = dict(line.split("=", 1) for line in props.splitlines() if "=" in line)
+    last_ok = vals.get("Result") == "success" and vals.get("ExecMainStatus") == "0"
+    metric("matemail_central_dr_last_result_ok", int(last_ok), {},
+           "1 when the host-wide Azure DR backup service last exited successfully")
+
+    exit_text = vals.get("ExecMainExitTimestamp", "").strip()
+    exit_seconds = 0
+    if exit_text:
+        parsed = try_run(["date", "-d", exit_text, "+%s"]).strip()
+        if parsed.isdigit():
+            exit_seconds = int(parsed)
+
+    script = CENTRAL_DR_SCRIPT.read_text(encoding="utf-8")
+    contract_ok = all(fragment in script for fragment in _CENTRAL_DR_REQUIRED_SCRIPT)
+    metric("matemail_central_dr_matemail_script_coverage_ok",
+           int(contract_ok), {},
+           "1 when host DR script includes MateMail databases, mail, DKIM and Azure uploads")
+
+    timestamp, bytes_uploaded = _central_dr_newest_success(CENTRAL_DR_LOG_DIR)
+    now = time.time()
+    metric("matemail_central_dr_last_success_timestamp_seconds", timestamp, {},
+           "Time of newest Azure DR completion marker; zero if none")
+    metric("matemail_central_dr_last_archive_bytes", bytes_uploaded, {},
+           "Archive bytes reported after successful Azure Blob upload")
+    recent = bool(
+        timestamp and 0 <= now - timestamp < CENTRAL_DR_MAX_AGE_SECONDS
+        and last_ok and exit_seconds and abs(timestamp - exit_seconds) <= 300
+        and enabled == "enabled" and contract_ok
+    )
+    metric("matemail_central_dr_verified_recent", int(recent), {},
+           "1 when Azure DR is recent, last run succeeded and MateMail is in scope")
+
+    # Preserve the existing truthful distinction: Restic is LOCAL only.
+    # A configured independent offsite Restic repository can also protect mail
+    # if there is a recent snapshot; this signal never changes that config.
+    emitted = {}
+    for line in lines:
+        if not line.startswith("#") and " " in line and "{" not in line:
+            k, v = line.rsplit(" ", 1)
+            emitted[k] = v
+    local_offsite_valid = (
+        emitted.get("matemail_backup_offsite_configured") == "1"
+        and float(emitted.get("matemail_backup_latest_snapshot_age_seconds",
+                              "inf")) < CENTRAL_DR_MAX_AGE_SECONDS
+    )
+    metric("matemail_backup_offsite_coverage_ok",
+           int(recent or local_offsite_valid), {},
+           "1 when recent off-host recovery coverage is verified by Azure DR or offsite Restic")
+
+
 def sec_tls():
     out = run(["openssl", "x509", "-enddate", "-noout", "-in",
                "/etc/letsencrypt/live/%s/fullchain.pem" % MAIL_CERT_NAME])
@@ -1098,7 +1222,8 @@ def main():
         ("mail_queue", sec_mail_queue),
         ("log_counters", sec_log_counters), ("scanners", sec_scanners),
         ("dns", sec_dns), ("postgres", sec_postgres), ("redis", sec_redis),
-        ("storage", sec_storage), ("backups", sec_backups), ("tls", sec_tls),
+        ("storage", sec_storage), ("backups", sec_backups),
+        ("central_dr", sec_central_dr), ("tls", sec_tls),
         ("abuse_protection", sec_abuse_protection),
         ("dns_identity", sec_dns_identity), ("exposure", sec_exposure),
         ("celery", sec_celery),
