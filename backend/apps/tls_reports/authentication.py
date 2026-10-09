@@ -30,24 +30,24 @@ def verified_report_sender(raw: bytes, message) -> bool:
     signature_headers = message.get_all("DKIM-Signature", [])
     if not 1 <= len(signature_headers) <= MAX_DKIM_SIGNATURES:
         return False
-    for index, value in enumerate(signature_headers):
-        match = _DOMAIN_TAG.search(str(value).replace("\r", "").replace("\n", ""))
-        if not match:
-            continue
-        signing_domain = match.group(1).lower().rstrip(".")
-        if not HOST_RE.fullmatch(signing_domain):
-            continue
-        # Signed From may be a subdomain of the signing/reporting domain.
-        if from_domain != signing_domain and not from_domain.endswith("." + signing_domain):
-            continue
-        try:
-            if dkim.DKIM(raw).verify(idx=index, tlsrpt=True):
-                return True
-        except Exception:
-            # Treat DNS timeouts, invalid signatures and malformed headers as
-            # untrusted reports. Never put externally supplied text in logs.
-            continue
-    return False
+    # The RFC8460 mode is exposed on dkimpy.verify(), not DKIM.verify().
+    # It checks TLS-RPT service keys and forbids body-length-limited DKIM.
+    # That API validates the FIRST DKIM-Signature; do not silently fall back
+    # to a generic verifier for other signatures with weaker semantics.
+    value = signature_headers[0]
+    match = _DOMAIN_TAG.search(str(value).replace("\r", "").replace("\n", ""))
+    if not match:
+        return False
+    signing_domain = match.group(1).lower().rstrip(".")
+    if not HOST_RE.fullmatch(signing_domain):
+        return False
+    if from_domain != signing_domain and not from_domain.endswith("." + signing_domain):
+        return False
+    try:
+        return bool(dkim.verify(raw, tlsrpt=True))
+    except Exception:
+        # Malformed signatures/DNS failures are untrusted telemetry.
+        return False
 
 
 def require_authenticated_report(raw: bytes, message):
