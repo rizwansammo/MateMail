@@ -1,6 +1,8 @@
 from unittest import mock
 
 from django.core.cache import cache
+
+from apps.domains.models import DomainOwnership
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -61,6 +63,28 @@ class CustomHostnameTenantAPITest(TestCase):
         self.assertEqual(response.data["cname_target"], "custom.matemail.online")
         self.assertEqual(response.data["dns_status"], "pending")
         self.assertEqual(response.data["provisioning_status"], "unprovisioned")
+
+    def test_copyable_dns_host_is_relative_to_verified_zone(self):
+        from apps.tenants.custom_host_serializers import CustomHostnameSerializer
+
+        zone = make_domain(self.tenant, "customer.com")
+        zone.ownership_status = DomainOwnership.VERIFIED
+        zone.save(update_fields=["ownership_status"])
+        response = self.create("mail.customer.com")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["cname_zone"], "customer.com")
+        self.assertEqual(response.data["cname_host"], "mail")
+        self.assertEqual(response.data["hostname"], "mail.customer.com")
+
+        row = CustomHostname.objects.get(pk=response.data["id"])
+        row.hostname = "mail.us.customer.com"
+        self.assertEqual(CustomHostnameSerializer(row).data["cname_host"], "mail.us")
+
+    def test_no_verified_dns_zone_does_not_guess_suffix(self):
+        response = self.create("mail.unrelated.co.uk")
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.data["cname_host"])
+        self.assertIsNone(response.data["cname_zone"])
 
     def test_url_port_wildcard_and_matemail_owned_names_are_rejected(self):
         for hostname in (
