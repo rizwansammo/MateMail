@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   AtSign,
-  ChevronDown,
   ChevronRight,
   CircleCheckBig,
   CreditCard,
@@ -27,13 +26,11 @@ import {
   Settings2,
   ShieldAlert,
   ShieldCheck,
-  Sparkles,
   Users,
 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { WorkspaceThemeProvider, WorkspaceThemeToggle } from "@/components/workspace/theme";
 import { useAuth } from "@/contexts/auth-context";
-import { apiRequest } from "@/lib/api";
 
 const navGroups = [
   {
@@ -91,26 +88,11 @@ function initials(value?: string | null) {
     .join("");
 }
 
-function displayPlan(value?: string | null) {
-  if (!value) return "Workspace";
-  return value
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function roleLabel(value?: string | null) {
-  if (!value) return "Member";
-  return value
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user, tenant, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [workspaceMeta, setWorkspaceMeta] = useState<{ id?: string; plan?: string; my_role?: string } | null>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -122,22 +104,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       }
     }
   }, [isLoading, isAuthenticated, pathname, router]);
-
-  useEffect(() => {
-    if (!tenant?.id) return;
-    let cancelled = false;
-    apiRequest(`/api/workspaces/${tenant.id}/`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!cancelled) setWorkspaceMeta(data);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaceMeta(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tenant?.id]);
 
   const activeItem = useMemo(() => {
     return [...allNavItems, ...auxiliaryNavItems]
@@ -164,12 +130,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     router.push("/login");
   }
 
-  const shellMeta = workspaceMeta?.id === tenant?.id ? workspaceMeta : null;
   const workspaceName = tenant?.name || "MateMail";
   const accountName = user?.full_name || user?.email || "Account";
 
-  const accountMenu = (placement: "sidebar" | "topbar") => (
-    <div className={"portal-account-menu " + (placement === "topbar" ? "portal-account-menu-top" : "")}>
+  const accountMenu = () => (
+    <div className="portal-account-menu portal-account-menu-top">
       <div className="portal-account-menu-head">
         <strong>{accountName}</strong>
         <span>{user?.email}</span>
@@ -247,29 +212,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             ))}
           </nav>
 
-          <div className="portal-sidebar-footer">
-            {tenant && (
-              <div className="portal-plan-mini">
-                <div className="portal-plan-mini-top">
-                  <Sparkles className="h-3.5 w-3.5 text-[var(--portal-primary)]" />
-                  <strong>{shellMeta?.plan ? displayPlan(shellMeta.plan) : "Workspace"}</strong>
-                  <span>{tenant.status === "active" ? "Active" : displayPlan(tenant.status)}</span>
-                </div>
-              </div>
-            )}
-
-            <details className="portal-account">
-              <summary>
-                <span className="portal-avatar">{initials(accountName)}</span>
-                <span className="portal-account-copy">
-                  <strong>{accountName}</strong>
-                  <small>{roleLabel(shellMeta?.my_role || tenant?.role)}</small>
-                </span>
-                <ChevronDown className="h-3.5 w-3.5 text-[var(--portal-faint)]" />
-              </summary>
-              {accountMenu("sidebar")}
-            </details>
-          </div>
         </aside>
 
         <div className="portal-main">
@@ -293,7 +235,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <summary className="portal-icon-button" aria-label="Account menu">
                   <span className="portal-avatar">{initials(accountName)}</span>
                 </summary>
-                {accountMenu("topbar")}
+                {accountMenu()}
               </details>
             </div>
           </header>
