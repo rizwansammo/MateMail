@@ -7,9 +7,9 @@ ROOT = pathlib.Path(__file__).resolve().parent
 
 
 class MtastsContract(unittest.TestCase):
-    def test_three_receiving_domains(self):
+    def test_four_receiving_domains(self):
         source = (ROOT / "policy.txt").read_text()
-        for domain in ("mail.matemail.pro", "netamate.com", "matedesk.pro"):
+        for domain in ("mail.matemail.pro", "netamate.com", "matedesk.pro", "myrightbd.org"):
             result = subprocess.run(
                 ["python3", str(ROOT / "validate.py"), "-", domain],
                 input=source,
