@@ -2,7 +2,7 @@
 from django.conf import settings
 from rest_framework import serializers
 
-from .models import TransportSecurityLifecycle
+from .models import TransportSecurityLifecycle, TransportSecurityCertificateStatus
 
 
 class TransportSecurityToggleSerializer(serializers.Serializer):
@@ -67,6 +67,20 @@ def describe_transport_security(domain, config=None) -> dict:
                 "requirement": "P4-C.E verified TLS-RPT intake and parser",
             },
         ]
+    # CNAME becomes displayable only when the platform operator has confirmed
+    # that the dedicated policy gateway resolves to the HTTPS provisioner.
+    edge_ready = bool(getattr(settings, "MTA_STS_POLICY_EDGE_READY", False))
+    if enabled and records and edge_configured and edge_ready:
+        records[0]["publish_ready"] = True
+        records[0]["requirement"] = "Create this CNAME, then verify DNS in MateMail Hub."
+    # STS TXT must remain withheld until the worker has actually served and
+    # TLS-verified the requested hostname (never use an optimistic status).
+    if enabled and config and config.lifecycle in (
+        TransportSecurityLifecycle.READY,
+        TransportSecurityLifecycle.ACTIVE,
+    ) and config.certificate_status == TransportSecurityCertificateStatus.ACTIVE and config.cert_verified_at:
+        records[1]["publish_ready"] = True
+        records[1]["requirement"] = "Verified HTTPS policy; publish this TXT to announce testing mode."
     return {
         "domain": name,
         "ownership_verified": domain.is_ownership_verified,
@@ -84,7 +98,7 @@ def describe_transport_security(domain, config=None) -> dict:
         "cert_verified_at": config.cert_verified_at if config else None,
         "activated_at": config.activated_at if config else None,
         "last_error": config.last_error if config else "",
-        "can_publish_dns": False,  # P4-C.C/E must validate before this can change.
+        "can_publish_dns": bool(records) and all(item["publish_ready"] for item in records),  # TLS-RPT waits for P4-C.E.
         "detail": (
             "Transport security is optional. DNS records are not ready to publish "
             "until verified HTTPS hosting and TLS report ingestion are available."

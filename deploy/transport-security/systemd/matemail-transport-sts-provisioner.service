@@ -1,0 +1,20 @@
+[Unit]
+Description=MateMail dynamic MTA-STS HTTPS provisioner
+Requires=nginx.service
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=7min
+User=root
+Group=root
+EnvironmentFile=/etc/matemail/transport-security.env
+ExecStart=/usr/local/libexec/matemail-transport-sts-provisioner
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true

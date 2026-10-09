@@ -251,6 +251,12 @@ jobs:
       - name: Validate P4-C MTA-STS policy and safe installation rules
         run: python3 -m unittest discover -s deploy/mta-sts -p 'test_*.py' -v
 
+      - name: Validate P4-C.C dynamic root-worker contracts (no privileges)
+        run: |
+          python3 -m unittest discover -s deploy/transport-security -p 'test_*.py' -v
+          python3 -m py_compile deploy/transport-security/provisioner.py
+          bash -n deploy/transport-security/install.sh
+
       - name: docker compose config
         working-directory: deploy
         env:

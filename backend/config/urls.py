@@ -29,6 +29,7 @@ urlpatterns = [
     path("api/internal/health/", include("apps.health.internal_urls")),
     # Root-owned nginx/Certbot provisioner. Separate purpose-specific secret.
     path("api/internal/custom-hostnames/", include("apps.tenants.custom_host_internal_urls")),
+    path("api/internal/transport-security/", include("apps.transport_security.internal_urls")),
     # The Native Engine's new-mail events for native PostBox push. Its own
     # credential (POSTBOX_PUSH_INGEST_SECRET), not INTERNAL_API_SECRET.
     path("api/internal/postbox/", include("apps.postbox.internal_urls")),

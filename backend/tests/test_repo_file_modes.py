@@ -68,6 +68,8 @@ MUST_BE_EXECUTABLE = {
 MUST_NOT_BE_EXECUTABLE = {
     "deploy/mta-sts/install.sh":
         "P4-C operator invocation uses sudo bash; no executable bit required",
+    "deploy/transport-security/install.sh":
+        "P4-C.C files-only installer is invoked via sudo bash; worker is installed 0755",
     "deploy/native-engine/scripts/security-upgrade-preflight.sh":
         "read-only operator preflight invoked explicitly with bash; no executable bit needed",
     "deploy/backup/lib/guard.sh":
