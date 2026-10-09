@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
+import { AdvancedTransportSecurity } from "@/components/domains/advanced-transport-security";
 import {
   DomainOwnership,
   DomainOwnershipCard,
@@ -258,7 +259,7 @@ export default function DomainDetailPage() {
   const [myRole, setMyRole] = useState("");
   const [records, setRecords] = useState<DNSRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"dns" | "details">("dns");
+  const [tab, setTab] = useState<"dns" | "details" | "transport">("dns");
   const [checking, setChecking] = useState(false);
   const [checkMessage, setCheckMessage] = useState(
     "DNS results stay visible while checks run and refresh automatically when new results arrive."
@@ -578,6 +579,14 @@ export default function DomainDetailPage() {
           >
             Domain details
           </button>
+          <button
+            type="button"
+            className="portal-domain-tab"
+            data-active={tab === "transport"}
+            onClick={() => setTab("transport")}
+          >
+            Advanced security
+          </button>
           {canAdmin && (
             <Link href={`/app/domains/${params.id}/dmarc`} className="portal-domain-tab">
               DMARC reports
@@ -713,6 +722,15 @@ export default function DomainDetailPage() {
               </PortalCard>
             </div>
           </div>
+        ) : tab === "transport" ? (
+          <AdvancedTransportSecurity
+            key={params.id}
+            domainId={params.id}
+            domainName={domain.domain}
+            ownershipVerified={domain.ownership_verified}
+            canAdmin={canAdmin}
+            emailVerified={Boolean(user?.email_verified)}
+          />
         ) : (
           <div className="pt-5">
             <div className="portal-detail-grid">
