@@ -8,7 +8,7 @@
   ],
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "refresh": "1m",
   "time": {
@@ -1006,7 +1006,7 @@
     {
       "id": 19,
       "type": "stat",
-      "title": "Offsite backup",
+      "title": "Offsite recovery coverage",
       "datasource": {
         "type": "prometheus",
         "uid": "matemail-prom"
@@ -1020,7 +1020,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "matemail_backup_offsite_configured",
+          "expr": "matemail_backup_offsite_coverage_ok",
           "datasource": {
             "type": "prometheus",
             "uid": "matemail-prom"
@@ -1074,7 +1074,8 @@
           ]
         },
         "overrides": []
-      }
+      },
+      "description": "Verified fresh remote recovery via existing MateServer Azure DR or a separate offsite Restic repository. Local Restic alone is not DR."
     },
     {
       "id": 20,
@@ -1556,6 +1557,311 @@
           "mode": "multi",
           "sort": "desc"
         }
+      }
+    },
+    {
+      "id": 28,
+      "type": "row",
+      "title": "Central Azure Disaster Recovery (MateServer)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "Azure DR verified recent",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "matemail-prom"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "matemail_central_dr_verified_recent",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "matemail-prom"
+          },
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NO",
+                  "color": "orange"
+                },
+                "1": {
+                  "text": "YES",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Last Azure DR job OK",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "matemail-prom"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 34,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "matemail_central_dr_last_result_ok",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "matemail-prom"
+          },
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NO",
+                  "color": "orange"
+                },
+                "1": {
+                  "text": "YES",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "Azure upload age (seconds)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "matemail-prom"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - matemail_central_dr_last_success_timestamp_seconds",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "matemail-prom"
+          },
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NO",
+                  "color": "orange"
+                },
+                "1": {
+                  "text": "YES",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "MateMail backup scope intact",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "matemail-prom"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 34,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "matemail_central_dr_matemail_script_coverage_ok",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "matemail-prom"
+          },
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NO",
+                  "color": "orange"
+                },
+                "1": {
+                  "text": "YES",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
       }
     }
   ]
