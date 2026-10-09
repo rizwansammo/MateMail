@@ -60,6 +60,7 @@ psycopg[binary]==3.2.3
 # rotation. This test keeps that property from regressing without needing the
 # whole stack running.
 #
-# Absent from requirements.txt deliberately: nothing in the Django application
-# signs or verifies DKIM. Rspamd signs, and it has its own implementation.
-dkimpy==1.1.8
+# Now also a runtime dependency: RFC 8460 requires DKIM authentication
+# before accepting untrusted TLS report email, independent of Rspamd's
+# outbound DKIM signing and of untrusted inbound Authentication-Results.
+# Installed transitively from requirements.txt above.

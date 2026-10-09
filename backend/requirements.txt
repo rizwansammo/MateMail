@@ -9,6 +9,9 @@ celery==5.4.0
 django-celery-beat==2.8.1
 django-celery-results==2.5.1
 dnspython==2.7.0
+# RFC 8460 requires DKIM-verified SMTP TLS aggregate reports; the TLS-RPT
+# ingestion path cryptographically checks the reporting sender before storage.
+dkimpy==1.1.8
 cryptography==50.0.2
 requests==2.34.2
 gunicorn==23.0.0

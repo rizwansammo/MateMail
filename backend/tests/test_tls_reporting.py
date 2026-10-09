@@ -12,6 +12,16 @@ from django.utils import timezone
 
 from apps.tls_reports.parser import InvalidTlsReport, parse_json, unpack
 from apps.tls_reports.ingest import ingest_mailbox_once, ingest_raw_message
+from apps.tls_reports.authentication import verified_report_sender
+from apps.tls_reports import authentication as tls_authentication
+# Native Engine test modules intentionally import engine/native_api/dkim.py
+# under the plain "dkim" name. Their sys.path/module cache is global during
+# Django test discovery. Reuse the NE3 test's real pinned dkimpy verifier
+# (loaded without that engine shadow), only in this isolated test module.
+from tests.test_native_engine_mail_flow import dkimpy as _real_dkimpy
+
+if _real_dkimpy is not None:
+    tls_authentication.dkim = _real_dkimpy
 from apps.tls_reports.models import TlsAggregateReport, TlsFailureBucket, TlsIngestCursor
 from apps.tls_reports.services import store_policy, prune_old_reports
 from apps.transport_security.models import DomainTransportSecurity
@@ -83,6 +93,47 @@ class ParserSecurityTest(SimpleTestCase):
             unpack(gzip.compress(b"X" * (2 * 1024 * 1024 + 32)), "bad.json.gz", "application/tlsrpt+gzip")
         with self.assertRaises(InvalidTlsReport):
             unpack(raw, "anything.zip", "application/zip")
+
+    def test_pinned_dkimpy_supports_rfc8460_verification_mode(self):
+        import inspect
+        self.assertIsNotNone(_real_dkimpy)
+        self.assertIn("tlsrpt", inspect.signature(_real_dkimpy.verify).parameters)
+
+    def test_unauthenticated_tls_reports_are_rejected(self):
+        # A structurally valid report with an attacker-supplied From or
+        # Authentication-Results header is not authenticated evidence.
+        raw = report_mime(gzip.compress(report_json()))
+        with self.assertRaises(InvalidTlsReport):
+            ingest_raw_message(raw)
+        msg = EmailMessage()
+        msg["From"] = "reporter@example.test"
+        msg["Authentication-Results"] = "mx.example.test; dkim=pass header.d=example.test"
+        msg["DKIM-Signature"] = (
+            "v=1; a=rsa-sha256; d=example.test; s=default; "
+            "h=from:subject; bh=notvalid; b=notvalid"
+        )
+        msg["To"] = "tlsrpt@mail.matemail.pro"
+        msg.set_content("Fake report")
+        with mock.patch("apps.tls_reports.authentication.dkim.verify") as verifier:
+            verifier.return_value = False
+            self.assertFalse(verified_report_sender(msg.as_bytes(), msg))
+            verifier.assert_called_once()
+
+    def test_dkim_requires_reporting_sender_domain_alignment(self):
+        msg = EmailMessage()
+        msg["From"] = "reporter@reports.example.test"
+        msg["DKIM-Signature"] = (
+            "v=1; a=rsa-sha256; d=example.test; s=default; "
+            "h=from:subject; bh=fake; b=fake"
+        )
+        msg.set_content("Test")
+        with mock.patch("apps.tls_reports.authentication.dkim.verify") as verifier:
+            verifier.return_value = True
+            self.assertTrue(verified_report_sender(msg.as_bytes(), msg))
+        msg.replace_header("From", "attacker@other.test")
+        with mock.patch("apps.tls_reports.authentication.dkim.verify") as verifier:
+            self.assertFalse(verified_report_sender(msg.as_bytes(), msg))
+            verifier.assert_not_called()
 
     @override_settings(TLS_RPT_INGEST_ENABLED=False)
     def test_default_off_never_opens_mailbox(self):
@@ -163,8 +214,9 @@ class TenantTlsReportingTest(TestCase):
 
     def test_mime_and_retention(self):
         payload = report_mime(gzip.compress(report_json()))
-        self.assertEqual(ingest_raw_message(payload)["stored"], 1)
-        self.assertEqual(ingest_raw_message(payload)["duplicate"], 1)
+        with mock.patch("apps.tls_reports.ingest.require_authenticated_report"):
+            self.assertEqual(ingest_raw_message(payload)["stored"], 1)
+            self.assertEqual(ingest_raw_message(payload)["duplicate"], 1)
         TlsAggregateReport.objects.update(created_at=timezone.now() - timedelta(days=100))
         self.assertGreater(prune_old_reports(), 0)
         self.assertEqual(TlsFailureBucket.objects.count(), 0)
@@ -192,7 +244,9 @@ class TenantTlsReportingTest(TestCase):
         def opened(addr):
             self.assertEqual(addr, "tlsrpt@mail.matemail.pro")
             yield box
-        with mock.patch("apps.tls_reports.ingest.open_mailbox", opened):
+        with mock.patch("apps.tls_reports.ingest.open_mailbox", opened), mock.patch(
+            "apps.tls_reports.ingest.require_authenticated_report"
+        ):
             one = ingest_mailbox_once()
             self.assertEqual(one["stored"], 1)
             self.assertEqual(one["rejected"], 1)
