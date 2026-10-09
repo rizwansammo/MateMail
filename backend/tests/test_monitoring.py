@@ -94,6 +94,77 @@ def test_collector_is_valid_python():
     ast.parse(COLLECTOR.read_text(encoding="utf-8"))
 
 
+def test_central_dr_completion_marker_and_mail_coverage(tmp_path, monkeypatch):
+    """The collector must not confuse a same-host snapshot with an Azure upload."""
+    collector = _collector_module()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    script = tmp_path / "backup.sh"
+    script.write_text("\n".join(collector._CENTRAL_DR_REQUIRED_SCRIPT))
+    completion = "2026-10-09T03:40:19+02:00"
+    epoch = int(collector._parse_iso_offset(completion))
+    log = log_dir / "backup-2026-10-09.log"
+    log.write_text(
+        "[2026-10-09T02:48:16+02:00] backup start\n"
+        f"[{completion}] backup complete latest_bytes=62812605 daily_full=2026-10-09\n"
+    )
+
+    monkeypatch.setattr(collector, "CENTRAL_DR_LOG_DIR", log_dir)
+    monkeypatch.setattr(collector, "CENTRAL_DR_SCRIPT", script)
+    monkeypatch.setattr(collector.time, "time", lambda: epoch + 300)
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["systemctl", "show"]:
+            return ("Result=success\nExecMainStatus=0\n"
+                    "ExecMainExitTimestamp=Fri 2026-10-09 03:40:19 CEST\n")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    def fake_try_run(cmd, **kwargs):
+        if cmd[:2] == ["systemctl", "is-enabled"]:
+            return "enabled\n"
+        if cmd[:2] == ["date", "-d"]:
+            return str(epoch) + "\n"
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    monkeypatch.setattr(collector, "run", fake_run)
+    monkeypatch.setattr(collector, "try_run", fake_try_run)
+    collector.lines.clear()
+    collector._declared.clear()
+    collector.metric("matemail_backup_offsite_configured", 0)
+    collector.sec_central_dr()
+    content = "\n".join(collector.lines)
+    assert "matemail_central_dr_last_archive_bytes 62812605" in content
+    assert "matemail_central_dr_verified_recent 1" in content
+    assert "matemail_backup_offsite_coverage_ok 1" in content
+
+    # A failed systemd run cannot be concealed by yesterday's successful log.
+    monkeypatch.setattr(
+        collector, "run",
+        lambda cmd, **kwargs: fake_run(cmd, **kwargs).replace(
+            "Result=success", "Result=exit-code"))
+    collector.lines.clear()
+    collector._declared.clear()
+    collector.metric("matemail_backup_offsite_configured", 0)
+    collector.sec_central_dr()
+    content = "\n".join(collector.lines)
+    assert "matemail_central_dr_verified_recent 0" in content
+    assert "matemail_backup_offsite_coverage_ok 0" in content
+
+
+def test_central_dr_log_must_report_finished_archive(tmp_path):
+    collector = _collector_module()
+    (tmp_path / "backup-2026-10-09.log").write_text(
+        "[2026-10-09T03:40:19+02:00] backup start\n"
+        "curl: (22) The requested URL returned error: 403\n"
+    )
+    assert collector._central_dr_newest_success(tmp_path) == (0, 0)
+    (tmp_path / "backup-2026-10-09.log").write_text(
+        "[2026-10-09T03:40:19+02:00] backup complete "
+        "latest_bytes=62812605 daily_full=2026-10-08\n"
+    )
+    assert collector._central_dr_newest_success(tmp_path) == (0, 0)
+
+
 # ─── nothing here may be reachable from the Internet ────────────────────────
 
 def test_every_published_port_is_loopback_only():
@@ -567,12 +638,15 @@ def test_the_required_alerts_all_exist():
 
 def test_the_offsite_gap_is_a_permanent_visible_warning():
     """
-    It is true right now and it is a pre-beta requirement. It must not be
-    silently absent from monitoring, and it must not page anyone nightly.
+    Warn only when NO verified recovery coverage exists; a successful central
+    Azure DR backup counts even when the dedicated Restic repository is local.
+    Missing coverage metrics must also alert, never pass silently.
     """
     rules = {r["alert"]: r for _, r in _all_rules()}
     rule = rules["BackupOffsiteNotConfigured"]
     assert rule["labels"]["severity"] == "warning"
+    assert "matemail_backup_offsite_coverage_ok" in rule["expr"]
+    assert "absent(" in rule["expr"]
     assert rule["labels"].get("persistent") == "true"
     route = load(ALERTMANAGER)["route"]["routes"][0]
     assert 'persistent="true"' in route["matchers"][0]
@@ -637,6 +711,10 @@ def test_the_three_operator_dashboards_cover_what_p7_asks_for():
 
     overview = seen["matemail-overview"]
     for expr in ("matemail_native_services_healthy", "matemail_app_all_healthy",
+                 "matemail_backup_offsite_coverage_ok",
+                 "matemail_central_dr_verified_recent",
+                 "matemail_central_dr_last_result_ok",
+                 "matemail_central_dr_matemail_script_coverage_ok",
                  "matemail_backup_latest_snapshot_age_seconds",
                  "matemail_certificate_days_remaining",
                  "matemail_dns_ptr_correct",

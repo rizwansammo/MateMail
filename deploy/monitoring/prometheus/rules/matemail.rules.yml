@@ -446,15 +446,47 @@ groups:
           summary: "The backup timer is not enabled; no backups are being taken"
 
       - alert: BackupOffsiteNotConfigured
-        # Deliberately permanent and deliberately only a warning. It is true
-        # right now, it is a pre-beta requirement, and it must not be silently
-        # forgotten by being left out of monitoring.
-        expr: matemail_backup_offsite_configured == 0
+        # The dedicated Restic repository remains local. A recent successful
+        # MateServer Azure DR archive ALSO provides off-host coverage, as
+        # long as the collector verifies the current MateMail coverage contract.
+        # Fail closed when the signal is absent, never hide a missing collector.
+        expr: (matemail_backup_offsite_coverage_ok == 0) or absent(matemail_backup_offsite_coverage_ok)
         for: 1h
         labels: {severity: warning, persistent: "true"}
         annotations:
-          summary: "No offsite backup repository is configured"
-          description: "The only copy of the backups is on this host. That survives deletion, corruption and operator error, but not the loss of this machine. It is retention, not disaster recovery."
+          summary: "MateMail has no verified recent offsite recovery coverage"
+          description: "Neither a recent verified MateServer Azure DR upload nor an independent offsite Restic snapshot protects mail. Check mateserver-backup.service, the latest Azure DR completion log and the central_dr collector section."
+
+      - alert: CentralDRBackupFailed
+        expr: matemail_central_dr_last_result_ok == 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "The latest MateServer Azure DR backup job failed"
+          description: "Check systemctl status mateserver-backup.service and its root-owned logs. Do not disable the timer or overwrite archives."
+
+      - alert: CentralDRBackupStale
+        expr: (time() - matemail_central_dr_last_success_timestamp_seconds > 129600) or (matemail_central_dr_last_success_timestamp_seconds == 0)
+        for: 30m
+        labels: {severity: critical}
+        annotations:
+          summary: "No successful Azure DR archive upload in the last 36 hours"
+          description: "The Azure DR completion marker is missing or stale. Inspect the host-wide backup job, its latest log and Azure upload errors."
+
+      - alert: CentralDRBackupTimerDisabled
+        expr: matemail_central_dr_timer_enabled == 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "MateServer Azure DR backup timer is disabled"
+
+      - alert: CentralDRMateMailCoverageDrift
+        expr: matemail_central_dr_matemail_script_coverage_ok == 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Central DR script no longer declares the required MateMail recovery inputs"
+          description: "Inspect database dumps, mail and DKIM volumes, and Azure latest/daily archive uploads in /opt/mateserver-backup/bin/backup.sh."
 
   # ── TLS ─────────────────────────────────────────────────────────────────
   - name: tls

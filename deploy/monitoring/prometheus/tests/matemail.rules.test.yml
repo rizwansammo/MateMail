@@ -153,11 +153,25 @@ tests:
         alertname: BackupStale
         exp_alerts: []
 
-  # ── Offsite: a permanent, deliberate warning ─────────────────────────────
+  # ── Offsite coverage: local Restic alone must NOT be the verdict ─────────
   - interval: 1m
-    name: the missing offsite repository stays visible rather than being forgotten
+    name: a fresh verified central Azure DR upload silences the local-only warning
     input_series:
+      - series: 'matemail_backup_offsite_coverage_ok'
+        values: '1+0x120'
       - series: 'matemail_backup_offsite_configured'
+        values: '0+0x120'
+      - series: 'matemail_central_dr_verified_recent'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: BackupOffsiteNotConfigured
+        exp_alerts: []
+
+  - interval: 1m
+    name: no fresh offsite recovery coverage remains a visible warning
+    input_series:
+      - series: 'matemail_backup_offsite_coverage_ok'
         values: '0+0x120'
     alert_rule_test:
       - eval_time: 90m
@@ -167,8 +181,70 @@ tests:
               severity: warning
               persistent: "true"
             exp_annotations:
-              summary: "No offsite backup repository is configured"
-              description: "The only copy of the backups is on this host. That survives deletion, corruption and operator error, but not the loss of this machine. It is retention, not disaster recovery."
+              summary: "MateMail has no verified recent offsite recovery coverage"
+              description: "Neither a recent verified MateServer Azure DR upload nor an independent offsite Restic snapshot protects mail. Check mateserver-backup.service, the latest Azure DR completion log and the central_dr collector section."
+
+  - interval: 1m
+    name: missing coverage metrics must not be interpreted as healthy
+    input_series:
+      - series: 'matemail_backup_timer_enabled'
+        values: '1+0x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: BackupOffsiteNotConfigured
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              persistent: "true"
+            exp_annotations:
+              summary: "MateMail has no verified recent offsite recovery coverage"
+              description: "Neither a recent verified MateServer Azure DR upload nor an independent offsite Restic snapshot protects mail. Check mateserver-backup.service, the latest Azure DR completion log and the central_dr collector section."
+
+  - interval: 1m
+    name: a failed Azure DR run triggers a dedicated failure alert
+    input_series:
+      - series: 'matemail_central_dr_last_result_ok'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CentralDRBackupFailed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CentralDRBackupFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "The latest MateServer Azure DR backup job failed"
+              description: "Check systemctl status mateserver-backup.service and its root-owned logs. Do not disable the timer or overwrite archives."
+
+  - interval: 1m
+    name: an overdue Azure DR upload triggers a dedicated stale alert
+    input_series:
+      - series: 'matemail_central_dr_last_success_timestamp_seconds'
+        values: '-200000+0x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CentralDRBackupStale
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: CentralDRBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "No successful Azure DR archive upload in the last 36 hours"
+              description: "The Azure DR completion marker is missing or stale. Inspect the host-wide backup job, its latest log and Azure upload errors."
+
+  - interval: 1m
+    name: a fresh Azure upload produces no stale alert
+    input_series:
+      - series: 'matemail_central_dr_last_success_timestamp_seconds'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: CentralDRBackupStale
+        exp_alerts: []
 
   # ── Certificate expiry ───────────────────────────────────────────────────
   - interval: 1m
