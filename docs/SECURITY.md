@@ -356,7 +356,8 @@ tests cannot drift apart.
 | DNS background checks | 1 / 5 min | domain (Celery, P3a) |
 | Authenticated API (general) | 60 / min | user |
 | Unauthenticated API (general) | 60 / min | client IP |
-| Unauthenticated auth endpoints | 5 / min | client IP |
+| Unauthenticated auth endpoints (except refresh) | 5 / min | client IP |
+| POST /api/auth/refresh/ | 30 / min | client IP (separate `auth_refresh` bucket) |
 | Authenticated auth actions | 10 / min | user |
 | SMTP AUTH attempts | 5 / min per IP | *Mail Engine — not yet installed* |
 | Outbound SMTP send | 100 / hour per mailbox | *Mail Engine — not yet installed* |
@@ -369,6 +370,12 @@ what an attack produces.
 
 Refusals are HTTP **429** with a `Retry-After` header, raised through DRF's
 `Throttled` so the shape is identical everywhere.
+
+The cookie-based session refresh endpoint has its own, bounded per-IP throttle.
+It does not consume the stricter login/signup budget. The frontend never
+refreshes implicitly before a public login, signup or verification request and
+coalesces concurrent session-refresh calls. Password failure counters, 2FA
+limits, HttpOnly cookie scope and token rotation remain unchanged.
 
 ### What is deliberately not limited
 
