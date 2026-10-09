@@ -151,6 +151,69 @@ class PrimitiveTest(TestCase):
 
 
 @override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS, CACHES=LOCMEM_CACHE)
+class AuthRefreshIsolationTest(TestCase):
+    """A page-load session check cannot exhaust the login/signup rate budget."""
+
+    def setUp(self):
+        cache.clear()
+        self.user = make_user("refresh-isolation@example.test")
+        make_tenant(self.user, name="Refresh Limit", slug="refresh-limit")
+
+    def _refresh(self):
+        return self.client.post("/api/auth/refresh/", REMOTE_ADDR="198.51.100.111")
+
+    def _login(self):
+        return self.client.post(
+            "/api/auth/login/",
+            {"email": self.user.email, "password": TEST_PASSWORD},
+            REMOTE_ADDR="198.51.100.111",
+        )
+
+    def test_failed_session_restores_do_not_block_a_valid_login(self):
+        # No refresh cookie: the browser is unauthenticated, not an attacker.
+        for _ in range(8):
+            self.assertEqual(self._refresh().status_code, 401)
+        self.assertEqual(self._login().status_code, 200)
+
+    def test_successful_session_refreshes_do_not_block_login(self):
+        self.assertEqual(self._login().status_code, 200)
+        for _ in range(8):
+            self.assertEqual(self._refresh().status_code, 200)
+        self.assertEqual(self._login().status_code, 200)
+
+    def test_refresh_endpoint_is_still_throttled_with_retry_after(self):
+        for _ in range(30):
+            self.assertEqual(self._refresh().status_code, 401)
+        blocked = self._refresh()
+        self.assertEqual(blocked.status_code, 429)
+        self.assertGreater(int(blocked.headers["Retry-After"]), 0)
+        # Exhausting refresh quota must not consume the sign-in quota.
+        self.assertEqual(self._login().status_code, 200)
+
+    def test_authenticated_bearer_does_not_bypass_refresh_ip_limit(self):
+        from apps.accounts.tokens import make_tokens
+        from rest_framework.test import APIClient
+
+        access = make_tokens(self.user)["access"]
+        api = APIClient()
+        api.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        for _ in range(30):
+            self.assertEqual(
+                api.post("/api/auth/refresh/", REMOTE_ADDR="203.0.113.33").status_code,
+                401,
+            )
+        self.assertEqual(
+            api.post("/api/auth/refresh/", REMOTE_ADDR="203.0.113.33").status_code,
+            429,
+        )
+
+    def test_sign_in_budget_remains_five_per_minute(self):
+        for _ in range(5):
+            self.assertEqual(self._login().status_code, 200)
+        self.assertEqual(self._login().status_code, 429)
+
+
+@override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS, CACHES=LOCMEM_CACHE)
 class LoginLimitTest(TestCase):
     def setUp(self):
         cache.clear()
