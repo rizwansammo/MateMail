@@ -97,7 +97,7 @@ class ParserSecurityTest(SimpleTestCase):
     def test_pinned_dkimpy_supports_rfc8460_verification_mode(self):
         import inspect
         self.assertIsNotNone(_real_dkimpy)
-        self.assertIn("tlsrpt", inspect.signature(_real_dkimpy.DKIM.verify).parameters)
+        self.assertIn("tlsrpt", inspect.signature(_real_dkimpy.verify).parameters)
 
     def test_unauthenticated_tls_reports_are_rejected(self):
         # A structurally valid report with an attacker-supplied From or
@@ -114,10 +114,10 @@ class ParserSecurityTest(SimpleTestCase):
         )
         msg["To"] = "tlsrpt@mail.matemail.pro"
         msg.set_content("Fake report")
-        with mock.patch("apps.tls_reports.authentication.dkim.DKIM") as verifier:
-            verifier.return_value.verify.return_value = False
+        with mock.patch("apps.tls_reports.authentication.dkim.verify") as verifier:
+            verifier.return_value = False
             self.assertFalse(verified_report_sender(msg.as_bytes(), msg))
-            self.assertTrue(verifier.return_value.verify.called)
+            verifier.assert_called_once()
 
     def test_dkim_requires_reporting_sender_domain_alignment(self):
         msg = EmailMessage()
@@ -127,11 +127,11 @@ class ParserSecurityTest(SimpleTestCase):
             "h=from:subject; bh=fake; b=fake"
         )
         msg.set_content("Test")
-        with mock.patch("apps.tls_reports.authentication.dkim.DKIM") as verifier:
-            verifier.return_value.verify.return_value = True
+        with mock.patch("apps.tls_reports.authentication.dkim.verify") as verifier:
+            verifier.return_value = True
             self.assertTrue(verified_report_sender(msg.as_bytes(), msg))
         msg.replace_header("From", "attacker@other.test")
-        with mock.patch("apps.tls_reports.authentication.dkim.DKIM") as verifier:
+        with mock.patch("apps.tls_reports.authentication.dkim.verify") as verifier:
             self.assertFalse(verified_report_sender(msg.as_bytes(), msg))
             verifier.assert_not_called()
 
