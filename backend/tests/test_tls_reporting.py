@@ -218,6 +218,11 @@ class TenantTlsReportingTest(TestCase):
         with override_settings(TLS_RPT_RECEIVER_VERIFIED=False):
             blocked = describe_transport_security(self.domain_a, config)
             self.assertFalse(blocked["dns_records"][2]["publish_ready"])
+        from apps.domains.models import DomainOwnership
+        self.domain_a.ownership_status = DomainOwnership.PENDING
+        self.domain_a.save(update_fields=["ownership_status"])
+        lost = describe_transport_security(self.domain_a, config)
+        self.assertFalse(lost["dns_records"][2]["publish_ready"])
 
     @override_settings(TLS_RPT_INGEST_ENABLED=False)
     def test_platform_health_is_disabled_by_default(self):
