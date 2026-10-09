@@ -162,13 +162,17 @@ def test_every_service_has_a_memory_limit():
             f"already into its swap")
 
 
-def test_the_whole_stack_is_capped_well_under_a_gigabyte():
+def test_the_whole_stack_total_limit_stays_below_one_gigabyte():
+    # Grafana is intentionally capped at 400M on the live MateServer; keeping
+    # the old 200M source limit would silently undo its production tuning.
+    # All four service caps total 992M. Enforce a strict sub-1000M budget
+    # rather than the obsolete 900M pre-tuning limit.
     compose = load(COMPOSE)
     total = 0
     for svc in compose["services"].values():
         mem = svc["deploy"]["resources"]["limits"]["memory"]
         total += int(re.sub(r"[^0-9]", "", mem))
-    assert total <= 900, f"monitoring may consume up to {total}M, which is too much"
+    assert total < 1000, f"monitoring configured limits total {total}M (must remain <1000M)"
 
 
 def test_services_restart_and_are_health_checked():
