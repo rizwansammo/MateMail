@@ -67,6 +67,11 @@ cat > "$DEST/collector.env" <<'ENV'
 NATIVE_DIR=/opt/MateMail/engine/deploy/native-engine
 MATEMAIL_DIR=/opt/MateMail/app
 BACKUP_ENV=/opt/MateMail/backup/backup.env
+# Read-only metadata from the existing central MateServer Azure DR job.
+CENTRAL_DR_SERVICE=mateserver-backup.service
+CENTRAL_DR_TIMER=mateserver-backup.timer
+CENTRAL_DR_LOG_DIR=/opt/mateserver-backup/logs
+CENTRAL_DR_SCRIPT=/opt/mateserver-backup/bin/backup.sh
 MATEMAIL_HEALTH_URL=http://127.0.0.1:8020/api/internal/health/
 MAIL_HOSTNAME=mx.matemail.pro
 MAIL_DOMAIN=matemail.pro
