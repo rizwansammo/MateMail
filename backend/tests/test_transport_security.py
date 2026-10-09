@@ -2,12 +2,14 @@
 from unittest import mock
 
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.domains.models import Domain
 from apps.tenants.models import MemberRole, TenantStatus
 from apps.transport_security.models import (
     DomainTransportSecurity, TransportSecurityLifecycle,
+    TransportSecurityCertificateStatus,
 )
 from tests.factories import (
     FAST_PASSWORD_HASHERS, add_member, auth_client, disable_throttling,
@@ -199,6 +201,30 @@ class TransportSecurityAPITest(TestCase):
         client = APIClient()
         self.assertIn(client.get(self.url_a).status_code, [401, 403])
         self.assertFalse(DomainTransportSecurity.objects.exists())
+
+    @override_settings(
+        MTA_STS_POLICY_EDGE_TARGET="mta-sts-gateway.matemail.pro",
+        MTA_STS_POLICY_EDGE_READY=True,
+    )
+    def test_domain_ownership_loss_blocks_cname_and_sts_txt(self):
+        from apps.domains.models import DomainOwnership
+        response = self.client_a.post(self.url_a, {"enabled": True}, format="json")
+        self.assertEqual(response.status_code, 200)
+        row = DomainTransportSecurity.objects.get(domain=self.domain_a)
+        row.lifecycle = TransportSecurityLifecycle.READY
+        row.certificate_status = TransportSecurityCertificateStatus.ACTIVE
+        row.cert_verified_at = timezone.now()
+        row.save(update_fields=["lifecycle", "certificate_status", "cert_verified_at"])
+        ready = self.client_a.get(self.url_a)
+        self.assertTrue(ready.data["dns_records"][0]["publish_ready"])
+        self.assertTrue(ready.data["dns_records"][1]["publish_ready"])
+        self.domain_a.ownership_status = DomainOwnership.PENDING
+        self.domain_a.save(update_fields=["ownership_status"])
+        withdrawn = self.client_a.get(self.url_a)
+        self.assertEqual(withdrawn.status_code, 200)
+        self.assertFalse(withdrawn.data["ownership_verified"])
+        self.assertFalse(any(record["publish_ready"] for record in withdrawn.data["dns_records"]))
+        self.assertFalse(withdrawn.data["can_publish_dns"])
 
     @override_settings(TRANSPORT_SECURITY_SELF_SERVICE_ENABLED=False)
     def test_release_default_is_fail_closed(self):
