@@ -6,7 +6,7 @@
 set -Eeuo pipefail
 
 usage() {
-  echo "Usage: sudo bash install.sh prepare|activate mail.matemail.pro|netamate.com|matedesk.pro" >&2
+  echo "Usage: sudo bash install.sh prepare|activate mail.matemail.pro|netamate.com|matedesk.pro|myrightbd.org" >&2
   exit 2
 }
 [ "$#" -eq 2 ] || usage
@@ -14,7 +14,7 @@ ACTION="$1"
 DOMAIN="$2"
 case "$ACTION" in prepare|activate) ;; *) usage ;; esac
 case "$DOMAIN" in
-  mail.matemail.pro|netamate.com|matedesk.pro) ;;
+  mail.matemail.pro|netamate.com|matedesk.pro|myrightbd.org) ;;
   *) echo "Not an approved mail receiving domain" >&2; exit 3 ;;
 esac
 [ "$(id -u)" -eq 0 ] || { echo "Must run as root" >&2; exit 3; }
