@@ -45,7 +45,7 @@ MUST_BE_EXECUTABLE = {
     "deploy/backup/install.sh":
         "operator entry point, run from a copy of the directory on the server",
     "deploy/backup/matemail-backup.sh":
-        "systemd ExecStart=/opt/MateMailBackup/matemail-backup.sh",
+        "systemd ExecStart=/opt/MateMail/backup/matemail-backup.sh",
     "deploy/backup/matemail-restore.sh":
         "docs/BACKUP_RESTORE.md invokes it by absolute path during an incident",
     "deploy/backup/matemail-restore-mailbox.sh":

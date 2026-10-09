@@ -36,6 +36,31 @@ Regenerable ClamAV signatures do not require recovery.
 blindly start outbound SMTP with old queue files. Inspect and quarantine or
 discard replayable queue entries during actual recovery.
 
+## Local Restic exclusions (separate from Azure DR)
+
+The local MateMail `matemail-backup.sh` intentionally omits the following
+volumes. This is **not** the same volume policy as the whole-server Azure DR
+job above. The table must remain aligned with the local Restic manifest's
+`excluded_volumes` list.
+
+| Local Restic volume excluded | Why |
+|---|---|
+| `matemail_native_clamav_db` | ClamAV signature database; freshclam downloads again |
+| `matemail_native_rspamd` | Compiled lookup maps and statistics cache |
+| `matemail_native_redis` | Ephemeral engine rate-limit counters |
+| `matemail_redis_data` | Ephemeral app Celery broker/results |
+| `matemail_native_postfix_queue` | In-flight mail must not be blindly replayed |
+| `matemail_native_vmail_index` | Rebuild Dovecot indexes after Maildir restore |
+| `matemail_native_tls` | Local Restic expects TLS to be restored via host Certbot |
+| `matemail_native_auth` | Engine auth socket mount, no persistent state |
+| `matemail_native_pgdata` | Use consistent native PostgreSQL logical dumps instead |
+| `matemail_postgres_data` | Use consistent app PostgreSQL logical dumps instead |
+
+For **Azure DR**, the Rspamd, engine Redis, Dovecot index, TLS and queue
+volumes **are** copied separately from the local Restic strategy. During
+actual disaster recovery, verify service compatibility and deliberately
+quarantine any restored SMTP queue before SMTP delivery is enabled.
+
 ## Azure schedule and verified acceptance
 
 - Scheduled by `mateserver-backup.timer` daily at 03:30 **server local time**,
