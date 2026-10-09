@@ -1090,10 +1090,18 @@ class DkimRetirementTest(MailFlowDatabaseTestCase):
         material = provisioning.get_dkim_public_key(self.conn, DOMAIN)
         self.assertEqual("alt7", material["selector"])
         self.assertIn("alt7", material["dns_record_name"])
-        # The retired selector must not leak into anything a customer is told to
-        # publish, or they would create a DNS record for a key about to expire.
+        # The retired selector must not leak into the published DNS *name*.
+        # DNS TXT value has key metadata and random Base64 public-key bytes:
+        # testing whether "mm1" occurs anywhere in those random bytes is flaky.
         self.assertNotIn("mm1", material["dns_record_name"])
-        self.assertNotIn("mm1", material["dns_record_value"])
+        fields = dict(
+            item.strip().split("=", 1)
+            for item in material["dns_record_value"].split(";")
+        )
+        self.assertEqual({"v", "k", "p"}, set(fields))
+        self.assertEqual("DKIM1", fields["v"])
+        self.assertEqual("rsa", fields["k"])
+        self.assertTrue(fields["p"], "public key must be published")
 
         published = engine_dkim.selector_map_path().read_text(encoding="ascii")
         self.assertIn(DOMAIN + " alt7", published)
