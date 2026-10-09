@@ -94,6 +94,116 @@ def test_collector_is_valid_python():
     ast.parse(COLLECTOR.read_text(encoding="utf-8"))
 
 
+def test_rspamd_lowercase_nan_does_not_break_scanner_stats(monkeypatch):
+    mod = _collector_module()
+    payload = r'''{"version":"4.2.1","scanned":9,"learned":0,"uptime":28,
+    "actions":{"reject":1,"no action":7},
+    "scan_times":[0.125,nan,nan],
+    "label":"literal nan must not become literal null",
+    "escaped":"quoted \\"nan\\" remains text"}'''
+    # The command status remains JSON-like but has non-standard lowercase nan.
+    payload = payload.replace(r'\\"', r'\"')
+    parsed = mod._parse_rspamd_stat(payload)
+    assert parsed["scanned"] == 9
+    assert parsed["scan_times"] == [0.125, None, None]
+    assert parsed["label"] == "literal nan must not become literal null"
+    assert "nan" in parsed["escaped"]
+
+    def fake_dexec(container, *args, **kwargs):
+        if container == "matemail-native-rspamd":
+            return payload
+        if container == "matemail-native-clamav":
+            return "ClamAV 1.4.6/28147/Fri Oct 09 02:00:00 2026"
+        raise AssertionError(container)
+
+    monkeypatch.setattr(mod, "dexec_try", fake_dexec)
+    mod.CONTAINERS = {"matemail-native-olefy": {"State": {"Running": True}}}
+    mod.lines.clear()
+    mod.sections.clear()
+    mod._declared.clear()
+    mod.section("scanners", mod.sec_scanners)
+    output = "\n".join(mod.lines)
+    assert mod.sections["scanners"] == 1
+    assert "matemail_rspamd_up 1" in output
+    assert "matemail_clamav_up 1" in output
+    assert "matemail_olefy_up 1" in output
+    assert 'matemail_rspamd_actions_total{action="reject"} 1' in output
+
+
+def test_rspamd_parser_still_fails_closed_on_corrupt_json():
+    mod = _collector_module()
+    import pytest
+    with pytest.raises((ValueError, json.JSONDecodeError)):
+        mod._parse_rspamd_stat('{"scanned":nan, broken}')
+    assert mod._parse_rspamd_stat("") == {}
+
+
+def test_firewall_aware_exposure_never_silences_ufw_allow_or_docker_publish(monkeypatch):
+    mod = _collector_module()
+    denied = """Status: active
+Default: deny (incoming), allow (outgoing), deny (routed)
+To Action From
+9119/tcp DENY IN Anywhere
+443/tcp ALLOW IN Anywhere
+"""
+    allowed = denied.replace("9119/tcp DENY IN", "9119/tcp ALLOW IN")
+    assert mod._ufw_exposed_unexpected({9119}, denied) == set()
+    assert mod._ufw_exposed_unexpected({9119}, allowed) == {9119}
+    assert mod._ufw_exposed_unexpected({9119}, "Status: inactive") == {9119}
+    assert mod._ufw_exposed_unexpected({9119}, "Status: active") == {9119}
+    assert mod._ufw_exposed_unexpected(
+        {9119}, denied.replace("9119/tcp DENY IN Anywhere",
+                               "9000:9200/tcp ALLOW IN Anywhere")) == {9119}
+
+    mod.CONTAINERS = {
+        "some-docker-service": {
+            "State": {"Running": True},
+            "HostConfig": {"PortBindings": {"9119/tcp": [
+                {"HostIp": "0.0.0.0", "HostPort": "9119"}]}}
+        },
+        "internal-service": {
+            "State": {"Running": True},
+            "HostConfig": {"PortBindings": {"8123/tcp": [
+                {"HostIp": "127.0.0.1", "HostPort": "8123"}]}}
+        }
+    }
+    assert mod._docker_public_bindings() == {9119}
+
+    mod.CONTAINERS = {}
+    commands = {
+        "ss": "LISTEN 0 2048 0.0.0.0:9119 0.0.0.0:*\n"
+              "LISTEN 0 128 127.0.0.1:8020 0.0.0.0:*\n"
+              "LISTEN 0 128 169.58.114.252:25 0.0.0.0:*\n"
+              "LISTEN 0 128 169.58.114.252:587 0.0.0.0:*\n"
+              "LISTEN 0 128 169.58.114.252:993 0.0.0.0:*\n",
+        "ufw": denied,
+    }
+
+    def try_run(args, **kwargs):
+        if args[0] == "ss":
+            return commands["ss"]
+        if args[0] == "ufw":
+            return commands["ufw"]
+        if args[0] == "docker":
+            return ""
+        raise AssertionError(args)
+
+    monkeypatch.setattr(mod, "try_run", try_run)
+    mod.lines.clear()
+    mod._declared.clear()
+    mod.sec_exposure()
+    metrics = "\n".join(mod.lines)
+    assert "matemail_unexpected_bound_ports 1" in metrics
+    assert "matemail_unexpected_public_ports 0" in metrics
+    assert "matemail_ufw_active 1" in metrics
+
+    commands["ufw"] = allowed
+    mod.lines.clear()
+    mod._declared.clear()
+    mod.sec_exposure()
+    assert "matemail_unexpected_public_ports 1" in "\n".join(mod.lines)
+
+
 def test_central_dr_completion_marker_and_mail_coverage(tmp_path, monkeypatch):
     """The collector must not confuse a same-host snapshot with an Azure upload."""
     collector = _collector_module()
