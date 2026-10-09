@@ -73,6 +73,14 @@ def describe_transport_security(domain, config=None) -> dict:
     if enabled and records and edge_configured and edge_ready:
         records[0]["publish_ready"] = True
         records[0]["requirement"] = "Create this CNAME, then verify DNS in MateMail Hub."
+    # TLS-RPT TXT is separately gated by an operator-tested recipient and
+    # verified parser. Merely deploying Phase E never unlocks DNS publication.
+    if (enabled and records and getattr(settings, "TLS_RPT_INGEST_ENABLED", False)
+            and getattr(settings, "TLS_RPT_DNS_PUBLICATION_ENABLED", False)
+            and getattr(settings, "TLS_RPT_RECEIVER_VERIFIED", False)
+            and report_address.strip().lower() == "tlsrpt@mail.matemail.pro"):
+        records[2]["publish_ready"] = True
+        records[2]["requirement"] = "Verified central TLS report intake; publish this TXT when approved."
     # STS TXT must remain withheld until the worker has actually served and
     # TLS-verified the requested hostname (never use an optimistic status).
     if enabled and config and config.lifecycle in (
