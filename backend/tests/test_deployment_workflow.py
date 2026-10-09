@@ -325,3 +325,38 @@ class EngineLinkPreflightTest(SimpleTestCase):
             line_of("docker compose pull"),
             "the preflight must fail before the deploy does any work",
         )
+
+
+class ProductionDependencySecurityPolicyTest(SimpleTestCase):
+    """Regression gates against silently disabling supply-chain checks."""
+
+    def test_backend_image_has_patched_installer_and_compatibility_gate(self):
+        source = (REPO / "backend" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("pip==26.2.1", source)
+        self.assertIn("setuptools==84.0.0", source)
+        self.assertIn("python -m pip check", source)
+        self.assertNotIn("--trusted-host", source)
+
+    def test_ci_fail_closed_dependency_audits(self):
+        source = CI.read_text(encoding="utf-8")
+        self.assertIn("python -m pip_audit --strict", source)
+        self.assertIn("npm audit --omit=dev --audit-level=moderate", source)
+        self.assertNotIn("pip_audit --strict || true", source)
+        self.assertNotIn("npm audit --omit=dev --audit-level=moderate || true", source)
+
+    def test_supported_lts_tracks_do_not_regress(self):
+        import json
+        required = (REPO / "backend" / "requirements.txt").read_text(encoding="utf-8")
+        self.assertRegex(required, r"(?m)^Django==5\.2\.\d+$")
+        # DRF can advance to later patched 3.x releases without needing
+        # to loosen this guard; support for Django 5.2 is what matters.
+        drf_line = next(line for line in required.splitlines()
+                        if line.startswith("djangorestframework=="))
+        drf_version = tuple(int(n) for n in drf_line.split("==")[1].split("."))
+        self.assertGreaterEqual(drf_version, (3, 17, 2))
+        frontend = json.loads((REPO / "frontend" / "package.json").read_text(encoding="utf-8"))
+        next_version = tuple(int(n) for n in frontend["dependencies"]["next"].split("."))
+        self.assertEqual(next_version[0], 16)
+        self.assertGreaterEqual(next_version, (16, 3, 8))
+        self.assertEqual(frontend["dependencies"]["next"],
+                         frontend["devDependencies"]["eslint-config-next"])

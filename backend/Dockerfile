@@ -20,8 +20,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq-dev gcc curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Keep the installer and build backend patched as well as app dependencies.
+# Both are present in the final Python image and are covered by vulnerability
+# scanning. Pinned versions avoid a silently drifting supply-chain surface.
+RUN python -m pip install --no-cache-dir --upgrade \
+        "pip==26.2.1" "setuptools==84.0.0"
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt \
+    && python -m pip check
 
 COPY . .
 
