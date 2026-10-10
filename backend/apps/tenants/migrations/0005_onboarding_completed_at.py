@@ -35,8 +35,8 @@ def mark_existing_completed(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [
         ("tenants", "0004_customhostname"),
-        ("domains", "0001_initial"),
-        ("mailboxes", "0001_initial"),
+        ("domains", "0006_domain_ownership_recheck_failures"),
+        ("mailboxes", "0002_mailbox_kind"),
     ]
 
     operations = [
