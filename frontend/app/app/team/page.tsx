@@ -314,8 +314,12 @@ function TeamPageContent() {
             <PortalButton
               type="button"
               onClick={() => {
-                setInviteOpen(true);
+                setInviteEmail("");
+                setInviteRole("admin");
+                setCreateMailbox(false);
                 setInviteError("");
+                setInviteLink("");
+                setInviteOpen(true);
               }}
             >
               <Plus className="h-4 w-4" />
@@ -342,7 +346,13 @@ function TeamPageContent() {
         busy={inviting}
         title="Invite member"
         description="Invite someone using a verified organization domain. Invitations expire after 7 days."
-        onDismiss={() => { setInviteOpen(false); setInviteError(""); setInviteEmail(""); }}
+        onDismiss={() => {
+          setInviteOpen(false);
+          setInviteError("");
+          setInviteEmail("");
+          setInviteRole("admin");
+          setCreateMailbox(false);
+        }}
       >
           <form onSubmit={sendInvite}>
             {inviteError && (
@@ -368,11 +378,15 @@ function TeamPageContent() {
                   id="astra-user-invite-role"
                   value={inviteRole}
                   onChange={(event) => setInviteRole(event.target.value as typeof inviteRole)}
+                  aria-describedby="astra-user-invite-role-help"
                 >
                   {ROLES.map((role) => (
-                    <option key={role.value} value={role.value}>{role.label} — {role.desc}</option>
+                    <option key={role.value} value={role.value}>{role.label}</option>
                   ))}
                 </select>
+                <small id="astra-user-invite-role-help" className="mt-1 block text-xs text-[var(--muted-foreground)]">
+                  {ROLES.find((role) => role.value === inviteRole)?.desc}
+                </small>
               </div>
             </div>
 
@@ -412,6 +426,8 @@ function TeamPageContent() {
                   setInviteOpen(false);
                   setInviteError("");
                   setInviteEmail("");
+                  setInviteRole("admin");
+                  setCreateMailbox(false);
                 }}
               >
                 Cancel
@@ -631,7 +647,14 @@ function TeamPageContent() {
           <PortalEmptyState
             title="No invitations"
             description="New invitations will appear here until they are accepted, revoked, or expire."
-            action={canManageInvites ? <PortalButton type="button" onClick={() => setInviteOpen(true)}><Plus className="h-4 w-4" />Invite member</PortalButton> : undefined}
+            action={canManageInvites ? <PortalButton type="button" onClick={() => {
+              setInviteEmail("");
+              setInviteRole("admin");
+              setCreateMailbox(false);
+              setInviteError("");
+              setInviteLink("");
+              setInviteOpen(true);
+            }}><Plus className="h-4 w-4" />Invite member</PortalButton> : undefined}
           />
         )}
       </PortalCard>

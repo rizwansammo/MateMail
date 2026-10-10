@@ -106,6 +106,20 @@ try {
     (await owner.page.getByRole("button", { name: "Copy invite link" }).count()) === 1);
   check("Pending list identifies mailbox creation intent",
     (await owner.page.getByText("Mailbox requested").count()) === 1);
+  await invite.click();
+  await dlg.waitFor({ state: "visible" });
+  check("New invite starts with mailbox opt-in disabled and Admin role",
+    !(await dlg.getByLabel("Create a mailbox for this user").isChecked()) &&
+    (await dlg.getByLabel("Workspace role").inputValue()) === "admin");
+  check("Role dropdown uses concise labels, with full explanation outside",
+    (await dlg.getByLabel("Workspace role").locator("option").allTextContents())
+      .every(label => ["Admin", "Support", "Read-only"].includes(label.trim())) &&
+    (await dlg.getByText("Manage workspace resources and team operations.").count()) === 1);
+  await dlg.getByLabel("Create a mailbox for this user").check();
+  await dlg.getByRole("button", { name: "Cancel" }).click();
+  await invite.click();
+  check("Cancelling an opted-in invite never retains mailbox provisioning consent",
+    !(await dlg.getByLabel("Create a mailbox for this user").isChecked()));
   check("No UI JavaScript faults", owner.errors.length === 0, { errors: owner.errors });
   await owner.ctx.close();
 
