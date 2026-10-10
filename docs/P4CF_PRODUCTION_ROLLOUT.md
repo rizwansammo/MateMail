@@ -37,3 +37,15 @@ The manual deployment workflow now archives deploy/transport-security from the r
 
 ## Status
 Source-only deployment preparation. The live rollout remains gated by verified backup/restore evidence and operator approval.
+
+## 2026-10-10 Operational verification checkpoint
+
+- P4-C.F canary `netamate.com`: public DNS CNAME and `_mta-sts` TXT verified, HTTPS policy `mode: testing` and hostname-specific certificate validated.
+- Docker applications deployed at `43f2f86eae7eb8f1b3433249b4bb4e785fc3fc2a` and healthy before this patch; signed TLS-RPT parser running in read-only polling mode.
+- Certbot systemd timer is enabled and active; per-certificate staging renewal dry-run must finish before renewal is marked tested.
+- Customer opt-in self-service and MTA-STS provisioning timer are intentionally still OFF until safe offboarding and lifecycle controls are production-verified.
+- A domain in `READY` cannot be disabled by the customer API (409 Managed removal required); preserving the HTTPS policy and honoring cached max_age protects continued mail delivery. Full customer offboarding remains an **operator-run** workflow, not a completed automatic process.
+- No external independent TLS-RPT report for `netamate.com` has yet been received; do not mark this validation as passed or attest `TLS_RPT_RECEIVER_VERIFIED` on local synthetic results alone.
+- New RFC8460 intake hardening: reject email without the mandatory `TLS-Report-Domain` and `TLS-Report-Submitter` headers, require agreement with signed JSON policy and contact-info domain, validate every MIME attachment before writing any aggregate, and retain DKIM + read-only IMAP gates.
+- External report arrival requires publishing `_smtp._tls.<domain>` TXT; it is impossible to prove **real reporter-initiated** report receipt on the canary prior to advertising this TXT. Secure local signed-message tests and a separate staged operator approval are prerequisite; then publish canary only and monitor reporting over the provider's reporting interval.
+- Retain pending full restore rehearsal in the future DR checklist as previously agreed; backup integrity checks are not a fresh full-restore proof.
