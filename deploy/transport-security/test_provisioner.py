@@ -320,3 +320,69 @@ class RetirementContractTests(TestCase):
             self.assertEqual(source.read_bytes(), module.policy_none())
             state.assert_called_once_with(data, "mode-none")
 
+
+
+    def test_resume_after_crash_between_nginx_unlink_and_source_removal(self):
+        data = self.job()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sites, enabled, journal = root / "sites", root / "enabled", root / "receipts"
+            for folder in (sites, enabled):
+                folder.mkdir()
+            host = data["hostname"]
+            site = sites / ("matemail-transport-sts-" + host + ".conf")
+            site.write_text(module.https_site(host))
+            link = enabled / site.name
+            link.symlink_to(site)
+            other = enabled / "unrelated.conf"
+            other.write_text("server { server_name unrelated.example; }\n")
+            with mock.patch.object(module, "SITES", sites), mock.patch.object(
+                module, "ENABLED", enabled,
+            ), mock.patch.object(module, "RECEIPTS", journal), mock.patch.object(
+                module, "run", side_effect=[SystemExit("crash during nginx reload")],
+            ):
+                with self.assertRaises(SystemExit):
+                    module.drop_managed_nginx(data)
+            self.assertFalse(link.is_symlink())
+            self.assertTrue(site.exists())
+            self.assertTrue(module.receipt_path(host).exists())
+            # A subsequent worker invocation must complete without deleting an
+            # unrelated site or treating the interrupted removal as unmanaged.
+            with mock.patch.object(module, "SITES", sites), mock.patch.object(
+                module, "ENABLED", enabled,
+            ), mock.patch.object(module, "RECEIPTS", journal), mock.patch.object(
+                module, "run", return_value="",
+            ):
+                receipt = module.drop_managed_nginx(data)
+                self.assertEqual(receipt, journal / (host + ".json"))
+            self.assertFalse(site.exists())
+            self.assertTrue(other.exists())
+
+    def test_interrupted_cleanup_refuses_unmanaged_replacement(self):
+        data = self.job()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sites, enabled, journal = root / "sites", root / "enabled", root / "receipts"
+            for folder in (sites, enabled):
+                folder.mkdir()
+            host = data["hostname"]
+            path = sites / ("matemail-transport-sts-" + host + ".conf")
+            path.write_text(module.https_site(host))
+            link = enabled / path.name
+            link.symlink_to(path)
+            with mock.patch.object(module, "SITES", sites), mock.patch.object(
+                module, "ENABLED", enabled,
+            ), mock.patch.object(module, "RECEIPTS", journal), mock.patch.object(
+                module, "run", side_effect=[SystemExit("crash")],
+            ):
+                with self.assertRaises(SystemExit):
+                    module.drop_managed_nginx(data)
+            path.write_text("# unrelated operator-managed\nserver { server_name unrelated.example; }\n")
+            with mock.patch.object(module, "SITES", sites), mock.patch.object(
+                module, "ENABLED", enabled,
+            ), mock.patch.object(module, "RECEIPTS", journal), mock.patch.object(
+                module, "run", return_value="",
+            ):
+                with self.assertRaises(module.EdgeError):
+                    module.drop_managed_nginx(data)
+            self.assertTrue(path.exists())
