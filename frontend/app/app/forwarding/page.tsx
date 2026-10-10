@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Check,
@@ -49,7 +50,9 @@ function fieldError(value: unknown) {
   return String(value);
 }
 
-export default function ForwardingPage() {
+function ForwardingPageContent() {
+  const routeParams = useSearchParams();
+  const requestedSearch = routeParams.get("q") || "";
   const { user, tenant } = useAuth();
   const [rules, setRules] = useState<ForwardingRule[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
@@ -113,6 +116,12 @@ export default function ForwardingPage() {
         .catch(() => {});
     }
   }, [fetchAll, tenant?.id]);
+
+  useEffect(() => {
+    // Direct links from Global Search remain shareable and survive a reload.
+    // The effect also handles Next.js soft navigation to a new query.
+    setQuery(requestedSearch);
+  }, [requestedSearch]);
 
   const filteredRules = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -477,4 +486,9 @@ export default function ForwardingPage() {
       </div>
     </div>
   );
+}
+
+/** Suspense boundary required by Next.js useSearchParams during static builds. */
+export default function ForwardingPage() {
+  return <Suspense fallback={null}><ForwardingPageContent /></Suspense>;
 }
