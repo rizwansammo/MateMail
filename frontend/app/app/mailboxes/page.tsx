@@ -201,6 +201,7 @@ export default function MailboxesPage() {
       setPassword("");
       setQuotaMb(quotaDefaultMb);
       setAddOpen(false);
+      window.dispatchEvent(new Event("matemail:workspace-onboarding-updated"));
       await fetchAll();
     } catch (caught) {
       if (caught instanceof ApiError) {
