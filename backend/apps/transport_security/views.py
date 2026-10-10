@@ -71,6 +71,11 @@ class DomainTransportSecurityView(APIView):
                 lifecycle=TransportSecurityLifecycle.PENDING_DNS,
             )
         elif enabled:
+            if config.lifecycle in (
+                TransportSecurityLifecycle.DEACTIVATING,
+                TransportSecurityLifecycle.DRAINING,
+            ):
+                return Response({"detail": "Safe offboarding is underway. Wait for completion."}, status=409)
             if not config.enabled:
                 # A fresh opted-in cycle needs a fresh version identifier.
                 # Repeated enable calls do NOT rotate an existing one.
@@ -78,24 +83,49 @@ class DomainTransportSecurityView(APIView):
                 config.policy_id = new_policy_id()
                 config.lifecycle = TransportSecurityLifecycle.PENDING_DNS
                 config.last_error = ""
+                config.deactivation_requested_at = None
+                config.deactivation_policy_none_at = None
+                config.deactivation_dns_absent_since = None
+                config.deactivation_completed_at = None
                 config.save(update_fields=[
-                    "enabled", "policy_id", "lifecycle", "last_error", "updated_at",
+                    "enabled", "policy_id", "lifecycle", "last_error",
+                    "deactivation_requested_at", "deactivation_policy_none_at",
+                    "deactivation_dns_absent_since", "deactivation_completed_at", "updated_at",
                 ])
         else:
-            # DNS policies can be cached and HTTPS hostnames may still exist:
-            # P4-C.F will coordinate deactivation with the root-owned worker.
-            if config.lifecycle not in (
-                TransportSecurityLifecycle.DISABLED,
-                TransportSecurityLifecycle.PENDING_DNS,
+            if config.lifecycle in (
+                TransportSecurityLifecycle.DEACTIVATING,
+                TransportSecurityLifecycle.DRAINING,
             ):
-                return Response({
-                    "detail": "This domain has edge provisioning state. "
-                              "Managed removal is required before disabling transport security."
-                }, status=409)
-            if config.enabled:
-                config.enabled = False
-                config.lifecycle = TransportSecurityLifecycle.DISABLED
-                config.save(update_fields=["enabled", "lifecycle", "updated_at"])
+                # Idempotent retirement request: do not reset the cache-drain timer.
+                return Response(describe_transport_security(domain, config))
+            if config.lifecycle in (TransportSecurityLifecycle.DISABLED,
+                                    TransportSecurityLifecycle.PENDING_DNS):
+                # The root worker cannot touch an unverified PENDING_DNS intent.
+                if config.enabled:
+                    config.enabled = False
+                    config.lifecycle = TransportSecurityLifecycle.DISABLED
+                    config.save(update_fields=["enabled", "lifecycle", "updated_at"])
+            elif config.lifecycle in (
+                TransportSecurityLifecycle.PROVISIONING,
+                TransportSecurityLifecycle.READY,
+                TransportSecurityLifecycle.ACTIVE,
+                TransportSecurityLifecycle.ERROR,
+            ):
+                # Never drop HTTPS hosting or the original domain ownership row.
+                # The separate root worker first serves mode:none, then waits
+                # for TXT removal and a conservative cache-expiry period.
+                config.lifecycle = TransportSecurityLifecycle.DEACTIVATING
+                config.deactivation_requested_at = timezone.now()
+                config.deactivation_policy_none_at = None
+                config.deactivation_dns_absent_since = None
+                config.last_error = ""
+                config.save(update_fields=[
+                    "lifecycle", "deactivation_requested_at", "deactivation_policy_none_at",
+                    "deactivation_dns_absent_since", "last_error", "updated_at",
+                ])
+            else:
+                return Response({"detail": "Unexpected lifecycle state; contact platform support."}, status=409)
 
         return Response(describe_transport_security(domain, config))
 
