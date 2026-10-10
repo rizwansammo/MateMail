@@ -204,7 +204,7 @@ try{
  verify("Creating workspace invitation does not increase mailboxes",t.state.mailboxes.length===3);
  await shot(p,"phase2e-06-membership-no-mailbox");
 
- await p.getByRole("button",{name:"Search workspace"}).click();
+ await p.getByRole("button",{name:/Search workspace/}).click();
  const search=p.getByRole("dialog",{name:"Search Hub"});
  await search.getByRole("textbox",{name:"Search Hub pages and resources"}).fill("newteam");
  await p.getByRole("option",{name:"newteam@example.test"}).waitFor({timeout:8000});
@@ -229,7 +229,7 @@ try{
  await open(read.page,"/app/team");
  verify("Read-only users cannot invoke invitation",await read.page.getByRole("button",{name:"Invite member"}).count()===0);
  verify("Read-only users cannot use role editing",await read.page.getByRole("combobox",{name:/Role for/}).count()===0);
- await read.page.getByRole("button",{name:"Search workspace"}).click();
+ await read.page.getByRole("button",{name:/Search workspace/}).click();
  await read.page.getByRole("textbox",{name:"Search Hub pages and resources"}).fill("delegation");
  verify("Restricted Delegation not visible in read-only global search",await read.page.getByRole("option",{name:"Delegation"}).count()===0);
  await read.page.keyboard.press("Escape");
