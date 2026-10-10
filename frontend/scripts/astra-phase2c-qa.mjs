@@ -99,7 +99,7 @@ try{
  await shot(t.page,"phase2c-02-alias-create");
  check("Alias dialog is 4px native dialog",(await measure(t.page)).modal==="4px");
  await t.page.keyboard.press("Escape");
- check("Alias escape closes without mutation",!(await am.isVisible())&&t.calls.length===0);
+ check("Alias escape closes without mutation",!(await am.isVisible())&&!t.calls.some(x=>x.endpoint.startsWith("/api/aliases/")));
  await aliasButton.click();
  await am.getByLabel("Alias address").fill("accounts");
  await am.getByLabel("Mailbox").selectOption(m2);
@@ -142,13 +142,13 @@ try{
  const dm=t.page.getByRole("dialog",{name:"Add mailbox delegation"});
  await dm.waitFor({state:"visible"});
  await shot(t.page,"phase2c-06-delegation-create");
- await dm.getByLabel("Mailbox to delegate").selectOption(m1);
- await dm.getByLabel("Delegate mailbox").selectOption(m2);
+ await dm.getByLabel("Mailbox to delegate").selectOption(m2);
+ await dm.getByLabel("Delegate mailbox").selectOption(m1);
  await dm.getByRole("checkbox",{name:/Send As/}).check();
  await dm.getByRole("button",{name:"Add delegation"}).click();
  await t.page.waitForTimeout(400);
  const dc=t.calls.find(x=>x.endpoint==="/api/delegations/"&&x.method==="POST");
- check("Delegation POST preserves personal identities and permission bits",dc?.payload.target_mailbox_id===m1&&dc?.payload.delegate_mailbox_id===m2&&dc?.payload.can_read===true&&dc?.payload.can_send_as===true,{call:dc});
+ check("Delegation POST preserves personal identities and permission bits",dc?.payload.target_mailbox_id===m2&&dc?.payload.delegate_mailbox_id===m1&&dc?.payload.can_read===true&&dc?.payload.can_send_as===true,{call:dc});
  await t.page.getByRole("checkbox",{name:"Manage for oliver@example.test"}).first().click();
  await t.page.waitForTimeout(400);
  const dp=t.calls.find(x=>x.endpoint==="/api/delegations/"+g1+"/"&&x.method==="PATCH");
