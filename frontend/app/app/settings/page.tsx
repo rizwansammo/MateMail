@@ -120,7 +120,7 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-settings-page">
         <PortalSkeleton className="mb-5 h-20 w-full" />
         <PortalSkeleton className="h-[430px] w-full" />
       </div>
@@ -129,7 +129,7 @@ export default function SettingsPage() {
 
   if (!workspace || loadError) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-settings-page">
         <PortalPageHeading title="Workspace settings" description="Manage the configuration stored for this organization." />
         <PortalNotice tone="danger">{loadError || "Workspace settings could not be loaded."}</PortalNotice>
       </div>
@@ -139,7 +139,7 @@ export default function SettingsPage() {
   const canEdit = workspace.my_role === "owner" || workspace.my_role === "admin";
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-settings-page">
       <PortalPageHeading
         title="Workspace settings"
         description="Keep your organization identity and access entry points in one place."
