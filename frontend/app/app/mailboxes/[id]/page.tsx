@@ -222,7 +222,7 @@ export default function MailboxDetailPage() {
 
   if (loading) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page">
         <PortalSkeleton className="mb-5 h-24 w-full" />
         <PortalSkeleton className="h-[420px] w-full" />
       </div>
@@ -231,7 +231,7 @@ export default function MailboxDetailPage() {
 
   if (!mailbox) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page">
         <PortalCard>
           <div className="portal-empty">
             <div>
@@ -254,7 +254,7 @@ export default function MailboxDetailPage() {
   const availableMb = Math.max(0, mailbox.quota_mb - mailbox.storage_used_mb);
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page">
       <Link href="/app/mailboxes" className="portal-back-link">
         <ArrowLeft className="h-3.5 w-3.5" />
         Mailboxes
