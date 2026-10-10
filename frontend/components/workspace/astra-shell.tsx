@@ -274,7 +274,7 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
             <span className="astra-org-name org-name">{workspaceName}</span>
           </div>
           <div className="topbar-right">
-            <button type="button" className="global-search" onClick={openSearch}>
+            <button type="button" className="global-search" onClick={openSearch} aria-label="Search workspace">
               <Search size={16}/><span>Search workspace</span><kbd>⌘ K</kbd>
             </button>
             <button type="button" className="astra-icon-button" aria-label={theme==="dark"?"Switch to light theme":"Switch to dark theme"}
