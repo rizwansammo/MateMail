@@ -7,6 +7,11 @@ on:
       - "frontend/app/app/astra-shell.css"
       - "frontend/components/workspace/astra-shell.tsx"
       - "frontend/scripts/astra-visual-qa.mjs"
+      - "frontend/scripts/astra-phase2a-qa.mjs"
+      - "frontend/app/app/astra-resources.css"
+      - "frontend/components/workspace/astra-resource-dialog.tsx"
+      - "frontend/app/app/mailboxes/**"
+      - "frontend/app/app/domains/**"
       - ".github/workflows/astra-hub-visual-qa.yml"
   workflow_dispatch:
 
@@ -52,6 +57,12 @@ jobs:
           VISUAL_QA_URL: http://127.0.0.1:3100
           VISUAL_QA_OUTPUT: visual-qa-artifacts
         run: node scripts/astra-visual-qa.mjs
+      - name: Phase 2A Mailboxes and Domains live-API-mock UI contract
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase2a-qa.mjs
       - name: Upload screenshots and QA report
         if: always()
         uses: actions/upload-artifact@v4
