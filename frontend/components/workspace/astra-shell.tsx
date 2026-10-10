@@ -247,7 +247,15 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
     const listener=(event:KeyboardEvent)=>{
       if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k"){
         event.preventDefault();
-        setSearchOpen(value=>!value);
+        if (searchOpen) {
+          setSearchOpen(false);
+        } else {
+          openerRef.current=document.activeElement as HTMLElement;
+          setQuery("");
+          setSelected(0);
+          setSearchState({tenantId,rows:[],loading:!!tenantId,unavailable:0});
+          setSearchOpen(true);
+        }
       } else if(event.key==="Escape"){
         setSearchOpen(false);
         setAccountOpen(false);
@@ -256,7 +264,7 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
     };
     document.addEventListener("keydown",listener);
     return ()=>document.removeEventListener("keydown",listener);
-  },[]);
+  },[searchOpen,tenantId]);
 
   useEffect(() => {
     const id=window.setTimeout(()=>setMacShortcut(/Mac|iPhone|iPad/i.test(navigator.platform)),0);
@@ -293,7 +301,7 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
     return [...pages,...records.sort((a,b)=>rank(a)-rank(b)||a.text.localeCompare(b.text))].slice(0,100);
     // Every search result belongs to this tenant and is filtered by role.
   },[query,searchState,tenantId,admin,showOnboarding]);
-  const openSearch=()=>{openerRef.current=document.activeElement as HTMLElement;setQuery("");setSelected(0);setSearchOpen(true);};
+  const openSearch=()=>{openerRef.current=document.activeElement as HTMLElement;setQuery("");setSelected(0);setSearchState({tenantId,rows:[],loading:!!tenantId,unavailable:0});setSearchOpen(true);};
   const navigate=(href:string)=>{setSearchOpen(false);setMobileOpen(false);router.push(href);};
   const choose=(item:Resource)=>navigate(item.href);
   const activeIndex=Math.min(selected,Math.max(0,matches.length-1));
