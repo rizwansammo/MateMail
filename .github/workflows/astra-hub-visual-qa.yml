@@ -81,6 +81,12 @@ jobs:
           done
           cat "$RUNNER_TEMP/astra-preview.log"
           exit 1
+      - name: Phase 4 Global Search resources, routes, keyboard and tenant boundaries
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase4-qa.mjs
       - name: Browser geometry, focus, keyboard and responsive QA
         working-directory: frontend
         env:
@@ -123,12 +129,6 @@ jobs:
           VISUAL_QA_URL: http://127.0.0.1:3100
           VISUAL_QA_OUTPUT: visual-qa-artifacts
         run: node scripts/astra-phase3-qa.mjs
-      - name: Phase 4 Global Search resources, routes, keyboard and tenant boundaries
-        working-directory: frontend
-        env:
-          VISUAL_QA_URL: http://127.0.0.1:3100
-          VISUAL_QA_OUTPUT: visual-qa-artifacts
-        run: node scripts/astra-phase4-qa.mjs
       - name: Upload screenshots and QA report
         if: always()
         uses: actions/upload-artifact@v4
