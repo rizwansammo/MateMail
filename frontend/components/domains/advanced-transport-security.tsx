@@ -35,6 +35,12 @@ type SecurityInfo = {
   dns_records_checked_at: string | null;
   cert_verified_at: string | null;
   activated_at: string | null;
+  offboarding: boolean;
+  deactivation_requested_at: string | null;
+  deactivation_policy_none_at: string | null;
+  deactivation_dns_absent_since: string | null;
+  deactivation_completed_at: string | null;
+  offboarding_dns_records: Array<{ type: "TXT"; host: string; action: string }>;
   last_error: string;
   can_publish_dns: boolean;
   detail: string;
@@ -128,7 +134,9 @@ export function AdvancedTransportSecurity({
       setData(result as SecurityInfo);
       setNotice(enabled
         ? "Advanced transport security requested. No DNS record is active until its individual readiness check passes."
-        : "Optional transport security has been disabled. Standard mail remains unchanged.");
+        : result.lifecycle === "disabled"
+          ? "Security request cancelled. Standard mail is unchanged."
+          : "Safe offboarding requested. HTTPS policy hosting remains until public DNS removal and cache expiry.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to update transport security.");
     } finally {
@@ -175,13 +183,17 @@ export function AdvancedTransportSecurity({
 
   const readyForCname = data.dns_records.some((record) =>
     record.type === "CNAME" && record.publish_ready);
-  const canEnable = canAdmin && emailVerified && ownershipVerified &&
-    data.self_service_available && !busy;
-  const removable = data.enabled && ["disabled", "pending_dns"].includes(data.lifecycle);
+  const canMutate = canAdmin && emailVerified && data.self_service_available && !busy;
+  const canEnable = canMutate && ownershipVerified;
+  const canDisable = canMutate && data.enabled;
+  const removable = data.enabled && [
+    "pending_dns", "provisioning", "ready", "active", "error",
+  ].includes(data.lifecycle);
   const canVerify = canAdmin && emailVerified && data.enabled && data.self_service_available &&
     ["pending_dns", "error", "ready", "active"].includes(data.lifecycle) && readyForCname && !busy;
   const sslReady = !!data.cert_verified_at && data.certificate_status === "active";
-  const status = !data.enabled ? "Not enabled"
+  const status = data.offboarding ? friendly(data.lifecycle)
+    : !data.enabled ? "Not enabled"
     : data.lifecycle === "active" && sslReady ? "STS DNS verified (testing)"
     : data.lifecycle === "ready" && sslReady ? "HTTPS ready (testing)"
     : friendly(data.lifecycle);
@@ -222,7 +234,7 @@ export function AdvancedTransportSecurity({
 
       <div className="grid gap-3 sm:grid-cols-3">
         {[
-          { label: "MTA-STS policy", value: status, sub: "Mode: testing only" },
+          { label: "MTA-STS policy", value: status, sub: "Mode: " + data.policy_mode },
           { label: "HTTPS certificate", value: sslReady ? "Verified" : friendly(data.certificate_status), sub: timestamp(data.cert_verified_at) },
           { label: "DNS ownership & gateway", value: data.dns_verified_at ? "Verified" : "Not verified", sub: timestamp(data.dns_verified_at) },
         ].map((item) => (
@@ -240,27 +252,28 @@ export function AdvancedTransportSecurity({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <p className="text-[12px] font-semibold text-[var(--portal-text-strong)]">
-              {data.enabled ? "Advanced security requested" : "Optional protection is off"}
+              {data.offboarding ? "Safe deactivation in progress" : data.enabled ? "Advanced security requested" : "Optional protection is off"}
             </p>
             <p className="text-[11px] leading-5 text-[var(--portal-muted)]">
-              Enabling starts a controlled setup, not immediate enforcement. The policy is
-              fixed to testing mode. HTTPS certificates and reporting require independent checks.
+              Advanced transport security is optional. Turning it off starts
+              a staged policy retirement: the HTTPS endpoint remains available until
+              required DNS changes are verified and cached policies have expired.
             </p>
           </div>
           {canAdmin && (data.enabled ? removable : true) && (
             <PortalButton
               type="button"
               variant="secondary"
-              disabled={!canEnable}
+              disabled={data.enabled ? !canDisable : !canEnable}
               onClick={() => setConfirmAction(data.enabled ? "disable" : "enable")}
-            >{data.enabled ? "Disable request" : "Enable advanced security"}</PortalButton>
+            >{data.enabled ? (data.lifecycle === "pending_dns" ? "Cancel setup" : "Request safe deactivation") : "Enable advanced security"}</PortalButton>
           )}
         </div>
         {!ownershipVerified && <p className="mt-3 text-xs text-[var(--portal-warning)]">Verify domain ownership before enabling.</p>}
         {!emailVerified && <p className="mt-3 text-xs text-[var(--portal-warning)]">Verify your account email before making changes.</p>}
-        {data.enabled && !removable && (
+        {data.offboarding && (
           <p className="mt-3 text-xs text-[var(--portal-muted)]">
-            Managed removal is required once edge provisioning starts. Contact platform support instead of deleting cached policy hosting.
+            Retirement is processing. Do not delete the domain while its policy might be cached.
           </p>
         )}
         {confirmAction && (
@@ -268,11 +281,13 @@ export function AdvancedTransportSecurity({
             <p className="text-xs leading-5 text-[var(--portal-text)]">
               {confirmAction === "enable"
                 ? "Request optional testing-mode MTA-STS setup? You must verify DNS manually, and only individually approved records can be published."
-                : "Cancel this pending security request? This is allowed only before edge provisioning has started."}
+                : data.lifecycle === "pending_dns"
+                  ? "Cancel this unprovisioned setup request? Standard email is unaffected."
+                  : "Start safe deactivation? MateMail first serves mode:none. Keep your CNAME in place and remove the two TXT records only when instructed. Managed cleanup waits at least 48 hours after DNS removal is confirmed."}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <PortalButton variant="secondary" disabled={busy} onClick={() => setConfirmAction(null)}>Cancel</PortalButton>
-              <PortalButton disabled={!canEnable} onClick={() => toggle(confirmAction === "enable")}>
+              <PortalButton disabled={confirmAction === "enable" ? !canEnable : !canDisable} onClick={() => toggle(confirmAction === "enable")}>
                 {busy ? "Saving…" : "Confirm"}
               </PortalButton>
             </div>
@@ -280,7 +295,50 @@ export function AdvancedTransportSecurity({
         )}
       </PortalCard>
 
-      {data.enabled && (
+      {data.offboarding && (
+        <PortalCard title="Safe Advanced Security Offboarding"
+          subtitle="Mail service continues. Cached sender policies must expire before HTTPS and certificates are removed.">
+          <div className="space-y-3 text-xs leading-5 text-[var(--portal-muted)]">
+            {data.lifecycle === "deactivating" ? (
+              <PortalNotice tone="warn">
+                MateMail is preparing the public mode:none policy. Keep the MTA-STS CNAME and both
+                TXT records unchanged until this status becomes Draining.
+              </PortalNotice>
+            ) : (
+              <PortalNotice tone="info">
+                The policy has entered safe retirement. Remove the two TXT records listed below,
+                but keep the MTA-STS CNAME until this process is complete.
+              </PortalNotice>
+            )}
+            {data.offboarding_dns_records.map((record) => (
+              <div className="flex flex-wrap items-center justify-between gap-2 border border-[var(--portal-border)] p-3" key={record.host}>
+                <div className="min-w-0">
+                  <p className="font-semibold text-[var(--portal-text-strong)]">{record.type} — {record.host}</p>
+                  <p>{record.action}</p>
+                </div>
+                <PortalCopyButton label="Copy DNS hostname" value={record.host} />
+              </div>
+            ))}
+            <p>Request received: {timestamp(data.deactivation_requested_at)}</p>
+            <p>Policy retirement verified: {timestamp(data.deactivation_policy_none_at)}</p>
+            <p>TXT records absent since: {timestamp(data.deactivation_dns_absent_since)}</p>
+            <p>Once public DNS absence is confirmed, MateMail waits at least 48 hours and checks
+              public DNS again before removing the managed site and certificate.
+              Remove the CNAME only after retirement is completed.</p>
+            <PortalButton variant="secondary" disabled={busy} onClick={reload}>
+              <RefreshCw className="h-4 w-4" /> Refresh offboarding status
+            </PortalButton>
+          </div>
+        </PortalCard>
+      )}
+      {!data.enabled && data.deactivation_completed_at && (
+        <PortalNotice tone="success">
+          Safe offboarding completed on {timestamp(data.deactivation_completed_at)}.
+          The MTA-STS CNAME can now be removed at your DNS provider.
+        </PortalNotice>
+      )}
+
+      {data.enabled && !data.offboarding && (
         <>
           <PortalCard title="Guided security setup" subtitle="Optional protection. Standard email works without these records.">
             <ol className="grid gap-3 text-xs leading-5 text-[var(--portal-muted)] sm:grid-cols-2">
@@ -373,7 +431,7 @@ export function AdvancedTransportSecurity({
 
           <PortalCard title="MTA-STS policy" subtitle="Informational preview, not an instruction to enforce transport restrictions.">
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="portal-fact"><span>Policy mode</span><strong>Testing (fixed)</strong></div>
+              <div className="portal-fact"><span>Policy mode</span><strong>{friendly(data.policy_mode)} (managed)</strong></div>
               <div className="portal-fact"><span>Expected MX</span><code className="break-all">{data.mx}</code></div>
               <div className="portal-fact"><span>Cache duration</span><strong>{data.max_age_seconds} seconds</strong></div>
               <div className="portal-fact"><span>TLS reporting</span><strong>{data.dns_records.find((record) => record.host.startsWith("_smtp._tls."))?.publish_ready ? "Reporting DNS ready" : "Reporting setup pending"}</strong></div>
