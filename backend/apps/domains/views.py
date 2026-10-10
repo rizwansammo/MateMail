@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import Throttled
 from rest_framework.response import Response
@@ -114,10 +115,29 @@ class DomainDetailView(APIView):
             return Response({"detail": "Not found."}, status=404)
         return Response(DomainSerializer(domain).data)
 
+    @transaction.atomic
     def delete(self, request, pk):
-        domain = self._get_domain(request, pk)
+        # Serialize deletes against domain-level security opt-in and verification.
+        domain = Domain.objects.for_tenant(request.tenant).select_for_update().filter(pk=pk).first()
         if not domain:
             return Response({"detail": "Not found."}, status=404)
+
+        from apps.transport_security.models import (
+            DomainTransportSecurity, TransportSecurityLifecycle,
+        )
+        # A domain row is the durable ownership link for its HTTPS policy.
+        # Fail closed for pending, active, error, or partially provisioned sites.
+        # A separate managed offboarding workflow must deal with MTA-STS caches.
+        if DomainTransportSecurity.objects.filter(domain=domain).exclude(
+            enabled=False, lifecycle=TransportSecurityLifecycle.DISABLED,
+        ).exists():
+            return Response({
+                "detail": (
+                    "Advanced transport security is configured for this domain. "
+                    "Cancel an unprovisioned request or contact platform support "
+                    "for safe policy offboarding before deleting this domain."
+                )
+            }, status=409)
 
         # ── Queue engine cleanup BEFORE deleting the local row, and fail closed
         #    if it cannot be queued. ────────────────────────────────────────────

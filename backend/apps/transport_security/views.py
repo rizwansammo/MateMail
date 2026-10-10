@@ -10,7 +10,8 @@ from apps.tenants.permissions import IsEmailVerified, TenantReadAdminWrite
 from apps.tenants.policy import MailNotPermitted, assert_can_use_mail
 
 from .models import (
-    DomainTransportSecurity, TransportSecurityLifecycle, new_policy_id,
+    DomainTransportSecurity, TransportSecurityCertificateStatus,
+    TransportSecurityLifecycle, new_policy_id,
 )
 from .serializers import (
     TransportSecurityToggleSerializer, describe_transport_security,
@@ -20,7 +21,7 @@ from django.utils import timezone
 from rest_framework.exceptions import Throttled
 from apps.security import ratelimit
 from apps.security.limits import DOMAIN_CHECK_PER_DOMAIN
-from .dns import check_domain_policy_dns
+from .dns import check_domain_policy_dns, check_publication_txt
 
 
 class DomainTransportSecurityView(APIView):
@@ -120,8 +121,10 @@ class DomainTransportSecurityDNSVerifyView(APIView):
         if row.lifecycle not in (
             TransportSecurityLifecycle.PENDING_DNS,
             TransportSecurityLifecycle.ERROR,
+            TransportSecurityLifecycle.READY,
+            TransportSecurityLifecycle.ACTIVE,
         ):
-            return Response({"detail": "This domain is already being provisioned or is ready."}, status=409)
+            return Response({"detail": "Provisioning is still in progress."}, status=409)
 
         decision = ratelimit.hit(
             DOMAIN_CHECK_PER_DOMAIN.bucket,
@@ -135,10 +138,54 @@ class DomainTransportSecurityDNSVerifyView(APIView):
         verified, message = check_domain_policy_dns(domain)
         if not verified:
             row.dns_verified_at = None
-            row.save(update_fields=["dns_verified_at", "updated_at"])
+            fields = ["dns_verified_at", "updated_at"]
+            if row.lifecycle in (TransportSecurityLifecycle.READY, TransportSecurityLifecycle.ACTIVE):
+                # An existing policy remains hosted for remote MTA caches.
+                # Withdraw the current verification claim, not the HTTPS site.
+                row.dns_records_checked_at = timezone.now()
+                row.sts_txt_verified_at = None
+                row.tls_rpt_txt_verified_at = None
+                row.lifecycle = TransportSecurityLifecycle.READY
+                fields += ["dns_records_checked_at", "sts_txt_verified_at",
+                           "tls_rpt_txt_verified_at", "lifecycle"]
+            row.save(update_fields=fields)
             return Response({"verified": False, "detail": message}, status=409)
 
-        row.dns_verified_at = timezone.now()
+        now = timezone.now()
+        if row.lifecycle in (TransportSecurityLifecycle.READY, TransportSecurityLifecycle.ACTIVE):
+            if (row.certificate_status != TransportSecurityCertificateStatus.ACTIVE
+                    or row.cert_verified_at is None):
+                return Response({"verified": False, "detail": "HTTPS policy certificate is not verified."}, status=409)
+            sts_ok, tls_ok = check_publication_txt(domain, row.policy_id)
+            if sts_ok is None or tls_ok is None:
+                return Response({"verified": False, "detail": "DNS lookup temporarily unavailable. Please retry."}, status=503)
+            row.dns_verified_at = now
+            row.dns_records_checked_at = now
+            row.sts_txt_verified_at = now if sts_ok else None
+            row.tls_rpt_txt_verified_at = now if tls_ok else None
+            row.lifecycle = (TransportSecurityLifecycle.ACTIVE if sts_ok
+                             else TransportSecurityLifecycle.READY)
+            if sts_ok and row.activated_at is None:
+                row.activated_at = now
+            row.save(update_fields=[
+                "dns_verified_at", "dns_records_checked_at", "sts_txt_verified_at",
+                "tls_rpt_txt_verified_at", "lifecycle", "activated_at", "updated_at",
+            ])
+            return Response({
+                "verified": True,
+                "sts_txt_verified": sts_ok,
+                "tls_rpt_txt_verified": tls_ok,
+                "detail": (
+                    "MTA-STS TXT verified." if sts_ok else
+                    "HTTPS ready, but MTA-STS TXT is missing or incorrect."
+                ) + (
+                    " TLS reporting TXT verified." if tls_ok else
+                    " TLS reporting TXT is not yet verified."
+                ),
+            })
+
+        # Before HTTPS provisioning, only ownership, CNAME and MX are checked.
+        row.dns_verified_at = now
         row.lifecycle = TransportSecurityLifecycle.PENDING_DNS
         row.last_error = ""
         row.save(update_fields=["dns_verified_at", "lifecycle", "last_error", "updated_at"])
