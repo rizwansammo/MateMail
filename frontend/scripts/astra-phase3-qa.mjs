@@ -107,7 +107,7 @@ try{
  await t.page.getByRole("button",{name:"Create connected app"}).click();
  const cd=t.page.getByRole("dialog",{name:"Create connected app"});
  await cd.waitFor({state:"visible"});
- check("Connected Apps modal has accessible name, purpose, mailbox",await cd.getByLabel("Application name").count()===1&&await cd.getByLabel("Purpose").count()===1&&await cd.getByLabel("Mailbox").count()===1);
+ check("Connected Apps modal has accessible name, purpose, mailbox",await cd.getByLabel("Application name").count()===1&&await cd.getByLabel("Purpose").count()===1&&await cd.getByLabel("Mailbox",{exact:true}).count()===1);
  await cd.getByLabel("Application name").fill("QA HelpDesk");
  await cd.getByRole("button",{name:"Create connected app"}).click();
  await t.page.waitForTimeout(400);
