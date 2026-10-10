@@ -589,7 +589,7 @@ export default function TeamPage() {
         )}
       </PortalCard>
 
-      <PortalCard className="mt-5" title="Roles, at a glance" subtitle="MateMail uses four real workspace roles rather than the prototype’s simplified member model.">
+      <PortalCard className="mt-5" title="Roles, at a glance" subtitle="Role-based access is enforced by MateMail for each organization.">
         <div className="portal-role-guide">
           <div><strong>Owner</strong><span>Full workspace control. Only the owner can change another member’s role.</span></div>
           <div><strong>Admin</strong><span>Manage domains, mailboxes, routing, invitations and other administrative resources.</span></div>
