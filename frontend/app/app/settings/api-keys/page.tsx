@@ -16,6 +16,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { useAuth } from "@/contexts/auth-context";
 import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import {
   PortalButton,
@@ -104,6 +105,8 @@ function ScopeSummary({ scopes }: { scopes: string[] }) {
 }
 
 export default function APIKeysPage() {
+  const { tenant } = useAuth();
+  const canManageCredentials = tenant?.role === "owner" || tenant?.role === "admin";
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -274,6 +277,7 @@ export default function APIKeysPage() {
         actions={
           <PortalButton
             type="button"
+            disabled={!canManageCredentials}
             onClick={() => {
               setCreateOpen(true);
               setNewKey(null);
@@ -301,7 +305,7 @@ export default function APIKeysPage() {
       )}
 
       <AstraResourceDialog
-        open={createOpen}
+        open={createOpen && canManageCredentials}
         busy={creating}
         title="Create API key"
         description="Every key can read workspace data. Grant only the write scopes required."
