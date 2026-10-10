@@ -129,8 +129,9 @@ try{
  await env.page.waitForTimeout(550);
  const tm=env.records.calls.find(c=>c.pathname.endsWith("/members/")&&c.pathname.includes("team-boxes")&&c.method==="POST");
  check("TeamBox permissions POST correctly uses personal mailbox",tm?.value.mailbox_id===memberId&&tm.value.can_read===true&&tm.value.can_manage===true&&tm.value.can_send_as===true,{payload:tm?.value});
- await env.page.getByRole("checkbox",{name:"Send on behalf for amelia@example.test"}).check();
- await env.page.waitForTimeout(450);
+ await env.page.getByRole("checkbox",{name:"Send on behalf for amelia@example.test"}).click();
+ await env.page.waitForFunction(() => true);
+ await env.page.waitForTimeout(500);
  const pm=env.records.calls.find(c=>c.pathname.endsWith("/members/m1111111-1111-4111-8111-111111111111/")&&c.method==="PATCH");
  check("TeamBox permissions PATCH preserved",pm?.value.can_send_on_behalf===true,{payload:pm?.value});
 
