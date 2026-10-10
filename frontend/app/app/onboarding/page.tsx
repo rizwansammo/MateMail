@@ -81,7 +81,7 @@ export default function OnboardingPage() {
       {
         title: "Create your workspace",
         description: `${tenant?.name || "Your workspace"} is ready for your organization.`,
-        done: status?.workspace_created ?? true,
+        done: status?.completed || (status?.workspace_created ?? true),
         icon: Building2,
         href: "/app/settings",
         label: "Workspace settings",
@@ -89,7 +89,7 @@ export default function OnboardingPage() {
       {
         title: "Connect your email domain",
         description: "Bring your business identity to MateMail.",
-        done: status?.domain_added ?? false,
+        done: status?.completed || (status?.domain_added ?? false),
         icon: Globe2,
         href: "/app/domains",
         label: "Add a domain",
@@ -97,7 +97,7 @@ export default function OnboardingPage() {
       {
         title: "Verify ownership & DNS",
         description: "Prove domain control, then verify MX, SPF, DKIM and DMARC.",
-        done: status?.dns_verified ?? false,
+        done: status?.completed || (status?.dns_verified ?? false),
         icon: ShieldCheck,
         href: domainForReview ? `/app/domains/${domainForReview.id}` : "/app/domains",
         label: "Review DNS records",
@@ -105,7 +105,7 @@ export default function OnboardingPage() {
       {
         title: "Create your first mailbox",
         description: "Give someone on your team their new email address.",
-        done: status?.first_mailbox_created ?? false,
+        done: status?.completed || (status?.first_mailbox_created ?? false),
         icon: Mail,
         href: "/app/mailboxes",
         label: "Create mailbox",
@@ -200,9 +200,9 @@ export default function OnboardingPage() {
             <PortalNotice tone={completed === 4 ? "success" : "info"}>
               <Check className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="flex-1">
-                <strong>{completed === 4 ? "You’re ready for business." : "Your setup progress is saved."}</strong>{" "}
+                <strong>{completed === 4 ? "Your initial setup is complete." : "Your setup progress is saved."}</strong>{" "}
                 {completed === 4
-                  ? "Your core workspace setup is complete."
+                  ? "Your one-time onboarding is complete. Future domain health is managed under Domains."
                   : "You can return and finish the remaining steps whenever you’re ready."}
               </div>
               <Link href="/app" className="portal-button secondary">Go to overview</Link>
