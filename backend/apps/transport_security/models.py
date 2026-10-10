@@ -41,7 +41,7 @@ class DomainTransportSecurity(models.Model):
     """
 
     domain = models.OneToOneField(
-        "domains.Domain", on_delete=models.CASCADE,
+        "domains.Domain", on_delete=models.PROTECT,
         primary_key=True, related_name="transport_security",
     )
     enabled = models.BooleanField(default=False)
