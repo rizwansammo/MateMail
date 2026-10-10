@@ -59,7 +59,7 @@ function ForwardingPageContent() {
   const [myRole, setMyRole] = useState("");
   const [workspaceStatus, setWorkspaceStatus] = useState(tenant?.status || "");
   const [loading, setLoading] = useState(true);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(requestedSearch);
   const [loadError, setLoadError] = useState("");
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"success" | "warn" | "danger">("success");
