@@ -14,6 +14,8 @@ type RecordInstruction = {
   value: string | null;
   publish_ready: boolean;
   requirement: string;
+  verification_status: "not_checked" | "verified" | "missing";
+  verified_at: string | null;
 };
 type SecurityInfo = {
   domain: string;
@@ -30,6 +32,7 @@ type SecurityInfo = {
   edge_configured: boolean;
   dns_records: RecordInstruction[];
   dns_verified_at: string | null;
+  dns_records_checked_at: string | null;
   cert_verified_at: string | null;
   activated_at: string | null;
   last_error: string;
@@ -135,7 +138,7 @@ export function AdvancedTransportSecurity({
 
   async function verifyDNS() {
     if (!data?.enabled || !canAdmin || !emailVerified ||
-        !["pending_dns", "error"].includes(data.lifecycle)) return;
+        !["pending_dns", "error", "ready", "active"].includes(data.lifecycle)) return;
     setBusy(true);
     setError("");
     setNotice("");
@@ -176,10 +179,10 @@ export function AdvancedTransportSecurity({
     data.self_service_available && !busy;
   const removable = data.enabled && ["disabled", "pending_dns"].includes(data.lifecycle);
   const canVerify = canAdmin && emailVerified && data.enabled &&
-    ["pending_dns", "error"].includes(data.lifecycle) && readyForCname && !busy;
+    ["pending_dns", "error", "ready", "active"].includes(data.lifecycle) && readyForCname && !busy;
   const sslReady = !!data.cert_verified_at && data.certificate_status === "active";
   const status = !data.enabled ? "Not enabled"
-    : data.lifecycle === "active" && sslReady ? "Policy active (testing)"
+    : data.lifecycle === "active" && sslReady ? "STS DNS verified (testing)"
     : data.lifecycle === "ready" && sslReady ? "HTTPS ready (testing)"
     : friendly(data.lifecycle);
 
@@ -206,8 +209,9 @@ export function AdvancedTransportSecurity({
       {!data.self_service_available && (
         <PortalNotice tone="info">
           <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Self-service activation is not released yet. The upcoming reporting and production
-            verification phases must finish first. Do not publish any draft DNS records.</span>
+          <span>Advanced security is currently operator-managed. Customer activation will be released
+            after safe policy offboarding and multi-tenant testing are complete. Do not publish any
+            record marked Not ready.</span>
         </PortalNotice>
       )}
       {error && <PortalNotice tone="danger"><span role="alert">{error}</span></PortalNotice>}
@@ -278,6 +282,22 @@ export function AdvancedTransportSecurity({
 
       {data.enabled && (
         <>
+          <PortalCard title="Guided security setup" subtitle="Optional protection. Standard email works without these records.">
+            <ol className="grid gap-3 text-xs leading-5 text-[var(--portal-muted)] sm:grid-cols-2">
+              <li><strong className="text-[var(--portal-text-strong)]">1. Connect the policy gateway</strong>
+                <p>Publish the approved CNAME, then verify ownership, CNAME and MX records.</p>
+              </li>
+              <li><strong className="text-[var(--portal-text-strong)]">2. Wait for verified HTTPS</strong>
+                <p>MateMail provisions the hostname-specific certificate and policy automatically.</p>
+              </li>
+              <li><strong className="text-[var(--portal-text-strong)]">3. Publish approved TXT records</strong>
+                <p>Copy each record only once its individual readiness check passes.</p>
+              </li>
+              <li><strong className="text-[var(--portal-text-strong)]">4. Confirm public DNS</strong>
+                <p>Verify both TXT records after publication. MTA-STS remains in testing mode.</p>
+              </li>
+            </ol>
+          </PortalCard>
           <PortalCard title="Security DNS records" subtitle="Each record is unlocked separately, only after the backend approves publication.">
             <div className="mb-4"><PortalNotice tone={data.can_publish_dns ? "success" : "warn"}>
               <span>{data.can_publish_dns
@@ -294,6 +314,12 @@ export function AdvancedTransportSecurity({
                         : record.host.startsWith("_mta-sts.") ? "MTA-STS announcement" : "TLS failure reporting"}
                     </span>
                     <PortalStatus value={record.publish_ready ? "Ready to publish" : "Not ready"} />
+                    {record.publish_ready && (
+                      <PortalStatus value={
+                        record.verification_status === "verified" ? "DNS verified" :
+                        record.verification_status === "missing" ? "Missing / incorrect" : "DNS not checked"
+                      } />
+                    )}
                   </div>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <div className="min-w-0">
@@ -316,6 +342,11 @@ export function AdvancedTransportSecurity({
                   <p className="mt-2 text-[11px] leading-5 text-[var(--portal-muted)]">
                     {record.publish_ready ? record.requirement : "Blocked: " + record.requirement}
                   </p>
+                  {record.verified_at && (
+                    <p className="mt-1 text-[11px] text-[var(--portal-muted)]">
+                      Last verified: {timestamp(record.verified_at)} — evidence from the last check, not live monitoring.
+                    </p>
+                  )}
                 </article>
               ))}
             </div>
@@ -327,12 +358,17 @@ export function AdvancedTransportSecurity({
             <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--portal-border)] pt-4">
               <PortalButton variant="secondary" onClick={verifyDNS} disabled={!canVerify}>
                 <RefreshCw className={"h-4 w-4 " + (busy ? "animate-spin" : "")} />
-                {busy ? "Checking…" : "Verify policy DNS"}
+                {busy ? "Checking…" : ["ready", "active"].includes(data.lifecycle) ? "Check published DNS" : "Verify gateway DNS"}
               </PortalButton>
               <p className="text-xs text-[var(--portal-muted)]">
-                Verification checks current ownership TXT, exact CNAME and all MX records.
+                Verifies current ownership, the exact gateway CNAME and all MX records. Once HTTPS is ready, also checks both published TXT records.
               </p>
             </div>
+            {data.dns_records_checked_at && (
+              <p className="mt-3 text-[11px] text-[var(--portal-muted)]">
+                Last TXT check: {timestamp(data.dns_records_checked_at)}. Changes made since then require another check.
+              </p>
+            )}
           </PortalCard>
 
           <PortalCard title="MTA-STS policy" subtitle="Informational preview, not an instruction to enforce transport restrictions.">
