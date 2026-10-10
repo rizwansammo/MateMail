@@ -46,7 +46,7 @@ async function setup(viewport,role="owner"){
   else if(endpoint==="/api/domains/"&&method==="POST"){
     const value=JSON.parse(route.request().postData()||"{}");
     requests.domain.push(value);
-    const row={...initialDomain,id:"d2222222-2222-4222-8222-222222222222",domain:value.domain,status:"pending",dns_health_score:0,ownership_verified:false,mail_service_ready:false};
+    const row={...initialDomain,id:"d2222222-2222-4222-8222-222222222222",domain:value.domain,status:"pending",dns_health_score:0,ownership_status:"pending",ownership_verified:false,ownership_verified_at:null,mail_service_ready:false,mail_service_message:"",verification_record_type:"TXT",verification_record_name:"_matemail-verification."+value.domain,verification_record_value:"matemail-verify=synthetic",verification_instructions:"Publish the TXT value",verification_last_checked_at:null,verification_last_error:"",dkim_selector:"",dkim_public_key:"",verified_at:null};
     domains.push(row);body=row;
   }
   else if(endpoint.startsWith("/api/mailboxes/")&&endpoint.endsWith("/status/")&&method==="PATCH"){
