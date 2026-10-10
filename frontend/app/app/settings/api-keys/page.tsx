@@ -264,7 +264,7 @@ export default function APIKeysPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-settings-page astra-credential-page">
       <Link href="/app/settings" className="portal-back-link">← Workspace settings</Link>
 
       <PortalPageHeading
