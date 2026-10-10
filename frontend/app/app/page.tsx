@@ -46,6 +46,8 @@ interface OnboardingStatus {
   domain_added: boolean;
   dns_verified: boolean;
   first_mailbox_created: boolean;
+  completed: boolean;
+  completed_at: string | null;
 }
 
 interface DomainSummary {
@@ -182,7 +184,9 @@ export default function DashboardPage() {
     ].filter(Boolean).length;
   }, [onboarding]);
 
-  const setupComplete = setupSteps === 4;
+  // Permanent organization-wide completion is authoritative: a later DNS
+  // incident belongs in Domains, never in the one-time onboarding wizard.
+  const setupComplete = onboarding?.completed === true || setupSteps === 4;
   const storageUsedGb = stats ? stats.storage_used_mb / 1024 : 0;
   const storageQuotaGb = stats ? stats.storage_quota_mb / 1024 : 0;
 
