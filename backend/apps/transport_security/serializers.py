@@ -43,7 +43,9 @@ def describe_transport_security(domain, config=None) -> dict:
     report_address = getattr(settings, "TLS_RPT_REPORT_ADDRESS", "tlsrpt@mail.matemail.pro")
     # P4-C.B's static preview MUST NOT be mistaken for verified service readiness.
     records = []
-    if enabled:
+    if enabled and lifecycle not in (
+        TransportSecurityLifecycle.DEACTIVATING, TransportSecurityLifecycle.DRAINING,
+    ):
         records = [
             {
                 "type": "CNAME",
@@ -106,6 +108,9 @@ def describe_transport_security(domain, config=None) -> dict:
     ) and config.certificate_status == TransportSecurityCertificateStatus.ACTIVE and config.cert_verified_at:
         records[1]["publish_ready"] = True
         records[1]["requirement"] = "Verified HTTPS policy; publish this TXT to announce testing mode."
+    offboarding = lifecycle in (
+        TransportSecurityLifecycle.DEACTIVATING, TransportSecurityLifecycle.DRAINING,
+    )
     return {
         "domain": name,
         "ownership_verified": domain.is_ownership_verified,
@@ -114,7 +119,7 @@ def describe_transport_security(domain, config=None) -> dict:
         "self_service_available": bool(getattr(settings, "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", False)),
         "lifecycle": lifecycle,
         "certificate_status": config.certificate_status if config else "not_requested",
-        "policy_mode": "testing",  # enforce must never be user-writable.
+        "policy_mode": "none" if (offboarding and config.deactivation_policy_none_at) else "testing",  # actual worker-confirmed mode.
         "mx": mx_host,
         "max_age_seconds": 86400,
         "policy_url": f"https://{policy_host}/.well-known/mta-sts.txt" if enabled else None,
@@ -124,9 +129,20 @@ def describe_transport_security(domain, config=None) -> dict:
         "dns_records_checked_at": config.dns_records_checked_at if config else None,
         "cert_verified_at": config.cert_verified_at if config else None,
         "activated_at": config.activated_at if config else None,
+        "offboarding": offboarding,
+        "deactivation_requested_at": config.deactivation_requested_at if config else None,
+        "deactivation_policy_none_at": config.deactivation_policy_none_at if config else None,
+        "deactivation_dns_absent_since": config.deactivation_dns_absent_since if config else None,
+        "deactivation_completed_at": config.deactivation_completed_at if config else None,
+        "offboarding_dns_records": [
+            {"type": "TXT", "host": f"_mta-sts.{name}", "action": "Remove after the HTTPS policy shows mode none"},
+            {"type": "TXT", "host": f"_smtp._tls.{name}", "action": "Remove to stop aggregate TLS reports"},
+        ] if offboarding else [],
         "last_error": config.last_error if config else "",
         "can_publish_dns": bool(records) and all(item["publish_ready"] for item in records),  # TLS-RPT waits for P4-C.E.
         "detail": (
+            "Safe offboarding in progress. Keep the MTA-STS CNAME until cleanup completes."
+            if offboarding else
             "Transport security is optional. DNS records are not ready to publish "
             "until verified HTTPS hosting and TLS report ingestion are available."
             if enabled else

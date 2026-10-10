@@ -72,6 +72,27 @@ class DomainDeleteDurabilityTest(TestCase):
         self.assertEqual(response.status_code, 204)
         queued.assert_called_once()
 
+    def test_direct_orm_delete_is_protected_during_transport_security(self):
+        from django.db.models.deletion import ProtectedError
+        from apps.transport_security.models import DomainTransportSecurity, TransportSecurityLifecycle
+        DomainTransportSecurity.objects.create(
+            domain=self.domain, enabled=True, lifecycle=TransportSecurityLifecycle.ACTIVE,
+        )
+        with self.assertRaises(ProtectedError):
+            self.domain.delete()
+        self.assertTrue(Domain.objects.filter(pk=self.domain.pk).exists())
+
+    def test_api_deletes_disabled_transport_config_without_cascade_hazards(self):
+        from apps.transport_security.models import DomainTransportSecurity, TransportSecurityLifecycle
+        DomainTransportSecurity.objects.create(
+            domain=self.domain, enabled=False, lifecycle=TransportSecurityLifecycle.DISABLED,
+        )
+        response, enqueued = self._delete(mock.Mock())
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Domain.objects.filter(pk=self.domain.pk).exists())
+        self.assertFalse(DomainTransportSecurity.objects.filter(domain_id=self.domain.pk).exists())
+        enqueued.assert_called_once()
+
     # ── the happy path still works ──────────────────────────────────────────
 
     def test_queue_succeeds_so_the_local_domain_is_deleted(self):

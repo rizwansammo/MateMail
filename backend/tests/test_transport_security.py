@@ -103,15 +103,55 @@ class TransportSecurityAPITest(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(DomainTransportSecurity.objects.count(), 0)
 
-    def test_active_policy_cannot_be_disabled_without_edge_deactivation(self):
+    def test_active_policy_starts_staged_retirement_without_disabling_hosting(self):
         self.client_a.post(self.url_a, {"enabled": True}, format="json")
         row = DomainTransportSecurity.objects.get(domain=self.domain_a)
         row.lifecycle = TransportSecurityLifecycle.ACTIVE
         row.save(update_fields=["lifecycle"])
-        denied = self.client_a.post(self.url_a, {"enabled": False}, format="json")
-        self.assertEqual(denied.status_code, 409)
+        res = self.client_a.post(self.url_a, {"enabled": False}, format="json")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data["enabled"])
+        self.assertTrue(res.data["offboarding"])
+        self.assertEqual(res.data["lifecycle"], "deactivating")
+        self.assertEqual(len(res.data["offboarding_dns_records"]), 2)
         row.refresh_from_db()
+        self.assertIsNotNone(row.deactivation_requested_at)
         self.assertTrue(row.enabled)
+        self.assertEqual(row.lifecycle, TransportSecurityLifecycle.DEACTIVATING)
+
+        # Repeated disable calls cannot reset the waiting period.
+        first = row.deactivation_requested_at
+        again = self.client_a.post(self.url_a, {"enabled": False}, format="json")
+        self.assertEqual(again.status_code, 200)
+        row.refresh_from_db()
+        self.assertEqual(row.deactivation_requested_at, first)
+        self.assertEqual(
+            self.client_a.post(self.url_a, {"enabled": True}, format="json").status_code, 409,
+        )
+
+    def test_retirement_can_begin_after_partial_provisioning_error(self):
+        self.client_a.post(self.url_a, {"enabled": True}, format="json")
+        row = DomainTransportSecurity.objects.get(domain=self.domain_a)
+        for stage in (TransportSecurityLifecycle.PROVISIONING,
+                      TransportSecurityLifecycle.READY, TransportSecurityLifecycle.ERROR):
+            row.lifecycle = stage
+            row.save(update_fields=["lifecycle"])
+            reply = self.client_a.post(self.url_a, {"enabled": False}, format="json")
+            self.assertEqual(reply.status_code, 200)
+            self.assertEqual(reply.data["lifecycle"], "deactivating")
+            row.refresh_from_db()
+
+    def test_retirement_does_not_require_current_dns_ownership_to_cancel(self):
+        from apps.domains.models import DomainOwnership
+        self.client_a.post(self.url_a, {"enabled": True}, format="json")
+        row = DomainTransportSecurity.objects.get(domain=self.domain_a)
+        row.lifecycle = TransportSecurityLifecycle.ACTIVE
+        row.save(update_fields=["lifecycle"])
+        self.domain_a.ownership_status = DomainOwnership.PENDING
+        self.domain_a.save(update_fields=["ownership_status"])
+        result = self.client_a.post(self.url_a, {"enabled": False}, format="json")
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.data["lifecycle"], "deactivating")
 
     def test_non_owner_cannot_see_or_mutate_another_tenants_domain(self):
         self.assertEqual(self.client_b.get(self.url_a).status_code, 404)

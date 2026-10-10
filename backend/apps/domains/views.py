@@ -189,6 +189,14 @@ class DomainDetailView(APIView):
         # the engine loses the domain while MateMail keeps the row — recoverable
         # by reprovisioning, and strictly preferable to the reverse.
         log_event(request.tenant, LogEventType.DOMAIN_DELETED, request=request, domain=domain)
+        # TransportSecurity's PROTECT foreign key makes all non-API cascades
+        # fail closed. A fully disabled and cleaned-up configuration can now
+        # be explicitly removed before normal domain deletion.
+        disabled_policy = DomainTransportSecurity.objects.filter(
+            domain=domain, enabled=False, lifecycle=TransportSecurityLifecycle.DISABLED,
+        ).first()
+        if disabled_policy is not None:
+            disabled_policy.delete()
         domain.delete()
         return Response(status=204)
 

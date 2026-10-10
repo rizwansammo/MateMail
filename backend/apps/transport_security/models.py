@@ -20,7 +20,8 @@ class TransportSecurityLifecycle(models.TextChoices):
     READY = "ready", "HTTPS verified, DNS publication pending"
     ACTIVE = "active", "Active"
     ERROR = "error", "Provisioning error"
-    DEACTIVATING = "deactivating", "Deactivating"
+    DEACTIVATING = "deactivating", "Replacing HTTPS policy with mode none"
+    DRAINING = "draining", "Awaiting customer DNS removal and MTA-STS cache expiry"
 
 
 class TransportSecurityCertificateStatus(models.TextChoices):
@@ -40,7 +41,7 @@ class DomainTransportSecurity(models.Model):
     """
 
     domain = models.OneToOneField(
-        "domains.Domain", on_delete=models.CASCADE,
+        "domains.Domain", on_delete=models.PROTECT,
         primary_key=True, related_name="transport_security",
     )
     enabled = models.BooleanField(default=False)
@@ -60,6 +61,10 @@ class DomainTransportSecurity(models.Model):
     tls_rpt_txt_verified_at = models.DateTimeField(null=True, blank=True)
     cert_verified_at = models.DateTimeField(null=True, blank=True)
     activated_at = models.DateTimeField(null=True, blank=True)
+    deactivation_requested_at = models.DateTimeField(null=True, blank=True)
+    deactivation_policy_none_at = models.DateTimeField(null=True, blank=True)
+    deactivation_dns_absent_since = models.DateTimeField(null=True, blank=True)
+    deactivation_completed_at = models.DateTimeField(null=True, blank=True)
     # Only application-authored safe messages; no raw Certbot error or DNS output.
     last_error = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
