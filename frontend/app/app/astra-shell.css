@@ -63,6 +63,18 @@
 .ws.astra-hub .astra-search-row{display:flex;width:100%;gap:11px;align-items:center;text-align:left;color:var(--foreground);background:transparent;border:0;border-radius:3px;padding:6px 8px;font-size:.875rem;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ws.astra-hub .astra-search-row:hover,.ws.astra-hub .astra-search-row[data-selected=true]{background:var(--accent);color:var(--sidebar-primary)}
 .ws.astra-hub .astra-search-empty{padding:22px;text-align:center;font-size:.8125rem;color:var(--muted-foreground)}
+
+.ws.astra-hub .astra-search-rowtext{min-width:0;display:flex;flex-direction:column;gap:2px;flex:1;text-align:left;overflow:hidden}
+.ws.astra-hub .astra-search-rowtext>span,.ws.astra-hub .astra-search-rowtext small{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.ws.astra-hub .astra-search-rowtext small{font-size:.72rem;font-weight:400;color:var(--muted-foreground)}
+.ws.astra-hub .astra-search-row{min-height:32px}
+.ws.astra-hub .astra-search-row:focus-visible{outline:1px solid var(--muted-foreground);outline-offset:-2px;background:var(--accent)}
+.ws.astra-hub .astra-search-feedback{padding:10px 12px;color:var(--muted-foreground);font-size:.75rem;line-height:1.5}
+.ws.astra-hub .astra-search-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 13px;background:var(--soft);border-top:1px solid var(--border);color:var(--muted-foreground);font-size:.6875rem}
+.ws.astra-hub .astra-search-footer span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.ws.astra-hub .astra-search-footer kbd{font:inherit;font-size:.6875rem;border:1px solid var(--border);border-radius:3px;padding:0 5px;background:var(--card);color:var(--muted-foreground)}
+@media(max-width:540px){.ws.astra-hub .astra-search-layer{align-items:flex-start;padding:12px}.ws.astra-hub .astra-search-dialog{max-height:min(75dvh,570px);margin-top:12dvh}.ws.astra-hub .astra-search-footer{gap:5px;padding:7px 9px}}
+
 .ws.astra-hub .astra-account-menu{position:absolute;right:22px;top:52px;z-index:60;min-width:232px;padding:5px;background:var(--popover);border:1px solid var(--border);border-radius:4px;box-shadow:0 14px 35px #10203b24}
 .ws.astra-hub .astra-account-menu button,.ws.astra-hub .astra-account-menu a{width:100%;display:flex;align-items:center;gap:10px;padding:9px 11px;color:var(--foreground);text-decoration:none;border:0;background:none;border-radius:3px;font-size:.8125rem;text-align:left}
 .ws.astra-hub .astra-account-menu button:hover,.ws.astra-hub .astra-account-menu a:hover{background:var(--accent)}
