@@ -51,7 +51,8 @@ async function setup(viewport,role="owner"){
   }
   else if(endpoint==="/api/mailboxes/")body=mailboxes;
   else if(endpoint==="/api/domains/")body=domains;
-  else if(endpoint.startsWith("/api/domains/"))body={...domains[1],records:[]};
+  else if(endpoint.startsWith("/api/domains/")&&endpoint.endsWith("/records/"))body=[];
+  else if(endpoint.startsWith("/api/domains/")&&endpoint.endsWith("/"))body=domains.find(d=>endpoint.includes(d.id))||domains[0];
   await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(body)});
  });
  const page=await ctx.newPage();
