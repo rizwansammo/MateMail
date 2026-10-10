@@ -266,6 +266,53 @@ class TransportSecurityAPITest(TestCase):
         self.assertFalse(any(record["publish_ready"] for record in withdrawn.data["dns_records"]))
         self.assertFalse(withdrawn.data["can_publish_dns"])
 
+
+    @override_settings(
+        TRANSPORT_SECURITY_SELF_SERVICE_ENABLED=False,
+    )
+    def test_canary_allowlist_only_grants_exact_domain_uuid(self):
+        from django.test import override_settings
+        from apps.transport_security.serializers import self_service_available_for
+
+        with override_settings(TRANSPORT_SECURITY_CANARY_DOMAIN_IDS=str(self.domain_a.pk)):
+            first = self.client_a.get(self.url_a)
+            self.assertEqual(first.status_code, 200)
+            self.assertTrue(first.data["self_service_available"])
+
+            # Another tenant is not affected; its known UUID is unapproved.
+            url_b = f"/api/domains/{self.domain_b.pk}/transport-security/"
+            self.assertFalse(self.client_b.get(url_b).data["self_service_available"])
+            self.assertEqual(
+                self.client_b.post(url_b, {"enabled": True}, format="json").status_code,
+                503,
+            )
+            self.assertEqual(self.client_a.post(
+                self.url_a, {"enabled": True}, format="json",
+            ).status_code, 200)
+            self.assertEqual(self.client_b.get(self.url_a).status_code, 404)
+
+        for invalid in (
+            str(self.tenant_a.id), self.domain_a.domain, "*",
+            str(self.domain_a.pk)[:-1], "", "untrusted",
+        ):
+            with self.subTest(invalid=invalid), override_settings(
+                TRANSPORT_SECURITY_CANARY_DOMAIN_IDS=invalid,
+            ):
+                self.assertFalse(self_service_available_for(self.domain_a))
+                self.assertFalse(self.client_a.get(self.url_a).data["self_service_available"])
+
+    @override_settings(TRANSPORT_SECURITY_SELF_SERVICE_ENABLED=False)
+    def test_canary_does_not_enable_global_self_service_by_default(self):
+        from django.test import override_settings
+        url_b = f"/api/domains/{self.domain_b.pk}/transport-security/"
+        with override_settings(TRANSPORT_SECURITY_CANARY_DOMAIN_IDS=""):
+            self.assertEqual(
+                self.client_a.post(self.url_a, {"enabled": True}, format="json").status_code, 503,
+            )
+            self.assertEqual(
+                self.client_b.post(url_b, {"enabled": True}, format="json").status_code, 503,
+            )
+
     @override_settings(TRANSPORT_SECURITY_SELF_SERVICE_ENABLED=False)
     def test_release_default_is_fail_closed(self):
         res = self.client_a.post(self.url_a, {"enabled": True}, format="json")
