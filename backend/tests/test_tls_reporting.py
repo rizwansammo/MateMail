@@ -59,6 +59,8 @@ def report_mime(raw, *, filename="report.json.gz", mime="tlsrpt+gzip"):
     msg = EmailMessage()
     msg["To"] = "tlsrpt@mail.matemail.pro"
     msg["From"] = "reporter@example.test"
+    msg["TLS-Report-Domain"] = "a.test"
+    msg["TLS-Report-Submitter"] = "example.test"
     msg.set_content("Report attached")
     msg.add_attachment(raw, maintype="application", subtype=mime, filename=filename)
     return msg.as_bytes()
@@ -211,6 +213,55 @@ class TenantTlsReportingTest(TestCase):
         self.assertEqual([store_policy(p).status for p in policies], ["stored", "stored"])
         self.assertEqual(self.client_a.get(f"/api/domains/{self.domain_a.pk}/tls-reports/").data["report_count"], 1)
         self.assertEqual(self.client_b.get(f"/api/domains/{self.domain_b.pk}/tls-reports/").data["report_count"], 1)
+
+    def test_rfc8460_headers_required_and_match_authenticated_report(self):
+        from email import policy
+        from email.parser import BytesParser
+        from apps.tls_reports.headers import validate_report_headers
+        doc = report_json()
+        report = parse_json(doc)
+        good = BytesParser(policy=policy.default).parsebytes(
+            report_mime(gzip.compress(doc)))
+        validate_report_headers(good, doc, report)
+        missing = BytesParser(policy=policy.default).parsebytes(
+            report_mime(gzip.compress(doc)))
+        del missing["TLS-Report-Domain"]
+        with self.assertRaises(InvalidTlsReport):
+            validate_report_headers(missing, doc, report)
+        wrong = BytesParser(policy=policy.default).parsebytes(
+            report_mime(gzip.compress(doc)))
+        wrong.replace_header("TLS-Report-Submitter", "other.test")
+        with self.assertRaises(InvalidTlsReport):
+            validate_report_headers(wrong, doc, report)
+        wrong_domain = BytesParser(policy=policy.default).parsebytes(
+            report_mime(gzip.compress(doc)))
+        wrong_domain.replace_header("TLS-Report-Domain", "b.test")
+        with self.assertRaises(InvalidTlsReport):
+            validate_report_headers(wrong_domain, doc, report)
+        double = BytesParser(policy=policy.default).parsebytes(
+            report_mime(gzip.compress(doc)))
+        double["TLS-Report-Domain"] = "a.test"
+        with self.assertRaises(InvalidTlsReport):
+            validate_report_headers(double, doc, report)
+
+    def test_multi_attachment_validation_is_atomic(self):
+        from email import policy
+        from email.parser import BytesParser
+        first = BytesParser(policy=policy.default).parsebytes(
+            report_mime(gzip.compress(report_json())))
+        first.add_attachment(b"invalid", maintype="application",
+                             subtype="tlsrpt+json", filename="wrong.json")
+        with mock.patch("apps.tls_reports.ingest.require_authenticated_report"):
+            with self.assertRaises(InvalidTlsReport):
+                ingest_raw_message(first.as_bytes())
+        self.assertEqual(TlsAggregateReport.objects.count(), 0)
+
+    def test_wrong_contact_submitter_cannot_persist(self):
+        bad = report_json().replace(b"reporter@example.test", b"reporter@other.test")
+        with mock.patch("apps.tls_reports.ingest.require_authenticated_report"):
+            with self.assertRaises(InvalidTlsReport):
+                ingest_raw_message(report_mime(gzip.compress(bad)))
+        self.assertFalse(TlsAggregateReport.objects.exists())
 
     def test_mime_and_retention(self):
         payload = report_mime(gzip.compress(report_json()))
