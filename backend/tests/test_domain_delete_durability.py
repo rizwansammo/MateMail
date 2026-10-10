@@ -46,6 +46,32 @@ class DomainDeleteDurabilityTest(TestCase):
             response = self.client.delete(self.url)
         return response, patched
 
+    def test_advanced_transport_domain_cannot_be_deleted_before_offboarding(self):
+        from apps.transport_security.models import DomainTransportSecurity, TransportSecurityLifecycle
+        for stage in (TransportSecurityLifecycle.PENDING_DNS,
+                      TransportSecurityLifecycle.PROVISIONING,
+                      TransportSecurityLifecycle.READY,
+                      TransportSecurityLifecycle.ACTIVE,
+                      TransportSecurityLifecycle.ERROR,
+                      TransportSecurityLifecycle.DEACTIVATING):
+            with self.subTest(stage=stage):
+                row, _ = DomainTransportSecurity.objects.update_or_create(
+                    domain=self.domain,
+                    defaults={"enabled": True, "lifecycle": stage},
+                )
+                response, queued = self._delete(mock.Mock())
+                self.assertEqual(response.status_code, 409)
+                self.assertIn("Advanced transport security", response.data["detail"])
+                self.assertTrue(Domain.objects.filter(pk=self.domain.pk).exists())
+                queued.assert_not_called()
+
+        row.enabled = False
+        row.lifecycle = TransportSecurityLifecycle.DISABLED
+        row.save(update_fields=["enabled", "lifecycle"])
+        response, queued = self._delete(mock.Mock())
+        self.assertEqual(response.status_code, 204)
+        queued.assert_called_once()
+
     # ── the happy path still works ──────────────────────────────────────────
 
     def test_queue_succeeds_so_the_local_domain_is_deleted(self):
