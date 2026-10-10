@@ -157,7 +157,7 @@ export default function BillingPage() {
 
   if (loading) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-billing-page">
         <PortalSkeleton className="mb-5 h-20 w-full" />
         <div className="grid gap-5 lg:grid-cols-2">
           <PortalSkeleton className="h-[330px] w-full" />
@@ -169,7 +169,7 @@ export default function BillingPage() {
 
   if (!data || loadError) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-billing-page">
         <PortalPageHeading title="Billing & usage" description="Your plan, resource allowances and current usage." />
         <PortalNotice tone="danger">{loadError || "Billing information could not be loaded."}</PortalNotice>
       </div>
@@ -180,7 +180,7 @@ export default function BillingPage() {
 
   if (!subscription) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-billing-page">
         <PortalPageHeading title="Billing & usage" description="Your plan, resource allowances and current usage." />
         <PortalNotice tone="warn">
           <CreditCard className="mt-0.5 h-4 w-4 shrink-0" />
@@ -195,7 +195,7 @@ export default function BillingPage() {
   const isTrial = subscription.status === "trialing";
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-billing-page">
       <PortalPageHeading
         title="Billing & usage"
         description="Your current plan, resource allowances and room to grow."

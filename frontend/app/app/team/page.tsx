@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Clock3,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import {
   PortalButton,
   PortalCard,
@@ -46,6 +47,7 @@ interface Invite {
   accepted_at: string | null;
   is_revoked: boolean;
   is_pending: boolean;
+  create_mailbox?: boolean;
 }
 
 interface WorkspaceStats {
@@ -68,7 +70,9 @@ function initials(name: string, email: string) {
   return parts.map((part) => part[0]?.toUpperCase()).join("") || "TM";
 }
 
-export default function TeamPage() {
+function TeamPageContent() {
+  const routeParams = useSearchParams();
+  const requestedSearch = routeParams.get("q") || "";
   const router = useRouter();
   const { tenant, user, logout } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
@@ -76,12 +80,14 @@ export default function TeamPage() {
   const [myRole, setMyRole] = useState<Member["role"] | "">("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(requestedSearch);
   const [tab, setTab] = useState<"members" | "invites">("members");
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "support" | "read_only">("admin");
+  const [createMailbox, setCreateMailbox] = useState(false);
+  const [inviteLink, setInviteLink] = useState("");
   const [inviteError, setInviteError] = useState("");
   const [inviting, setInviting] = useState(false);
   const [message, setMessage] = useState("");
@@ -145,6 +151,12 @@ export default function TeamPage() {
   const canManageInvites = myRole === "owner" || myRole === "admin";
   const canChangeRoles = myRole === "owner";
 
+  useEffect(() => {
+    // Sync incoming query after mount (no render-cascade state update).
+    const id = window.setTimeout(() => setQuery(requestedSearch), 0);
+    return () => window.clearTimeout(id);
+  }, [requestedSearch]);
+
   const filteredMembers = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return members;
@@ -172,12 +184,14 @@ export default function TeamPage() {
     setInviting(true);
     setInviteError("");
     setMessage("");
+    setInviteLink("");
     try {
       const response = await apiRequest("/api/teams/invites/", {
         method: "POST",
         body: JSON.stringify({
           email: inviteEmail.trim().toLowerCase(),
           role: inviteRole,
+          ...(createMailbox ? { create_mailbox: true } : {}),
         }),
       });
       const data = await response.json().catch(() => null);
@@ -185,13 +199,17 @@ export default function TeamPage() {
       if (response.ok && data?.id) {
         setInviteEmail("");
         setInviteRole("admin");
+        setCreateMailbox(false);
+        setInviteLink(data.invite_url || "");
         setInviteOpen(false);
         if (data.email_delivered === false) {
           setMessageTone("warn");
           setMessage(data.detail ?? "The invitation was created, but the email could not be delivered.");
         } else {
           setMessageTone("success");
-          setMessage("Invitation sent successfully.");
+          setMessage(createMailbox
+            ? "Invitation sent. The member can create their personal mailbox when accepting."
+            : "Invitation sent successfully.");
         }
         setTab("invites");
         await loadTeam(false);
@@ -287,10 +305,10 @@ export default function TeamPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-users-page">
       <PortalPageHeading
-        title="Your team"
-        description="Manage the people who can administer or review this MateMail workspace."
+        title="Users & access"
+        description="Manage workspace members, invitations and administrative roles."
         actions={
           canManageInvites ? (
             <PortalButton
@@ -307,18 +325,25 @@ export default function TeamPage() {
         }
       />
 
+      <div className="astra-resource-summary" aria-label="Users and access statistics">
+        <div><span>Active members</span><strong>{loading ? "—" : members.length}</strong></div>
+        <div><span>Pending invitations</span><strong>{loading || !canManageInvites ? "—" : invites.filter(invite => invite.is_pending).length}</strong></div>
+        <div><span>Workspace admins</span><strong>{loading ? "—" : members.filter(member => member.role === "admin" || member.role === "owner").length}</strong></div>
+      </div>
+
       {message && (
         <div className="mb-5">
           <PortalNotice tone={messageTone}>{message}</PortalNotice>
         </div>
       )}
 
-      {inviteOpen && canManageInvites && (
-        <PortalCard
-          className="portal-form-card"
-          title="Invite someone to your workspace"
-          subtitle="Only email addresses on a verified domain registered to this organization can be invited. Invitations expire after 7 days."
-        >
+      <AstraResourceDialog
+        open={inviteOpen && canManageInvites}
+        busy={inviting}
+        title="Invite member"
+        description="Invite someone using a verified organization domain. Invitations expire after 7 days."
+        onDismiss={() => { setInviteOpen(false); setInviteError(""); setInviteEmail(""); }}
+      >
           <form onSubmit={sendInvite}>
             {inviteError && (
               <div className="mb-4"><PortalNotice tone="danger">{inviteError}</PortalNotice></div>
@@ -326,9 +351,11 @@ export default function TeamPage() {
 
             <div className="portal-form-grid">
               <div className="portal-field">
-                <label>Email address</label>
+                <label htmlFor="astra-user-invite-email">Email address</label>
                 <input
+                  id="astra-user-invite-email"
                   type="email"
+                  autoComplete="off"
                   required
                   value={inviteEmail}
                   onChange={(event) => setInviteEmail(event.target.value)}
@@ -336,8 +363,9 @@ export default function TeamPage() {
                 />
               </div>
               <div className="portal-field">
-                <label>Workspace role</label>
+                <label htmlFor="astra-user-invite-role">Workspace role</label>
                 <select
+                  id="astra-user-invite-role"
                   value={inviteRole}
                   onChange={(event) => setInviteRole(event.target.value as typeof inviteRole)}
                 >
@@ -348,8 +376,31 @@ export default function TeamPage() {
               </div>
             </div>
 
+            <label className="mb-3 flex items-start gap-3 rounded border border-[var(--portal-border)] p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1 shrink-0"
+                checked={createMailbox}
+                onChange={(event) => setCreateMailbox(event.target.checked)}
+                aria-label="Create a mailbox for this user"
+              />
+              <span>
+                <strong className="block">Create a mailbox for this user</strong>
+                <small className="block mt-1">
+                  Optional. A personal mailbox matching the invited email will be provisioned when
+                  the person accepts and chooses a separate mailbox password.
+                </small>
+              </span>
+            </label>
+            <div className="astra-user-invite-context">
+              <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <p>{createMailbox
+                ? "Mailbox creation requires an approved workspace, verified domain, an unused address and available plan capacity. The invitation stores no password."
+                : "Hub access only. This invitation does not create or assign a mailbox. Mailbox provisioning remains a separate administrative action."
+              }</p>
+            </div>
             <div className="portal-detail-actions">
-              <PortalButton type="submit" disabled={inviting || !inviteEmail.trim()}>
+              <PortalButton type="submit" disabled={inviting || !inviteEmail.trim() || !canManageInvites}>
                 <Mail className="h-4 w-4" />
                 {inviting ? "Sending…" : "Send invitation"}
               </PortalButton>
@@ -367,9 +418,19 @@ export default function TeamPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
+      {inviteLink && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            Invitation link (shown once). If delivery failed, share it securely with the recipient.
+            <button type="button" className="ml-2 underline font-medium"
+              onClick={() => { void navigator.clipboard.writeText(inviteLink); }}>
+              Copy invite link
+            </button>
+          </PortalNotice>
+        </div>
+      )}
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
       )}
@@ -531,7 +592,7 @@ export default function TeamPage() {
                         <span><strong>{invite.email}</strong><small>Workspace invitation</small></span>
                       </div>
                     </td>
-                    <td><span className="portal-role-badge">{pretty(invite.role)}</span></td>
+                    <td><span className="portal-role-badge">{pretty(invite.role)}</span>{invite.create_mailbox && <small className="block mt-1">Mailbox requested</small>}</td>
                     <td><PortalStatus value={invite.is_pending ? "Pending" : "Expired"} /></td>
                     <td>{invite.invited_by_email || "Former member"}</td>
                     <td>{new Date(invite.expires_at).toLocaleDateString()}</td>
@@ -575,7 +636,7 @@ export default function TeamPage() {
         )}
       </PortalCard>
 
-      <PortalCard className="mt-5" title="Roles, at a glance" subtitle="MateMail uses four real workspace roles rather than the prototype’s simplified member model.">
+      <PortalCard className="mt-5" title="Roles, at a glance" subtitle="Role-based access is enforced by MateMail for each organization.">
         <div className="portal-role-guide">
           <div><strong>Owner</strong><span>Full workspace control. Only the owner can change another member’s role.</span></div>
           <div><strong>Admin</strong><span>Manage domains, mailboxes, routing, invitations and other administrative resources.</span></div>
@@ -603,4 +664,9 @@ export default function TeamPage() {
       )}
     </div>
   );
+}
+
+/** Suspense boundary required by Next.js useSearchParams during static builds. */
+export default function TeamPage() {
+  return <Suspense fallback={null}><TeamPageContent /></Suspense>;
 }

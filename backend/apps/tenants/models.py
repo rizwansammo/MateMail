@@ -81,6 +81,12 @@ class Tenant(models.Model):
     outbound_disabled = models.BooleanField(default=False)
     outbound_disabled_at = models.DateTimeField(null=True, blank=True)
 
+    # One-way onboarding milestone. Once the initial Hub setup is finished,
+    # later DNS problems or deleted domains do NOT restart onboarding.
+    # This belongs to the organization, not a browser or a member.
+    onboarding_completed_at = models.DateTimeField(null=True, blank=True)
+
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

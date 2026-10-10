@@ -14,6 +14,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import { api, ApiError, apiRequest } from "@/lib/api";
 import {
   PortalButton,
@@ -201,6 +202,7 @@ export default function MailboxesPage() {
       setPassword("");
       setQuotaMb(quotaDefaultMb);
       setAddOpen(false);
+      window.dispatchEvent(new Event("matemail:workspace-onboarding-updated"));
       await fetchAll();
     } catch (caught) {
       if (caught instanceof ApiError) {
@@ -219,7 +221,7 @@ export default function MailboxesPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page">
       <PortalPageHeading
         title="Mailboxes"
         description="Manage your team’s email identities, access and storage."
@@ -237,6 +239,12 @@ export default function MailboxesPage() {
           </PortalButton>
         }
       />
+
+      <div className="astra-resource-summary" aria-label="Mailbox statistics">
+        <div><span>Personal mailboxes</span><strong>{loading ? "—" : mailboxes.length}</strong></div>
+        <div><span>Active accounts</span><strong>{loading ? "—" : mailboxes.filter((item) => item.status === "active").length}</strong></div>
+        <div><span>Mail service ready</span><strong>{loading ? "—" : mailboxes.filter((item) => item.mail_service_ready).length}</strong></div>
+      </div>
 
       {!user?.email_verified && (
         <div className="mb-5">
@@ -268,12 +276,13 @@ export default function MailboxesPage() {
         </div>
       )}
 
-      {addOpen && (
-        <PortalCard
-          className="portal-form-card"
-          title="Create a mailbox"
-          subtitle="Set up a dedicated email identity. The password is sent to the Mail Engine and is never stored by MateMail."
-        >
+      <AstraResourceDialog
+        open={addOpen}
+        busy={adding}
+        title="Create a mailbox"
+        description="Set up a dedicated email identity. Passwords are sent to the Mail Engine and are not stored by MateMail."
+        onDismiss={() => { setAddOpen(false); setAddErrors({}); setPassword(""); }}
+      >
           <form onSubmit={handleAdd}>
             {errorText(addErrors.detail) && (
               <div className="mb-4">
@@ -283,9 +292,10 @@ export default function MailboxesPage() {
 
             <div className="portal-form-grid">
               <div className="portal-field full">
-                <label>Email address</label>
+                <label htmlFor="astra-mailbox-local-part">Email address</label>
                 <div className="portal-address-composer">
                   <input
+                    id="astra-mailbox-local-part"
                     type="text"
                     required
                     pattern="[a-zA-Z0-9._+-]+"
@@ -305,8 +315,9 @@ export default function MailboxesPage() {
               </div>
 
               <div className="portal-field">
-                <label>Display name</label>
+                <label htmlFor="astra-mailbox-display-name">Display name</label>
                 <input
+                  id="astra-mailbox-display-name"
                   type="text"
                   required
                   value={fullName}
@@ -317,8 +328,9 @@ export default function MailboxesPage() {
               </div>
 
               <div className="portal-field">
-                <label>Temporary password</label>
+                <label htmlFor="astra-mailbox-password">Temporary password</label>
                 <input
+                  id="astra-mailbox-password"
                   type="password"
                   autoComplete="new-password"
                   minLength={10}
@@ -332,11 +344,12 @@ export default function MailboxesPage() {
               </div>
 
               <div className="portal-field full">
-                <label>
+                <label htmlFor="astra-mailbox-quota">
                   Storage quota — {formatStorage(quotaMb)}
                   {planName ? ` · ${planName} maximum ${formatStorage(quotaMaxMb)}` : ""}
                 </label>
                 <input
+                  id="astra-mailbox-quota"
                   type="range"
                   min={Math.min(1024, quotaMaxMb)}
                   max={quotaMaxMb}
@@ -378,8 +391,7 @@ export default function MailboxesPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5">
@@ -449,7 +461,15 @@ export default function MailboxesPage() {
                     ? Math.min(100, Math.round((mailbox.storage_used_mb / mailbox.quota_mb) * 100))
                     : 0;
                   return (
-                    <tr key={mailbox.id} className="cursor-pointer" onClick={() => router.push(`/app/mailboxes/${mailbox.id}`)}>
+                    <tr key={mailbox.id} className="cursor-pointer" tabIndex={0}
+                      aria-label={`Open mailbox ${mailbox.email}`}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          router.push(`/app/mailboxes/${mailbox.id}`);
+                        }
+                      }}
+                      onClick={() => router.push(`/app/mailboxes/${mailbox.id}`)}>
                       <td>
                         <div className="portal-identity-cell">
                           <span className="portal-avatar">{initials(mailbox.full_name || mailbox.email)}</span>
@@ -490,7 +510,7 @@ export default function MailboxesPage() {
       <div className="mt-4">
         <PortalNotice tone="info">
           <HardDrive className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Mailbox quota is chosen at creation and enforced against your plan. Editing quota/display name requires a backend update endpoint and is intentionally not simulated in this redesign.</span>
+          <span>Mailbox storage quotas are enforced by your plan. Changing an existing mailbox’s name or quota is not available in Hub yet.</span>
         </PortalNotice>
       </div>
     </div>

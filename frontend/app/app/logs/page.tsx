@@ -113,7 +113,7 @@ export default function LogsPage() {
   );
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-operations-page">
       <PortalPageHeading
         title="Activity logs"
         description="A tenant-scoped record of important workspace and security events."

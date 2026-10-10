@@ -1,0 +1,146 @@
+name: Astra Hub Visual QA (isolated)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/app/app/astra-shell.css"
+      - "frontend/components/workspace/astra-shell.tsx"
+      - "frontend/scripts/astra-visual-qa.mjs"
+      - "frontend/scripts/astra-phase2a-qa.mjs"
+      - "frontend/scripts/astra-phase2b-qa.mjs"
+      - "frontend/scripts/astra-phase2c-qa.mjs"
+      - "frontend/scripts/astra-phase2d-qa.mjs"
+      - "frontend/scripts/astra-phase2e-qa.mjs"
+      - "frontend/scripts/astra-phase3-qa.mjs"
+      - "frontend/scripts/astra-phase4-qa.mjs"
+      - "frontend/scripts/astra-phase5-qa.mjs"
+      - "frontend/components/workspace/astra-shell.tsx"
+      - "frontend/app/app/aliases/**"
+      - "frontend/app/app/forwarding/**"
+      - "frontend/app/app/delegation/**"
+      - "frontend/app/app/team/**"
+      - "frontend/app/app/astra-advanced.css"
+      - "frontend/app/app/backups/**"
+      - "frontend/app/app/logs/**"
+      - "frontend/app/app/queue/**"
+      - "frontend/app/app/spam/**"
+      - "frontend/app/app/billing/**"
+      - "frontend/app/app/security/**"
+      - "frontend/app/app/settings/**"
+      - "frontend/app/app/domains/**"
+      - "frontend/components/workspace/custom-hostnames-settings.tsx"
+      - "frontend/app/app/astra-users.css"
+      - "frontend/app/app/team/**"
+      - "frontend/app/app/astra-routing.css"
+      - "frontend/app/app/aliases/**"
+      - "frontend/app/app/forwarding/**"
+      - "frontend/app/app/delegation/**"
+      - "frontend/app/app/astra-collaboration.css"
+      - "frontend/app/app/team-boxes/**"
+      - "frontend/app/app/forward-groups/**"
+      - "frontend/app/app/astra-resources.css"
+      - "frontend/components/workspace/astra-resource-dialog.tsx"
+      - "frontend/app/app/mailboxes/**"
+      - "frontend/app/app/domains/**"
+      - ".github/workflows/astra-hub-visual-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-visual:
+    name: Playwright visual and interaction checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install app dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install ephemeral visual QA browser
+        working-directory: frontend
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Build production Next.js app
+        working-directory: frontend
+        run: npm run build
+      - name: Start isolated preview
+        working-directory: frontend
+        run: |
+          nohup npm run start -- -p 3100 > "$RUNNER_TEMP/astra-preview.log" 2>&1 &
+          for try in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:3100/app" -o /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/astra-preview.log"
+          exit 1
+      - name: Phase 4 Global Search resources, routes, keyboard and tenant boundaries
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase4-qa.mjs
+      - name: Phase 5 optional mailbox invitation flow (isolated)
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase5-qa.mjs
+      - name: Browser geometry, focus, keyboard and responsive QA
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-visual-qa.mjs
+      - name: Phase 2A Mailboxes and Domains live-API-mock UI contract
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase2a-qa.mjs
+      - name: Phase 2B TeamBox and Forward Group API-mock browser contract
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase2b-qa.mjs
+      - name: Phase 2C Aliases, Forwarding and Delegation browser contracts
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase2c-qa.mjs
+      - name: Phase 2D Users & Access roles, invitations and membership browser QA
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase2d-qa.mjs
+      - name: Phase 2E combined cross-feature and permission boundary QA
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase2e-qa.mjs
+      - name: Phase 3 advanced Operations, Security, Settings & Hostname browser QA
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase3-qa.mjs
+      - name: Upload screenshots and QA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: astra-hub-visual-review
+          path: frontend/visual-qa-artifacts/
+          if-no-files-found: warn
+          retention-days: 14

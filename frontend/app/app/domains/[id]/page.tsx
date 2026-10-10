@@ -284,7 +284,10 @@ export default function DomainDetailPage() {
       apiRequest(`/api/domains/${params.id}/`),
       apiRequest(`/api/domains/${params.id}/records/`),
     ]);
-    if (domainResponse.ok) setDomain(await domainResponse.json());
+    if (domainResponse.ok) {
+      setDomain(await domainResponse.json());
+      window.dispatchEvent(new Event("matemail:workspace-onboarding-updated"));
+    }
     if (recordsResponse.ok) setRecords(await recordsResponse.json());
   }, [params.id]);
 
@@ -463,7 +466,7 @@ export default function DomainDetailPage() {
 
   if (loading) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page">
         <PortalSkeleton className="mb-5 h-20 w-full" />
         <PortalSkeleton className="h-[480px] w-full" />
       </div>
@@ -472,7 +475,7 @@ export default function DomainDetailPage() {
 
   if (!domain) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page">
         <PortalCard>
           <div className="portal-empty">
             <div>
@@ -494,7 +497,7 @@ export default function DomainDetailPage() {
   const verifiedScored = scoredRecords.filter((record) => record.status === "verified").length;
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page">
       <div className="portal-domain-detail-head">
         <div>
           <Link href="/app/domains" className="portal-back-link">

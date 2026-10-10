@@ -14,6 +14,7 @@ import {
   Users,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import { apiRequest } from "@/lib/api";
 import {
   PortalButton,
@@ -209,7 +210,7 @@ export default function ForwardGroupsPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-collaboration-page">
       <PortalPageHeading
         title="Forward Groups"
         description="Distribution addresses that deliver one message to multiple member mailboxes."
@@ -238,6 +239,12 @@ export default function ForwardGroupsPage() {
         </PortalNotice>
       </div>
 
+      <div className="astra-resource-summary" aria-label="Forward Groups statistics">
+        <div><span>Forward Groups</span><strong>{loading ? "—" : groups.length}</strong></div>
+        <div><span>Active groups</span><strong>{loading ? "—" : groups.filter((item) => item.status === "active").length}</strong></div>
+        <div><span>Distribution members</span><strong>{loading ? "—" : groups.reduce((sum, item) => sum + item.member_count, 0)}</strong></div>
+      </div>
+
       {!user?.email_verified && (
         <div className="mb-5">
           <PortalNotice tone="warn">
@@ -247,12 +254,13 @@ export default function ForwardGroupsPage() {
         </div>
       )}
 
-      {addOpen && (
-        <PortalCard
-          className="portal-form-card mb-5"
-          title="Create a Forward Group"
-          subtitle="Choose an address, at least one delivery member, and who is allowed to post to the group."
-        >
+      <AstraResourceDialog
+        open={addOpen}
+        busy={adding}
+        title="Create a Forward Group"
+        description="Choose an address, delivery members, and who is allowed to send to the group."
+        onDismiss={() => { setAddOpen(false); setAddErrors({}); }}
+      >
           <form onSubmit={createGroup}>
             {fieldError(addErrors.detail) && (
               <div className="mb-4">
@@ -262,9 +270,10 @@ export default function ForwardGroupsPage() {
 
             <div className="portal-form-grid">
               <div className="portal-field full">
-                <label>Group address</label>
+                <label htmlFor="astra-fg-local">Group address</label>
                 <div className="portal-address-composer">
                   <input
+                    id="astra-fg-local"
                     type="text"
                     required
                     pattern="[a-zA-Z0-9._+-]+"
@@ -284,8 +293,9 @@ export default function ForwardGroupsPage() {
               </div>
 
               <div className="portal-field full">
-                <label>Display name</label>
+                <label htmlFor="astra-fg-name">Display name</label>
                 <input
+                  id="astra-fg-name"
                   type="text"
                   required
                   value={displayName}
@@ -321,8 +331,9 @@ export default function ForwardGroupsPage() {
               </div>
 
               <div className="portal-field full">
-                <label>Who can send to this group?</label>
+                <label htmlFor="astra-fg-policy">Who can send to this group?</label>
                 <select
+                  id="astra-fg-policy"
                   value={senderPolicy}
                   onChange={(event) => setSenderPolicy(event.target.value as ForwardGroup["sender_policy"])}
                 >
@@ -384,8 +395,7 @@ export default function ForwardGroupsPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
@@ -443,6 +453,14 @@ export default function ForwardGroupsPage() {
                   <tr
                     key={group.id}
                     className="cursor-pointer"
+                    tabIndex={0}
+                    aria-label={`Open Forward Group ${group.address}`}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        router.push(`/app/forward-groups/${group.id}`);
+                      }
+                    }}
                     onClick={() => router.push(`/app/forward-groups/${group.id}`)}
                   >
                     <td>

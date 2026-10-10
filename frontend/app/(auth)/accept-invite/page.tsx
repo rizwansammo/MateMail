@@ -15,6 +15,7 @@ interface InvitePreview {
   tenant_name?: string;
   invited_by?: string;
   expires_at?: string;
+  create_mailbox?: boolean;
   detail?: string;
 }
 
@@ -31,6 +32,8 @@ function AcceptInviteContent() {
   const [accepting, setAccepting] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState("");
+  const [mailboxPassword, setMailboxPassword] = useState("");
+  const [mailboxWarning, setMailboxWarning] = useState("");
 
   useEffect(() => {
     if (!token) {
@@ -50,13 +53,17 @@ function AcceptInviteContent() {
     try {
       const res = await apiRequest("/api/teams/invites/accept/", {
         method: "POST",
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token, ...(preview?.create_mailbox ? { mailbox_password: mailboxPassword } : {}) }),
       });
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
         if (body.access && body.user && body.tenant) {
           setAuthResult(body);
         }
+        if (preview?.create_mailbox && body.mailbox?.mail_service_ready === false) {
+          setMailboxWarning("Your membership is active, but your mailbox is waiting for a service retry. Contact your workspace administrator.");
+        }
+        setMailboxPassword("");
         setAccepted(true);
       } else {
         setError(body.detail ?? "Failed to accept invite.");
@@ -118,8 +125,10 @@ function AcceptInviteContent() {
               You&apos;ve joined <strong>{preview.tenant_name}</strong>.
             </p>
           </div>
+          {mailboxWarning && <p role="status" className="text-sm text-amber-700">{mailboxWarning}</p>}
           <button
             onClick={() => router.push("/app")}
+
             className="rounded-md bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-700"
           >
             Open workspace
@@ -193,9 +202,27 @@ function AcceptInviteContent() {
             {error && (
               <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
             )}
+            {preview.create_mailbox && (
+              <label className="block space-y-1 text-sm font-medium text-slate-700">
+                <span>Mailbox password (separate from your Hub password)</span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  minLength={10}
+                  required
+                  className="block w-full rounded border border-slate-300 px-3 py-2"
+                  value={mailboxPassword}
+                  onChange={(event) => setMailboxPassword(event.target.value)}
+                  aria-label="Mailbox password"
+                />
+                <small className="block text-slate-500">
+                  A mailbox at {preview.email} will be created only when you accept.
+                </small>
+              </label>
+            )}
             <button
               onClick={handleAccept}
-              disabled={accepting}
+              disabled={accepting || (Boolean(preview.create_mailbox) && mailboxPassword.length < 10)}
               className="flex w-full items-center justify-center gap-2 rounded-md bg-cyan-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
             >
               {accepting && <Loader2 className="h-4 w-4 animate-spin" />}

@@ -20,6 +20,7 @@ class SignupSerializer(serializers.Serializer):
     full_name = serializers.CharField(max_length=255)
     workspace_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
     invite_token = serializers.CharField(required=False, allow_blank=False, write_only=True)
+    mailbox_password = serializers.CharField(required=False, min_length=10, write_only=True, trim_whitespace=False)
 
     def validate_password(self, value):
         validate_password(value)

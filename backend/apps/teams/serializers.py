@@ -13,13 +13,14 @@ class TeamInviteSerializer(serializers.ModelSerializer):
         model = TeamInvite
         fields = [
             "id", "email", "role", "invited_by_email",
-            "created_at", "expires_at", "accepted_at", "is_revoked", "is_pending",
+            "created_at", "expires_at", "accepted_at", "is_revoked", "is_pending", "create_mailbox",
         ]
 
 
 class TeamInviteCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.ChoiceField(choices=["admin", "support", "read_only"])
+    create_mailbox = serializers.BooleanField(required=False, default=False)
 
 
 class APIKeySerializer(serializers.ModelSerializer):
