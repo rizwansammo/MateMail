@@ -81,7 +81,7 @@ class PremiumPortalRouteContractTest(SimpleTestCase):
             "/app/settings",
         ):
             with self.subTest(href=href):
-                self.assertRegex(self.layout, rf'href:\\s*"{href}"')
+                self.assertRegex(self.layout, rf'href:\s*"{href}"')
 
     def test_account_security_is_a_real_account_destination(self):
         self.assertIn('href="/app/security"', self.layout)
