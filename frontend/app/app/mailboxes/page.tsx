@@ -292,9 +292,10 @@ export default function MailboxesPage() {
 
             <div className="portal-form-grid">
               <div className="portal-field full">
-                <label>Email address</label>
+                <label htmlFor="astra-mailbox-local-part">Email address</label>
                 <div className="portal-address-composer">
                   <input
+                    id="astra-mailbox-local-part"
                     type="text"
                     required
                     pattern="[a-zA-Z0-9._+-]+"
@@ -314,8 +315,9 @@ export default function MailboxesPage() {
               </div>
 
               <div className="portal-field">
-                <label>Display name</label>
+                <label htmlFor="astra-mailbox-display-name">Display name</label>
                 <input
+                  id="astra-mailbox-display-name"
                   type="text"
                   required
                   value={fullName}
@@ -326,8 +328,9 @@ export default function MailboxesPage() {
               </div>
 
               <div className="portal-field">
-                <label>Temporary password</label>
+                <label htmlFor="astra-mailbox-password">Temporary password</label>
                 <input
+                  id="astra-mailbox-password"
                   type="password"
                   autoComplete="new-password"
                   minLength={10}
@@ -341,11 +344,12 @@ export default function MailboxesPage() {
               </div>
 
               <div className="portal-field full">
-                <label>
+                <label htmlFor="astra-mailbox-quota">
                   Storage quota — {formatStorage(quotaMb)}
                   {planName ? ` · ${planName} maximum ${formatStorage(quotaMaxMb)}` : ""}
                 </label>
                 <input
+                  id="astra-mailbox-quota"
                   type="range"
                   min={Math.min(1024, quotaMaxMb)}
                   max={quotaMaxMb}
