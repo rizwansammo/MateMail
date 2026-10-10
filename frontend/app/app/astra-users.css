@@ -1,0 +1,40 @@
+/* Phase 2D — Users & Access. Applied only inside authenticated Hub team route.
+   Preserve actual tenant member/invitation permissions and Astra 4px design. */
+.ws.astra-hub .astra-users-page .portal-team-tabs{display:flex;align-items:center;gap:23px;border-bottom:1px solid var(--border);margin-bottom:19px;overflow-x:auto;scrollbar-width:thin}
+.ws.astra-hub .astra-users-page .portal-team-tabs button{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 0 11px;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;color:var(--muted-foreground);background:transparent;font-size:.8125rem;font-weight:550;white-space:nowrap;cursor:pointer;border-radius:0}
+.ws.astra-hub .astra-users-page .portal-team-tabs button[data-active=true]{border-bottom-color:var(--sidebar-primary);color:var(--foreground)}
+.ws.astra-hub .astra-users-page .portal-team-tabs button span{display:inline-flex;min-width:19px;justify-content:center;align-items:center;border:1px solid var(--border);border-radius:3px;padding:2px 5px;background:var(--soft);font-size:.6875rem;color:var(--muted-foreground)}
+.ws.astra-hub .astra-users-page .portal-team-tabs button:focus-visible{outline:1px solid var(--muted-foreground);outline-offset:2px}
+.ws.astra-hub .astra-users-page .portal-management-table th{white-space:nowrap}
+.ws.astra-hub .astra-users-page .portal-management-table td{white-space:nowrap}
+.ws.astra-hub .astra-users-page .portal-identity-cell{min-width:225px;display:flex;align-items:center;gap:11px}
+.ws.astra-hub .astra-users-page .portal-identity-cell strong{display:flex;align-items:center;gap:8px;font-size:.8125rem;font-weight:600}
+.ws.astra-hub .astra-users-page .portal-identity-cell small{font-size:.735rem;color:var(--muted-foreground)}
+.ws.astra-hub .astra-users-page .portal-avatar{border-radius:4px!important;background:var(--muted);border:1px solid var(--border);color:var(--foreground);width:34px;height:34px;flex:0 0 34px;display:flex;align-items:center;justify-content:center;font-size:.6875rem;font-weight:650}
+.ws.astra-hub .astra-users-page .portal-you-badge{font-style:normal;font-weight:500;font-size:.65rem;color:var(--muted-foreground);background:var(--soft);border:1px solid var(--border);border-radius:3px;padding:2px 5px}
+.ws.astra-hub .astra-users-page .portal-role-badge{display:inline-flex;align-items:center;gap:5px;color:var(--muted-foreground);font-size:.75rem;font-weight:500;border:1px solid var(--border);background:var(--soft);border-radius:3px;padding:4px 8px}
+.ws.astra-hub .astra-users-page .portal-management-table .portal-input{border:1px solid var(--input);border-radius:4px!important;background:var(--card);color:var(--foreground);font-size:.75rem!important;min-height:32px!important}
+.ws.astra-hub .astra-users-page .portal-management-table .portal-input:focus{outline:none;box-shadow:none!important;border-color:var(--muted-foreground)}
+.ws.astra-hub .astra-users-page .portal-management-table .portal-input:focus-visible{outline:1px solid var(--muted-foreground);outline-offset:1px}
+.ws.astra-hub .astra-users-page .portal-action-button{border-radius:4px!important;min-width:30px;min-height:30px;display:inline-flex;align-items:center;justify-content:center}
+.ws.astra-hub .astra-users-page .portal-inline-actions{display:flex;justify-content:flex-end;gap:8px}
+.ws.astra-hub .astra-users-page .portal-confirm-inline{min-width:200px;max-width:360px;white-space:normal}
+.ws.astra-hub .astra-users-page .portal-confirm-inline .portal-notice{border-radius:4px!important}
+.ws.astra-hub .astra-users-page .portal-role-guide{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}
+.ws.astra-hub .astra-users-page .portal-role-guide>div{display:flex;flex-direction:column;gap:6px;min-width:0;padding:16px 18px;border-bottom:1px solid var(--border)}
+.ws.astra-hub .astra-users-page .portal-role-guide>div:nth-child(odd){border-right:1px solid var(--border)}
+.ws.astra-hub .astra-users-page .portal-role-guide strong{font-size:.8125rem;font-weight:600;color:var(--foreground)}
+.ws.astra-hub .astra-users-page .portal-role-guide span{font-size:.75rem;line-height:1.55;color:var(--muted-foreground)}
+.ws.astra-hub .astra-users-page .portal-management-table-wrap{max-width:100%;overflow-x:auto;scrollbar-width:thin}
+.ws.astra-hub .astra-users-page .portal-management-table tbody tr:focus-within{background:var(--soft)}
+.ws.astra-hub .astra-user-invite-context{display:flex;align-items:flex-start;gap:10px;margin-top:20px;padding:12px;background:var(--soft);border:1px solid var(--border);border-radius:4px;color:var(--muted-foreground)}
+.ws.astra-hub .astra-user-invite-context p{font-size:.75rem;line-height:1.6;margin:0}
+.ws.astra-hub .astra-user-invite-context svg{flex-shrink:0;margin-top:2px}
+.ws.astra-hub .astra-users-page :is(input,select):focus{box-shadow:none!important;border-color:var(--muted-foreground)!important}
+@media(max-width:800px){
+ .ws.astra-hub .astra-users-page .portal-team-tabs{gap:18px}
+ .ws.astra-hub .astra-users-page .portal-role-guide{grid-template-columns:1fr}
+ .ws.astra-hub .astra-users-page .portal-role-guide>div:nth-child(odd){border-right:0}
+ .ws.astra-hub .astra-users-page .portal-management-table{min-width:710px}
+ .ws.astra-hub .astra-users-page .portal-management-table-wrap{overflow-x:auto}
+}
