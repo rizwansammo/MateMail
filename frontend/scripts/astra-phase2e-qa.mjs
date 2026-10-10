@@ -207,9 +207,9 @@ try{
  await p.getByRole("button",{name:/Search workspace/}).click();
  const search=p.getByRole("dialog",{name:"Search Hub"});
  await search.getByRole("textbox",{name:"Search Hub pages and resources"}).fill("newteam");
- await p.getByRole("option",{name:"newteam@example.test"}).waitFor({timeout:8000});
+ await p.getByRole("group",{name:"Mailboxes"}).getByRole("option",{name:"newteam@example.test"}).waitFor({timeout:8000});
  await shot(p,"phase2e-07-search-new-mailbox");
- await p.getByRole("option",{name:"newteam@example.test"}).click();
+ await p.getByRole("group",{name:"Mailboxes"}).getByRole("option",{name:"newteam@example.test"}).click();
  await p.waitForURL("**/app/mailboxes/"+m3,{timeout:10000});
  verify("Global Search resource navigation opens correct detail route",p.url().endsWith("/app/mailboxes/"+m3));
 
