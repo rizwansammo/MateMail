@@ -52,7 +52,7 @@ type Resource = { id: string; text: string; description: string; searchText: str
 type SearchState = { tenantId: string; rows: Resource[]; loading: boolean; unavailable: number };
 type SearchSource = {
   path: string; category: string; href: string; icon: LucideIcon;
-  titleFields: string[]; detailFields: string[]; detailRoute?: boolean; adminOnly?: boolean;
+  titleFields: string[]; detailFields: string[]; searchFields?: string[]; detailRoute?: boolean; adminOnly?: boolean;
 };
 type Onboarding = {
   workspace_created: boolean;
@@ -97,7 +97,7 @@ function parseItems(data: unknown, source: SearchSource): Resource[] {
       : source.href + "?q=" + encodeURIComponent(title);
     return [{
       id: source.category + ":" + id, text: title, description,
-      searchText: [title, description].join(" ").toLocaleLowerCase(),
+      searchText: [title, description, ...(source.searchFields || []).map(name => field(row,[name]))].join(" ").toLocaleLowerCase(),
       category: source.category, href, icon: source.icon,
     }];
   });
@@ -109,7 +109,7 @@ const searchSources: SearchSource[] = [
   {path:"/api/forward-groups/",category:"Forward Groups",href:"/app/forward-groups",icon:Users,titleFields:["address"],detailFields:["display_name"],detailRoute:true},
   {path:"/api/aliases/",category:"Aliases",href:"/app/aliases",icon:Link2,titleFields:["source_address"],detailFields:["destination_email"]},
   {path:"/api/forwarding/",category:"Forwarding",href:"/app/forwarding",icon:Waypoints,titleFields:["source_mailbox_email"],detailFields:["destination_email"]},
-  {path:"/api/delegations/",category:"Delegation",href:"/app/delegation",icon:ShieldCheck,titleFields:["target_email"],detailFields:["delegate_email"],adminOnly:true},
+  {path:"/api/delegations/",category:"Delegation",href:"/app/delegation",icon:ShieldCheck,titleFields:["target_email"],detailFields:["delegate_email"],searchFields:["target_name","delegate_name"],adminOnly:true},
   {path:"/api/teams/members/",category:"Users & access",href:"/app/team",icon:Users,titleFields:["email"],detailFields:["full_name"]},
 ];
 /** Static settings shortcuts supplement navigation; no credential values are indexed. */
