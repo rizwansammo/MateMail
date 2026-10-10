@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { useAuth } from "@/contexts/auth-context";
 import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import {
   PortalButton,
@@ -74,6 +75,8 @@ const PRESETS: Record<string, string[]> = {
 };
 
 export default function IntegrationsPage() {
+  const { tenant } = useAuth();
+  const canManageCredentials = tenant?.role === "owner" || tenant?.role === "admin";
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [loading, setLoading] = useState(true);
@@ -240,7 +243,7 @@ export default function IntegrationsPage() {
         actions={
           <PortalButton
             type="button"
-            disabled={!mailboxes.length}
+            disabled={!mailboxes.length || !canManageCredentials}
             onClick={() => {
               setCreateOpen(true);
               setCreateError("");
@@ -288,7 +291,7 @@ export default function IntegrationsPage() {
       )}
 
       <AstraResourceDialog
-        open={createOpen}
+        open={createOpen && canManageCredentials}
         busy={creating}
         title="Create connected app"
         description="Issue a scoped credential bound permanently to one organization mailbox."
