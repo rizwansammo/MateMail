@@ -14,6 +14,7 @@ import {
   Users,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { useAuth } from "@/contexts/auth-context";
 import {
   PortalButton,
   PortalCard,
@@ -68,6 +69,9 @@ const policyLabels: Record<ForwardGroup["sender_policy"], string> = {
 export default function ForwardGroupDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const { tenant } = useAuth();
+  const [myRole, setMyRole] = useState(tenant?.role || "");
+  const canAdmin = myRole === "owner" || myRole === "admin";
   const [group, setGroup] = useState<ForwardGroup | null>(null);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,6 +105,18 @@ export default function ForwardGroupDetailPage() {
     })();
     return () => { cancelled = true; };
   }, [fetchAll]);
+
+  useEffect(() => {
+    if (!tenant?.id) return;
+    let current = true;
+    apiRequest(`/api/workspaces/${tenant.id}/stats/`)
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (current && typeof data?.my_role === "string") setMyRole(data.my_role);
+      })
+      .catch(() => {});
+    return () => { current = false; };
+  }, [tenant?.id]);
 
   const members = group?.members ?? [];
   const allowedSenders = group?.allowed_senders ?? [];
@@ -341,6 +357,7 @@ export default function ForwardGroupDetailPage() {
           </div>
           <div className="portal-inline-actions">
             <PortalStatus value={group.status} />
+            {canAdmin && <>
             <PortalButton type="button" variant="secondary" disabled={busy} onClick={toggleStatus}>
               {group.status === "active" ? "Disable" : "Enable"}
             </PortalButton>
@@ -352,6 +369,7 @@ export default function ForwardGroupDetailPage() {
               <Trash2 className="h-4 w-4" />
               Delete
             </PortalButton>
+            </>}
           </div>
         </div>
 
@@ -380,7 +398,7 @@ export default function ForwardGroupDetailPage() {
       )}
 
       <PortalCard className="mb-5" title="Members" subtitle="Each member receives its own copy in its own mailbox.">
-        <div className="mb-5 flex flex-wrap items-end gap-3">
+        {canAdmin && <div className="mb-5 flex flex-wrap items-end gap-3">
           <div className="portal-field min-w-[18rem] flex-1">
             <label htmlFor="astra-fg-detail-add-member">Add mailbox</label>
             <select id="astra-fg-detail-add-member" value={chosenMemberId} onChange={(event) => setMemberMailboxId(event.target.value)}>
@@ -396,11 +414,11 @@ export default function ForwardGroupDetailPage() {
             <UserPlus className="h-4 w-4" />
             Add member
           </PortalButton>
-        </div>
+        </div>}
 
         <div className="portal-management-table-wrap">
           <table className="portal-management-table">
-            <thead><tr><th>Mailbox</th><th>Role</th><th className="text-right">Actions</th></tr></thead>
+            <thead><tr><th>Mailbox</th><th>Role</th>{canAdmin && <th className="text-right">Actions</th>}</tr></thead>
             <tbody>
               {members.map((member) => (
                 <tr key={member.id}>
@@ -414,16 +432,16 @@ export default function ForwardGroupDetailPage() {
                     </div>
                   </td>
                   <td>
-                    <select
+                    {canAdmin ? <select
                       value={member.role}
                       disabled={rowBusy === member.id}
                       onChange={(event) => changeRole(member, event.target.value as GroupMember["role"])}
                     >
                       <option value="member">Member</option>
                       <option value="owner">Owner</option>
-                    </select>
+                    </select> : <span className="capitalize">{member.role}</span>}
                   </td>
-                  <td>
+                  {canAdmin && <td>
                     <div className="portal-inline-actions">
                       <button
                         type="button"
@@ -435,7 +453,7 @@ export default function ForwardGroupDetailPage() {
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
-                  </td>
+                  </td>}
                 </tr>
               ))}
             </tbody>
@@ -450,7 +468,7 @@ export default function ForwardGroupDetailPage() {
             <select
               id="astra-fg-detail-policy"
               value={group.sender_policy}
-              disabled={busy}
+              disabled={!canAdmin || busy}
               onChange={(event) => void patchPolicy(event.target.value as ForwardGroup["sender_policy"])}
             >
               <option value="anyone">Anyone</option>
@@ -463,7 +481,7 @@ export default function ForwardGroupDetailPage() {
 
         {group.sender_policy === "selected" && (
           <div className="mt-5">
-            <div className="mb-4 flex flex-wrap items-end gap-3">
+            {canAdmin && <div className="mb-4 flex flex-wrap items-end gap-3">
               <div className="portal-field min-w-[18rem] flex-1">
                 <label htmlFor="astra-fg-detail-add-sender">Add allowed sender</label>
                 <select id="astra-fg-detail-add-sender" value={chosenSenderId} onChange={(event) => setSenderMailboxId(event.target.value)}>
@@ -477,7 +495,7 @@ export default function ForwardGroupDetailPage() {
               <PortalButton type="button" onClick={addSender} disabled={busy || !chosenSenderId}>
                 Add sender
               </PortalButton>
-            </div>
+            </div>}
 
             {allowedSenders.length === 0 ? (
               <PortalNotice tone="warn">
@@ -486,12 +504,12 @@ export default function ForwardGroupDetailPage() {
             ) : (
               <div className="portal-management-table-wrap">
                 <table className="portal-management-table">
-                  <thead><tr><th>Allowed sender</th><th className="text-right">Actions</th></tr></thead>
+                  <thead><tr><th>Allowed sender</th>{canAdmin && <th className="text-right">Actions</th>}</tr></thead>
                   <tbody>
                     {allowedSenders.map((sender) => (
                       <tr key={sender.id}>
                         <td>{sender.full_name || sender.email}<small className="block">{sender.email}</small></td>
-                        <td>
+                        {canAdmin && <td>
                           <div className="portal-inline-actions">
                             <button
                               type="button"
@@ -502,7 +520,7 @@ export default function ForwardGroupDetailPage() {
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
-                        </td>
+                        </td>}
                       </tr>
                     ))}
                   </tbody>
