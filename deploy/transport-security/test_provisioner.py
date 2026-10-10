@@ -114,6 +114,17 @@ class EdgeContractTests(TestCase):
                 with self.assertRaises(module.EdgeError):
                     module.expose_public_policy_path("mta-sts.customer.example")
 
+    def test_certbot_hook_is_scoped_to_our_own_managed_nginx_site(self):
+        hook = (path.parent / "mta-sts-certbot-renew-hook.sh").read_text()
+        installer = (path.parent / "install.sh").read_text()
+        for gate in ("RENEWED_LINEAGE", "mta-sts.", "matemail-transport-sts-",
+                     "# Managed by MateMail P4-C dynamic MTA-STS",
+                     "readlink -f", "nginx -t", "systemctl reload nginx"):
+            self.assertIn(gate, hook)
+        self.assertIn("mta-sts-certbot-renew-hook.sh", installer)
+        self.assertNotIn("certbot renew", installer)
+        self.assertNotIn("systemctl enable", installer)
+
     def test_installer_never_enables_service(self):
         script = (path.parent / "install.sh").read_text()
         self.assertNotIn("systemctl enable", script)
