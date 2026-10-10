@@ -106,6 +106,7 @@
 .ws.astra-hub .astra-resource-dialog-body .portal-detail-actions,
 .ws.astra-hub .astra-resource-dialog-body .portal-form-actions{display:flex;justify-content:flex-end;gap:9px;border-top:1px solid var(--border);margin-top:24px;padding-top:18px}
 .ws.astra-hub .astra-resource-dialog-body .portal-button{border-radius:4px!important;font-size:.8125rem;min-height:36px;font-weight:550}
+.ws.astra-hub .astra-resource-dialog-body .portal-detail-actions{flex-direction:row-reverse}
 .ws.astra-hub .astra-resource-dialog-body input[type=range]{width:100%;accent-color:var(--primary)}
 .ws.astra-hub .astra-resource-dialog-body .portal-address-composer{display:flex;align-items:center;gap:10px}
 .ws.astra-hub .astra-resource-dialog-body .portal-address-composer input{min-width:0;flex:1}
