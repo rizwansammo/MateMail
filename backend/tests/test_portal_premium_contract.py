@@ -52,7 +52,7 @@ class PremiumPortalRouteContractTest(SimpleTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.layout = read("app", "app", "layout.tsx")
+        cls.layout = read("components", "workspace", "astra-shell.tsx")
 
     def test_every_visible_nav_route_exists(self):
         for href, path in self.NAV_ROUTES.items():
@@ -179,26 +179,22 @@ class MateMailHubBrandingContractTest(SimpleTestCase):
     """The Organization Hub uses one canonical mark and wordmark."""
 
     def test_sidebar_is_icon_plus_matemail_hub_only(self):
-        layout = read("app", "app", "layout.tsx")
-        css = read("app", "app", "portal-premium.css")
-        self.assertIn(
-            '<BrandMark size={31} className="portal-brand-mark" preload />',
-            layout,
-        )
-        self.assertIn('className="portal-brand-word">MateMail Hub</span>', layout)
-        self.assertNotIn("ORGANIZATION PORTAL", layout)
+        layout = read("components", "workspace", "astra-shell.tsx")
+        css = read("app", "app", "astra-shell.css")
+        self.assertIn('<BrandMark size={30}/>', layout)
+        self.assertIn('<span className="wordmark">MateMail</span>', layout)
+        self.assertIn('<span className="brand-hub">HUB</span>', layout)
+        # The organization is named once, in Topbar, not again below the logo.
+        self.assertNotIn('className="org-sidebar"', layout)
+        self.assertIn("workspaceName", layout)
         self.assertNotIn("Switch workspace", layout)
         self.assertNotIn('href="/workspaces"', layout)
         self.assertNotIn("ChevronsUpDown", layout)
-        self.assertNotIn("portal-workspace-card", layout)
-        self.assertNotIn("Current organization", layout)
-        self.assertIn("font-family: var(--font-matemail-hub), sans-serif !important;", css)
-        self.assertIn("font-size: 23px;", css)
-        self.assertIn("font-weight: 700;", css)
-        self.assertIn("letter-spacing: 0.2px;", css)
-        self.assertIn("white-space: nowrap;", css)
-        self.assertIn("font-synthesis: none;", css)
-        self.assertIn("border-radius: 8px;", css)
+        self.assertIn("font-family:var(--font-matemail-hub)", css)
+        self.assertIn("border-radius:4px", css)
+        self.assertIn("244px", css)
+        self.assertIn("60px", css)
+        self.assertNotIn("refinements.css", css)
 
     def test_hub_loads_verified_hemi_head_without_postbox_redirects(self):
         """Hub and login must load the real prototype font on their own origin."""
@@ -314,8 +310,13 @@ class PremiumPortalDesignIntegrationTest(SimpleTestCase):
 
     def test_workspace_shell_imports_the_scoped_premium_styles(self):
         layout = read("app", "app", "layout.tsx")
+        shell = read("components", "workspace", "astra-shell.tsx")
         root_layout = read("app", "layout.tsx")
-        css = read("app", "app", "portal-premium.css")
-        self.assertIn("portal-premium", layout)
+        legacy_css = read("app", "app", "portal-premium.css")
+        astra_css = read("app", "app", "astra-shell.css")
+        self.assertIn("<AstraWorkspaceShell>", layout)
+        self.assertIn('import "./app/astra-shell.css";', root_layout)
         self.assertIn("portal-premium.css", root_layout)
-        self.assertIn(".portal-premium", css)
+        self.assertIn("ws portal-premium astra-hub", shell)
+        self.assertIn(".ws.portal-premium.astra-hub", astra_css)
+        self.assertIn(".portal-premium", legacy_css)
