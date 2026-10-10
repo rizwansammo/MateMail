@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity, AtSign, Building2, CheckCircle2, ChevronDown, ChevronRight,
+  Activity, Building2, CheckCircle2, ChevronDown, ChevronRight,
   Clock, DatabaseBackup, ExternalLink, Globe2, HardDrive, Inbox,
   KeyRound, LayoutDashboard, Link2, Lock, LogOut, Mail, Menu, Moon,
   Network, Plug, Search, Settings, Shield, ShieldCheck, Sun,
@@ -34,7 +34,7 @@ const sections: NavGroup[] = [
   ] },
   { label: "Organization", items: [
     { label: "Domains", href: "/app/domains", icon: Globe2 },
-    { label: "Custom hostnames", href: "/app/settings/custom-domains", icon: Network },
+    { label: "Custom hostnames", href: "/app/settings#hub-custom-hostnames", icon: Network },
     { label: "Users & access", href: "/app/team", icon: Users },
     { label: "Plan & usage", href: "/app/billing", icon: HardDrive },
   ] },
@@ -197,10 +197,10 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
   },[searchOpen]);
 
   useEffect(() => {
-    // Navigate to a real backend page; clear overlays on route change.
-    setMobileOpen(false);
-    setAccountOpen(false);
-  },[pathname]);
+    const closeMenus = () => { setMobileOpen(false); setAccountOpen(false); };
+    window.addEventListener("popstate", closeMenus);
+    return () => window.removeEventListener("popstate", closeMenus);
+  },[]);
 
   const pageItems=allItems.filter(item=>accessible(item,admin)&&(!item.onboarding||showOnboarding));
   const matches=useMemo(() => {
