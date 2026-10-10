@@ -67,6 +67,23 @@ def describe_transport_security(domain, config=None) -> dict:
                 "requirement": "P4-C.E verified TLS-RPT intake and parser",
             },
         ]
+        # "Ready to publish" is permission; it is NOT a live DNS result.
+        # Each record displays only the last explicitly checked state.
+        for index, record in enumerate(records):
+            verified_at = (
+                config.dns_verified_at if index == 0 else
+                config.sts_txt_verified_at if index == 1 else
+                config.tls_rpt_txt_verified_at
+            )
+            checked_at = (
+                config.dns_verified_at if index == 0 else
+                config.dns_records_checked_at
+            )
+            record["verified_at"] = verified_at
+            record["verification_status"] = (
+                "not_checked" if checked_at is None else
+                "verified" if verified_at is not None else "missing"
+            )
     # CNAME becomes displayable only when the platform operator has confirmed
     # that the dedicated policy gateway resolves to the HTTPS provisioner.
     edge_ready = bool(getattr(settings, "MTA_STS_POLICY_EDGE_READY", False))
@@ -104,6 +121,7 @@ def describe_transport_security(domain, config=None) -> dict:
         "edge_configured": edge_configured,
         "dns_records": records,
         "dns_verified_at": config.dns_verified_at if config else None,
+        "dns_records_checked_at": config.dns_records_checked_at if config else None,
         "cert_verified_at": config.cert_verified_at if config else None,
         "activated_at": config.activated_at if config else None,
         "last_error": config.last_error if config else "",
