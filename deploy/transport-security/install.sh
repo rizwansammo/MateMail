@@ -12,5 +12,9 @@ install -d -o root -g root -m 0700 /etc/matemail
 install -m 0755 "$SOURCE/provisioner.py" /usr/local/libexec/matemail-transport-sts-provisioner
 install -m 0644 "$SOURCE/systemd/matemail-transport-sts-provisioner.service" /etc/systemd/system/
 install -m 0644 "$SOURCE/systemd/matemail-transport-sts-provisioner.timer" /etc/systemd/system/
+# Certbot's renewal requires an Nginx reload to present the renewed certificate.
+# The hook is strictly scoped to this worker's own marker and enabled vhost.
+install -d -o root -g root -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+install -m 0755 "$SOURCE/mta-sts-certbot-renew-hook.sh" /etc/letsencrypt/renewal-hooks/deploy/matemail-mta-sts-nginx.sh
 systemctl daemon-reload
 echo "MTA-STS worker staged. Timer NOT enabled or started. P4-C.F owns activation."
