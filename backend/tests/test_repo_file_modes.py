@@ -82,6 +82,8 @@ MUST_NOT_BE_EXECUTABLE = {
         "invoked with bash by the release workflow; it installs runtime files with explicit modes",
     "deploy/custom-hosts/renew-hook.sh":
         "source artifact only; install.sh places the runtime Certbot hook 0755",
+    "deploy/transport-security/mta-sts-certbot-renew-hook.sh":
+        "source artifact only; transport-security/install.sh installs the scoped Certbot hook 0755",
 }
 
 
