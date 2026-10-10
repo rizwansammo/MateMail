@@ -7,6 +7,7 @@ import "./globals.css";
 import "./app/portal-premium.css";
 import "./app/astra-shell.css";
 import "./app/astra-resources.css";
+import "./app/astra-collaboration.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
