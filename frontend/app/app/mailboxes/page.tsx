@@ -14,6 +14,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import { api, ApiError, apiRequest } from "@/lib/api";
 import {
   PortalButton,
@@ -220,7 +221,7 @@ export default function MailboxesPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page">
       <PortalPageHeading
         title="Mailboxes"
         description="Manage your team’s email identities, access and storage."
@@ -238,6 +239,12 @@ export default function MailboxesPage() {
           </PortalButton>
         }
       />
+
+      <div className="astra-resource-summary" aria-label="Mailbox statistics">
+        <div><span>Personal mailboxes</span><strong>{loading ? "—" : mailboxes.length}</strong></div>
+        <div><span>Active accounts</span><strong>{loading ? "—" : mailboxes.filter((item) => item.status === "active").length}</strong></div>
+        <div><span>Mail service ready</span><strong>{loading ? "—" : mailboxes.filter((item) => item.mail_service_ready).length}</strong></div>
+      </div>
 
       {!user?.email_verified && (
         <div className="mb-5">
@@ -269,12 +276,13 @@ export default function MailboxesPage() {
         </div>
       )}
 
-      {addOpen && (
-        <PortalCard
-          className="portal-form-card"
-          title="Create a mailbox"
-          subtitle="Set up a dedicated email identity. The password is sent to the Mail Engine and is never stored by MateMail."
-        >
+      <AstraResourceDialog
+        open={addOpen}
+        busy={adding}
+        title="Create a mailbox"
+        description="Set up a dedicated email identity. Passwords are sent to the Mail Engine and are not stored by MateMail."
+        onDismiss={() => { setAddOpen(false); setAddErrors({}); setPassword(""); }}
+      >
           <form onSubmit={handleAdd}>
             {errorText(addErrors.detail) && (
               <div className="mb-4">
@@ -379,8 +387,7 @@ export default function MailboxesPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5">
