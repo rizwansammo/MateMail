@@ -87,9 +87,9 @@ try{
  check("Alias list shows matching row only",await t.page.getByText("sales@example.test").count()>0&&await t.page.getByText("billing@example.test").count()===0);
  await open(t,"/app/team");
  dialog=await search(t,"Bob Smith");
- await dialog.getByRole("option",{name:"bob@example.test"}).waitFor({timeout:7000});
+ await dialog.getByRole("group",{name:"Users & access"}).getByRole("option",{name:"bob@example.test"}).waitFor({timeout:7000});
  await snap(t,"phase4-02-user-search");
- await dialog.getByRole("option",{name:"bob@example.test"}).click();
+ await dialog.getByRole("group",{name:"Users & access"}).getByRole("option",{name:"bob@example.test"}).click();
  await t.page.waitForURL("**/app/team?q=*",{timeout:8000});
  check("Member full name matches while deep-link filters by email",await t.page.getByRole("searchbox",{name:"Search members"}).inputValue()==="bob@example.test");
  await t.page.getByText("bob@example.test").first().waitFor({state:"visible",timeout:8000});
@@ -102,8 +102,8 @@ try{
  check("Forwarding destination search resolves to correct source record",await t.page.getByRole("searchbox",{name:"Search forwarding rules"}).inputValue()==="alice@example.test");
  await open(t,"/app/delegation");
  dialog=await search(t,"Bob Smith");
- await dialog.getByRole("option",{name:"alice@example.test"}).waitFor({timeout:8000});
- await dialog.getByRole("option",{name:"alice@example.test"}).click();
+ await dialog.getByRole("group",{name:"Delegation"}).getByRole("option",{name:"alice@example.test"}).waitFor({timeout:8000});
+ await dialog.getByRole("group",{name:"Delegation"}).getByRole("option",{name:"alice@example.test"}).click();
  await t.page.waitForURL("**/app/delegation?q=*",{timeout:8000});
  check("Delegation searches delegate and filters by target",await t.page.getByRole("searchbox",{name:"Search delegations"}).inputValue()==="alice@example.test");
  await open(t,"/app/mailboxes");
