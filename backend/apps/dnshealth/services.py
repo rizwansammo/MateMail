@@ -1,5 +1,6 @@
 import dns.resolver
 import dns.exception
+from django.db import transaction
 from django.conf import settings
 from django.utils import timezone
 
@@ -122,20 +123,67 @@ def _discovery_records(domain_obj):
     ]
 
 
-def _resolve_mx(hostname):
+class DNSLookupInconclusive(Exception):
+    """No trustworthy answer: retry the check without downgrading healthy DNS."""
+
+
+# Independent public resolvers are consulted ONLY when Docker/host DNS reports
+# absence or fails. That resolver can serve stale NXDOMAIN after a customer
+# publishes a new record; treating it as authoritative caused false "Missing".
+# Both independent answers MUST agree, even for legitimate NXDOMAIN.
+DNS_FALLBACK_RESOLVERS = ("1.1.1.1", "8.8.8.8")
+
+
+def _critical_dns_answers(hostname, record_type):
+    """Resolve MX/TXT safely; never convert a transient failure into 'Missing'.
+
+    A positive default answer is enough to evaluate in the normal path.
+    A negative/unavailable default answer is independently rechecked against
+    two public DNS resolvers. Disagreement or timeout causes a retry, not a
+    customer-facing false-negative. No writes or HTTP calls occur here.
+    """
     try:
-        answers = dns.resolver.resolve(hostname, "MX", lifetime=5)
-        return [f"{r.preference} {str(r.exchange).rstrip('.')}" for r in answers]
-    except Exception:
-        return []
+        answers = list(dns.resolver.resolve(hostname, record_type, lifetime=4))
+        if answers:
+            return answers
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        pass  # DNS Docker resolver negative-cache can be stale.
+    except dns.exception.DNSException:
+        pass  # Try two independently configured public resolvers.
+
+    responses = []
+    for address in DNS_FALLBACK_RESOLVERS:
+        resolver = dns.resolver.Resolver(configure=False)
+        resolver.nameservers = [address]
+        resolver.timeout = 2
+        resolver.lifetime = 3
+        try:
+            found = list(resolver.resolve(hostname, record_type))
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+            found = []
+        except dns.exception.DNSException as exc:
+            raise DNSLookupInconclusive(
+                "Independent public DNS verification temporarily unavailable."
+            ) from exc
+        responses.append(found)
+
+    if tuple(sorted(str(value) for value in responses[0])) != tuple(
+        sorted(str(value) for value in responses[1])
+    ):
+        raise DNSLookupInconclusive(
+            "Independent public DNS resolvers have not converged."
+        )
+    return responses[0]
+
+
+def _resolve_mx(hostname):
+    answers = _critical_dns_answers(hostname, "MX")
+    return [f"{r.preference} {str(r.exchange).rstrip('.')}" for r in answers]
 
 
 def _resolve_txt(hostname):
-    try:
-        answers = dns.resolver.resolve(hostname, "TXT", lifetime=5)
-        return [b"".join(r.strings).decode("utf-8", errors="replace") for r in answers]
-    except Exception:
-        return []
+    answers = _critical_dns_answers(hostname, "TXT")
+    return [b"".join(r.strings).decode("utf-8", errors="replace") for r in answers]
 
 
 def _evaluate_mx(detected):
@@ -216,6 +264,7 @@ def check_dns_for_domain(domain_obj):
     scored = _expected_records(domain_obj)
     discovery = _discovery_records(domain_obj)
     verified = {}
+    observations = []
 
     for rec in scored + discovery:
         rtype = rec["record_type"]
@@ -254,19 +303,9 @@ def check_dns_for_domain(domain_obj):
                     rec.get("record_prefix"),
                 )
 
-        DNSRecordCheck.objects.update_or_create(
-            domain=domain_obj,
-            record_type=rtype,
-            host=host,
-            defaults={
-                "tenant": domain_obj.tenant,
-                "expected_value": rec["expected_value"],
-                "detected_value": detected_value,
-                "status": status,
-                "last_checked": now,
-                "is_scored": is_scored,
-            },
-        )
+        # Stage all findings in memory first. If a later DNS query is
+        # inconclusive, NONE of the earlier observations should be persisted.
+        observations.append((rec, status, detected_value, is_scored))
         # Only scored records reach `verified`, so the arithmetic below
         # cannot see a discovery record even if one were added carelessly.
         if is_scored:
@@ -283,5 +322,22 @@ def check_dns_for_domain(domain_obj):
     else:
         domain_obj.status = DomainStatus.PENDING
 
-    domain_obj.save(update_fields=["dns_health_score", "status", "verified_at"])
+    # Persist a coherent snapshot. Partial DNS outages cannot write mixed
+    # fresh/old rows and then report an outdated health score as current.
+    with transaction.atomic():
+        for rec, status, detected_value, is_scored in observations:
+            DNSRecordCheck.objects.update_or_create(
+                domain=domain_obj,
+                record_type=rec["record_type"],
+                host=rec["host"],
+                defaults={
+                    "tenant": domain_obj.tenant,
+                    "expected_value": rec["expected_value"],
+                    "detected_value": detected_value,
+                    "status": status,
+                    "last_checked": now,
+                    "is_scored": is_scored,
+                },
+            )
+        domain_obj.save(update_fields=["dns_health_score", "status", "verified_at"])
     return domain_obj
