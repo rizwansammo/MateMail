@@ -409,10 +409,20 @@ def retire_to_none(data):
         # provisioner had stopped after issuing the cert but before HTTPS.
         install_site(host, https_site(host))
         policy_http_ok(data, expected=policy_none())
-    elif not public_txt_absent(data):
-        # A partially installed vhost with no valid TLS cert cannot claim
-        # a mode:none policy. Any remaining MTA-STS TXT must be handled first.
-        raise EdgeError("HTTPS policy unavailable while public security TXT exists")
+    else:
+        # A partially provisioned vhost without any valid HTTPS certificate
+        # can retire only if both security announcements are already absent.
+        if not public_txt_absent(data):
+            raise EdgeError("HTTPS policy unavailable while public security TXT exists")
+        root = POLICIES / host
+        well_known = root / ".well-known"
+        target = well_known / "mta-sts.txt"
+        if root.is_symlink() or well_known.is_symlink() or target.is_symlink():
+            raise EdgeError("Unsafe partial policy directory")
+        if target.is_file():
+            # Normalize an orphaned testing policy only AFTER external TXT
+            # absence is proven. No invalid HTTPS mode:none claim is made.
+            atomic(target, policy_none())
     retire_authorize(data, "serve-none")
     retire_state(data, "mode-none")
 
