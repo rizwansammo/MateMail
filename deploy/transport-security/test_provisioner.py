@@ -267,3 +267,56 @@ class RetirementContractTests(TestCase):
                 module.retire_to_none(data)
             state.assert_called_once_with(data, "mode-none")
 
+
+    def test_certificate_retirement_rejects_shared_san_and_other_nginx_references(self):
+        host = self.job()["hostname"]
+        with mock.patch.object(module.Path, "exists", return_value=True), mock.patch.object(
+            module, "run", return_value="Certificate Name: " + host + "\n    Domains: other.example\n",
+        ):
+            with self.assertRaises(module.EdgeError):
+                module.delete_dedicated_certificate(host)
+        with mock.patch.object(module.Path, "exists", return_value=True), mock.patch.object(
+            module, "run", side_effect=[
+                "Certificate Name: " + host + "\n    Domains: " + host + "\n",
+                "server { ssl_certificate /etc/letsencrypt/live/" + host + "/fullchain.pem; }\n",
+            ],
+        ):
+            with self.assertRaises(module.EdgeError):
+                module.delete_dedicated_certificate(host)
+
+    def test_partial_vhost_without_cert_needs_both_dns_records_removed(self):
+        data = self.job()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sites, enabled, policies = root / "sites", root / "enabled", root / "policies"
+            for folder in (sites, enabled, policies):
+                folder.mkdir()
+            host = data["hostname"]
+            vhost = sites / ("matemail-transport-sts-" + host + ".conf")
+            vhost.write_text(module.bootstrap(host))
+            (enabled / vhost.name).symlink_to(vhost)
+            source = policies / host / ".well-known" / "mta-sts.txt"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(module.policy("mx.matemail.pro"))
+            with mock.patch.object(module, "SITES", sites), mock.patch.object(
+                module, "ENABLED", enabled,
+            ), mock.patch.object(module, "POLICIES", policies), mock.patch.object(
+                module, "retire_authorize",
+            ), mock.patch.object(module, "cert_ok", return_value=False), mock.patch.object(
+                module, "public_txt_absent", return_value=False,
+            ), mock.patch.object(module, "retire_state") as state:
+                with self.assertRaises(module.EdgeError):
+                    module.retire_to_none(data)
+            state.assert_not_called()
+            self.assertEqual(source.read_bytes(), module.policy("mx.matemail.pro"))
+            with mock.patch.object(module, "SITES", sites), mock.patch.object(
+                module, "ENABLED", enabled,
+            ), mock.patch.object(module, "POLICIES", policies), mock.patch.object(
+                module, "retire_authorize",
+            ), mock.patch.object(module, "cert_ok", return_value=False), mock.patch.object(
+                module, "public_txt_absent", return_value=True,
+            ), mock.patch.object(module, "retire_state") as state:
+                module.retire_to_none(data)
+            self.assertEqual(source.read_bytes(), module.policy_none())
+            state.assert_called_once_with(data, "mode-none")
+
