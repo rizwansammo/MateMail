@@ -4,10 +4,12 @@ from email import policy
 from email.parser import BytesParser
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from apps.postbox.imap import open_mailbox
 from .authentication import require_authenticated_report
+from .headers import validate_report_headers
 from .models import TlsIngestCursor
 from .parser import InvalidTlsReport, MAX_ARCHIVE, MAX_PARTS, parse_json, unpack
 from .services import store_policy
@@ -31,12 +33,20 @@ def ingest_raw_message(raw):
     attachments = list(message.iter_attachments())
     if not 1 <= len(attachments) <= MAX_PARTS:
         raise InvalidTlsReport("No supported attachments")
-    totals = {"stored": 0, "duplicate": 0, "unmanaged": 0}
+    # Parse and validate ALL attachments before storing any tenant telemetry.
+    # A malformed second attachment must not partially persist the first.
+    verified_policies = []
     for part in attachments:
         payload = part.get_payload(decode=True)
         if not isinstance(payload, bytes) or len(payload) > MAX_ARCHIVE:
             raise InvalidTlsReport("Attachment exceeds cap")
-        for parsed in parse_json(unpack(payload, part.get_filename() or "", part.get_content_type())):
+        document = unpack(payload, part.get_filename() or "", part.get_content_type())
+        policies = parse_json(document)
+        validate_report_headers(message, document, policies)
+        verified_policies.extend(policies)
+    totals = {"stored": 0, "duplicate": 0, "unmanaged": 0}
+    with transaction.atomic():
+        for parsed in verified_policies:
             totals[store_policy(parsed).status] += 1
     return totals
 
