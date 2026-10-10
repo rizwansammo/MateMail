@@ -11,6 +11,7 @@ on:
       - "frontend/scripts/astra-phase2b-qa.mjs"
       - "frontend/scripts/astra-phase2c-qa.mjs"
       - "frontend/scripts/astra-phase2d-qa.mjs"
+      - "frontend/scripts/astra-phase2e-qa.mjs"
       - "frontend/app/app/astra-users.css"
       - "frontend/app/app/team/**"
       - "frontend/app/app/astra-routing.css"
@@ -93,6 +94,12 @@ jobs:
           VISUAL_QA_URL: http://127.0.0.1:3100
           VISUAL_QA_OUTPUT: visual-qa-artifacts
         run: node scripts/astra-phase2d-qa.mjs
+      - name: Phase 2E combined cross-feature and permission boundary QA
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase2e-qa.mjs
       - name: Upload screenshots and QA report
         if: always()
         uses: actions/upload-artifact@v4
