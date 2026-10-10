@@ -178,7 +178,7 @@ export function AdvancedTransportSecurity({
   const canEnable = canAdmin && emailVerified && ownershipVerified &&
     data.self_service_available && !busy;
   const removable = data.enabled && ["disabled", "pending_dns"].includes(data.lifecycle);
-  const canVerify = canAdmin && emailVerified && data.enabled &&
+  const canVerify = canAdmin && emailVerified && data.enabled && data.self_service_available &&
     ["pending_dns", "error", "ready", "active"].includes(data.lifecycle) && readyForCname && !busy;
   const sslReady = !!data.cert_verified_at && data.certificate_status === "active";
   const status = !data.enabled ? "Not enabled"
