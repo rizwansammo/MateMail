@@ -15,6 +15,7 @@ on:
       - "frontend/scripts/astra-phase3-qa.mjs"
       - "frontend/scripts/astra-phase4-qa.mjs"
       - "frontend/scripts/astra-phase5-qa.mjs"
+      - "frontend/scripts/astra-phase6-qa.mjs"
       - "frontend/components/workspace/astra-shell.tsx"
       - "frontend/app/app/aliases/**"
       - "frontend/app/app/forwarding/**"
@@ -94,6 +95,12 @@ jobs:
           VISUAL_QA_URL: http://127.0.0.1:3100
           VISUAL_QA_OUTPUT: visual-qa-artifacts
         run: node scripts/astra-phase5-qa.mjs
+      - name: Phase 6 Astra baseline themes, layout, keyboard & mobile acceptance
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase6-qa.mjs
       - name: Browser geometry, focus, keyboard and responsive QA
         working-directory: frontend
         env:

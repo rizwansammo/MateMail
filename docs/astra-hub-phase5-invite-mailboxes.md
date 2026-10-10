@@ -36,3 +36,23 @@
 - CI: run only the existing workflow set on a single consolidated commit;
   do not trigger needless per-fix parallel runs.
 - Production: explicit user approval, backup/restore readiness and staging.
+
+## Phase 6 security gate — verified *provisioning administrator*
+The ordinary Mailboxes API checks `IsEmailVerified` on the authenticated
+workspace administrator who **creates** the mailbox, not on its future
+PostBox/mailbox account holder. Optional invited mailbox creation now enforces
+the equivalent rule twice: at invite issuance and again before DB reservation
+on acceptance/signup. Plain Hub-only invitations remain allowed, even for
+unverified Hub admins (no Mail Engine action).
+
+Do **not** insist on the recipient verifying an email address before creating
+the mailbox at that same address: if it does not exist yet, a verification
+email cannot reach it. A new invited Hub user remains `email_verified=False`
+until the normal verification email is sent *after* the requested personal
+mailbox is provisioned. A valid invite link is a privileged bearer secret;
+admins must share it privately and only with its intended recipient.
+
+Security properties verified by tests: no mailbox request from an unverified
+admin; an old invite from an unverified issuer cannot be redeemed for mailbox
+creation; no user, membership or mailbox row remains after a denied signup;
+no Mail Engine call occurs on denied paths.

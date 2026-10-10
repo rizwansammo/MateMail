@@ -59,6 +59,16 @@ def reserve_invited_mailbox(tenant, invite, full_name):
     """Call INSIDE membership/invite DB transaction under locked tenant."""
     if not invite.create_mailbox:
         return None
+
+    # Reject pre-gate/legacy invitations originally issued by an unverified
+    # administrator. The recipient is not the provisioning authority.
+    inviter = invite.invited_by
+    if not inviter or not inviter.email_verified:
+        raise InviteMailboxError(
+            "The mailbox request requires a verified workspace administrator. "
+            "Ask an administrator to issue a new invitation.",
+            403,
+        )
     domain, local_part, quota = preflight_invited_mailbox(tenant, invite.email)
     try:
         return Mailbox.objects.create(

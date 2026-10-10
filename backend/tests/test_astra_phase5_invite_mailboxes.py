@@ -187,3 +187,118 @@ class InviteMailboxPhase5Tests(TestCase):
             204,
         )
         self.assertFalse(Mailbox.objects.filter(email="colleague@acme.test").exists())
+
+    def test_unverified_admin_cannot_request_mailbox_but_may_invite_to_hub(self):
+        self.owner.email_verified = False
+        self.owner.save(update_fields=["email_verified"])
+        blocked = self.invite(email="unverified-admin@acme.test")
+        self.assertEqual(blocked.status_code, 403)
+        self.assertIn("Verify", blocked.data["detail"])
+        self.assertFalse(TeamInvite.objects.filter(email="unverified-admin@acme.test").exists())
+        hub_invite = self.invite(email="hub-only@acme.test", create_mailbox=False)
+        self.assertEqual(hub_invite.status_code, 201)
+        self.assertFalse(hub_invite.data["create_mailbox"])
+
+    def test_inviter_verification_rechecked_before_mailbox_acceptance(self):
+        res = self.invite()
+        user = make_user("colleague@acme.test")
+        self.owner.email_verified = False
+        self.owner.save(update_fields=["email_verified"])
+        token = res.data["invite_url"].split("token=", 1)[1]
+        with mock.patch("apps.mailboxes.views._provision_mailbox") as engine:
+            accepted = auth_client(user).post(
+                "/api/teams/invites/accept/",
+                {"token": token, "mailbox_password": MAIL_PASSWORD},
+                format="json",
+            )
+        self.assertEqual(accepted.status_code, 403)
+        self.assertTrue(TeamInvite.objects.get(email=user.email).is_pending)
+        self.assertFalse(Mailbox.objects.filter(email=user.email).exists())
+        self.assertFalse(TenantMembership.objects.filter(
+            tenant=self.tenant, user=user, status=MemberStatus.ACTIVE,
+        ).exists())
+        engine.assert_not_called()
+
+    def test_unverified_new_invitee_can_receive_verification_into_new_mailbox(self):
+        """Mailbox address must exist before its verification email can arrive."""
+        res = self.invite(email="newjoiner@acme.test")
+        token = res.data["invite_url"].split("token=", 1)[1]
+        def create_in_engine(mailbox, password):
+            self.assertEqual(password, MAIL_PASSWORD)
+            mailbox.mail_engine_provisioned = True
+            mailbox.save(update_fields=["mail_engine_provisioned"])
+        with (
+            mock.patch("apps.mailboxes.views._provision_mailbox", side_effect=create_in_engine) as engine,
+            mock.patch("apps.accounts.views._send_verification_email") as verification,
+        ):
+            created = APIClient().post("/api/auth/signup/", {
+                "email": "newjoiner@acme.test",
+                "password": TEST_PASSWORD,
+                "full_name": "New Joiner",
+                "invite_token": token,
+                "mailbox_password": MAIL_PASSWORD,
+            }, format="json")
+        self.assertEqual(created.status_code, 201)
+        user = User.objects.get(email="newjoiner@acme.test")
+        self.assertFalse(user.email_verified)
+        self.assertTrue(created.data["mailbox"]["mail_service_ready"])
+        engine.assert_called_once()
+        verification.assert_called_once_with(user)
+
+    def test_unverified_inviter_cannot_bypass_gate_via_signup(self):
+        res = self.invite(email="newjoiner@acme.test")
+        token = res.data["invite_url"].split("token=", 1)[1]
+        self.owner.email_verified = False
+        self.owner.save(update_fields=["email_verified"])
+        with mock.patch("apps.mailboxes.views._provision_mailbox") as engine:
+            created = APIClient().post("/api/auth/signup/", {
+                "email": "newjoiner@acme.test",
+                "password": TEST_PASSWORD,
+                "full_name": "New Joiner",
+                "invite_token": token,
+                "mailbox_password": MAIL_PASSWORD,
+            }, format="json")
+        self.assertEqual(created.status_code, 403)
+        self.assertFalse(User.objects.filter(email="newjoiner@acme.test").exists())
+        self.assertFalse(Mailbox.objects.filter(email="newjoiner@acme.test").exists())
+        self.assertTrue(TeamInvite.objects.get(email="newjoiner@acme.test").is_pending)
+        engine.assert_not_called()
+
+    def test_mail_engine_failure_preserves_pending_mailbox_and_successful_membership(self):
+        from apps.mail_engine.errors import EngineUnavailable
+
+        res = self.invite(email="retry@acme.test")
+        person = make_user("retry@acme.test")
+        token = res.data["invite_url"].split("token=", 1)[1]
+        with mock.patch(
+            "apps.mailboxes.views._provision_mailbox",
+            side_effect=EngineUnavailable("synthetic engine outage"),
+        ):
+            accepted = auth_client(person).post(
+                "/api/teams/invites/accept/",
+                {"token": token, "mailbox_password": MAIL_PASSWORD},
+                format="json",
+            )
+        self.assertEqual(accepted.status_code, 200)
+        self.assertFalse(accepted.data["mailbox"]["mail_service_ready"])
+        self.assertTrue(TenantMembership.objects.filter(
+            tenant=self.tenant, user=person, status=MemberStatus.ACTIVE
+        ).exists())
+        mailbox = Mailbox.objects.get(email=person.email)
+        self.assertFalse(mailbox.mail_engine_provisioned)
+        self.assertFalse(TeamInvite.objects.get(email=person.email).is_pending)
+
+    def test_mailbox_secret_never_persisted_on_invite_or_in_api_responses(self):
+        result = self.invite(email="no-secret@acme.test")
+        self.assertEqual(result.status_code, 201)
+        invite = TeamInvite.objects.get(email="no-secret@acme.test")
+        self.assertNotIn(MAIL_PASSWORD, str(invite.__dict__))
+        listing = self.admin.get("/api/teams/invites/")
+        self.assertNotIn("mailbox_password", str(listing.data))
+        preview = APIClient().get(
+            "/api/teams/invites/preview/",
+            {"token": result.data["invite_url"].split("token=", 1)[1]},
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertNotIn("invite_url", str(preview.data))
+        self.assertNotIn("mailbox_password", str(preview.data))

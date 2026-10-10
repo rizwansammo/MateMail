@@ -56,6 +56,15 @@ class TeamInviteListView(APIView):
         role = serializer.validated_data["role"]
         create_mailbox = serializer.validated_data["create_mailbox"]
 
+        # Creating a mailbox via invitation is a provisioning action.
+        # The admin initiating it must satisfy the same verified-account gate
+        # as POST /api/mailboxes/. Ordinary Hub-only invites stay unchanged.
+        if create_mailbox and not request.user.email_verified:
+            return Response(
+                {"detail": "Verify your Hub account email before requesting a mailbox."},
+                status=403,
+            )
+
         if not tenant_allows_member_email(request.tenant, email):
             return Response({"detail": MEMBER_DOMAIN_ERROR}, status=400)
 
