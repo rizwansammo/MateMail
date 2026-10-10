@@ -68,7 +68,7 @@ try{
   await desktop.page.getByRole("textbox",{name:"Search Hub pages and resources"}).fill("mailbox");
   m=await metrics(desktop.page);
   await snap(desktop.page,"03-global-search");
-  check("Search dialog original compact geometry",m.search?.width===512&&m.searchInput?.height===40&&m.search.radius==="4px",{dialog:m.search,input:m.searchInput});
+  check("Search dialog original compact geometry",m.search?.width===512&&m.searchInput?.height===36&&m.search.radius==="4px",{dialog:m.search,input:m.searchInput});
   check("Search field has no extra blue focus ring",m.input?.boxShadow==="none",{focus:m.input});
   await desktop.page.keyboard.press("Escape");
   check("Escape closes Global Search",await desktop.page.getByRole("dialog",{name:"Search Hub"}).count()===0);
