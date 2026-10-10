@@ -9,3 +9,4 @@ class TenantsConfig(AppConfig):
     def ready(self):
         # Register deployment/security checks without importing models early.
         from . import checks  # noqa: F401
+        from . import onboarding_signals  # noqa: F401

@@ -1,0 +1,32 @@
+/* Phase 2C — aliases, per-mailbox forwarding and personal mailbox delegation.
+   Original Astra 4px enterprise geometry; Hub routing screens only.
+   Mail backend, PostBox, Platform Admin and unrelated Hub styles are untouched. */
+.ws.astra-hub .astra-routing-page .portal-route-address{display:flex;align-items:center;gap:10px;min-width:175px}
+.ws.astra-hub .astra-routing-page .portal-route-address code{font-size:.8125rem;white-space:nowrap;font-family:inherit;color:var(--foreground);font-weight:550}
+.ws.astra-hub .astra-routing-page .portal-domain-symbol{flex:0 0 30px;width:30px;height:30px;border:1px solid var(--border);border-radius:4px!important;background:var(--muted);color:var(--muted-foreground);display:inline-flex;align-items:center;justify-content:center}
+.ws.astra-hub .astra-routing-page .portal-destination-pill{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;max-width:100%;background:var(--soft);border:1px solid var(--border);border-radius:3px!important;color:var(--muted-foreground);font-size:.75rem;white-space:nowrap}
+.ws.astra-hub .astra-routing-page .portal-management-table th{white-space:nowrap}
+.ws.astra-hub .astra-routing-page .portal-management-table td{white-space:nowrap}
+.ws.astra-hub .astra-routing-page .portal-management-table td:first-child{min-width:185px}
+.ws.astra-hub .astra-routing-page .portal-management-table .portal-inline-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.ws.astra-hub .astra-routing-page .portal-management-table .portal-toggle{flex-shrink:0}
+.ws.astra-hub .astra-routing-page .portal-action-button{border-radius:4px!important;min-width:30px;min-height:30px;display:inline-flex;align-items:center;justify-content:center}
+.ws.astra-hub .astra-routing-page .portal-management-table .portal-input{border:1px solid var(--input);border-radius:4px!important;color:var(--foreground);background:var(--card);font-size:.75rem!important}
+.ws.astra-hub .astra-routing-page .portal-confirm-inline{white-space:normal;max-width:390px}
+.ws.astra-hub .astra-routing-page .portal-confirm-inline .portal-notice{border-radius:4px!important}
+.ws.astra-hub .astra-routing-page .portal-form-grid{gap:16px}
+.ws.astra-hub .astra-routing-page .portal-field label{font-size:.8125rem;color:var(--foreground);font-weight:550}
+.ws.astra-hub .astra-routing-page .portal-field :is(input,select,textarea){min-height:36px;border-radius:4px!important;border:1px solid var(--input);background:var(--card);color:var(--foreground);font-size:.8125rem}
+.ws.astra-hub .astra-routing-page .portal-field :is(input,select,textarea):focus{box-shadow:none!important;border-color:var(--muted-foreground)!important;outline:none}
+.ws.astra-hub .astra-routing-page .portal-field :is(input,select,textarea):focus-visible{outline:1px solid var(--muted-foreground);outline-offset:1px}
+.ws.astra-hub .astra-routing-page .portal-management-table input[type=checkbox]{width:15px;height:15px;min-height:15px;accent-color:var(--sidebar-primary)}
+.ws.astra-hub .astra-routing-page .portal-management-table :is(input,button,select):disabled{cursor:not-allowed;opacity:.62}
+.ws.astra-hub .astra-routing-page .portal-identity-cell strong{font-weight:600}
+.ws.astra-hub .astra-routing-page .portal-notice{line-height:1.55}
+.ws.astra-hub .astra-routing-page .portal-management-table :is(th,td){padding-left:16px;padding-right:16px}
+@media(max-width:800px){
+  .ws.astra-hub .astra-routing-page .portal-management-table{min-width:720px}
+  .ws.astra-hub .astra-routing-page .portal-management-table-wrap{max-width:100%;overflow-x:auto;scrollbar-width:thin}
+  .ws.astra-hub .astra-routing-page .portal-destination-pill{max-width:240px}
+  .ws.astra-hub .astra-routing-page .portal-destination-pill span{overflow:hidden;text-overflow:ellipsis}
+}

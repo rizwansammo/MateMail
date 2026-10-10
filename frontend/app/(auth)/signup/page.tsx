@@ -23,6 +23,7 @@ interface InvitePreview {
   valid: boolean;
   email?: string;
   tenant_name?: string;
+  create_mailbox?: boolean;
   detail?: string;
 }
 
@@ -34,6 +35,7 @@ export default function SignupPage() {
     password: "",
     full_name: "",
     workspace_name: "",
+    mailbox_password: "",
   });
   const [errors, setErrors] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(false);
@@ -66,6 +68,8 @@ export default function SignupPage() {
     setErrors((current) => ({ ...current, [field]: "" }));
   }
 
+  const invited = Boolean(inviteToken && invitePreview?.valid);
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setErrors({});
@@ -77,6 +81,7 @@ export default function SignupPage() {
         form.full_name,
         inviteToken ? undefined : form.workspace_name,
         inviteToken || undefined,
+        invited && invitePreview?.create_mailbox ? form.mailbox_password : undefined,
       );
       router.push("/verify-email?sent=1");
     } catch (caught) {
@@ -133,8 +138,6 @@ export default function SignupPage() {
       </PremiumAuthShell>
     );
   }
-
-  const invited = Boolean(inviteToken && invitePreview?.valid);
 
   return (
     <PremiumAuthShell
@@ -212,6 +215,24 @@ export default function SignupPage() {
             onChange={(event) => set("password", event.target.value)}
           />
         </AuthField>
+
+        {invited && invitePreview?.create_mailbox && (
+          <AuthField
+            label="Mailbox password"
+            hint={"For " + invitePreview.email + ". Separate from your Hub login password. At least 10 characters."}
+            error={message(errors.mailbox_password)}
+          >
+            <input
+              className="auth-input"
+              type="password"
+              autoComplete="new-password"
+              minLength={10}
+              required
+              value={form.mailbox_password}
+              onChange={(event) => set("mailbox_password", event.target.value)}
+            />
+          </AuthField>
+        )}
 
         <AuthButton type="submit" loading={loading}>
           {loading

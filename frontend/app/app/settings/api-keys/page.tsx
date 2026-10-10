@@ -16,6 +16,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { useAuth } from "@/contexts/auth-context";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import {
   PortalButton,
   PortalCard,
@@ -103,6 +105,8 @@ function ScopeSummary({ scopes }: { scopes: string[] }) {
 }
 
 export default function APIKeysPage() {
+  const { tenant } = useAuth();
+  const canManageCredentials = tenant?.role === "owner" || tenant?.role === "admin";
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -264,7 +268,7 @@ export default function APIKeysPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-settings-page astra-credential-page">
       <Link href="/app/settings" className="portal-back-link">← Workspace settings</Link>
 
       <PortalPageHeading
@@ -273,6 +277,7 @@ export default function APIKeysPage() {
         actions={
           <PortalButton
             type="button"
+            disabled={!canManageCredentials}
             onClick={() => {
               setCreateOpen(true);
               setNewKey(null);
@@ -299,14 +304,20 @@ export default function APIKeysPage() {
         </PortalCard>
       )}
 
-      {createOpen && (
-        <PortalCard className="portal-form-card" title="Create API key" subtitle="Every key can read workspace data. Grant only the write scopes the integration genuinely needs.">
+      <AstraResourceDialog
+        open={createOpen && canManageCredentials}
+        busy={creating}
+        title="Create API key"
+        description="Every key can read workspace data. Grant only the write scopes required."
+        onDismiss={() => { setCreateOpen(false); setCreateError(""); }}
+      >
           <form onSubmit={createKey}>
             {createError && <div className="mb-4"><PortalNotice tone="danger">{createError}</PortalNotice></div>}
             <div className="portal-form-grid">
               <div className="portal-field">
-                <label>Key name</label>
+                <label htmlFor="astra-api-key-name">Key name</label>
                 <input
+                  id="astra-api-key-name"
                   type="text"
                   required
                   maxLength={100}
@@ -316,8 +327,9 @@ export default function APIKeysPage() {
                 />
               </div>
               <div className="portal-field">
-                <label>Expiry date (optional)</label>
+                <label htmlFor="astra-api-key-expiry">Expiry date (optional)</label>
                 <input
+                  id="astra-api-key-expiry"
                   type="date"
                   value={newExpiry}
                   min={new Date().toISOString().slice(0, 10)}
@@ -350,8 +362,7 @@ export default function APIKeysPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>

@@ -148,7 +148,7 @@ export default function SpamPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-operations-page">
       <PortalPageHeading
         title="Spam & quarantine"
         description="Review messages held by the mail filter and release only mail you trust."

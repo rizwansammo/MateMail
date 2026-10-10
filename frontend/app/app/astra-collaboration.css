@@ -1,0 +1,41 @@
+/* Phase 2B — TeamBox and Forward Group visuals. Scoped to Hub collaboration routes.
+   Shares the Phase 2A 4px Astra geometry without modifying backend or other screens. */
+.ws.astra-hub .astra-collaboration-page .portal-management-table th,
+.ws.astra-hub .astra-collaboration-page .portal-management-table td{white-space:nowrap}
+.ws.astra-hub .astra-collaboration-page .portal-management-table .portal-identity-cell{min-width:185px;white-space:normal}
+.ws.astra-hub .astra-collaboration-page .portal-destination-pill{display:inline-flex;gap:7px;align-items:center;background:var(--muted);border:1px solid var(--border);border-radius:3px;padding:4px 9px;color:var(--muted-foreground);font-size:.75rem}
+.ws.astra-hub .astra-collaboration-page .portal-choice{min-width:0;display:flex;align-items:flex-start;gap:10px;border:1px solid var(--border);border-radius:4px!important;background:var(--card);padding:11px 12px;cursor:pointer;transition:background 140ms ease,border-color 140ms ease;line-height:1.45}
+.ws.astra-hub .astra-collaboration-page .portal-choice:hover{background:var(--soft)}
+.ws.astra-hub .astra-collaboration-page .portal-choice[data-active=true]{background:var(--accent);border-color:var(--input)}
+.ws.astra-hub .astra-collaboration-page .portal-choice input[type=checkbox]{accent-color:var(--sidebar-primary);margin:3px 0 0;height:14px;width:14px;min-height:14px;flex-shrink:0;border-radius:2px!important}
+.ws.astra-hub .astra-collaboration-page .portal-choice strong{display:block;font-size:.8125rem;font-weight:600;color:var(--foreground)}
+.ws.astra-hub .astra-collaboration-page .portal-choice small{display:block;font-size:.75rem;color:var(--muted-foreground);margin-top:3px;line-height:1.4;overflow-wrap:anywhere}
+.ws.astra-hub .astra-collaboration-page .portal-detail-stat{padding:16px 18px;background:var(--soft);border:1px solid var(--border);border-radius:4px!important;min-width:0}
+.ws.astra-hub .astra-collaboration-page .portal-detail-stat>span{display:block;font-size:.75rem;color:var(--muted-foreground);margin-bottom:7px}
+.ws.astra-hub .astra-collaboration-page .portal-detail-stat>strong{font-size:1rem;font-weight:600;letter-spacing:-.02em;overflow-wrap:anywhere;color:var(--foreground)}
+.ws.astra-hub .astra-collaboration-page .portal-inline-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:7px}
+.ws.astra-hub .astra-collaboration-page .portal-action-button{border-radius:4px!important;min-height:30px;min-width:30px;display:inline-flex;align-items:center;justify-content:center}
+.ws.astra-hub .astra-collaboration-page .portal-management-table :is(input[type=checkbox],select){accent-color:var(--sidebar-primary)}
+.ws.astra-hub .astra-collaboration-page .portal-management-table select{background:var(--card);border:1px solid var(--border);border-radius:4px!important;color:var(--foreground);padding:6px 9px;font-size:.8125rem}
+.ws.astra-hub .astra-collaboration-page .portal-field :is(input,select,textarea){font-size:.8125rem;min-height:36px;border:1px solid var(--input);border-radius:4px!important;background:var(--card);color:var(--foreground);padding:0 10px}
+.ws.astra-hub .astra-collaboration-page .portal-field select{width:100%}
+.ws.astra-hub .astra-collaboration-page .portal-field :is(input,select,textarea):focus{outline:none;box-shadow:none!important;border-color:var(--muted-foreground)!important}
+.ws.astra-hub .astra-collaboration-page .portal-field :is(input,select,textarea):focus-visible{outline:1px solid var(--muted-foreground);outline-offset:1px}
+.ws.astra-hub .astra-collaboration-page .portal-card-header{padding:18px 21px 15px}
+.ws.astra-hub .astra-collaboration-page .portal-card-header h2{font-size:.925rem;letter-spacing:-.01em}
+.ws.astra-hub .astra-collaboration-page .portal-identity-cell strong{font-size:.875rem}
+.ws.astra-hub .astra-collaboration-page .portal-identity-cell small{font-size:.75rem}
+.ws.astra-hub .astra-collaboration-page a.auth-text-button{font-size:.75rem;color:var(--muted-foreground);text-decoration:none}
+.ws.astra-hub .astra-collaboration-page a.auth-text-button:hover{color:var(--foreground)}
+.ws.astra-hub .astra-collaboration-page .portal-management-table tbody tr[tabindex]:focus-visible{outline:2px solid var(--muted-foreground);outline-offset:-2px}
+.ws.astra-hub .astra-collaboration-page .portal-form-grid{gap:16px}
+.ws.astra-hub .astra-collaboration-page .portal-field label{font-size:.8125rem;font-weight:550;color:var(--foreground)}
+.ws.astra-hub .astra-collaboration-page .portal-notice{line-height:1.55}
+.ws.astra-hub .astra-collaboration-page .portal-management-table input[type=checkbox]{height:15px;width:15px;min-height:15px}
+.ws.astra-hub .astra-collaboration-page .portal-inline-actions .portal-button{white-space:nowrap}
+@media(max-width:760px){
+ .ws.astra-hub .astra-collaboration-page .portal-inline-actions{justify-content:flex-start}
+ .ws.astra-hub .astra-collaboration-page .portal-choice{padding:10px}
+ .ws.astra-hub .astra-collaboration-page .portal-detail-stat{padding:13px}
+ .ws.astra-hub .astra-collaboration-page .portal-management-table{min-width:650px}
+}

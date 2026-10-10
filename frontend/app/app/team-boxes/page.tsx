@@ -14,6 +14,7 @@ import {
   Users,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import { apiRequest } from "@/lib/api";
 import {
   PortalButton,
@@ -212,7 +213,7 @@ export default function TeamBoxesPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-collaboration-page">
       <PortalPageHeading
         title="TeamBoxes"
         description="Shared mailboxes for teams, managed without shared passwords."
@@ -230,6 +231,12 @@ export default function TeamBoxesPage() {
           </PortalButton>
         }
       />
+
+      <div className="astra-resource-summary" aria-label="TeamBoxes statistics">
+        <div><span>Shared mailboxes</span><strong>{loading ? "—" : teamBoxes.length}</strong></div>
+        <div><span>Active TeamBoxes</span><strong>{loading ? "—" : teamBoxes.filter((item) => item.status === "active").length}</strong></div>
+        <div><span>Members assigned</span><strong>{loading ? "—" : teamBoxes.reduce((sum, item) => sum + item.member_count, 0)}</strong></div>
+      </div>
 
       {!user?.email_verified && (
         <div className="mb-5">
@@ -261,12 +268,13 @@ export default function TeamBoxesPage() {
         </div>
       )}
 
-      {addOpen && (
-        <PortalCard
-          className="portal-form-card"
-          title="Create a TeamBox"
-          subtitle="TeamBoxes store mail like a mailbox, but members access them through their own PostBox identity. No shared password is created."
-        >
+      <AstraResourceDialog
+        open={addOpen}
+        busy={adding}
+        title="Create a TeamBox"
+        description="Create a shared mailbox. Members access it with their own PostBox accounts; no shared password."
+        onDismiss={() => { setAddOpen(false); setAddErrors({}); }}
+      >
           <form onSubmit={createTeamBox}>
             {fieldError(addErrors.detail) && (
               <div className="mb-4">
@@ -275,9 +283,10 @@ export default function TeamBoxesPage() {
             )}
             <div className="portal-form-grid">
               <div className="portal-field full">
-                <label>TeamBox address</label>
+                <label htmlFor="astra-teambox-local">TeamBox address</label>
                 <div className="portal-address-composer">
                   <input
+                    id="astra-teambox-local"
                     type="text"
                     required
                     pattern="[a-zA-Z0-9._+-]+"
@@ -297,8 +306,9 @@ export default function TeamBoxesPage() {
               </div>
 
               <div className="portal-field full">
-                <label>Display name</label>
+                <label htmlFor="astra-teambox-name">Display name</label>
                 <input
+                  id="astra-teambox-name"
                   type="text"
                   required
                   value={displayName}
@@ -309,11 +319,12 @@ export default function TeamBoxesPage() {
               </div>
 
               <div className="portal-field full">
-                <label>
+                <label htmlFor="astra-teambox-quota">
                   Storage quota — {formatStorage(quotaMb)}
                   {planName ? ` · ${planName} maximum ${formatStorage(quotaMaxMb)}` : ""}
                 </label>
                 <input
+                  id="astra-teambox-quota"
                   type="range"
                   min={Math.min(1024, quotaMaxMb)}
                   max={quotaMaxMb}
@@ -345,8 +356,7 @@ export default function TeamBoxesPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
@@ -410,6 +420,14 @@ export default function TeamBoxesPage() {
                   <tr
                     key={teamBox.id}
                     className="cursor-pointer"
+                    tabIndex={0}
+                    aria-label={`Open TeamBox ${teamBox.email}`}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        router.push(`/app/team-boxes/${teamBox.id}`);
+                      }
+                    }}
                     onClick={() => router.push(`/app/team-boxes/${teamBox.id}`)}
                   >
                     <td>
@@ -448,7 +466,7 @@ export default function TeamBoxesPage() {
       <div className="mt-4">
         <PortalNotice tone="info">
           <Inbox className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>TeamBoxes do not have a direct PostBox password. Members sign in with their own mailbox; PostBox access itself is enabled in the next collaboration phase.</span>
+          <span>TeamBoxes have no shared password. Access is managed per member from TeamBox details; members use their own PostBox identity.</span>
         </PortalNotice>
       </div>
     </div>

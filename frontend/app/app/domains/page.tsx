@@ -10,6 +10,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import { apiRequest } from "@/lib/api";
 import {
   PortalButton,
@@ -120,7 +121,7 @@ export default function DomainsPage() {
     !!user?.email_verified && workspaceStatus === "active" && canAdmin;
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page">
       <PortalPageHeading
         title="Domains"
         description="Connect, verify and monitor the domains that power your organization’s email."
@@ -140,6 +141,12 @@ export default function DomainsPage() {
           )
         }
       />
+
+      <div className="astra-resource-summary" aria-label="Domain statistics">
+        <div><span>Connected domains</span><strong>{loading ? "—" : domains.length}</strong></div>
+        <div><span>Ownership verified</span><strong>{loading ? "—" : domains.filter((item) => item.ownership_verified).length}</strong></div>
+        <div><span>Mail service ready</span><strong>{loading ? "—" : domains.filter((item) => item.mail_service_ready).length}</strong></div>
+      </div>
 
       {!user?.email_verified && (
         <div className="mb-5">
@@ -162,12 +169,13 @@ export default function DomainsPage() {
         </div>
       )}
 
-      {addOpen && (
-        <PortalCard
-          className="portal-add-domain"
-          title="Connect a new domain"
-          subtitle="Add a domain you already own. MateMail does not transfer or purchase the domain."
-        >
+      <AstraResourceDialog
+        open={addOpen}
+        busy={adding}
+        title="Connect a new domain"
+        description="Add a domain you own. MateMail does not transfer or purchase domains."
+        onDismiss={() => { setAddOpen(false); setNewDomain(""); setAddError(""); }}
+      >
           <form onSubmit={handleAdd} className="portal-add-domain-form">
             <div className="portal-form-field">
               <label htmlFor="portal-domain-name">Root domain</label>
@@ -207,8 +215,7 @@ export default function DomainsPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5">
@@ -283,6 +290,14 @@ export default function DomainsPage() {
                   <tr
                     key={domain.id}
                     onClick={() => router.push(`/app/domains/${domain.id}`)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        router.push(`/app/domains/${domain.id}`);
+                      }
+                    }}
+                    tabIndex={0}
+                    aria-label={`Open domain ${domain.domain}`}
                     className="cursor-pointer"
                   >
                     <td>

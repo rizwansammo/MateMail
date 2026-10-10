@@ -80,7 +80,7 @@ export default function DomainDmarcReportsPage() {
   }, [params.id, days]);
 
   return (
-    <div className="portal-page space-y-5">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-report-page space-y-5">
       <div>
         <Link href={`/app/domains/${params.id}`} className="portal-back-link">
           <ArrowLeft className="h-3.5 w-3.5" /> Domain configuration

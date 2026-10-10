@@ -159,6 +159,7 @@ class SignupView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         application_only = request.data.get("application_only") is True
+        mailbox_password = data.get("mailbox_password", "")
 
         if User.objects.filter(email=data["email"]).exists():
             return Response({"email": "An account with this email already exists."}, status=400)
@@ -208,34 +209,52 @@ class SignupView(APIView):
             if not tenant_allows_member_email(invite.tenant, data["email"]):
                 return Response({"email": MEMBER_DOMAIN_ERROR}, status=400)
 
-            with transaction.atomic():
-                invite = (
-                    TeamInvite.objects.select_for_update()
-                    .select_related("tenant")
-                    .get(pk=invite.pk)
+            from apps.teams.invite_mailbox import (
+                InviteMailboxError, reserve_invited_mailbox, complete_invited_mailbox,
+            )
+            if invite.create_mailbox and len(mailbox_password) < 10:
+                return Response(
+                    {"mailbox_password": ["Choose a mailbox password of at least 10 characters."]},
+                    status=400,
                 )
-                if not invite.is_pending:
-                    return Response({"invite_token": "This invite is no longer valid."}, status=400)
 
-                tenant = Tenant.objects.select_for_update().get(pk=invite.tenant_id)
-                allowed, msg = check_member_limit(tenant, additional=0)
-                if not allowed:
-                    return Response({"detail": msg}, status=403)
+            mailbox = None
+            try:
+                with transaction.atomic():
+                    tenant = Tenant.objects.select_for_update().get(pk=invite.tenant_id)
+                    invite = (
+                        TeamInvite.objects.select_for_update()
+                        .select_related("tenant")
+                        .get(pk=invite.pk)
+                    )
+                    if not invite.is_pending:
+                        return Response({"invite_token": "This invite is no longer valid."}, status=400)
+                    allowed, msg = check_member_limit(tenant, additional=0)
+                    if not allowed:
+                        return Response({"detail": msg}, status=403)
+    
+                    mailbox = reserve_invited_mailbox(tenant, invite, data["full_name"])
+                    user = User.objects.create_user(
+                        email=data["email"],
+                        password=data["password"],
+                        full_name=data["full_name"],
+                    )
+                    TenantMembership.objects.create(
+                        tenant=tenant,
+                        user=user,
+                        role=invite.role,
+                        status=MemberStatus.ACTIVE,
+                        invited_by_id=invite.invited_by_id,
+                    )
+                    invite.accepted_at = timezone.now()
+                    invite.save(update_fields=["accepted_at"])
+            except InviteMailboxError as exc:
+                return Response({"detail": exc.message}, status=exc.status_code)
 
-                user = User.objects.create_user(
-                    email=data["email"],
-                    password=data["password"],
-                    full_name=data["full_name"],
-                )
-                TenantMembership.objects.create(
-                    tenant=tenant,
-                    user=user,
-                    role=invite.role,
-                    status=MemberStatus.ACTIVE,
-                    invited_by_id=invite.invited_by_id,
-                )
-                invite.accepted_at = timezone.now()
-                invite.save(update_fields=["accepted_at"])
+            mailbox_result = (
+                complete_invited_mailbox(mailbox, mailbox_password)
+                if mailbox is not None else None
+            )
 
             _send_verification_email(user)
             tokens = make_tokens(user, tenant_id=tenant.id)
@@ -244,6 +263,7 @@ class SignupView(APIView):
                 {
                     "user": UserProfileSerializer(user).data,
                     "tenant": _tenant_brief(tenant),
+                    "mailbox": mailbox_result,
                 },
                 status=201,
             )

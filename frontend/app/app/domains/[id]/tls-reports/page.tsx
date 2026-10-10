@@ -57,7 +57,7 @@ export default function DomainTlsReportsPage() {
 
   const num = (value: number) => value.toLocaleString();
   return (
-    <div className="portal-page space-y-5">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-report-page space-y-5">
       <div>
         <Link className="portal-back-link" href={"/app/domains/" + params.id}>
           <ArrowLeft className="h-3.5 w-3.5" /> Domain configuration

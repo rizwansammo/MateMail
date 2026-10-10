@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 
 from apps.billing.utils import check_member_limit
 from .models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
+from .onboarding import onboarding_status
 from .host_binding import bound_tenant_slug, scope_memberships
 from .permissions import IsTenantAdmin, IsTenantOwner
 from .membership_policy import (
@@ -113,20 +114,7 @@ class OnboardingStatusView(APIView):
         except TenantMembership.DoesNotExist:
             return Response({"detail": "Not found."}, status=404)
 
-        tenant = mem.tenant
-        first_domain = tenant.domains.first()
-        domain_verified = (
-            first_domain.status == "active" if first_domain else False
-        )
-
-        return Response(
-            {
-                "workspace_created": True,
-                "domain_added": first_domain is not None,
-                "dns_verified": domain_verified,
-                "first_mailbox_created": tenant.mailboxes.exists(),
-            }
-        )
+        return Response(onboarding_status(mem.tenant))
 
 
 class WorkspaceStatsView(APIView):

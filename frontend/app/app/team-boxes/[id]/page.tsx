@@ -307,7 +307,7 @@ export default function TeamBoxDetailPage() {
 
   if (loading) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-collaboration-page">
         <PortalSkeleton className="mb-4 h-20 w-full" />
         <PortalSkeleton className="h-72 w-full" />
       </div>
@@ -316,14 +316,14 @@ export default function TeamBoxDetailPage() {
 
   if (!teamBox) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-collaboration-page">
         <PortalNotice tone="danger">TeamBox not found.</PortalNotice>
       </div>
     );
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-collaboration-page">
       <div className="mb-4">
         <Link href="/app/team-boxes" className="auth-text-button inline-flex items-center gap-2">
           <ArrowLeft className="h-4 w-4" />

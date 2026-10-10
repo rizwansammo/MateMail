@@ -131,7 +131,7 @@ export default function QueuePage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-operations-page">
       <PortalPageHeading
         title="Mail queue"
         description="Outbound messages waiting for delivery, retry, or administrator action."

@@ -130,7 +130,7 @@ function AuthorizationContent() {
 
   if (loading) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-authorization-page">
         <PortalSkeleton className="mx-auto h-[420px] max-w-[650px]" />
       </div>
     );
@@ -138,7 +138,7 @@ function AuthorizationContent() {
 
   if (approved) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-authorization-page">
         <div className="portal-authz-wrap">
           <PortalCard>
             <div className="portal-authz-success">
@@ -157,7 +157,7 @@ function AuthorizationContent() {
 
   if (!details) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-authorization-page">
         <div className="portal-authz-wrap">
           <PortalNotice tone="danger">{error || "This connection request is unavailable."}</PortalNotice>
         </div>
@@ -166,7 +166,7 @@ function AuthorizationContent() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-authorization-page">
       <div className="portal-authz-wrap">
         <PortalPageHeading
           eyebrow="CONNECTED APP AUTHORIZATION"
@@ -279,7 +279,7 @@ function AuthorizationContent() {
 
 export default function AuthorizationPage() {
   return (
-    <Suspense fallback={<div className="portal-page"><PortalSkeleton className="mx-auto h-[420px] max-w-[650px]" /></div>}>
+    <Suspense fallback={<div className="portal-page astra-resource-page astra-advanced-page astra-authorization-page"><PortalSkeleton className="mx-auto h-[420px] max-w-[650px]" /></div>}>
       <AuthorizationContent />
     </Suspense>
   );

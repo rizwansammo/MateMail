@@ -215,7 +215,7 @@ export default function SecurityPage() {
 
   if (loading) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-security-page">
         <PortalSkeleton className="mb-5 h-20 w-full" />
         <PortalSkeleton className="h-[420px] w-full" />
       </div>
@@ -224,7 +224,7 @@ export default function SecurityPage() {
 
   if (!profile || loadError) {
     return (
-      <div className="portal-page">
+      <div className="portal-page astra-resource-page astra-advanced-page astra-security-page">
         <PortalPageHeading title="Account security" description="Protect your MateMail Portal sign-in." />
         <PortalNotice tone="danger">{loadError || "Account security information could not be loaded."}</PortalNotice>
       </div>
@@ -232,7 +232,7 @@ export default function SecurityPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-security-page">
       <PortalPageHeading
         title="Account security"
         description="Protect your MateMail Portal account and manage the security controls the backend currently supports."
