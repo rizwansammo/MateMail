@@ -16,6 +16,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import {
   PortalButton,
   PortalCard,
@@ -299,14 +300,20 @@ export default function APIKeysPage() {
         </PortalCard>
       )}
 
-      {createOpen && (
-        <PortalCard className="portal-form-card" title="Create API key" subtitle="Every key can read workspace data. Grant only the write scopes the integration genuinely needs.">
+      <AstraResourceDialog
+        open={createOpen}
+        busy={creating}
+        title="Create API key"
+        description="Every key can read workspace data. Grant only the write scopes required."
+        onDismiss={() => { setCreateOpen(false); setCreateError(""); }}
+      >
           <form onSubmit={createKey}>
             {createError && <div className="mb-4"><PortalNotice tone="danger">{createError}</PortalNotice></div>}
             <div className="portal-form-grid">
               <div className="portal-field">
-                <label>Key name</label>
+                <label htmlFor="astra-api-key-name">Key name</label>
                 <input
+                  id="astra-api-key-name"
                   type="text"
                   required
                   maxLength={100}
@@ -316,8 +323,9 @@ export default function APIKeysPage() {
                 />
               </div>
               <div className="portal-field">
-                <label>Expiry date (optional)</label>
+                <label htmlFor="astra-api-key-expiry">Expiry date (optional)</label>
                 <input
+                  id="astra-api-key-expiry"
                   type="date"
                   value={newExpiry}
                   min={new Date().toISOString().slice(0, 10)}
@@ -350,8 +358,7 @@ export default function APIKeysPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
