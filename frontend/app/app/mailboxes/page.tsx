@@ -502,7 +502,7 @@ export default function MailboxesPage() {
       <div className="mt-4">
         <PortalNotice tone="info">
           <HardDrive className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Mailbox quota is chosen at creation and enforced against your plan. Editing quota/display name requires a backend update endpoint and is intentionally not simulated in this redesign.</span>
+          <span>Mailbox storage quotas are enforced by your plan. Changing an existing mailbox’s name or quota is not available in Hub yet.</span>
         </PortalNotice>
       </div>
     </div>
