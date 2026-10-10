@@ -469,10 +469,12 @@ def drop_managed_nginx(data):
     host = data["hostname"]
     receipt = retirement_receipt(data)
     path, link = site_file(host), enabled_file(host)
-    if path.exists() or link.is_symlink():
+
+    if link.is_symlink():
+        # First attempt: only our own marker and the exact owned symlink
+        # may be removed. If validation/reload fails, restore that symlink.
         managed_site(host)
-        if link.is_symlink():
-            link.unlink()
+        link.unlink()
         try:
             run("/usr/sbin/nginx", "-t")
             run("/usr/bin/systemctl", "reload", "nginx")
@@ -482,6 +484,21 @@ def drop_managed_nginx(data):
             run("/usr/sbin/nginx", "-t")
             run("/usr/bin/systemctl", "reload", "nginx")
             raise
+    elif path.exists():
+        # Crash recovery: the first attempt can die AFTER removing the
+        # enabled symlink but BEFORE deleting the source site file. An
+        # identity-matched 0600 retirement receipt proves this operation was
+        # previously authorized; we must neither get stuck nor remove an
+        # unmanaged replacement. Validate then reload before unlink.
+        if path.is_symlink() or not path.is_file() or not path.read_text().startswith(MARKER):
+            raise EdgeError("Retirement refuses unmanaged orphaned Nginx site")
+        collision_check(host)
+        run("/usr/sbin/nginx", "-t")
+        run("/usr/bin/systemctl", "reload", "nginx")
+    elif link.exists():
+        raise EdgeError("Retirement refuses unexpected Nginx enabled entry")
+
+    if path.exists():
         path.unlink()
     return receipt
 

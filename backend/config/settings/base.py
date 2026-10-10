@@ -54,6 +54,10 @@ CUSTOM_HOST_CACHE_TTL = env.int("CUSTOM_HOST_CACHE_TTL", default=30)
 TRANSPORT_SECURITY_SELF_SERVICE_ENABLED = env.bool(
     "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", default=False,
 )
+# DNS-Phase 4 controlled canary: exact internal Domain UUIDs only.
+# An empty allowlist is fail-closed; global customer self-service stays OFF.
+TRANSPORT_SECURITY_CANARY_DOMAIN_IDS = env("TRANSPORT_SECURITY_CANARY_DOMAIN_IDS", default="")
+
 # Phase C will supply a validated MTA-STS policy gateway. Do NOT assume the
 # existing Hub/PostBox custom-host CNAME target serves TLS policy files.
 MTA_STS_POLICY_EDGE_TARGET = env("MTA_STS_POLICY_EDGE_TARGET", default="")

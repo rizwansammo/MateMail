@@ -16,6 +16,22 @@ class TransportSecurityToggleSerializer(serializers.Serializer):
         return attrs
 
 
+
+def self_service_available_for(domain) -> bool:
+    """Global launch or an operator-approved exact Domain UUID canary.
+
+    Unknown/invalid values cannot expand access; domain names, tenant IDs and
+    wildcard entries never grant canary access.
+    """
+    if getattr(settings, "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", False):
+        return True
+    approved = (getattr(settings, "TRANSPORT_SECURITY_CANARY_DOMAIN_IDS", "") or "")
+    if not isinstance(approved, str):
+        return False
+    canonical_id = str(domain.pk).lower()
+    return any(part.strip().lower() == canonical_id for part in approved.split(","))
+
+
 def describe_transport_security(domain, config=None) -> dict:
     """Tenant-safe instructions, with explicit gates and no false Active status.
 
@@ -116,7 +132,7 @@ def describe_transport_security(domain, config=None) -> dict:
         "ownership_verified": domain.is_ownership_verified,
         "optional": True,
         "enabled": enabled,
-        "self_service_available": bool(getattr(settings, "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", False)),
+        "self_service_available": self_service_available_for(domain),
         "lifecycle": lifecycle,
         "certificate_status": config.certificate_status if config else "not_requested",
         "policy_mode": "none" if (offboarding and config.deactivation_policy_none_at) else "testing",  # actual worker-confirmed mode.
