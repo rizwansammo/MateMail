@@ -8,6 +8,10 @@ on:
       - "frontend/components/workspace/astra-shell.tsx"
       - "frontend/scripts/astra-visual-qa.mjs"
       - "frontend/scripts/astra-phase2a-qa.mjs"
+      - "frontend/scripts/astra-phase2b-qa.mjs"
+      - "frontend/app/app/astra-collaboration.css"
+      - "frontend/app/app/team-boxes/**"
+      - "frontend/app/app/forward-groups/**"
       - "frontend/app/app/astra-resources.css"
       - "frontend/components/workspace/astra-resource-dialog.tsx"
       - "frontend/app/app/mailboxes/**"
@@ -63,6 +67,12 @@ jobs:
           VISUAL_QA_URL: http://127.0.0.1:3100
           VISUAL_QA_OUTPUT: visual-qa-artifacts
         run: node scripts/astra-phase2a-qa.mjs
+      - name: Phase 2B TeamBox and Forward Group API-mock browser contract
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase2b-qa.mjs
       - name: Upload screenshots and QA report
         if: always()
         uses: actions/upload-artifact@v4
