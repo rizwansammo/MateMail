@@ -32,6 +32,8 @@ class TeamInvite(models.Model):
     expires_at = models.DateTimeField()
     accepted_at = models.DateTimeField(null=True, blank=True)
     is_revoked = models.BooleanField(default=False)
+    # Optional user-requested mailbox intent; no secret is saved here.
+    create_mailbox = models.BooleanField(default=False)
 
     class Meta:
         db_table = "teams_invite"
@@ -46,7 +48,7 @@ class TeamInvite(models.Model):
         )
 
     @classmethod
-    def make(cls, tenant, email, role, invited_by):
+    def make(cls, tenant, email, role, invited_by, *, create_mailbox=False):
         raw = secrets.token_urlsafe(40)
         token_hash = hashlib.sha256(raw.encode()).hexdigest()
         obj = cls.objects.create(
@@ -56,6 +58,7 @@ class TeamInvite(models.Model):
             token_hash=token_hash,
             invited_by=invited_by,
             expires_at=timezone.now() + timedelta(days=7),
+            create_mailbox=create_mailbox,
         )
         return raw, obj
 

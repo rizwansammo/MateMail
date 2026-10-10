@@ -47,6 +47,7 @@ interface Invite {
   accepted_at: string | null;
   is_revoked: boolean;
   is_pending: boolean;
+  create_mailbox?: boolean;
 }
 
 interface WorkspaceStats {
@@ -85,6 +86,8 @@ function TeamPageContent() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "support" | "read_only">("admin");
+  const [createMailbox, setCreateMailbox] = useState(false);
+  const [inviteLink, setInviteLink] = useState("");
   const [inviteError, setInviteError] = useState("");
   const [inviting, setInviting] = useState(false);
   const [message, setMessage] = useState("");
@@ -181,12 +184,14 @@ function TeamPageContent() {
     setInviting(true);
     setInviteError("");
     setMessage("");
+    setInviteLink("");
     try {
       const response = await apiRequest("/api/teams/invites/", {
         method: "POST",
         body: JSON.stringify({
           email: inviteEmail.trim().toLowerCase(),
           role: inviteRole,
+          ...(createMailbox ? { create_mailbox: true } : {}),
         }),
       });
       const data = await response.json().catch(() => null);
@@ -194,13 +199,17 @@ function TeamPageContent() {
       if (response.ok && data?.id) {
         setInviteEmail("");
         setInviteRole("admin");
+        setCreateMailbox(false);
+        setInviteLink(data.invite_url || "");
         setInviteOpen(false);
         if (data.email_delivered === false) {
           setMessageTone("warn");
           setMessage(data.detail ?? "The invitation was created, but the email could not be delivered.");
         } else {
           setMessageTone("success");
-          setMessage("Invitation sent successfully.");
+          setMessage(createMailbox
+            ? "Invitation sent. The member can create their personal mailbox when accepting."
+            : "Invitation sent successfully.");
         }
         setTab("invites");
         await loadTeam(false);
@@ -367,9 +376,28 @@ function TeamPageContent() {
               </div>
             </div>
 
+            <label className="mb-3 flex items-start gap-3 rounded border border-[var(--portal-border)] p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1 shrink-0"
+                checked={createMailbox}
+                onChange={(event) => setCreateMailbox(event.target.checked)}
+                aria-label="Create a mailbox for this user"
+              />
+              <span>
+                <strong className="block">Create a mailbox for this user</strong>
+                <small className="block mt-1">
+                  Optional. A personal mailbox matching the invited email will be provisioned when
+                  the person accepts and chooses a separate mailbox password.
+                </small>
+              </span>
+            </label>
             <div className="astra-user-invite-context">
               <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <p>Hub access only. This invitation does not create or assign a mailbox. Mailbox provisioning remains a separate administrative action.</p>
+              <p>{createMailbox
+                ? "Mailbox creation requires an approved workspace, verified domain, an unused address and available plan capacity. The invitation stores no password."
+                : "Hub access only. This invitation does not create or assign a mailbox. Mailbox provisioning remains a separate administrative action."
+              }</p>
             </div>
             <div className="portal-detail-actions">
               <PortalButton type="submit" disabled={inviting || !inviteEmail.trim() || !canManageInvites}>
@@ -392,6 +420,17 @@ function TeamPageContent() {
           </form>
       </AstraResourceDialog>
 
+      {inviteLink && (
+        <div className="mb-5">
+          <PortalNotice tone="warn">
+            Invitation link (shown once). If delivery failed, share it securely with the recipient.
+            <button type="button" className="ml-2 underline font-medium"
+              onClick={() => { void navigator.clipboard.writeText(inviteLink); }}>
+              Copy invite link
+            </button>
+          </PortalNotice>
+        </div>
+      )}
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
       )}
@@ -553,7 +592,7 @@ function TeamPageContent() {
                         <span><strong>{invite.email}</strong><small>Workspace invitation</small></span>
                       </div>
                     </td>
-                    <td><span className="portal-role-badge">{pretty(invite.role)}</span></td>
+                    <td><span className="portal-role-badge">{pretty(invite.role)}</span>{invite.create_mailbox && <small className="block mt-1">Mailbox requested</small>}</td>
                     <td><PortalStatus value={invite.is_pending ? "Pending" : "Expired"} /></td>
                     <td>{invite.invited_by_email || "Former member"}</td>
                     <td>{new Date(invite.expires_at).toLocaleDateString()}</td>

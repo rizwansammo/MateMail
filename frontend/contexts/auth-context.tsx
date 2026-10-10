@@ -41,7 +41,8 @@ interface AuthContextValue {
     password: string,
     full_name: string,
     workspace_name?: string,
-    invite_token?: string
+    invite_token?: string,
+    mailbox_password?: string
   ) => Promise<void>;
   logout: () => Promise<void>;
   verify2fa: (partial_token: string, code: string) => Promise<void>;
@@ -133,7 +134,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password: string,
       full_name: string,
       workspace_name?: string,
-      invite_token?: string
+      invite_token?: string,
+      mailbox_password?: string
     ) => {
       const data = await api.post<{
         access: string;
@@ -145,6 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         full_name,
         ...(workspace_name ? { workspace_name } : {}),
         ...(invite_token ? { invite_token } : {}),
+        ...(mailbox_password ? { mailbox_password } : {}),
       });
 
       setAccessToken(data.access);

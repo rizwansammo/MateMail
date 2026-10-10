@@ -24,6 +24,10 @@ from apps.tenants.membership_policy import (
     user_has_other_active_tenant,
 )
 from apps.tenants.permissions import HasTenantAccess, IsTenantAdmin
+from .invite_mailbox import (
+    InviteMailboxError, complete_invited_mailbox,
+    preflight_invited_mailbox, reserve_invited_mailbox,
+)
 from .models import APIKey, TeamInvite
 from .serializers import (
     APIKeyCreateSerializer,
@@ -50,6 +54,7 @@ class TeamInviteListView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"].lower()
         role = serializer.validated_data["role"]
+        create_mailbox = serializer.validated_data["create_mailbox"]
 
         if not tenant_allows_member_email(request.tenant, email):
             return Response({"detail": MEMBER_DOMAIN_ERROR}, status=400)
@@ -90,7 +95,20 @@ class TeamInviteListView(APIView):
             allowed, msg = check_member_limit(tenant)
             if not allowed:
                 return Response({"detail": msg}, status=403)
-            raw, invite = TeamInvite.make(request.tenant, email, role, request.user)
+            # Close the duplicate-invite race under the same tenant lock.
+            if TeamInvite.objects.filter(
+                tenant=tenant, email=email, is_revoked=False,
+                accepted_at__isnull=True, expires_at__gt=timezone.now(),
+            ).exists():
+                return Response({"detail": "A pending invite already exists for that email."}, status=400)
+            if create_mailbox:
+                try:
+                    preflight_invited_mailbox(tenant, email)
+                except InviteMailboxError as exc:
+                    return Response({"detail": exc.message}, status=exc.status_code)
+            raw, invite = TeamInvite.make(
+                tenant, email, role, request.user, create_mailbox=create_mailbox
+            )
 
         accept_url = f"{settings.FRONTEND_URL}/accept-invite?token={raw}"
 
@@ -105,7 +123,12 @@ class TeamInviteListView(APIView):
                 f"Accept your invitation (expires in 7 days):\n{accept_url}\n\n"
                 f"If you don't have a MateMail account yet, the invite link will create "
                 f"your account directly inside this organization.\n\n"
-                f"— MateMail, by NetaMate Solutions"
+                + (
+                    "A personal mailbox has been requested for your email. "
+                    "Choose its password when you accept this invitation.\n\n"
+                    if create_mailbox else ""
+                )
+                + "— MateMail, by NetaMate Solutions"
             ),
             to=email,
             purpose="team-invite",
@@ -116,6 +139,8 @@ class TeamInviteListView(APIView):
         # But the admin is told, because otherwise they sit waiting for someone
         # who was never contacted.
         data = TeamInviteSerializer(invite).data
+        # One-time secret link, only in this owner/admin POST response, never list/preview.
+        data["invite_url"] = accept_url
         data["email_delivered"] = delivered
         if not delivered:
             data["detail"] = (
@@ -179,55 +204,77 @@ class TeamInviteAcceptView(APIView):
         if user_has_other_active_tenant(request.user, invite.tenant):
             return Response({"detail": SINGLE_ORGANIZATION_ERROR}, status=403)
 
-        with transaction.atomic():
-            tenant = Tenant.objects.select_for_update().get(pk=invite.tenant_id)
+        mailbox_password = request.data.get("mailbox_password", "")
+        if invite.create_mailbox and (
+            not isinstance(mailbox_password, str) or len(mailbox_password) < 10
+        ):
+            return Response(
+                {"detail": "Choose a mailbox password of at least 10 characters."}, status=400
+            )
 
-            existing = TenantMembership.objects.filter(
-                tenant=invite.tenant, user=request.user
-            ).first()
-            if existing and existing.status == MemberStatus.ACTIVE:
+        mailbox = None
+        try:
+            with transaction.atomic():
+                tenant = Tenant.objects.select_for_update().get(pk=invite.tenant_id)
+                invite = TeamInvite.objects.select_for_update().get(pk=invite.pk)
+                if not invite.is_pending:
+                    return Response({"detail": "This invitation is no longer valid."}, status=400)
+    
+                existing = TenantMembership.objects.filter(
+                    tenant=invite.tenant, user=request.user
+                ).first()
+                if existing and existing.status == MemberStatus.ACTIVE:
+                    invite.accepted_at = timezone.now()
+                    invite.save(update_fields=["accepted_at"])
+                    tokens = make_tokens(request.user, tenant_id=invite.tenant_id)
+                    return authenticated_response(
+                        tokens,
+                        {
+                            "detail": "Already a member.",
+                            "user": UserProfileSerializer(request.user).data,
+                            "tenant": {
+                                "id": str(invite.tenant.id),
+                                "name": invite.tenant.name,
+                                "slug": invite.tenant.slug,
+                                "status": invite.tenant.status,
+                                "role": existing.role,
+                            },
+                        },
+                        status=200,
+                    )
+    
+                # This invite already occupies a seat, so the post-acceptance total
+                # is unchanged and `additional=0` is the right question to ask. The
+                # check is still needed: the plan can be downgraded between the
+                # invitation being sent and the recipient clicking the link.
+                allowed, msg = check_member_limit(tenant, additional=0)
+                if not allowed:
+                    return Response({"detail": msg}, status=403)
+    
+                # Reserve address and seat under the SAME database transaction.
+                mailbox = reserve_invited_mailbox(tenant, invite, request.user.full_name)
+                if existing:
+                    existing.role = invite.role
+                    existing.status = MemberStatus.ACTIVE
+                    existing.save(update_fields=["role", "status", "updated_at"])
+                else:
+                    TenantMembership.objects.create(
+                        tenant=invite.tenant,
+                        user=request.user,
+                        role=invite.role,
+                        status=MemberStatus.ACTIVE,
+                        invited_by_id=invite.invited_by_id,
+                    )
+    
                 invite.accepted_at = timezone.now()
                 invite.save(update_fields=["accepted_at"])
-                tokens = make_tokens(request.user, tenant_id=invite.tenant_id)
-                return authenticated_response(
-                    tokens,
-                    {
-                        "detail": "Already a member.",
-                        "user": UserProfileSerializer(request.user).data,
-                        "tenant": {
-                            "id": str(invite.tenant.id),
-                            "name": invite.tenant.name,
-                            "slug": invite.tenant.slug,
-                            "status": invite.tenant.status,
-                            "role": existing.role,
-                        },
-                    },
-                    status=200,
-                )
+        except InviteMailboxError as exc:
+            return Response({"detail": exc.message}, status=exc.status_code)
 
-            # This invite already occupies a seat, so the post-acceptance total
-            # is unchanged and `additional=0` is the right question to ask. The
-            # check is still needed: the plan can be downgraded between the
-            # invitation being sent and the recipient clicking the link.
-            allowed, msg = check_member_limit(tenant, additional=0)
-            if not allowed:
-                return Response({"detail": msg}, status=403)
-
-            if existing:
-                existing.role = invite.role
-                existing.status = MemberStatus.ACTIVE
-                existing.save(update_fields=["role", "status", "updated_at"])
-            else:
-                TenantMembership.objects.create(
-                    tenant=invite.tenant,
-                    user=request.user,
-                    role=invite.role,
-                    status=MemberStatus.ACTIVE,
-                    invited_by_id=invite.invited_by_id,
-                )
-
-            invite.accepted_at = timezone.now()
-            invite.save(update_fields=["accepted_at"])
+        mailbox_result = (
+            complete_invited_mailbox(mailbox, mailbox_password, request=request)
+            if mailbox is not None else None
+        )
 
         membership = TenantMembership.objects.get(
             tenant=invite.tenant,
@@ -239,6 +286,7 @@ class TeamInviteAcceptView(APIView):
             tokens,
             {
                 "detail": "Invite accepted.",
+                "mailbox": mailbox_result,
                 "user": UserProfileSerializer(request.user).data,
                 "tenant": {
                     "id": str(invite.tenant.id),
@@ -279,6 +327,7 @@ class TeamInvitePreviewView(APIView):
                 "tenant_name": invite.tenant.name,
                 "invited_by": invite.invited_by.full_name or invite.invited_by.email if invite.invited_by else None,
                 "expires_at": invite.expires_at,
+                "create_mailbox": invite.create_mailbox,
             }
         )
 
