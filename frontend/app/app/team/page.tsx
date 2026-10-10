@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Clock3,
@@ -69,7 +69,9 @@ function initials(name: string, email: string) {
   return parts.map((part) => part[0]?.toUpperCase()).join("") || "TM";
 }
 
-export default function TeamPage() {
+function TeamPageContent() {
+  const routeParams = useSearchParams();
+  const requestedSearch = routeParams.get("q") || "";
   const router = useRouter();
   const { tenant, user, logout } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
@@ -145,6 +147,12 @@ export default function TeamPage() {
 
   const canManageInvites = myRole === "owner" || myRole === "admin";
   const canChangeRoles = myRole === "owner";
+
+  useEffect(() => {
+    // Direct links from Global Search remain shareable and survive a reload.
+    // The effect also handles Next.js soft navigation to a new query.
+    setQuery(requestedSearch);
+  }, [requestedSearch]);
 
   const filteredMembers = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -617,4 +625,9 @@ export default function TeamPage() {
       )}
     </div>
   );
+}
+
+/** Suspense boundary required by Next.js useSearchParams during static builds. */
+export default function TeamPage() {
+  return <Suspense fallback={null}><TeamPageContent /></Suspense>;
 }
