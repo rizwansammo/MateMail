@@ -318,7 +318,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <CustomHostnamesSettings canEdit={canEdit} />
+      <div id="hub-custom-hostnames"><CustomHostnamesSettings canEdit={canEdit} /></div>
 
       <PortalCard
         className="mt-5"
