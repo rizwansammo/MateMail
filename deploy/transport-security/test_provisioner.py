@@ -345,7 +345,7 @@ class RetirementContractTests(TestCase):
                     module.drop_managed_nginx(data)
             self.assertFalse(link.is_symlink())
             self.assertTrue(site.exists())
-            self.assertTrue(module.receipt_path(host).exists())
+            self.assertTrue((journal / (host + ".json")).exists())
             # A subsequent worker invocation must complete without deleting an
             # unrelated site or treating the interrupted removal as unmanaged.
             with mock.patch.object(module, "SITES", sites), mock.patch.object(
