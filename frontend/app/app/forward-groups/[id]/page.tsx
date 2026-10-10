@@ -382,8 +382,8 @@ export default function ForwardGroupDetailPage() {
       <PortalCard className="mb-5" title="Members" subtitle="Each member receives its own copy in its own mailbox.">
         <div className="mb-5 flex flex-wrap items-end gap-3">
           <div className="portal-field min-w-[18rem] flex-1">
-            <label>Add mailbox</label>
-            <select value={chosenMemberId} onChange={(event) => setMemberMailboxId(event.target.value)}>
+            <label htmlFor="astra-fg-detail-add-member">Add mailbox</label>
+            <select id="astra-fg-detail-add-member" value={chosenMemberId} onChange={(event) => setMemberMailboxId(event.target.value)}>
               {availableMembers.map((mailbox) => (
                 <option key={mailbox.id} value={mailbox.id}>
                   {mailbox.full_name ? `${mailbox.full_name} — ${mailbox.email}` : mailbox.email}
@@ -446,8 +446,9 @@ export default function ForwardGroupDetailPage() {
       <PortalCard className="mb-5" title="Sender policy" subtitle="Restricted policies are enforced by Postfix using the authenticated mailbox, not the visible From address.">
         <div className="portal-form-grid">
           <div className="portal-field full">
-            <label>Who can send to this group?</label>
+            <label htmlFor="astra-fg-detail-policy">Who can send to this group?</label>
             <select
+              id="astra-fg-detail-policy"
               value={group.sender_policy}
               disabled={busy}
               onChange={(event) => void patchPolicy(event.target.value as ForwardGroup["sender_policy"])}
@@ -464,8 +465,8 @@ export default function ForwardGroupDetailPage() {
           <div className="mt-5">
             <div className="mb-4 flex flex-wrap items-end gap-3">
               <div className="portal-field min-w-[18rem] flex-1">
-                <label>Add allowed sender</label>
-                <select value={chosenSenderId} onChange={(event) => setSenderMailboxId(event.target.value)}>
+                <label htmlFor="astra-fg-detail-add-sender">Add allowed sender</label>
+                <select id="astra-fg-detail-add-sender" value={chosenSenderId} onChange={(event) => setSenderMailboxId(event.target.value)}>
                   {availableSenders.map((mailbox) => (
                     <option key={mailbox.id} value={mailbox.id}>
                       {mailbox.full_name ? `${mailbox.full_name} — ${mailbox.email}` : mailbox.email}
