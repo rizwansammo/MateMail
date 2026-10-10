@@ -12,6 +12,17 @@ on:
       - "frontend/scripts/astra-phase2c-qa.mjs"
       - "frontend/scripts/astra-phase2d-qa.mjs"
       - "frontend/scripts/astra-phase2e-qa.mjs"
+      - "frontend/scripts/astra-phase3-qa.mjs"
+      - "frontend/app/app/astra-advanced.css"
+      - "frontend/app/app/backups/**"
+      - "frontend/app/app/logs/**"
+      - "frontend/app/app/queue/**"
+      - "frontend/app/app/spam/**"
+      - "frontend/app/app/billing/**"
+      - "frontend/app/app/security/**"
+      - "frontend/app/app/settings/**"
+      - "frontend/app/app/domains/**"
+      - "frontend/components/workspace/custom-hostnames-settings.tsx"
       - "frontend/app/app/astra-users.css"
       - "frontend/app/app/team/**"
       - "frontend/app/app/astra-routing.css"
@@ -100,6 +111,12 @@ jobs:
           VISUAL_QA_URL: http://127.0.0.1:3100
           VISUAL_QA_OUTPUT: visual-qa-artifacts
         run: node scripts/astra-phase2e-qa.mjs
+      - name: Phase 3 advanced Operations, Security, Settings & Hostname browser QA
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase3-qa.mjs
       - name: Upload screenshots and QA report
         if: always()
         uses: actions/upload-artifact@v4
