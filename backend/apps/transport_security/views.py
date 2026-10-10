@@ -15,6 +15,7 @@ from .models import (
 )
 from .serializers import (
     TransportSecurityToggleSerializer, describe_transport_security,
+    self_service_available_for,
 )
 from django.conf import settings
 from django.utils import timezone
@@ -45,7 +46,7 @@ class DomainTransportSecurityView(APIView):
         serializer.is_valid(raise_exception=True)
         enabled = serializer.validated_data["enabled"]
 
-        if not getattr(settings, "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", False):
+        if not self_service_available_for(domain):
             return Response({
                 "detail": "Advanced transport security configuration is not yet available."
             }, status=503)
@@ -138,7 +139,7 @@ class DomainTransportSecurityDNSVerifyView(APIView):
         domain = get_object_or_404(
             Domain.objects.for_tenant(request.tenant).select_for_update(), pk=pk
         )
-        if not getattr(settings, "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", False):
+        if not self_service_available_for(domain):
             return Response({"detail": "Advanced transport security is not available."}, status=503)
         try:
             assert_can_use_mail(request.tenant)
