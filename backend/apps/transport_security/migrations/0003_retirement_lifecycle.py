@@ -1,10 +1,18 @@
 # DNS-Phase 3: durable opt-out, DNS absence and cache-drain checkpoints.
 from django.db import migrations, models
+import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
     dependencies = [("transport_security", "0002_record_publication_status")]
     operations = [
+        migrations.AlterField(
+            model_name="domaintransportsecurity", name="domain",
+            field=models.OneToOneField(
+                to="domains.domain", on_delete=django.db.models.deletion.PROTECT,
+                primary_key=True, related_name="transport_security", serialize=False,
+            ),
+        ),
         migrations.AlterField(
             model_name="domaintransportsecurity", name="lifecycle",
             field=models.CharField(max_length=20, default="disabled", choices=[
