@@ -119,7 +119,7 @@ def describe_transport_security(domain, config=None) -> dict:
         "self_service_available": bool(getattr(settings, "TRANSPORT_SECURITY_SELF_SERVICE_ENABLED", False)),
         "lifecycle": lifecycle,
         "certificate_status": config.certificate_status if config else "not_requested",
-        "policy_mode": "none" if offboarding else "testing",  # never customer-writable.
+        "policy_mode": "none" if (offboarding and config.deactivation_policy_none_at) else "testing",  # actual worker-confirmed mode.
         "mx": mx_host,
         "max_age_seconds": 86400,
         "policy_url": f"https://{policy_host}/.well-known/mta-sts.txt" if enabled else None,
