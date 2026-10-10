@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import {
   PortalButton,
   PortalCard,
@@ -286,15 +287,21 @@ export default function IntegrationsPage() {
         </PortalCard>
       )}
 
-      {createOpen && (
-        <PortalCard className="portal-form-card" title="Create connected app" subtitle="The resulting credential is permanently bound to one workspace mailbox.">
+      <AstraResourceDialog
+        open={createOpen}
+        busy={creating}
+        title="Create connected app"
+        description="Issue a scoped credential bound permanently to one organization mailbox."
+        onDismiss={() => { setCreateOpen(false); setCreateError(""); }}
+      >
           <form onSubmit={createIntegration}>
             {createError && <div className="mb-4"><PortalNotice tone="danger">{createError}</PortalNotice></div>}
 
             <div className="portal-form-grid">
               <div className="portal-field">
-                <label>Application name</label>
+                <label htmlFor="astra-connected-app-name">Application name</label>
                 <input
+                  id="astra-connected-app-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   maxLength={100}
@@ -304,8 +311,8 @@ export default function IntegrationsPage() {
               </div>
 
               <div className="portal-field">
-                <label>Purpose</label>
-                <select value={purpose} onChange={(event) => choosePurpose(event.target.value)}>
+                <label htmlFor="astra-connected-app-purpose">Purpose</label>
+                <select id="astra-connected-app-purpose" value={purpose} onChange={(event) => choosePurpose(event.target.value)}>
                   {PURPOSES.map((item) => (
                     <option key={item.value} value={item.value}>{item.label}</option>
                   ))}
@@ -314,8 +321,8 @@ export default function IntegrationsPage() {
               </div>
 
               <div className="portal-field full">
-                <label>Mailbox</label>
-                <select value={mailboxId} onChange={(event) => setMailboxId(event.target.value)} required>
+                <label htmlFor="astra-connected-app-mailbox">Mailbox</label>
+                <select id="astra-connected-app-mailbox" value={mailboxId} onChange={(event) => setMailboxId(event.target.value)} required>
                   {mailboxes.map((mailbox) => (
                     <option key={mailbox.id} value={mailbox.id}>
                       {mailbox.full_name ? mailbox.full_name + " — " : ""}{mailbox.email}
@@ -360,8 +367,7 @@ export default function IntegrationsPage() {
               <PortalButton type="button" variant="secondary" disabled={creating} onClick={() => setCreateOpen(false)}>Cancel</PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
