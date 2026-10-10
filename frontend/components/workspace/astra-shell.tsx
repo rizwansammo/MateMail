@@ -48,7 +48,12 @@ const sections: NavGroup[] = [
 ];
 const settings: NavItem = { label: "Settings", href: "/app/settings", icon: Settings };
 const allItems = [...home, ...sections.flatMap(group => group.items), settings];
-type Resource = { id: string; text: string; category: string; href: string; icon: LucideIcon };
+type Resource = { id: string; text: string; description: string; searchText: string; category: string; href: string; icon: LucideIcon };
+type SearchState = { tenantId: string; rows: Resource[]; loading: boolean; unavailable: number };
+type SearchSource = {
+  path: string; category: string; href: string; icon: LucideIcon;
+  titleFields: string[]; detailFields: string[]; detailRoute?: boolean; adminOnly?: boolean;
+};
 type Onboarding = {
   workspace_created: boolean;
   domain_added: boolean;
@@ -68,22 +73,49 @@ function currentItem(pathname: string): NavItem | undefined {
     .filter(item => pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href + "/")))
     .sort((a,b) => b.href.length-a.href.length)[0];
 }
-function parseItems(data: unknown, category: string, href: string, icon: LucideIcon): Resource[] {
-  const values = Array.isArray(data) ? data : data && typeof data === "object" && "results" in data && Array.isArray(data.results) ? data.results : [];
-  return values.slice(0, 80).flatMap((value: unknown): Resource[] => {
+function field(row: Record<string, unknown>, names: string[]): string {
+  for (const name of names) {
+    const candidate = row[name];
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  return "";
+}
+/** The backend remains authoritative for tenant isolation and permissions. */
+function parseItems(data: unknown, source: SearchSource): Resource[] {
+  const values: unknown[] = Array.isArray(data)
+    ? data
+    : data && typeof data === "object" && "results" in data && Array.isArray(data.results) ? data.results : [];
+  return values.slice(0, 200).flatMap((value): Resource[] => {
     if (!value || typeof value !== "object") return [];
     const row = value as Record<string, unknown>;
     const id = typeof row.id === "string" ? row.id : "";
-    const title = [row.email, row.domain, row.address, row.name, row.display_name].find(v => typeof v === "string" && v.trim());
-    if (!id || typeof title !== "string") return [];
-    return [{id, text:title,category,href:href + "/" + encodeURIComponent(id),icon}];
+    const title = field(row, source.titleFields);
+    if (!id || !title) return [];
+    const description = field(row, source.detailFields);
+    const href = source.detailRoute
+      ? source.href + "/" + encodeURIComponent(id)
+      : source.href + "?q=" + encodeURIComponent(title);
+    return [{
+      id: source.category + ":" + id, text: title, description,
+      searchText: [title, description].join(" ").toLocaleLowerCase(),
+      category: source.category, href, icon: source.icon,
+    }];
   });
 }
-const searchSources = [
-  {path:"/api/mailboxes/",category:"Mailboxes",href:"/app/mailboxes",icon:Mail},
-  {path:"/api/domains/",category:"Domains",href:"/app/domains",icon:Globe2},
-  {path:"/api/team-boxes/",category:"TeamBox",href:"/app/team-boxes",icon:Inbox},
-  {path:"/api/forward-groups/",category:"Forward Groups",href:"/app/forward-groups",icon:Users},
+const searchSources: SearchSource[] = [
+  {path:"/api/mailboxes/",category:"Mailboxes",href:"/app/mailboxes",icon:Mail,titleFields:["email"],detailFields:["full_name"],detailRoute:true},
+  {path:"/api/domains/",category:"Domains",href:"/app/domains",icon:Globe2,titleFields:["domain"],detailFields:[],detailRoute:true},
+  {path:"/api/team-boxes/",category:"TeamBox",href:"/app/team-boxes",icon:Inbox,titleFields:["email"],detailFields:["full_name"],detailRoute:true},
+  {path:"/api/forward-groups/",category:"Forward Groups",href:"/app/forward-groups",icon:Users,titleFields:["address"],detailFields:["display_name"],detailRoute:true},
+  {path:"/api/aliases/",category:"Aliases",href:"/app/aliases",icon:Link2,titleFields:["source_address"],detailFields:["destination_email"]},
+  {path:"/api/forwarding/",category:"Forwarding",href:"/app/forwarding",icon:Waypoints,titleFields:["source_mailbox_email"],detailFields:["destination_email"]},
+  {path:"/api/delegations/",category:"Delegation",href:"/app/delegation",icon:ShieldCheck,titleFields:["target_email"],detailFields:["delegate_email"],adminOnly:true},
+  {path:"/api/teams/members/",category:"Users & access",href:"/app/team",icon:Users,titleFields:["email"],detailFields:["full_name"]},
+];
+/** Static settings shortcuts supplement navigation; no credential values are indexed. */
+const extraPages: NavItem[] = [
+  {label:"Account security",href:"/app/security",icon:ShieldCheck},
+  {label:"API keys",href:"/app/settings/api-keys",icon:KeyRound,adminOnly:true},
 ];
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -131,10 +163,13 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
   const [searchOpen,setSearchOpen] = useState(false);
   const [query,setQuery] = useState("");
   const [selected,setSelected] = useState(0);
-  const [resources,setResources] = useState<Resource[]>([]);
+  const [searchState,setSearchState] = useState<SearchState>({tenantId:"",rows:[],loading:false,unavailable:0});
+  const [macShortcut,setMacShortcut] = useState(true);
   const [accountOpen,setAccountOpen] = useState(false);
   const [setupStatus,setSetupStatus] = useState<{tenantId:string;state:"required"|"done"}|null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
   const admin = accountRole==="admin"||accountRole==="owner";
   const current = currentItem(pathname);
   const done = setupStatus?.tenantId===tenantId && setupStatus.state==="done";
@@ -180,17 +215,31 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
 
   useEffect(() => {
     if (!searchOpen) return;
-    let cancelled=false;
-    Promise.allSettled(searchSources.map(async source => {
-      const response=await apiRequest(source.path);
-      if(!response.ok) return [];
-      return parseItems(await response.json(),source.category,source.href,source.icon);
-    })).then(values => {
-      if(cancelled) return;
-      setResources(values.flatMap(result=>result.status==="fulfilled"?result.value:[]));
+    const controller = new AbortController();
+    const sources = searchSources.filter(source => !source.adminOnly || admin);
+    // Keep the results tagged with their tenant: no previous workspace's data
+    // can be displayed while new requests are pending or if they fail.
+    setSearchState({tenantId,rows:[],loading:!!tenantId,unavailable:0});
+    if (!tenantId) return;
+    void Promise.allSettled(sources.map(async source => {
+      const path = source.category === "Users & access"
+        ? "/api/workspaces/" + encodeURIComponent(tenantId) + "/members/"
+        : source.path;
+      const response = await apiRequest(path,{signal:controller.signal});
+      if (!response.ok) throw new Error("Search source not available");
+      return parseItems(await response.json(),source);
+    })).then(results => {
+      if (controller.signal.aborted) return;
+      const rows: Resource[] = [];
+      let unavailable = 0;
+      for (const result of results) {
+        if (result.status === "fulfilled") rows.push(...result.value);
+        else unavailable++;
+      }
+      setSearchState({tenantId,rows,loading:false,unavailable});
     });
-    return () => {cancelled=true;};
-  },[searchOpen,tenantId]);
+    return () => controller.abort();
+  },[searchOpen,tenantId,admin]);
 
   useEffect(() => {
     const listener=(event:KeyboardEvent)=>{
@@ -208,7 +257,18 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
   },[]);
 
   useEffect(() => {
-    if(searchOpen){searchRef.current?.focus();}
+    setMacShortcut(/Mac|iPhone|iPad/i.test(navigator.platform));
+  },[]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const priorOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    searchRef.current?.focus();
+    return () => {
+      document.body.style.overflow = priorOverflow;
+      openerRef.current?.focus();
+    };
   },[searchOpen]);
 
   useEffect(() => {
@@ -217,17 +277,27 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
     return () => window.removeEventListener("popstate", closeMenus);
   },[]);
 
-  const pageItems=allItems.filter(item=>accessible(item,admin)&&(!item.onboarding||showOnboarding));
+  const pageItems=[...allItems,...extraPages].filter(item=>accessible(item,admin)&&(!item.onboarding||showOnboarding));
   const matches=useMemo(() => {
-    const needle=query.trim().toLowerCase();
-    const pages=pageItems.filter(item=>!needle||item.label.toLowerCase().includes(needle)).map(item=>({text:item.label,category:"Pages",href:item.href,icon:item.icon,id:item.href}));
-    const records=resources.filter(item=>!needle||item.text.toLowerCase().includes(needle));
-    return [...pages,...records].slice(0,120);
-    // Permissions and onboarding state directly determine which pages are listed.
-  },[query,resources,admin,showOnboarding]);
-  const openSearch=()=>{setQuery("");setSelected(0);setSearchOpen(true);};
+    const needle=query.trim().toLocaleLowerCase();
+    const pages:Resource[]=pageItems.filter(item=>!needle||item.label.toLocaleLowerCase().includes(needle)).map(item=>({
+      text:item.label,description:"",searchText:item.label.toLocaleLowerCase(),
+      category:"Pages",href:item.href,icon:item.icon,id:"page:"+item.href,
+    }));
+    const currentRows=searchState.tenantId===tenantId?searchState.rows:[];
+    const records=currentRows.filter(item=>!needle||item.searchText.includes(needle));
+    const rank=(item:Resource) => item.text.toLocaleLowerCase().startsWith(needle)?0:1;
+    return [...pages,...records.sort((a,b)=>rank(a)-rank(b)||a.text.localeCompare(b.text))].slice(0,100);
+    // Every search result belongs to this tenant and is filtered by role.
+  },[query,searchState,tenantId,admin,showOnboarding]);
+  const openSearch=()=>{openerRef.current=document.activeElement as HTMLElement;setQuery("");setSelected(0);setSearchOpen(true);};
   const navigate=(href:string)=>{setSearchOpen(false);setMobileOpen(false);router.push(href);};
   const choose=(item:Resource)=>navigate(item.href);
+  const activeIndex=Math.min(selected,Math.max(0,matches.length-1));
+  useEffect(() => {
+    if (!searchOpen) return;
+    document.getElementById("astra-search-result-"+activeIndex)?.scrollIntoView({block:"nearest"});
+  },[searchOpen,activeIndex,query,searchState]);
   const navLink=(item:NavItem)=>{
     const active=current?.href===item.href;
     return <li key={item.href} data-slot="sidebar-menu-item">
@@ -275,7 +345,7 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
           </div>
           <div className="topbar-right">
             <button type="button" className="global-search" onClick={openSearch} aria-label="Search workspace">
-              <Search size={16}/><span>Search workspace</span><kbd>⌘ K</kbd>
+              <Search size={16}/><span>Search workspace</span><kbd>{macShortcut?"⌘ K":"Ctrl K"}</kbd>
             </button>
             <button type="button" className="astra-icon-button" aria-label={theme==="dark"?"Switch to light theme":"Switch to dark theme"}
               onClick={()=>setTheme(theme==="dark"?"light":"dark")}>{theme==="dark"?<Sun size={17}/>:<Moon size={17}/>}</button>
@@ -301,25 +371,35 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
       </div>
     </div>
     {searchOpen&&<div className="astra-search-layer" onMouseDown={event=>{if(event.target===event.currentTarget)setSearchOpen(false)}}>
-      <section className="astra-search-dialog" role="dialog" aria-modal="true" aria-label="Search Hub" onKeyDown={event=>{
-        if(event.key==="ArrowDown"){event.preventDefault();setSelected(index=>Math.min(matches.length-1,index+1))}
+      <section ref={dialogRef} className="astra-search-dialog" role="dialog" aria-modal="true" aria-label="Search Hub" onKeyDown={event=>{
+        if(event.key==="ArrowDown"){event.preventDefault();setSelected(index=>Math.min(Math.max(0,matches.length-1),index+1))}
         if(event.key==="ArrowUp"){event.preventDefault();setSelected(index=>Math.max(0,index-1))}
-        if(event.key==="Enter"&&matches[selected]){event.preventDefault();choose(matches[selected])}
+        if(event.key==="Enter"&&matches[activeIndex]){event.preventDefault();choose(matches[activeIndex])}
+        if(event.key==="Tab"){
+          const focusable=Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('input,button:not([disabled])')??[]);
+          const first=focusable[0],last=focusable[focusable.length-1];
+          if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
+          else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
+        }
       }}>
         <div className="astra-search-inputrow">
-          <Search size={16}/>
+          <Search size={16} aria-hidden="true"/>
           <input ref={searchRef} autoFocus aria-label="Search Hub pages and resources" placeholder="Search pages, mailboxes, domains…" value={query}
+            aria-controls="astra-hub-search-results" aria-activedescendant={matches.length?"astra-search-result-"+activeIndex:undefined}
             onChange={event=>{setQuery(event.target.value);setSelected(0);}}/>
           <button type="button" className="astra-search-x" onClick={()=>setSearchOpen(false)} aria-label="Close search"><X size={16}/></button>
         </div>
-        <div className="astra-search-results" role="listbox" aria-label="Search results">
-          {matches.length===0?<div className="astra-search-empty">No matching results.</div>:
-            [...new Set(matches.map(item=>item.category))].map(category=><div key={category}>
+        <div id="astra-hub-search-results" className="astra-search-results" role="listbox" aria-label="Search results" aria-busy={searchState.tenantId===tenantId&&searchState.loading}>
+          {matches.length===0?<div className="astra-search-empty">{searchState.tenantId===tenantId&&searchState.loading?"Searching workspace…":"No matching results."}</div>:
+            [...new Set(matches.map(item=>item.category))].map(category=><div key={category} role="group" aria-label={category}>
               <div className="astra-search-group">{category}</div>
-              {matches.map((item,index)=>item.category===category&&<button type="button" key={item.id+item.category} role="option" aria-selected={index===selected} data-selected={index===selected} className="astra-search-row"
-                onMouseEnter={()=>setSelected(index)} onClick={()=>choose(item)}><item.icon size={16}/>{item.text}</button>)}
+              {matches.map((item,index)=>item.category===category&&<button type="button" key={item.id} id={"astra-search-result-"+index} role="option" aria-label={item.text} aria-selected={index===activeIndex} data-selected={index===activeIndex} className="astra-search-row"
+                onMouseEnter={()=>setSelected(index)} onClick={()=>choose(item)}><item.icon size={16} aria-hidden="true"/><span className="astra-search-rowtext"><span>{item.text}</span>{item.description&&<small>{item.description}</small>}</span></button>)}
             </div>)}
+          {searchState.tenantId===tenantId&&searchState.loading&&<div className="astra-search-feedback" role="status">Loading workspace resources…</div>}
+          {searchState.tenantId===tenantId&&!searchState.loading&&searchState.unavailable>0&&<div className="astra-search-feedback" role="status">Some resources are unavailable. Page search is still working.</div>}
         </div>
+        <div className="astra-search-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate <kbd>↵</kbd> Open</span><span><kbd>Esc</kbd> Close</span></div>
       </section>
     </div>}
   </div>;
