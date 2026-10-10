@@ -174,6 +174,11 @@ try{
  await screen(limited.page,"phase2b-08-group-mobile");
  check("Read-only Group create disabled",await limited.page.getByRole("button",{name:"Create Forward Group"}).first().isDisabled());
  check("Group mobile no page-wide overflow",(await checkGeometry(limited.page)).overflow<=391,await checkGeometry(limited.page));
+ await go(limited.page,"Group readonly detail","/app/forward-groups/"+groupId);
+ await screen(limited.page,"phase2b-09-group-detail-readonly");
+ check("Read-only Group detail hides member mutations",await limited.page.getByRole("button",{name:"Add member"}).count()===0);
+ check("Read-only Group detail hides destructive actions",await limited.page.getByRole("button",{name:"Delete",exact:true}).count()===0);
+ check("Read-only Group sender policy is immutable",await limited.page.getByLabel("Who can send to this group?").isDisabled());
  check("Mobile no JS crash",limited.errors.length===0,{errors:limited.errors});
  await limited.ctx.close();
 }catch(e){report.error=e.stack||String(e);process.exitCode=1;}
