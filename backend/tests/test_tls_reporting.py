@@ -109,6 +109,7 @@ class ParserSecurityTest(SimpleTestCase):
             ingest_raw_message(raw)
         msg = EmailMessage()
         msg["From"] = "reporter@example.test"
+        msg["TLS-Report-Submitter"] = "example.test"
         msg["Authentication-Results"] = "mx.example.test; dkim=pass header.d=example.test"
         msg["DKIM-Signature"] = (
             "v=1; a=rsa-sha256; d=example.test; s=default; "
@@ -124,6 +125,7 @@ class ParserSecurityTest(SimpleTestCase):
     def test_dkim_requires_reporting_sender_domain_alignment(self):
         msg = EmailMessage()
         msg["From"] = "reporter@reports.example.test"
+        msg["TLS-Report-Submitter"] = "example.test"
         msg["DKIM-Signature"] = (
             "v=1; a=rsa-sha256; d=example.test; s=default; "
             "h=from:subject; bh=fake; b=fake"
@@ -132,6 +134,11 @@ class ParserSecurityTest(SimpleTestCase):
         with mock.patch("apps.tls_reports.authentication.dkim.verify") as verifier:
             verifier.return_value = True
             self.assertTrue(verified_report_sender(msg.as_bytes(), msg))
+        msg.replace_header("TLS-Report-Submitter", "unrelated.test")
+        with mock.patch("apps.tls_reports.authentication.dkim.verify") as verifier:
+            self.assertFalse(verified_report_sender(msg.as_bytes(), msg))
+            verifier.assert_not_called()
+        msg.replace_header("TLS-Report-Submitter", "example.test")
         msg.replace_header("From", "attacker@other.test")
         with mock.patch("apps.tls_reports.authentication.dkim.verify") as verifier:
             self.assertFalse(verified_report_sender(msg.as_bytes(), msg))
