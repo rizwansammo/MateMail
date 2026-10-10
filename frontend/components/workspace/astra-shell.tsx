@@ -219,8 +219,10 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
     const sources = searchSources.filter(source => !source.adminOnly || admin);
     // Keep the results tagged with their tenant: no previous workspace's data
     // can be displayed while new requests are pending or if they fail.
-    setSearchState({tenantId,rows:[],loading:!!tenantId,unavailable:0});
-    if (!tenantId) return;
+    const reset = window.setTimeout(() => {
+      if (!controller.signal.aborted) setSearchState({tenantId,rows:[],loading:!!tenantId,unavailable:0});
+    }, 0);
+    if (!tenantId) return () => { window.clearTimeout(reset); controller.abort(); };
     void Promise.allSettled(sources.map(async source => {
       const path = source.category === "Users & access"
         ? "/api/workspaces/" + encodeURIComponent(tenantId) + "/members/"
@@ -238,7 +240,7 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
       }
       setSearchState({tenantId,rows,loading:false,unavailable});
     });
-    return () => controller.abort();
+    return () => {window.clearTimeout(reset);controller.abort();};
   },[searchOpen,tenantId,admin]);
 
   useEffect(() => {
@@ -257,7 +259,8 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
   },[]);
 
   useEffect(() => {
-    setMacShortcut(/Mac|iPhone|iPad/i.test(navigator.platform));
+    const id=window.setTimeout(()=>setMacShortcut(/Mac|iPhone|iPad/i.test(navigator.platform)),0);
+    return ()=>window.clearTimeout(id);
   },[]);
 
   useEffect(() => {
