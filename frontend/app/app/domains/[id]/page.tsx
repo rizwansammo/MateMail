@@ -284,7 +284,10 @@ export default function DomainDetailPage() {
       apiRequest(`/api/domains/${params.id}/`),
       apiRequest(`/api/domains/${params.id}/records/`),
     ]);
-    if (domainResponse.ok) setDomain(await domainResponse.json());
+    if (domainResponse.ok) {
+      setDomain(await domainResponse.json());
+      window.dispatchEvent(new Event("matemail:workspace-onboarding-updated"));
+    }
     if (recordsResponse.ok) setRecords(await recordsResponse.json());
   }, [params.id]);
 
