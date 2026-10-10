@@ -294,7 +294,7 @@ export default function IntegrationsPage() {
         open={createOpen && canManageCredentials}
         busy={creating}
         title="Create connected app"
-        description="Issue a scoped credential bound permanently to one organization mailbox."
+        description="The resulting credential is permanently bound to one workspace mailbox."
         onDismiss={() => { setCreateOpen(false); setCreateError(""); }}
       >
           <form onSubmit={createIntegration}>
