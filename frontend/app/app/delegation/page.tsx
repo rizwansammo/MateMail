@@ -79,7 +79,7 @@ function DelegationPageContent() {
   const [myRole, setMyRole] = useState(tenant?.role || "");
   const canAdmin = myRole === "owner" || myRole === "admin";
   const [delegations, setDelegations] = useState<Delegation[]>([]);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(requestedSearch);
   const filteredDelegations = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) return delegations;
