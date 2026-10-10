@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 
 import { apiRequest } from "@/lib/api";
+import { useAuth } from "@/contexts/auth-context";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import {
   PortalButton,
   PortalCard,
@@ -69,6 +71,9 @@ function errorText(value: unknown) {
 }
 
 export default function DelegationPage() {
+  const { tenant, user } = useAuth();
+  const [myRole, setMyRole] = useState(tenant?.role || "");
+  const canAdmin = myRole === "owner" || myRole === "admin";
   const [delegations, setDelegations] = useState<Delegation[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,6 +92,18 @@ export default function DelegationPage() {
   const [notice, setNotice] = useState("");
   const [failed, setFailed] = useState(false);
   const [createErrors, setCreateErrors] = useState<Record<string, unknown>>({});
+
+  useEffect(() => {
+    if (!tenant?.id) return;
+    let alive = true;
+    apiRequest(`/api/workspaces/${tenant.id}/stats/`)
+      .then(async response => response.ok ? response.json() : null)
+      .then(data => {
+        if (alive && typeof data?.my_role === "string") setMyRole(data.my_role);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [tenant?.id]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -266,14 +283,14 @@ export default function DelegationPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-routing-page astra-collaboration-page">
       <PortalPageHeading
         title="Delegation"
         description="Give one personal mailbox controlled access to another personal mailbox without sharing passwords."
         actions={
           <PortalButton
             type="button"
-            disabled={mailboxes.length < 2}
+            disabled={!canAdmin || !user?.email_verified || mailboxes.length < 2}
             onClick={() => {
               setCreateErrors({});
               setCreateOpen(true);
@@ -285,6 +302,11 @@ export default function DelegationPage() {
         }
       />
 
+      <div className="astra-resource-summary" aria-label="Delegation statistics">
+        <div><span>Delegations</span><strong>{loading ? "—" : delegations.length}</strong></div>
+        <div><span>Active grants</span><strong>{loading ? "—" : delegations.filter(row => row.active).length}</strong></div>
+        <div><span>Available mailboxes</span><strong>{loading ? "—" : mailboxes.length}</strong></div>
+      </div>
       <div className="mb-5">
         <PortalNotice tone="info">
           <KeyRound className="mt-0.5 h-4 w-4 shrink-0" />
@@ -294,12 +316,13 @@ export default function DelegationPage() {
         </PortalNotice>
       </div>
 
-      {createOpen && (
-        <PortalCard
-          className="mb-5 portal-form-card"
-          title="Add mailbox delegation"
-          subtitle="Choose the mailbox being shared, the delegate, and the exact permissions."
-        >
+      <AstraResourceDialog
+        open={createOpen && canAdmin}
+        busy={busy}
+        title="Add mailbox delegation"
+        description="Select two personal mailboxes and grant only the permissions needed."
+        onDismiss={() => { setCreateOpen(false); setCreateErrors({}); }}
+      >
           <form onSubmit={createDelegation}>
             {errorText(createErrors.detail) && (
               <div className="mb-4">
@@ -309,8 +332,9 @@ export default function DelegationPage() {
 
             <div className="portal-form-grid">
               <div className="portal-field">
-                <label>Mailbox to delegate</label>
+                <label htmlFor="astra-delegation-target">Mailbox to delegate</label>
                 <select
+                  id="astra-delegation-target"
                   value={chosenTarget}
                   onChange={(event) => {
                     setTargetId(event.target.value);
@@ -332,8 +356,9 @@ export default function DelegationPage() {
               </div>
 
               <div className="portal-field">
-                <label>Delegate mailbox</label>
+                <label htmlFor="astra-delegation-recipient">Delegate mailbox</label>
                 <select
+                  id="astra-delegation-recipient"
                   value={chosenDelegate}
                   onChange={(event) => setDelegateId(event.target.value)}
                   required
@@ -399,8 +424,7 @@ export default function DelegationPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {notice && (
         <div className="mb-5">
@@ -472,7 +496,7 @@ export default function DelegationPage() {
                         <input
                           type="checkbox"
                           checked={row[permission.key]}
-                          disabled={rowBusy === row.id}
+                          disabled={!canAdmin || rowBusy === row.id}
                           onChange={(event) =>
                             void patchDelegation(row, {
                               [permission.key]: event.target.checked,
@@ -486,7 +510,7 @@ export default function DelegationPage() {
                       <input
                         type="checkbox"
                         checked={row.active}
-                        disabled={rowBusy === row.id}
+                        disabled={!canAdmin || rowBusy === row.id}
                         onChange={(event) =>
                           void patchDelegation(row, { active: event.target.checked })
                         }
@@ -498,7 +522,7 @@ export default function DelegationPage() {
                         <button
                           type="button"
                           className="portal-action-button danger"
-                          disabled={rowBusy === row.id}
+                          disabled={!canAdmin || rowBusy === row.id}
                           onClick={() => void removeDelegation(row)}
                           aria-label={`Remove delegation for ${row.delegate_email}`}
                         >
