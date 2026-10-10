@@ -94,6 +94,14 @@ class DeployWorkflowTest(SimpleTestCase):
             ]
             self.assertEqual(live, [], f"host-global maintenance present: {live}")
 
+    def test_predeploy_db_backup_is_mandatory_and_validated(self):
+        # A missing dump must never be treated as an acceptable first-deploy
+        # warning: this workflow operates against an existing production DB.
+        self.assertIn('FATAL: pre-deploy database dump failed', self.raw)
+        self.assertIn('gzip -t "$DB_BACKUP_PART"', self.raw)
+        self.assertIn('rollback\n              trap - ERR\n              exit 1', self.raw)
+        self.assertNotIn('WARNING: pre-deploy dump failed', self.raw)
+
     def test_no_destructive_compose_verbs(self):
         for phrase in ("docker compose down", "compose down -v"):
             live = [

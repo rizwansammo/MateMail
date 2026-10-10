@@ -610,10 +610,31 @@ jobs:
 
             echo "▸ Backing up the database before migrating..."
             install -d -m 0700 /opt/MateMail/backup/pre-deploy
-            docker compose exec -T postgres \
+            # A missing/failed dump must STOP the release, not print a warning.
+            # The script has already switched Compose and image pins at this
+            # point, so a deliberate failure must explicitly call rollback:
+            # an 'exit 1' does NOT trigger the ERR trap.
+            DB_BACKUP="/opt/MateMail/backup/pre-deploy/pre-deploy-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+            DB_BACKUP_PART="${DB_BACKUP}.part"
+            if ! (set -o pipefail; docker compose exec -T postgres \
               pg_dump -U "${POSTGRES_USER:-matemail}" "${POSTGRES_DB:-matemail}" \
-              | gzip > "/opt/MateMail/backup/pre-deploy/pre-deploy-$(date -u +%Y%m%dT%H%M%SZ).sql.gz" \
-              || echo "WARNING: pre-deploy dump failed (first deploy, or postgres not yet running)"
+              | gzip > "$DB_BACKUP_PART"); then
+              echo "FATAL: pre-deploy database dump failed — refusing migration." >&2
+              rm -f "$DB_BACKUP_PART"
+              rollback
+              trap - ERR
+              exit 1
+            fi
+            if [ ! -s "$DB_BACKUP_PART" ] || ! gzip -t "$DB_BACKUP_PART"; then
+              echo "FATAL: database dump is empty or corrupt — refusing migration." >&2
+              rm -f "$DB_BACKUP_PART"
+              rollback
+              trap - ERR
+              exit 1
+            fi
+            chmod 0600 "$DB_BACKUP_PART"
+            mv -f "$DB_BACKUP_PART" "$DB_BACKUP"
+            echo "  verified pre-deploy backup: $(basename "$DB_BACKUP")"
 
             echo "▸ Preparing custom-host edge worker..."
             # Installs files and establishes the purpose-specific secret in
