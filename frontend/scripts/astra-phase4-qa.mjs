@@ -83,6 +83,7 @@ try{
  await t.page.waitForURL("**/app/aliases?q=*",{timeout:8000});
  await t.page.getByRole("searchbox",{name:"Search aliases"}).waitFor({timeout:8000});
  check("Alias result routes to query-filtered list",await t.page.getByRole("searchbox",{name:"Search aliases"}).inputValue()==="sales@example.test");
+ await t.page.getByText("sales@example.test").first().waitFor({state:"visible",timeout:8000});
  check("Alias list shows matching row only",await t.page.getByText("sales@example.test").count()>0&&await t.page.getByText("billing@example.test").count()===0);
  await open(t,"/app/team");
  dialog=await search(t,"Bob Smith");
@@ -91,6 +92,7 @@ try{
  await dialog.getByRole("option",{name:"bob@example.test"}).click();
  await t.page.waitForURL("**/app/team?q=*",{timeout:8000});
  check("Member full name matches while deep-link filters by email",await t.page.getByRole("searchbox",{name:"Search members"}).inputValue()==="bob@example.test");
+ await t.page.getByText("bob@example.test").first().waitFor({state:"visible",timeout:8000});
  check("Member filtered list excludes unrelated accounts",await t.page.getByText("bob@example.test").count()>0);
  await open(t,"/app/forwarding");
  dialog=await search(t,"supplier@outside.test");
