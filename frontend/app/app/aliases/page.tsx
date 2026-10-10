@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   AtSign,
@@ -55,7 +56,9 @@ function fieldError(value: unknown) {
   return String(value);
 }
 
-export default function AliasesPage() {
+function AliasesPageContent() {
+  const routeParams = useSearchParams();
+  const requestedSearch = routeParams.get("q") || "";
   const { user, tenant } = useAuth();
   const [aliases, setAliases] = useState<Alias[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
@@ -133,6 +136,12 @@ export default function AliasesPage() {
         .catch(() => {});
     }
   }, [fetchAll, tenant?.id]);
+
+  useEffect(() => {
+    // Direct links from Global Search remain shareable and survive a reload.
+    // The effect also handles Next.js soft navigation to a new query.
+    setQuery(requestedSearch);
+  }, [requestedSearch]);
 
   const filteredAliases = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -512,4 +521,9 @@ export default function AliasesPage() {
       </div>
     </div>
   );
+}
+
+/** Suspense boundary required by Next.js useSearchParams during static builds. */
+export default function AliasesPage() {
+  return <Suspense fallback={null}><AliasesPageContent /></Suspense>;
 }
