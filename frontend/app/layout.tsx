@@ -6,6 +6,7 @@ import { AuthProvider } from "@/contexts/auth-context";
 import "./globals.css";
 import "./app/portal-premium.css";
 import "./app/astra-shell.css";
+import "./app/astra-resources.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
