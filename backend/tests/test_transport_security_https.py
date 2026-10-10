@@ -273,6 +273,100 @@ class TransportHTTPSAPITest(TestCase):
                         side_effect=dns.exception.Timeout):
             self.assertIsNone(_exact_txt("_mta-sts.company.example", "v=STSv1; id=test"))
 
+    def test_retirement_worker_requires_exact_secret_and_domain_identity(self):
+        self.client.post(self.base, {"enabled": True}, format="json")
+        row = DomainTransportSecurity.objects.get(domain=self.domain)
+        row.lifecycle = TransportSecurityLifecycle.READY
+        row.save(update_fields=["lifecycle"])
+        requested = self.client.post(self.base, {"enabled": False}, format="json")
+        self.assertEqual(requested.status_code, 200)
+        url = self.internal + "retirement/pending/"
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertEqual(self.client.get(url, HTTP_X_MATEMAIL_TRANSPORT_SECRET="wrong").status_code, 403)
+        pending = self.client.get(url, **self.header)
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(len(pending.data["results"]), 1)
+        job = pending.data["results"][0]
+        self.assertEqual(job["id"], str(self.domain.id))
+        self.assertEqual(job["tenant_id"], str(self.tenant.id))
+        self.assertEqual(job["lifecycle"], "deactivating")
+        self.assertFalse(job["cleanup_ready"])
+        self.assertEqual(
+            self.client.post(self.internal + "retirement/authorize/", {
+                "id": str(self.domain.id), "policy_id": "f" * 24, "action": "serve-none",
+            }, format="json", **self.header).status_code, 404,
+        )
+        self.assertEqual(self.client.post(self.internal + "retirement/authorize/", {
+            "id": str(self.domain.id), "policy_id": row.policy_id, "action": "serve-none",
+        }, format="json", **self.header).status_code, 200)
+
+    def test_retirement_cache_drain_requires_48_hours_of_dns_absence(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        self.client.post(self.base, {"enabled": True}, format="json")
+        row = DomainTransportSecurity.objects.get(domain=self.domain)
+        row.lifecycle = TransportSecurityLifecycle.ACTIVE
+        row.save(update_fields=["lifecycle"])
+        self.client.post(self.base, {"enabled": False}, format="json")
+        state_url = self.internal + f"retirement/{self.domain.pk}/state/"
+        def post(action, **kwargs):
+            return self.client.post(state_url, {
+                "action": action, "policy_id": row.policy_id, **kwargs,
+            }, format="json", **self.header)
+        self.assertEqual(post("complete").status_code, 409)
+        self.assertEqual(post("mode-none").status_code, 200)
+        self.assertEqual(post("mode-none").status_code, 409)
+        self.assertEqual(post("dns-check", absent=True).status_code, 200)
+        self.assertEqual(post("complete").status_code, 409)
+        row.refresh_from_db()
+        self.assertEqual(row.lifecycle, "draining")
+        self.assertTrue(row.enabled)
+        self.assertIsNotNone(row.deactivation_dns_absent_since)
+        first_absent = row.deactivation_dns_absent_since
+        self.assertEqual(post("dns-check", absent=True).status_code, 200)
+        row.refresh_from_db()
+        self.assertEqual(row.deactivation_dns_absent_since, first_absent)
+        self.assertEqual(post("dns-check", absent=False).status_code, 200)
+        row.refresh_from_db()
+        self.assertIsNone(row.deactivation_dns_absent_since)
+        self.assertEqual(post("dns-check", absent=True).status_code, 200)
+        row.refresh_from_db()
+        row.deactivation_dns_absent_since = timezone.now() - timedelta(hours=49)
+        row.deactivation_policy_none_at = timezone.now() - timedelta(hours=49)
+        row.save(update_fields=["deactivation_dns_absent_since", "deactivation_policy_none_at"])
+        auth = self.client.post(self.internal + "retirement/authorize/", {
+            "id": str(self.domain.id), "policy_id": row.policy_id, "action": "cleanup",
+        }, format="json", **self.header)
+        self.assertEqual(auth.status_code, 200)
+        self.assertTrue(auth.data["cleanup_ready"])
+        self.assertEqual(post("complete").status_code, 200)
+        row.refresh_from_db()
+        self.assertFalse(row.enabled)
+        self.assertEqual(row.lifecycle, TransportSecurityLifecycle.DISABLED)
+        self.assertIsNotNone(row.deactivation_completed_at)
+
+    def test_retirement_rejects_forged_state_and_cross_tenant_writes(self):
+        self.client.post(self.base, {"enabled": True}, format="json")
+        row = DomainTransportSecurity.objects.get(domain=self.domain)
+        row.lifecycle = TransportSecurityLifecycle.READY
+        row.save(update_fields=["lifecycle"])
+        self.client.post(self.base, {"enabled": False}, format="json")
+        endpoint = self.internal + f"retirement/{self.domain.pk}/state/"
+        self.assertEqual(self.client.post(endpoint, {
+            "action": "mode-none", "policy_id": row.policy_id,
+        }, format="json").status_code, 403)
+        self.assertEqual(self.client.post(endpoint, {
+            "action": "mode-none", "policy_id": "f"*24,
+        }, format="json", **self.header).status_code, 409)
+        self.assertEqual(self.client.post(endpoint, {
+            "action": "dns-check", "policy_id": row.policy_id, "absent": "true",
+        }, format="json", **self.header).status_code, 400)
+        other_user = make_user("retirement-other@tenant.example")
+        other_tenant = make_tenant(other_user, "Other Retirement", "retire-other")
+        other_client = auth_client(other_user, other_tenant)
+        self.assertEqual(other_client.get(self.base).status_code, 404)
+        self.assertEqual(other_client.post(self.base, {"enabled": False}, format="json").status_code, 404)
+
     def test_policy_hostname_must_fit_dns_limit(self):
         with self.assertRaises(ValueError):
             policy_hostname("a" * 63 + "." + "b" * 63 + "." + "c" * 63 + "." + "d" * 60 + ".com")
