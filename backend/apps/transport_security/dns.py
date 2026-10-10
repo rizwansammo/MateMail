@@ -60,3 +60,31 @@ def check_domain_policy_dns(domain) -> tuple[bool, str]:
     except (dns.exception.DNSException, ValueError, AttributeError):
         return False, "MTA-STS DNS records could not be verified yet. Please try again later."
     return True, "MTA-STS CNAME, MX and current domain ownership verified."
+
+
+def check_publication_txt(domain, policy_id: str) -> tuple[bool | None, bool | None]:
+    """Check public RFC 8461 and RFC 8460 TXT records without changing DNS.
+
+    True: exact match; False: missing or incorrect; None: lookup unavailable.
+    Caller MUST independently recheck current domain ownership, MX and CNAME.
+    """
+    expected_sts = f"v=STSv1; id={policy_id}"
+    receiver = getattr(settings, "TLS_RPT_REPORT_ADDRESS", "tlsrpt@mail.matemail.pro")
+    expected_rpt = f"v=TLSRPTv1; rua=mailto:{receiver}"
+    return (
+        _exact_txt(f"_mta-sts.{domain.domain}", expected_sts),
+        _exact_txt(f"_smtp._tls.{domain.domain}", expected_rpt),
+    )
+
+
+def _exact_txt(host: str, expected: str) -> bool | None:
+    try:
+        answers = dns.resolver.resolve(host, "TXT", lifetime=5)
+        if len(answers) != 1:
+            return False
+        # DNS TXT strings may be split into multiple chunks: join them first.
+        return b"".join(answers[0].strings).decode("ascii") == expected
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        return False
+    except (dns.exception.DNSException, UnicodeError, ValueError, AttributeError):
+        return None
