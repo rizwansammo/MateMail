@@ -54,6 +54,10 @@ class DomainTransportSecurity(models.Model):
     )
     policy_id = models.CharField(max_length=24, default=new_policy_id, editable=False)
     dns_verified_at = models.DateTimeField(null=True, blank=True)
+    # Last explicit publication check; not a continuous DNS-monitoring claim.
+    dns_records_checked_at = models.DateTimeField(null=True, blank=True)
+    sts_txt_verified_at = models.DateTimeField(null=True, blank=True)
+    tls_rpt_txt_verified_at = models.DateTimeField(null=True, blank=True)
     cert_verified_at = models.DateTimeField(null=True, blank=True)
     activated_at = models.DateTimeField(null=True, blank=True)
     # Only application-authored safe messages; no raw Certbot error or DNS output.
