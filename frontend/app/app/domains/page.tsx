@@ -290,6 +290,14 @@ export default function DomainsPage() {
                   <tr
                     key={domain.id}
                     onClick={() => router.push(`/app/domains/${domain.id}`)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        router.push(`/app/domains/${domain.id}`);
+                      }
+                    }}
+                    tabIndex={0}
+                    aria-label={`Open domain ${domain.domain}`}
                     className="cursor-pointer"
                   >
                     <td>
