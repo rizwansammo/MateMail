@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import {
   PortalButton,
   PortalCard,
@@ -287,10 +288,10 @@ export default function TeamPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-users-page">
       <PortalPageHeading
-        title="Your team"
-        description="Manage the people who can administer or review this MateMail workspace."
+        title="Users & access"
+        description="Manage workspace members, invitations and administrative roles."
         actions={
           canManageInvites ? (
             <PortalButton
@@ -307,18 +308,25 @@ export default function TeamPage() {
         }
       />
 
+      <div className="astra-resource-summary" aria-label="Users and access statistics">
+        <div><span>Active members</span><strong>{loading ? "—" : members.length}</strong></div>
+        <div><span>Pending invitations</span><strong>{loading || !canManageInvites ? "—" : invites.filter(invite => invite.is_pending).length}</strong></div>
+        <div><span>Workspace admins</span><strong>{loading ? "—" : members.filter(member => member.role === "admin" || member.role === "owner").length}</strong></div>
+      </div>
+
       {message && (
         <div className="mb-5">
           <PortalNotice tone={messageTone}>{message}</PortalNotice>
         </div>
       )}
 
-      {inviteOpen && canManageInvites && (
-        <PortalCard
-          className="portal-form-card"
-          title="Invite someone to your workspace"
-          subtitle="Only email addresses on a verified domain registered to this organization can be invited. Invitations expire after 7 days."
-        >
+      <AstraResourceDialog
+        open={inviteOpen && canManageInvites}
+        busy={inviting}
+        title="Invite member"
+        description="Invite someone using a verified organization domain. Invitations expire after 7 days."
+        onDismiss={() => { setInviteOpen(false); setInviteError(""); setInviteEmail(""); }}
+      >
           <form onSubmit={sendInvite}>
             {inviteError && (
               <div className="mb-4"><PortalNotice tone="danger">{inviteError}</PortalNotice></div>
@@ -326,9 +334,11 @@ export default function TeamPage() {
 
             <div className="portal-form-grid">
               <div className="portal-field">
-                <label>Email address</label>
+                <label htmlFor="astra-user-invite-email">Email address</label>
                 <input
+                  id="astra-user-invite-email"
                   type="email"
+                  autoComplete="off"
                   required
                   value={inviteEmail}
                   onChange={(event) => setInviteEmail(event.target.value)}
@@ -336,8 +346,9 @@ export default function TeamPage() {
                 />
               </div>
               <div className="portal-field">
-                <label>Workspace role</label>
+                <label htmlFor="astra-user-invite-role">Workspace role</label>
                 <select
+                  id="astra-user-invite-role"
                   value={inviteRole}
                   onChange={(event) => setInviteRole(event.target.value as typeof inviteRole)}
                 >
@@ -348,8 +359,12 @@ export default function TeamPage() {
               </div>
             </div>
 
+            <div className="astra-user-invite-context">
+              <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <p>Hub access only. This invitation does not create or assign a mailbox. Mailbox provisioning remains a separate administrative action.</p>
+            </div>
             <div className="portal-detail-actions">
-              <PortalButton type="submit" disabled={inviting || !inviteEmail.trim()}>
+              <PortalButton type="submit" disabled={inviting || !inviteEmail.trim() || !canManageInvites}>
                 <Mail className="h-4 w-4" />
                 {inviting ? "Sending…" : "Send invitation"}
               </PortalButton>
@@ -367,8 +382,7 @@ export default function TeamPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
