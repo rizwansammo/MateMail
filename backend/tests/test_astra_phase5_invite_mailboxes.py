@@ -230,6 +230,12 @@ class InviteMailboxPhase5Tests(TestCase):
         with (
             mock.patch("apps.mailboxes.views._provision_mailbox", side_effect=create_in_engine) as engine,
             mock.patch("apps.accounts.views._send_verification_email") as verification,
+            # The release test covers provisioning, not global signup volume.
+            # Other CI cases share 127.0.0.1 and may exhaust the signup bucket.
+            mock.patch(
+                "apps.accounts.views.ratelimit.hit",
+                return_value=mock.Mock(allowed=True, retry_after=None),
+            ),
         ):
             created = APIClient().post("/api/auth/signup/", {
                 "email": "newjoiner@acme.test",
