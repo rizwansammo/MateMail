@@ -7,6 +7,7 @@ SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for bin in python3 nginx certbot systemctl install; do command -v "$bin" >/dev/null; done
 /usr/sbin/nginx -t
 python3 -m py_compile "$SOURCE/provisioner.py"
+sh -n "$SOURCE/mta-sts-certbot-renew-hook.sh"
 install -d -o root -g root -m 0755 /usr/local/libexec
 install -d -o root -g root -m 0700 /etc/matemail
 install -m 0755 "$SOURCE/provisioner.py" /usr/local/libexec/matemail-transport-sts-provisioner
