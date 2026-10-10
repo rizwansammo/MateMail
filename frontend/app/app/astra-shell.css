@@ -55,7 +55,10 @@
 .ws.astra-hub .astra-search-inputrow input{outline:0!important;border:0!important;box-shadow:none!important;background:transparent!important;min-width:0;flex:1;font-size:.875rem;padding:8px 0;color:var(--foreground)}
 .ws.astra-hub .astra-search-inputrow input:focus{outline:0!important;box-shadow:none!important}
 .ws.astra-hub .astra-search-x{background:none;border:0;color:var(--muted-foreground);cursor:pointer;padding:3px}
-.ws.astra-hub .astra-search-results{overflow-x:hidden;overflow-y:auto;min-height:0;padding:4px 8px 10px;scrollbar-width:thin;scrollbar-color:var(--muted-foreground) transparent}
+.ws.astra-hub .astra-search-results{overflow-x:hidden;overflow-y:scroll;min-height:0;padding:4px 8px 10px;scrollbar-width:auto;scrollbar-gutter:stable;scrollbar-color:#8c8c8c var(--soft)}
+.ws.astra-hub .astra-search-results::-webkit-scrollbar{width:12px}
+.ws.astra-hub .astra-search-results::-webkit-scrollbar-track{background:var(--soft)}
+.ws.astra-hub .astra-search-results::-webkit-scrollbar-thumb{background:#8c8c8c;border-radius:3px;border:2px solid var(--soft)}
 .ws.astra-hub .astra-search-group{font-size:.75rem;color:var(--muted-foreground);padding:6px 8px 5px}
 .ws.astra-hub .astra-search-row{display:flex;width:100%;gap:11px;align-items:center;text-align:left;color:var(--foreground);background:transparent;border:0;border-radius:3px;padding:6px 8px;font-size:.875rem;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ws.astra-hub .astra-search-row:hover,.ws.astra-hub .astra-search-row[data-selected=true]{background:var(--accent);color:var(--sidebar-primary)}
