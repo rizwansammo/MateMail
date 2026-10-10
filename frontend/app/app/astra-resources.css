@@ -55,6 +55,7 @@
 .ws.astra-hub .astra-resource-page .portal-domain-table td{font-size:.8125rem;padding:14px 18px;border-bottom:1px solid var(--border);color:var(--foreground);vertical-align:middle}
 .ws.astra-hub .astra-resource-page .portal-management-table tbody tr:hover,
 .ws.astra-hub .astra-resource-page .portal-domain-table tbody tr:hover{background:var(--soft)}
+.ws.astra-hub .astra-resource-page :is(.portal-management-table,.portal-domain-table) tbody tr:focus-visible{outline:2px solid var(--muted-foreground);outline-offset:-2px;background:var(--soft)}
 .ws.astra-hub .astra-resource-page .portal-management-table tbody tr:last-child td,
 .ws.astra-hub .astra-resource-page .portal-domain-table tbody tr:last-child td{border-bottom:0}
 .ws.astra-hub .astra-resource-page .portal-management-table-wrap,
