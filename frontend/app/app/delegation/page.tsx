@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   KeyRound,
+  Search,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -70,11 +72,23 @@ function errorText(value: unknown) {
   return String(value);
 }
 
-export default function DelegationPage() {
+function DelegationPageContent() {
+  const routeParams = useSearchParams();
+  const requestedSearch = routeParams.get("q") || "";
   const { tenant, user } = useAuth();
   const [myRole, setMyRole] = useState(tenant?.role || "");
+  const filteredDelegations = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    if (!needle) return delegations;
+    return delegations.filter(row =>
+      [row.target_email, row.target_name, row.delegate_email, row.delegate_name]
+        .some(value => value?.toLocaleLowerCase().includes(needle))
+    );
+  },[delegations,query]);
+
   const canAdmin = myRole === "owner" || myRole === "admin";
   const [delegations, setDelegations] = useState<Delegation[]>([]);
+  const [query, setQuery] = useState("");
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -104,6 +118,12 @@ export default function DelegationPage() {
       .catch(() => {});
     return () => { alive = false; };
   }, [tenant?.id]);
+
+  useEffect(() => {
+    // Direct links from Global Search remain shareable and survive a reload.
+    // The effect also handles Next.js soft navigation to a new query.
+    setQuery(requestedSearch);
+  }, [requestedSearch]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -440,9 +460,9 @@ export default function DelegationPage() {
 
       <PortalCard className="portal-management-card" bodyClassName="!p-0">
         <div className="portal-management-toolbar">
-          <div>
-            <strong>Mailbox delegation</strong>
-            <small className="ml-2">Personal mailbox → personal mailbox</small>
+          <div className="portal-management-search">
+            <Search className="h-4 w-4" aria-hidden="true"/>
+            <input aria-label="Search delegations" placeholder="Search delegations…" type="search" value={query} onChange={event=>setQuery(event.target.value)}/>
           </div>
           <button
             type="button"
@@ -460,7 +480,7 @@ export default function DelegationPage() {
             <PortalSkeleton className="mb-3 h-14 w-full" />
             <PortalSkeleton className="h-14 w-full" />
           </div>
-        ) : delegations.length === 0 ? (
+        ) : filteredDelegations.length === 0 ? (
           <PortalEmptyState
             title="No mailbox delegation"
             description="Add a delegate when one personal mailbox needs controlled access to another."
@@ -481,7 +501,7 @@ export default function DelegationPage() {
                 </tr>
               </thead>
               <tbody>
-                {delegations.map((row) => (
+                {filteredDelegations.map((row) => (
                   <tr key={row.id}>
                     <td>
                       <strong>{row.target_name || row.target_email}</strong>
@@ -548,4 +568,9 @@ export default function DelegationPage() {
       </div>
     </div>
   );
+}
+
+/** Suspense boundary required by Next.js useSearchParams during static builds. */
+export default function DelegationPage() {
+  return <Suspense fallback={null}><DelegationPageContent /></Suspense>;
 }
