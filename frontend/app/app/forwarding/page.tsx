@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import { apiRequest } from "@/lib/api";
 import {
   PortalButton,
@@ -215,7 +216,7 @@ export default function ForwardingPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-routing-page">
       <PortalPageHeading
         title="Forwarding"
         description="Route incoming mail from a mailbox to the right destination."
@@ -233,6 +234,8 @@ export default function ForwardingPage() {
           </PortalButton>
         }
       />
+
+      <div className="astra-resource-summary" aria-label="Forwarding statistics"><div><span>Forwarding rules</span><strong>{loading ? "—" : rules.length}</strong></div><div><span>Active routes</span><strong>{loading ? "—" : rules.filter((item) => item.status === "active").length}</strong></div><div><span>Keep local copy</span><strong>{loading ? "—" : rules.filter((item) => item.keep_copy).length}</strong></div></div>
 
       {!user?.email_verified && (
         <div className="mb-5">
@@ -268,12 +271,13 @@ export default function ForwardingPage() {
         <div className="mb-5"><PortalNotice tone={messageTone}>{message}</PortalNotice></div>
       )}
 
-      {addOpen && (
-        <PortalCard
-          className="portal-form-card"
-          title="Add a forwarding rule"
-          subtitle="Forward new incoming mail from one mailbox to one destination address."
-        >
+      <AstraResourceDialog
+        open={addOpen}
+        busy={adding}
+        title="Add a forwarding rule"
+        description="Forward incoming mail to a destination address; keep a local copy if needed."
+        onDismiss={() => { setAddOpen(false); setAddErrors({}); }}
+      >
           <form onSubmit={createRule}>
             {fieldError(addErrors.detail) && (
               <div className="mb-4"><PortalNotice tone="danger">{fieldError(addErrors.detail)}</PortalNotice></div>
@@ -281,8 +285,8 @@ export default function ForwardingPage() {
 
             <div className="portal-form-grid">
               <div className="portal-field">
-                <label>Source mailbox</label>
-                <select value={mailboxId} onChange={(event) => setMailboxId(event.target.value)} required>
+                <label htmlFor="astra-forwarding-source">Source mailbox</label>
+                <select id="astra-forwarding-source" value={mailboxId} onChange={(event) => setMailboxId(event.target.value)} required>
                   {mailboxes.map((mailbox) => (
                     <option key={mailbox.id} value={mailbox.id}>{mailbox.email}</option>
                   ))}
@@ -291,8 +295,9 @@ export default function ForwardingPage() {
               </div>
 
               <div className="portal-field">
-                <label>Forward to</label>
+                <label htmlFor="astra-forwarding-destination">Forward to</label>
                 <input
+                  id="astra-forwarding-destination"
                   type="email"
                   required
                   value={destinationEmail}
@@ -336,8 +341,7 @@ export default function ForwardingPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
