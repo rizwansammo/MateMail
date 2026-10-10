@@ -28,6 +28,7 @@ POLICIES = Path(os.getenv("MATEMAIL_TRANSPORT_POLICIES", "/var/www/matemail/tran
 WEBROOT = Path(os.getenv("MATEMAIL_TRANSPORT_WEBROOT", "/var/www/html"))
 PUBLIC_IP = os.getenv("MATEMAIL_TRANSPORT_EDGE_IPV4", "")
 LOCK = Path(os.getenv("MATEMAIL_TRANSPORT_LOCK", "/run/lock/matemail-transport-sts.lock"))
+RECEIPTS = Path(os.getenv("MATEMAIL_TRANSPORT_RETIRE_JOURNAL", "/var/lib/matemail/transport-sts-retirement"))
 HOST_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 MARKER = "# Managed by MateMail P4-C dynamic MTA-STS"
 
@@ -262,7 +263,7 @@ def expose_public_policy_path(host):
 
 
 
-def policy_http_ok(data):
+def policy_http_ok(data, expected=None):
     url = "https://" + data["hostname"] + "/.well-known/mta-sts.txt"
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}),
@@ -273,7 +274,7 @@ def policy_http_ok(data):
             with opener.open(url, timeout=8) as response:
                 if (response.status == 200
                         and response.headers.get_content_type() == "text/plain"
-                        and response.read(8192) == policy(data["mx"])):
+                        and response.read(8192) == (policy(data["mx"]) if expected is None else expected)):
                     return
         except (OSError, urllib.error.URLError, TimeoutError):
             pass
@@ -312,6 +313,218 @@ def provision(data):
     state(data, "ready", "active")
 
 
+
+# DNS-Phase 3: fully scoped deactivation. Never automatically remove an
+# advertised MTA-STS policy, even when the customer clicks Disable.
+# MTA-STS max_age is fixed to 86400; require 2x before host removal.
+
+
+def policy_none():
+    return b"version: STSv1\r\nmode: none\r\nmax_age: 86400\r\n"
+
+
+def retire_authorize(data, action):
+    response = api("POST", "retirement/authorize/", {
+        "id": data["id"], "policy_id": data["policy_id"], "action": action,
+    })
+    if response.get("approved") is not True:
+        raise EdgeError("Retirement is no longer approved")
+    for field in ("id", "tenant_id", "domain", "hostname", "policy_id", "mx", "edge"):
+        if str(response.get(field)) != data[field]:
+            raise EdgeError("Retirement identity changed")
+    return response
+
+
+def retire_state(data, action, absent=None):
+    body = {"action": action, "policy_id": data["policy_id"]}
+    if action == "dns-check":
+        if type(absent) is not bool:
+            raise EdgeError("Invalid DNS observation")
+        body["absent"] = absent
+    return api("POST", "retirement/" + data["id"] + "/state/", body)
+
+
+def txt_absent_at(resolver, name):
+    # Confirm an authoritative status in the resolver answer, not an empty
+    # stdout caused by a SERVFAIL, timeout or transport error.
+    answer = run("/usr/bin/dig", "@" + resolver, "+nocmd", "+noall",
+                 "+comments", "+answer", "+tries=1", "+time=4", "TXT", name)
+    matched = re.search(r"status:\s*(NOERROR|NXDOMAIN|SERVFAIL|REFUSED)", answer)
+    if not matched or matched.group(1) not in ("NOERROR", "NXDOMAIN"):
+        raise EdgeError("Public DNS result unavailable")
+    for line in answer.splitlines():
+        if re.search(r"\sIN\sTXT\s", line, re.IGNORECASE):
+            return False
+        if re.search(r"\sIN\sCNAME\s", line, re.IGNORECASE):
+            raise EdgeError("Unexpected TXT alias; manual review required")
+    return True
+
+
+def public_txt_absent(data):
+    # Both independent recursive resolvers must see both TXT records absent.
+    for resolver in ("1.1.1.1", "8.8.8.8"):
+        for name in ("_mta-sts." + data["domain"], "_smtp._tls." + data["domain"]):
+            if not txt_absent_at(resolver, name):
+                return False
+    return True
+
+
+def managed_site(host):
+    path, link = site_file(host), enabled_file(host)
+    if path.is_symlink() or not path.is_file() or not path.read_text().startswith(MARKER):
+        raise EdgeError("Retirement refuses missing or unmanaged Nginx source")
+    if not link.is_symlink() or link.resolve() != path.resolve():
+        raise EdgeError("Retirement refuses unexpected Nginx symlink")
+    collision_check(host)
+
+
+def retire_to_none(data):
+    retire_authorize(data, "serve-none")
+    host = data["hostname"]
+    managed_site(host)
+    if cert_ok(host):
+        root = POLICIES / host / ".well-known"
+        if root.is_symlink() or not root.is_dir():
+            raise EdgeError("Policy directory unsafe")
+        target = root / "mta-sts.txt"
+        if target.is_symlink():
+            raise EdgeError("Policy file unsafe")
+        atomic(target, policy_none())
+        expose_public_policy_path(host)
+        # Preserve the existing HTTPS vhost and its certificate.
+        policy_http_ok(data, expected=policy_none())
+    elif not public_txt_absent(data):
+        # A partially installed vhost with no valid TLS cert cannot claim
+        # a mode:none policy. Any remaining MTA-STS TXT must be handled first.
+        raise EdgeError("HTTPS policy unavailable while public security TXT exists")
+    retire_authorize(data, "serve-none")
+    retire_state(data, "mode-none")
+
+
+def receipt_path(host):
+    return RECEIPTS / (host + ".json")
+
+
+def retirement_receipt(data):
+    if RECEIPTS.is_symlink():
+        raise EdgeError("Unsafe retirement journal directory")
+    RECEIPTS.mkdir(parents=True, exist_ok=True, mode=0o700)
+    RECEIPTS.chmod(0o700)
+    path = receipt_path(data["hostname"])
+    if path.is_symlink():
+        raise EdgeError("Unsafe retirement journal")
+    identity = {key: data[key] for key in ("id", "tenant_id", "domain", "hostname", "policy_id")}
+    if path.exists():
+        try:
+            actual = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            raise EdgeError("Invalid retirement journal") from exc
+        if actual != identity:
+            raise EdgeError("Retirement journal ownership mismatch")
+    else:
+        managed_site(data["hostname"])
+        atomic(path, json.dumps(identity, sort_keys=True).encode())
+        path.chmod(0o600)
+    return path
+
+
+def drop_managed_nginx(data):
+    host = data["hostname"]
+    receipt = retirement_receipt(data)
+    path, link = site_file(host), enabled_file(host)
+    if path.exists() or link.is_symlink():
+        managed_site(host)
+        if link.is_symlink():
+            link.unlink()
+        try:
+            run("/usr/sbin/nginx", "-t")
+            run("/usr/bin/systemctl", "reload", "nginx")
+        except EdgeError:
+            if not link.exists() and not link.is_symlink():
+                link.symlink_to(path)
+            run("/usr/sbin/nginx", "-t")
+            run("/usr/bin/systemctl", "reload", "nginx")
+            raise
+        path.unlink()
+    return receipt
+
+
+def delete_dedicated_certificate(host):
+    # Certificate removal is restricted to the matching single-host lineage.
+    renewal = Path("/etc/letsencrypt/renewal") / (host + ".conf")
+    live = Path("/etc/letsencrypt/live") / host
+    if not renewal.exists() and not live.exists():
+        return
+    output = run("/usr/bin/certbot", "certificates", "--cert-name", host)
+    if not re.search(r"(?m)^\s*Certificate Name:\s*" + re.escape(host) + r"\s*$", output):
+        raise EdgeError("Certificate lineage does not match host")
+    match = re.search(r"(?m)^\s*Domains:\s*(.*?)\s*$", output)
+    if not match or match.group(1).strip() != host:
+        raise EdgeError("Refusing to remove shared or mismatched certificate")
+    # Nginx must no longer reference this lineage anywhere.
+    if "/etc/letsencrypt/live/" + host + "/" in run("/usr/sbin/nginx", "-T"):
+        raise EdgeError("Another active Nginx site still references certificate")
+    run("/usr/bin/certbot", "delete", "--cert-name", host, "--non-interactive")
+    if renewal.exists() or live.exists():
+        raise EdgeError("Certificate cleanup incomplete")
+
+
+def remove_managed_policy(host):
+    path = POLICIES / host
+    well_known = path / ".well-known"
+    target = well_known / "mta-sts.txt"
+    if path.is_symlink() or well_known.is_symlink() or target.is_symlink():
+        raise EdgeError("Unsafe policy cleanup path")
+    if target.is_file():
+        data = target.read_bytes()
+        if data not in (policy_none(),):
+            raise EdgeError("Policy is not in safe retirement mode")
+        target.unlink()
+    if well_known.exists():
+        well_known.rmdir()
+    if path.exists():
+        path.rmdir()
+
+
+def retire_cleanup(data):
+    # Both API and resolver checks happen immediately before the first
+    # destructive operation, not only when a job was queued 5 minutes earlier.
+    retire_authorize(data, "cleanup")
+    if not public_txt_absent(data):
+        retire_state(data, "dns-check", absent=False)
+        raise EdgeError("DNS record returned during retirement; cache timer reset")
+    retire_authorize(data, "cleanup")
+    receipt = drop_managed_nginx(data)
+    delete_dedicated_certificate(data["hostname"])
+    remove_managed_policy(data["hostname"])
+    retire_state(data, "complete")
+    receipt.unlink(missing_ok=True)
+
+
+def run_retirement_jobs():
+    pending = api("GET", "retirement/pending/").get("results")
+    if not isinstance(pending, list) or len(pending) > 25:
+        raise EdgeError("Invalid retirement job list")
+    failures = 0
+    for item in pending:
+        try:
+            data = job(item)
+            if item.get("lifecycle") == "deactivating":
+                retire_to_none(data)
+            elif item.get("lifecycle") == "draining":
+                retire_authorize(data, "check-dns")
+                absent = public_txt_absent(data)
+                retire_state(data, "dns-check", absent=absent)
+                if absent and item.get("cleanup_ready") is True:
+                    retire_cleanup(data)
+            else:
+                raise EdgeError("Invalid retirement lifecycle")
+        except Exception as exc:
+            failures += 1
+            print("MTA-STS retirement paused:", type(exc).__name__, flush=True)
+    return failures
+
+
 def main():
     if os.geteuid() != 0 or not SECRET or not PUBLIC_IP:
         return 2
@@ -340,6 +553,7 @@ def main():
                         state(data, "error", "error")
                     except Exception:
                         print("State update rejected", flush=True)
+        failures += run_retirement_jobs()
         return 1 if failures else 0
 
 
