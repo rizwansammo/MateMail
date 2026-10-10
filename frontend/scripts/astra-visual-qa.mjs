@@ -42,8 +42,8 @@ async function setup(viewport){
 async function metrics(page){
   return page.evaluate(()=>{
     const element=sel=>document.querySelector(sel);
-    const rect=sel=>{const el=element(sel);if(!el)return null;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),background:s.backgroundColor,radius:s.borderRadius};};
-    return {sidebar:rect(".astra-sidebar"),topbar:rect(".astra-topbar"),search:rect(".astra-search-dialog"),searchInput:rect(".astra-search-inputrow"),wordmarkFont:getComputedStyle(element(".wordmark")||document.body).fontFamily,gettingStarted:Array.from(document.querySelectorAll(".astra-sidebar a")).some(a=>a.textContent?.includes("Getting started")),duplicateOrg:!!element(".org-sidebar"),scroll:document.documentElement.scrollWidth,viewport:innerWidth};
+    const rect=sel=>{const el=element(sel);if(!el)return null;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return {x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),height:Math.round(r.height),background:s.backgroundColor,radius:s.borderRadius,transform:s.textTransform,boxShadow:s.boxShadow};};
+    return {sidebar:rect(".astra-sidebar"),topbar:rect(".astra-topbar"),search:rect(".astra-search-dialog"),searchInput:rect(".astra-search-inputrow"),groupLabel:rect("[data-slot=sidebar-group-label]"),input:rect(".astra-search-inputrow input"),wordmarkFont:getComputedStyle(element(".wordmark")||document.body).fontFamily,gettingStarted:Array.from(document.querySelectorAll(".astra-sidebar a")).some(a=>a.textContent?.includes("Getting started")),duplicateOrg:!!element(".org-sidebar"),scroll:document.documentElement.scrollWidth,viewport:innerWidth};
   });
 }
 async function snap(page,name){await page.screenshot({path:path.join(out,name+".png"),fullPage:false,animations:"disabled"});}
@@ -54,6 +54,7 @@ try{
   check("Astra desktop sidebar 244px and header 60px",m.sidebar?.width===244&&m.topbar?.height===60,m);
   check("Organization appears in topbar only",!m.duplicateOrg&&(await desktop.page.locator(".astra-org-name").innerText())===tenant.name);
   check("New organization shows Getting Started",m.gettingStarted);
+  check("Sidebar group headings match Astra uppercase style",m.groupLabel?.transform==="uppercase",{label:m.groupLabel});
   check("HemiHead brand font loaded",m.wordmarkFont.includes("--font-matemail-hub")||m.wordmarkFont.toLowerCase().includes("hemihead"),{font:m.wordmarkFont});
   await desktop.page.getByRole("button",{name:"Collapse sidebar"}).click();
   await desktop.page.waitForTimeout(260);
@@ -63,10 +64,12 @@ try{
   await desktop.page.getByRole("button",{name:"Expand sidebar"}).click();
   await desktop.page.getByRole("button",{name:/Search workspace/}).click();
   await desktop.page.getByRole("dialog",{name:"Search Hub"}).waitFor();
+  await snap(desktop.page,"03a-global-search-unfiltered");
   await desktop.page.getByRole("textbox",{name:"Search Hub pages and resources"}).fill("mailbox");
   m=await metrics(desktop.page);
   await snap(desktop.page,"03-global-search");
-  check("Search dialog original compact geometry",m.search?.width<=560&&m.searchInput?.height>=36,{dialog:m.search,input:m.searchInput});
+  check("Search dialog original compact geometry",m.search?.width===512&&m.searchInput?.height===40&&m.search.radius==="4px",{dialog:m.search,input:m.searchInput});
+  check("Search field has no extra blue focus ring",m.input?.boxShadow==="none",{focus:m.input});
   await desktop.page.keyboard.press("Escape");
   check("Escape closes Global Search",await desktop.page.getByRole("dialog",{name:"Search Hub"}).count()===0);
   await desktop.page.keyboard.press("Control+k");
