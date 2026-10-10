@@ -405,7 +405,9 @@ def retire_to_none(data):
             raise EdgeError("Policy file unsafe")
         atomic(target, policy_none())
         expose_public_policy_path(host)
-        # Preserve the existing HTTPS vhost and its certificate.
+        # Keep HTTPS available for cached remote MTAs, including if the old
+        # provisioner had stopped after issuing the cert but before HTTPS.
+        install_site(host, https_site(host))
         policy_http_ok(data, expected=policy_none())
     elif not public_txt_absent(data):
         # A partially installed vhost with no valid TLS cert cannot claim
