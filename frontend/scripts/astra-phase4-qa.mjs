@@ -82,6 +82,7 @@ try{
  await dialog.getByRole("option",{name:"sales@example.test"}).click();
  await t.page.waitForURL("**/app/aliases?q=*",{timeout:8000});
  await t.page.getByRole("searchbox",{name:"Search aliases"}).waitFor({timeout:8000});
+ await t.page.waitForFunction(() => document.querySelector('input[aria-label="Search aliases"]')?.value === "sales@example.test");
  check("Alias result routes to query-filtered list",await t.page.getByRole("searchbox",{name:"Search aliases"}).inputValue()==="sales@example.test");
  await t.page.getByText("sales@example.test").first().waitFor({state:"visible",timeout:8000});
  check("Alias list shows matching row only",await t.page.getByText("sales@example.test").count()>0&&await t.page.getByText("billing@example.test").count()===0);
@@ -91,6 +92,7 @@ try{
  await snap(t,"phase4-02-user-search");
  await dialog.getByRole("group",{name:"Users & access"}).getByRole("option",{name:"bob@example.test"}).click();
  await t.page.waitForURL("**/app/team?q=*",{timeout:8000});
+ await t.page.waitForFunction(() => document.querySelector('input[aria-label="Search members"]')?.value === "bob@example.test");
  check("Member full name matches while deep-link filters by email",await t.page.getByRole("searchbox",{name:"Search members"}).inputValue()==="bob@example.test");
  await t.page.getByText("bob@example.test").first().waitFor({state:"visible",timeout:8000});
  check("Member filtered list excludes unrelated accounts",await t.page.getByText("bob@example.test").count()>0);
@@ -99,12 +101,14 @@ try{
  await dialog.getByRole("option",{name:"alice@example.test"}).waitFor({timeout:8000});
  await dialog.getByRole("option",{name:"alice@example.test"}).click();
  await t.page.waitForURL("**/app/forwarding?q=*",{timeout:8000});
+ await t.page.waitForFunction(() => document.querySelector('input[aria-label="Search forwarding rules"]')?.value === "alice@example.test");
  check("Forwarding destination search resolves to correct source record",await t.page.getByRole("searchbox",{name:"Search forwarding rules"}).inputValue()==="alice@example.test");
  await open(t,"/app/delegation");
  dialog=await search(t,"Bob Smith");
  await dialog.getByRole("group",{name:"Delegation"}).getByRole("option",{name:"alice@example.test"}).waitFor({timeout:8000});
  await dialog.getByRole("group",{name:"Delegation"}).getByRole("option",{name:"alice@example.test"}).click();
  await t.page.waitForURL("**/app/delegation?q=*",{timeout:8000});
+ await t.page.waitForFunction(() => document.querySelector('input[aria-label="Search delegations"]')?.value === "alice@example.test");
  check("Delegation searches delegate and filters by target",await t.page.getByRole("searchbox",{name:"Search delegations"}).inputValue()==="alice@example.test");
  await open(t,"/app/mailboxes");
  dialog=await search(t,"alice@example.test");
