@@ -9,7 +9,6 @@ import {
   LifeBuoy,
   Mail,
   ShieldCheck,
-  Users,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
@@ -27,6 +26,8 @@ interface OnboardingStatus {
   domain_added: boolean;
   dns_verified: boolean;
   first_mailbox_created: boolean;
+  completed: boolean;
+  completed_at: string | null;
 }
 
 interface DomainSummary {
@@ -37,11 +38,6 @@ interface DomainSummary {
   dns_health_score: number;
 }
 
-interface MemberSummary {
-  id: string;
-  status: string;
-}
-
 interface WorkspaceStats {
   tenant_status: string;
 }
@@ -50,7 +46,6 @@ export default function OnboardingPage() {
   const { tenant, user } = useAuth();
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [domains, setDomains] = useState<DomainSummary[]>([]);
-  const [members, setMembers] = useState<MemberSummary[]>([]);
   const [workspaceStatus, setWorkspaceStatus] = useState(tenant?.status || "");
   const [loading, setLoading] = useState(true);
 
@@ -61,14 +56,12 @@ export default function OnboardingPage() {
     Promise.allSettled([
       apiRequest(`/api/workspaces/${tenant.id}/onboarding/`).then(async (res) => res.ok ? res.json() : null),
       apiRequest("/api/domains/").then(async (res) => res.ok ? res.json() : []),
-      apiRequest(`/api/workspaces/${tenant.id}/members/`).then(async (res) => res.ok ? res.json() : []),
       apiRequest(`/api/workspaces/${tenant.id}/stats/`).then(async (res) => res.ok ? res.json() : null),
     ]).then((results) => {
       if (cancelled) return;
-      const [onboardingResult, domainsResult, membersResult, statsResult] = results;
+      const [onboardingResult, domainsResult, statsResult] = results;
       if (onboardingResult.status === "fulfilled" && onboardingResult.value) setStatus(onboardingResult.value);
       if (domainsResult.status === "fulfilled" && Array.isArray(domainsResult.value)) setDomains(domainsResult.value);
-      if (membersResult.status === "fulfilled" && Array.isArray(membersResult.value)) setMembers(membersResult.value);
       if (statsResult.status === "fulfilled" && statsResult.value) {
         setWorkspaceStatus((statsResult.value as WorkspaceStats).tenant_status);
       }
@@ -84,7 +77,6 @@ export default function OnboardingPage() {
     domains.find((domain) => !domain.ownership_verified || domain.status !== "active") ?? domains[0];
 
   const steps = useMemo(() => {
-    const teamReady = members.filter((member) => member.status === "active").length > 1;
     return [
       {
         title: "Create your workspace",
@@ -118,19 +110,11 @@ export default function OnboardingPage() {
         href: "/app/mailboxes",
         label: "Create mailbox",
       },
-      {
-        title: "Welcome your team",
-        description: "Add another administrator or support teammate to your workspace.",
-        done: teamReady,
-        icon: Users,
-        href: "/app/team",
-        label: "Manage team",
-      },
     ];
-  }, [domainForReview, members, status, tenant?.name]);
+  }, [domainForReview, status, tenant?.name]);
 
-  const completed = steps.filter((step) => step.done).length;
-  const percentage = completed * 20;
+  const completed = status?.completed ? 4 : steps.filter((step) => step.done).length;
+  const percentage = completed * 25;
   const mailActionsAvailable = workspaceStatus === "active" && !!user?.email_verified;
 
   if (loading) {
@@ -175,7 +159,7 @@ export default function OnboardingPage() {
         <div>
           <div className="portal-onboarding-progress">
             <div className="portal-onboarding-progress-row">
-              <span><strong>{completed} of 5</strong> steps complete</span>
+              <span><strong>{completed} of 4</strong> steps complete</span>
               <span>{percentage}%</span>
             </div>
             <PortalProgress value={percentage} />
@@ -213,11 +197,11 @@ export default function OnboardingPage() {
           </div>
 
           <div className="mt-5">
-            <PortalNotice tone={completed === 5 ? "success" : "info"}>
+            <PortalNotice tone={completed === 4 ? "success" : "info"}>
               <Check className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="flex-1">
-                <strong>{completed === 5 ? "You’re ready for business." : "Your setup progress is saved."}</strong>{" "}
-                {completed === 5
+                <strong>{completed === 4 ? "You’re ready for business." : "Your setup progress is saved."}</strong>{" "}
+                {completed === 4
                   ? "Your core workspace setup is complete."
                   : "You can return and finish the remaining steps whenever you’re ready."}
               </div>
