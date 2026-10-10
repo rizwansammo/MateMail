@@ -43,6 +43,18 @@ def verified_report_sender(raw: bytes, message) -> bool:
         return False
     if from_domain != signing_domain and not from_domain.endswith("." + signing_domain):
         return False
+    # RFC 8460 requires that the DKIM signer be the REPORTING domain, not
+    # merely a random valid From identity. An attacker could otherwise sign
+    # made-up reports about a different organization's sending infrastructure.
+    # The submitter is checked against the JSON contact-info domain separately.
+    submitted = message.get_all("TLS-Report-Submitter", [])
+    if len(submitted) != 1:
+        return False
+    report_signer = str(submitted[0]).lower().strip().rstrip(".")
+    if not HOST_RE.fullmatch(report_signer):
+        return False
+    if report_signer != signing_domain and not report_signer.endswith("." + signing_domain):
+        return False
     try:
         return bool(dkim.verify(raw, tlsrpt=True))
     except Exception:
