@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
 import { apiRequest } from "@/lib/api";
 import {
   PortalButton,
@@ -236,7 +237,7 @@ export default function AliasesPage() {
   }
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-routing-page">
       <PortalPageHeading
         title="Aliases"
         description="More ways to reach your team without creating another mailbox."
@@ -254,6 +255,8 @@ export default function AliasesPage() {
           </PortalButton>
         }
       />
+
+      <div className="astra-resource-summary" aria-label="Alias statistics"><div><span>Aliases</span><strong>{loading ? "—" : aliases.length}</strong></div><div><span>Active aliases</span><strong>{loading ? "—" : aliases.filter((item) => item.status === "active").length}</strong></div><div><span>Engine ready</span><strong>{loading ? "—" : aliases.filter((item) => item.mail_service_ready).length}</strong></div></div>
 
       {!user?.email_verified && (
         <div className="mb-5">
@@ -303,12 +306,13 @@ export default function AliasesPage() {
         </div>
       )}
 
-      {addOpen && (
-        <PortalCard
-          className="portal-form-card"
-          title="Create an alias"
-          subtitle="An alias is an additional email address for exactly one existing MateMail mailbox."
-        >
+      <AstraResourceDialog
+        open={addOpen}
+        busy={adding}
+        title="Create an alias"
+        description="An alias delivers to one existing MateMail mailbox. It does not create a new mailbox."
+        onDismiss={() => { setAddOpen(false); setAddErrors({}); }}
+      >
           <form onSubmit={createAlias}>
             {fieldError(addErrors.detail) && (
               <div className="mb-4"><PortalNotice tone="danger">{fieldError(addErrors.detail)}</PortalNotice></div>
@@ -316,9 +320,10 @@ export default function AliasesPage() {
 
             <div className="portal-form-grid">
               <div className="portal-field full">
-                <label>Alias address</label>
+                <label htmlFor="astra-alias-local">Alias address</label>
                 <div className="portal-address-composer">
                   <input
+                    id="astra-alias-local"
                     type="text"
                     required
                     pattern="[a-zA-Z0-9._+-]+"
@@ -327,7 +332,7 @@ export default function AliasesPage() {
                     placeholder="sales"
                   />
                   <span>@</span>
-                  <select value={domainId} onChange={(event) => setDomainId(event.target.value)} required>
+                  <select aria-label="Alias domain" value={domainId} onChange={(event) => setDomainId(event.target.value)} required>
                     {domains.map((domain) => (
                       <option key={domain.id} value={domain.id}>{domain.domain}</option>
                     ))}
@@ -338,9 +343,10 @@ export default function AliasesPage() {
               </div>
 
               <div className="portal-field full">
-                <label>Mailbox</label>
+                <label htmlFor="astra-alias-mailbox">Mailbox</label>
                 {mailboxes.length ? (
                   <select
+                    id="astra-alias-mailbox"
                     value={destinationMailboxId}
                     onChange={(event) => setDestinationMailboxId(event.target.value)}
                     required
@@ -384,8 +390,7 @@ export default function AliasesPage() {
               </PortalButton>
             </div>
           </form>
-        </PortalCard>
-      )}
+      </AstraResourceDialog>
 
       {loadError && (
         <div className="mb-5"><PortalNotice tone="danger">{loadError}</PortalNotice></div>
