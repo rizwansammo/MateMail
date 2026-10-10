@@ -1,0 +1,62 @@
+name: Astra Hub Visual QA (isolated)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "frontend/app/app/astra-shell.css"
+      - "frontend/components/workspace/astra-shell.tsx"
+      - "frontend/scripts/astra-visual-qa.mjs"
+      - ".github/workflows/astra-hub-visual-qa.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-visual:
+    name: Playwright visual and interaction checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install app dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install ephemeral visual QA browser
+        working-directory: frontend
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Build production Next.js app
+        working-directory: frontend
+        run: npm run build
+      - name: Start isolated preview
+        working-directory: frontend
+        run: |
+          nohup npm run start -- -p 3100 > "$RUNNER_TEMP/astra-preview.log" 2>&1 &
+          for try in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:3100/app" -o /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/astra-preview.log"
+          exit 1
+      - name: Browser geometry, focus, keyboard and responsive QA
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-visual-qa.mjs
+      - name: Upload screenshots and QA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: astra-hub-visual-review
+          path: frontend/visual-qa-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
