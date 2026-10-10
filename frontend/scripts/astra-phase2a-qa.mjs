@@ -23,7 +23,7 @@ function verify(name,good,detail={}){
 }
 async function setup(viewport,role="owner"){
  const ctx=await browser.newContext({viewport,deviceScaleFactor:1,reducedMotion:"reduce"});
- const requests={mailbox:[],domain:[]};
+ const requests={mailbox:[],domain:[],status:[]};
  const mailboxes=[{...initialMailbox}];
  const domains=[{...initialDomain}];
  await ctx.route("**/api/**",async route=>{
@@ -49,7 +49,16 @@ async function setup(viewport,role="owner"){
     const row={...initialDomain,id:"d2222222-2222-4222-8222-222222222222",domain:value.domain,status:"pending",dns_health_score:0,ownership_verified:false,mail_service_ready:false};
     domains.push(row);body=row;
   }
+  else if(endpoint.startsWith("/api/mailboxes/")&&endpoint.endsWith("/status/")&&method==="PATCH"){
+    const value=JSON.parse(route.request().postData()||"{}");
+    requests.status.push(value);
+    const mailbox=mailboxes.find(row=>endpoint.includes(row.id));
+    if(mailbox){mailbox.status=value.status;body={...mailbox};}
+    else body={detail:"Not found"};
+  }
   else if(endpoint==="/api/mailboxes/")body=mailboxes;
+  else if(endpoint.startsWith("/api/mailboxes/")&&endpoint.endsWith("/"))body=mailboxes.find(row=>endpoint.includes(row.id))||{};
+  else if(endpoint==="/api/aliases/"||endpoint==="/api/forwarding/")body=[];
   else if(endpoint==="/api/domains/")body=domains;
   else if(endpoint.startsWith("/api/domains/")&&endpoint.endsWith("/records/"))body=[];
   else if(endpoint.startsWith("/api/domains/")&&endpoint.endsWith("/"))body=domains.find(d=>endpoint.includes(d.id))||domains[0];
@@ -106,9 +115,16 @@ try{
  verify("Mailbox creation preserves POST payload, domain and quota",sample.requests.mailbox.length===1&&sample.requests.mailbox[0].local_part==="newmember"&&sample.requests.mailbox[0].domain_id===initialDomain.id&&sample.requests.mailbox[0].full_name==="New Member",{requests:sample.requests.mailbox.map(({password,...data})=>data)});
  verify("Mailbox creation updates real table",(await sample.page.getByText("newmember@example.test").count())>0);
  verify("Mailbox modal closes after successful create",!(await modal.isVisible()));
+ await sample.page.goto(base+"/app/mailboxes/"+initialMailbox.id,{waitUntil:"domcontentloaded"});
+ await sample.page.getByRole("heading",{name:"Existing User"}).waitFor({timeout:30000});
+ await screenshot(sample.page,"phase2a-03-mailbox-detail");
+ verify("Mailbox detail loads existing API into Astra layout",await sample.page.locator(".astra-resource-page .portal-mailbox-hero").count()===1);
+ await sample.page.getByRole("button",{name:"Disable mailbox"}).click();
+ await sample.page.getByRole("button",{name:"Enable mailbox"}).waitFor({timeout:7000});
+ verify("Mailbox status keeps PATCH endpoint and updates UI",sample.requests.status.length===1&&sample.requests.status[0].status==="disabled");
  await ready(sample.page,"Domains");
  await sample.page.waitForTimeout(300);
- await screenshot(sample.page,"phase2a-03-domains");
+ await screenshot(sample.page,"phase2a-04-domains");
  m=await tableMetrics(sample.page);
  verify("Domains show backend records and Astra card radius",(await sample.page.getByText("example.test").count())>0&&m.cardRadius==="4px",m);
  verify("Domain table uses Astra 41px header",m.tableHeadHeight===41,m);
@@ -117,24 +133,27 @@ try{
  await addDomain.click();
  const domainModal=sample.page.getByRole("dialog",{name:"Connect a new domain"});
  await domainModal.waitFor({state:"visible"});
- await screenshot(sample.page,"phase2a-04-domain-create");
+ await screenshot(sample.page,"phase2a-05-domain-create");
  verify("Domain creation modal contains ownership guidance",(await domainModal.getByText(/does not transfer/i).count())>0);
  await domainModal.getByLabel("Root domain").fill("new-domain.example");
  await domainModal.getByRole("button",{name:"Add domain"}).click();
  await sample.page.waitForTimeout(450);
  verify("Domain creation POST preserved and navigates to existing detail",sample.requests.domain.length===1&&sample.requests.domain[0].domain==="new-domain.example",{request:sample.requests.domain[0]});
+ await sample.page.locator(".portal-domain-title").waitFor({timeout:7000});
+ await screenshot(sample.page,"phase2a-06-domain-detail");
+ verify("Domain detail retains actual DNS verification tab",await sample.page.getByRole("button",{name:"DNS & verification"}).count()===1);
  verify("No runtime errors in main list flows",sample.errors.length===0,{errors:sample.errors});
  await sample.ctx.close();
 
  const limited=await setup({width:390,height:844},"read_only");
  await ready(limited.page,"Mailboxes");
  await limited.page.waitForTimeout(450);
- await screenshot(limited.page,"phase2a-05-mailboxes-mobile-readonly");
+ await screenshot(limited.page,"phase2a-07-mailboxes-mobile-readonly");
  verify("Read-only member cannot create a mailbox",await limited.page.getByRole("button",{name:"Create mailbox"}).first().isDisabled());
  verify("Mobile Mailboxes table scrolls internally, not entire document",(await tableMetrics(limited.page)).scroll<=391,await tableMetrics(limited.page));
  await ready(limited.page,"Domains");
  await limited.page.waitForTimeout(450);
- await screenshot(limited.page,"phase2a-06-domains-mobile-readonly");
+ await screenshot(limited.page,"phase2a-08-domains-mobile-readonly");
  verify("Read-only member cannot create a domain",await limited.page.getByRole("button",{name:"Add domain"}).first().isDisabled());
  verify("Mobile Domains document has no horizontal overflow",(await tableMetrics(limited.page)).scroll<=391,await tableMetrics(limited.page));
  await limited.ctx.close();
