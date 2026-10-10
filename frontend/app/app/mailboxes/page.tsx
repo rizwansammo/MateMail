@@ -461,7 +461,15 @@ export default function MailboxesPage() {
                     ? Math.min(100, Math.round((mailbox.storage_used_mb / mailbox.quota_mb) * 100))
                     : 0;
                   return (
-                    <tr key={mailbox.id} className="cursor-pointer" onClick={() => router.push(`/app/mailboxes/${mailbox.id}`)}>
+                    <tr key={mailbox.id} className="cursor-pointer" tabIndex={0}
+                      aria-label={`Open mailbox ${mailbox.email}`}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          router.push(`/app/mailboxes/${mailbox.id}`);
+                        }
+                      }}
+                      onClick={() => router.push(`/app/mailboxes/${mailbox.id}`)}>
                       <td>
                         <div className="portal-identity-cell">
                           <span className="portal-avatar">{initials(mailbox.full_name || mailbox.email)}</span>
