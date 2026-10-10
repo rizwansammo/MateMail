@@ -1,0 +1,124 @@
+/* Phase 2A — approved Astra design language for real Mailbox & Domain routes.
+   All selectors are constrained to /app resource pages or their own modal.
+   Shared PostBox / Platform / general Hub screens remain untouched. */
+.ws.astra-hub .astra-resource-page{
+  --portal-text:var(--foreground);
+  --portal-text-strong:var(--foreground);
+  --portal-muted:var(--muted-foreground);
+  --portal-faint:var(--muted-foreground);
+  --portal-primary:var(--sidebar-primary);
+  --portal-primary-hover:var(--primary);
+  --portal-primary-soft:var(--accent);
+  --portal-border:var(--border);
+  --portal-border-strong:var(--input);
+  --portal-surface:var(--card);
+  --portal-surface-soft:var(--soft);
+  --portal-shadow:none;
+  color:var(--foreground);
+  font-size:.8125rem;
+}
+.ws.astra-hub .astra-resource-page .portal-page-heading{margin:4px 0 23px;align-items:center;gap:16px}
+.ws.astra-hub .astra-resource-page .portal-page-heading h1{font-size:1.85rem;font-weight:650;letter-spacing:-.035em;color:var(--foreground)}
+.ws.astra-hub .astra-resource-page .portal-page-heading p{font-size:.875rem;line-height:1.65;color:var(--muted-foreground)}
+.ws.astra-hub .astra-resource-page .portal-button{border-radius:4px!important;min-height:36px;font-size:.8125rem;font-weight:550;padding:0 13px}
+.ws.astra-hub .astra-resource-page .portal-icon-button{border-radius:4px!important;border:1px solid var(--border);width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground)}
+.ws.astra-hub .astra-resource-page .portal-icon-button:hover{background:var(--accent)}
+.ws.astra-hub .astra-resource-page .portal-card{border:1px solid var(--border)!important;border-radius:4px!important;background:var(--card)!important;box-shadow:none!important;min-width:0}
+.ws.astra-hub .astra-resource-page .portal-card-header{padding:19px 21px 16px;border-bottom:1px solid var(--border)}
+.ws.astra-hub .astra-resource-page .portal-card-header h2{font-size:.925rem;font-weight:600;color:var(--foreground)}
+.ws.astra-hub .astra-resource-page .portal-card-header p{font-size:.75rem;color:var(--muted-foreground)}
+.ws.astra-hub .astra-resource-page .portal-status{border-radius:3px!important;font-size:.72rem;font-weight:500;padding:3px 8px}
+.ws.astra-hub .astra-resource-page .portal-status::before{height:5px;width:5px}
+.ws.astra-hub .astra-resource-page .portal-notice{font-size:.8125rem;border-radius:4px!important;line-height:1.55}
+.ws.astra-hub .astra-resource-page .portal-avatar,
+.ws.astra-hub .astra-resource-page .portal-domain-symbol{background:var(--muted);border:1px solid var(--border);color:var(--muted-foreground);border-radius:4px!important;font-weight:600}
+.ws.astra-hub .astra-resource-page .portal-identity-cell strong,
+.ws.astra-hub .astra-resource-page .portal-domain-identity strong{font-size:.8125rem;font-weight:600;color:var(--foreground)}
+.ws.astra-hub .astra-resource-page .portal-identity-cell small,
+.ws.astra-hub .astra-resource-page .portal-domain-identity small{font-size:.735rem;color:var(--muted-foreground)}
+.ws.astra-hub .astra-resource-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--border);border-radius:4px;background:var(--card);margin-bottom:22px;overflow:hidden}
+.ws.astra-hub .astra-resource-summary>div{padding:15px 19px;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ws.astra-hub .astra-resource-summary>div+div{border-left:1px solid var(--border)}
+.ws.astra-hub .astra-resource-summary span{color:var(--muted-foreground);font-size:.75rem}
+.ws.astra-hub .astra-resource-summary strong{color:var(--foreground);font-size:1.4rem;font-weight:550;font-variant-numeric:tabular-nums;letter-spacing:-.04em}
+.ws.astra-hub .astra-resource-page .portal-management-toolbar,
+.ws.astra-hub .astra-resource-page .portal-domain-toolbar{padding:13px 16px;gap:12px;border-color:var(--border)}
+.ws.astra-hub .astra-resource-page .portal-management-search,
+.ws.astra-hub .astra-resource-page .portal-domain-toolbar>div:first-child{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:4px;background:var(--card);width:min(100%,340px);padding:0 11px;min-height:36px;flex:0 1 340px;color:var(--muted-foreground)}
+.ws.astra-hub .astra-resource-page .portal-management-search input,
+.ws.astra-hub .astra-resource-page .portal-domain-toolbar input{color:var(--foreground);font-size:.8125rem;padding:0;border:0;min-width:0;flex:1;background:transparent;outline:none;box-shadow:none}
+.ws.astra-hub .astra-resource-page .portal-management-table,
+.ws.astra-hub .astra-resource-page .portal-domain-table{font-size:.8125rem;border-collapse:collapse;width:100%}
+.ws.astra-hub .astra-resource-page .portal-management-table th,
+.ws.astra-hub .astra-resource-page .portal-domain-table th{height:41px;background:var(--soft);color:var(--muted-foreground);font-size:.6875rem;font-weight:500;letter-spacing:.02em;text-transform:none;padding:0 18px;text-align:left;border-bottom:1px solid var(--border)}
+.ws.astra-hub .astra-resource-page .portal-management-table td,
+.ws.astra-hub .astra-resource-page .portal-domain-table td{font-size:.8125rem;padding:14px 18px;border-bottom:1px solid var(--border);color:var(--foreground);vertical-align:middle}
+.ws.astra-hub .astra-resource-page .portal-management-table tbody tr:hover,
+.ws.astra-hub .astra-resource-page .portal-domain-table tbody tr:hover{background:var(--soft)}
+.ws.astra-hub .astra-resource-page .portal-management-table tbody tr:last-child td,
+.ws.astra-hub .astra-resource-page .portal-domain-table tbody tr:last-child td{border-bottom:0}
+.ws.astra-hub .astra-resource-page .portal-management-table-wrap,
+.ws.astra-hub .astra-resource-page .portal-domain-table-wrap{overflow:auto;scrollbar-width:thin}
+.ws.astra-hub .astra-resource-page .portal-health-inline,
+.ws.astra-hub .astra-resource-page .portal-storage-head{font-size:.75rem;color:var(--muted-foreground)}
+.ws.astra-hub .astra-resource-page .portal-storage-meter,
+.ws.astra-hub .astra-resource-page .portal-health-inline-bar{border-radius:2px!important;height:4px}
+.ws.astra-hub .astra-resource-page .portal-service-state{font-size:.75rem}
+.ws.astra-hub .astra-resource-page .portal-mailbox-hero{margin:5px 0 24px;gap:16px}
+.ws.astra-hub .astra-resource-page .portal-mailbox-hero .portal-avatar{height:50px;width:50px;border-radius:4px!important;font-size:.9rem}
+.ws.astra-hub .astra-resource-page .portal-mailbox-hero h1,
+.ws.astra-hub .astra-resource-page .portal-domain-title{font-size:1.85rem;font-weight:650;letter-spacing:-.035em;color:var(--foreground)}
+.ws.astra-hub .astra-resource-page .portal-mailbox-hero p{font-size:.8125rem}
+.ws.astra-hub .astra-resource-page .portal-domain-detail-head{margin:4px 0 22px}
+.ws.astra-hub .astra-resource-page .portal-domain-subline{gap:12px}
+.ws.astra-hub .astra-resource-page .portal-back-link{font-size:.75rem;color:var(--muted-foreground)}
+.ws.astra-hub .astra-resource-page .portal-domain-tabs{gap:22px;border-color:var(--border);overflow-x:auto;scrollbar-width:thin}
+.ws.astra-hub .astra-resource-page .portal-domain-tab{white-space:nowrap;font-size:.8125rem;font-weight:500}
+.ws.astra-hub .astra-resource-page .portal-domain-tab[data-active=true]{color:var(--sidebar-primary)}
+.ws.astra-hub .astra-resource-page .portal-dns-record{border:1px solid var(--border);border-radius:4px!important;background:var(--card);padding:15px}
+.ws.astra-hub .astra-resource-page .portal-record-type{border-radius:3px!important}
+.ws.astra-hub .astra-resource-page .portal-dns-list{gap:9px}
+.ws.astra-hub .astra-resource-page .portal-readiness{border-radius:4px!important}
+.ws.astra-hub .astra-resource-page .portal-detail-list .portal-detail-row{font-size:.8125rem}
+.ws.astra-hub .astra-resource-page .portal-routing-link{border-radius:4px!important}
+.ws.astra-hub .astra-resource-page :is(input:not([type=range]),select,textarea):focus{box-shadow:none!important;border-color:var(--muted-foreground)!important;outline:none}
+.ws.astra-hub .astra-resource-page :is(input:not([type=range]),select,textarea):focus-visible{outline:1px solid var(--muted-foreground);outline-offset:1px}
+.ws.astra-hub .astra-resource-page .portal-field :is(input,select,textarea){border-radius:4px!important;font-size:.8125rem;min-height:36px}
+.ws.astra-hub .astra-resource-page .portal-detail-actions{gap:9px}
+.ws.astra-hub .astra-resource-page :is(.portal-danger-zone,.portal-copy-button){border-radius:4px!important}
+/* Native modal is top-layer, but scoped to the same Hub shell, never global. */
+.ws.astra-hub dialog.astra-resource-dialog{position:fixed;inset:0;max-width:min(530px,calc(100vw - 24px));max-height:min(90dvh,760px);width:100%;margin:auto;padding:0;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--foreground);box-shadow:0 14px 50px #10203b30;overflow:auto;scrollbar-width:thin}
+.ws.astra-hub dialog.astra-resource-dialog::backdrop{background:rgb(9 17 29 / .54)}
+.ws.astra-hub .astra-resource-dialog-header{padding:25px 26px 18px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.ws.astra-hub .astra-resource-eyebrow{font-size:.625rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted-foreground);font-weight:600}
+.ws.astra-hub .astra-resource-dialog-header h2{font-size:1.125rem;font-weight:630;margin-top:10px;color:var(--foreground)}
+.ws.astra-hub .astra-resource-dialog-header p{font-size:.8125rem;line-height:1.6;color:var(--muted-foreground);margin-top:6px}
+.ws.astra-hub .astra-resource-dialog-close{display:flex;align-items:center;justify-content:center;min-width:28px;height:28px;border:0;border-radius:3px;color:var(--muted-foreground);background:transparent;cursor:pointer}
+.ws.astra-hub .astra-resource-dialog-close:hover{background:var(--muted)}
+.ws.astra-hub .astra-resource-dialog-body{padding:22px 26px 26px}
+.ws.astra-hub .astra-resource-dialog-body .portal-form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:17px}
+.ws.astra-hub .astra-resource-dialog-body :is(.portal-field label,.portal-form-field label){font-size:.8125rem;font-weight:500;color:var(--foreground);margin-bottom:7px}
+.ws.astra-hub .astra-resource-dialog-body :is(input:not([type=range]),select,textarea){min-height:36px;border:1px solid var(--input);border-radius:4px!important;background:var(--card);color:var(--foreground);font-size:.8125rem;padding:0 10px}
+.ws.astra-hub .astra-resource-dialog-body :is(input,select,textarea):focus{border-color:var(--muted-foreground)!important;box-shadow:none!important;outline:none}
+.ws.astra-hub .astra-resource-dialog-body :is(input,select,textarea):focus-visible{outline:1px solid var(--muted-foreground);outline-offset:1px}
+.ws.astra-hub .astra-resource-dialog-body .portal-field-hint,
+.ws.astra-hub .astra-resource-dialog-body .portal-form-field>p{font-size:.75rem;line-height:1.55;color:var(--muted-foreground)}
+.ws.astra-hub .astra-resource-dialog-body .portal-detail-actions,
+.ws.astra-hub .astra-resource-dialog-body .portal-form-actions{display:flex;justify-content:flex-end;gap:9px;border-top:1px solid var(--border);margin-top:24px;padding-top:18px}
+.ws.astra-hub .astra-resource-dialog-body .portal-button{border-radius:4px!important;font-size:.8125rem;min-height:36px;font-weight:550}
+.ws.astra-hub .astra-resource-dialog-body input[type=range]{width:100%;accent-color:var(--primary)}
+.ws.astra-hub .astra-resource-dialog-body .portal-address-composer{display:flex;align-items:center;gap:10px}
+.ws.astra-hub .astra-resource-dialog-body .portal-address-composer input{min-width:0;flex:1}
+.ws.astra-hub .astra-resource-dialog-body .portal-address-composer select{min-width:130px;flex:1}
+@media(max-width:800px){
+  .ws.astra-hub .astra-resource-page .portal-page-heading{align-items:flex-start}
+  .ws.astra-hub .astra-resource-summary{grid-template-columns:1fr}
+  .ws.astra-hub .astra-resource-summary>div{padding:10px 14px}
+  .ws.astra-hub .astra-resource-summary>div+div{border-left:0;border-top:1px solid var(--border)}
+  .ws.astra-hub .astra-resource-page .portal-management-toolbar,.ws.astra-hub .astra-resource-page .portal-domain-toolbar{padding:10px}
+  .ws.astra-hub .astra-resource-dialog-header{padding:22px 18px 17px}
+  .ws.astra-hub .astra-resource-dialog-body{padding:20px 18px}
+  .ws.astra-hub .astra-resource-dialog-body .portal-form-grid{grid-template-columns:1fr}
+  .ws.astra-hub .astra-resource-dialog-body .portal-address-composer{flex-wrap:wrap}
+}
+@media(prefers-reduced-motion:reduce){.ws.astra-hub dialog.astra-resource-dialog{scroll-behavior:auto}}
