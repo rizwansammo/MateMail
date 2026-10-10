@@ -13,6 +13,12 @@ on:
       - "frontend/scripts/astra-phase2d-qa.mjs"
       - "frontend/scripts/astra-phase2e-qa.mjs"
       - "frontend/scripts/astra-phase3-qa.mjs"
+      - "frontend/scripts/astra-phase4-qa.mjs"
+      - "frontend/components/workspace/astra-shell.tsx"
+      - "frontend/app/app/aliases/**"
+      - "frontend/app/app/forwarding/**"
+      - "frontend/app/app/delegation/**"
+      - "frontend/app/app/team/**"
       - "frontend/app/app/astra-advanced.css"
       - "frontend/app/app/backups/**"
       - "frontend/app/app/logs/**"
@@ -117,6 +123,12 @@ jobs:
           VISUAL_QA_URL: http://127.0.0.1:3100
           VISUAL_QA_OUTPUT: visual-qa-artifacts
         run: node scripts/astra-phase3-qa.mjs
+      - name: Phase 4 Global Search resources, routes, keyboard and tenant boundaries
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase4-qa.mjs
       - name: Upload screenshots and QA report
         if: always()
         uses: actions/upload-artifact@v4
