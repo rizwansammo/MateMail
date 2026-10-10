@@ -79,7 +79,7 @@ function TeamPageContent() {
   const [myRole, setMyRole] = useState<Member["role"] | "">("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(requestedSearch);
   const [tab, setTab] = useState<"members" | "invites">("members");
 
   const [inviteOpen, setInviteOpen] = useState(false);
