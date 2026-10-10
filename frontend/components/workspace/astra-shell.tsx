@@ -49,10 +49,14 @@ const sections: NavGroup[] = [
 const settings: NavItem = { label: "Settings", href: "/app/settings", icon: Settings };
 const allItems = [...home, ...sections.flatMap(group => group.items), settings];
 type Resource = { id: string; text: string; category: string; href: string; icon: LucideIcon };
-type Onboarding = { workspace_created: boolean; domain_added: boolean; dns_verified: boolean; first_mailbox_created: boolean };
-function isComplete(value: Onboarding): boolean {
-  return Boolean(value.workspace_created && value.domain_added && value.dns_verified && value.first_mailbox_created);
-}
+type Onboarding = {
+  workspace_created: boolean;
+  domain_added: boolean;
+  dns_verified: boolean;
+  first_mailbox_created: boolean;
+  completed: boolean;
+  completed_at: string | null;
+};
 function initials(text: string) {
   return text.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map(segment => segment[0]?.toUpperCase()).join("") || "?";
 }
@@ -139,29 +143,40 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
 
   useEffect(() => {
     if (!tenantId) return;
-    let cancelled=false;
-    // Sticky per-browser marker is an interim measure. Cross-device persistence
-    // requires an explicit reviewed backend completion timestamp.
-    const key="matemail.hub.onboarding.completed."+tenantId;
-    const saved = typeof window!=="undefined" && window.localStorage.getItem(key)==="1";
-    if (saved) {
-      Promise.resolve().then(() => { if(!cancelled) setSetupStatus({tenantId,state:"done"}); });
-      return () => {cancelled=true;};
-    }
-    apiRequest("/api/workspaces/"+encodeURIComponent(tenantId)+"/onboarding/")
-      .then(async response => {
-        if(!response.ok) return null;
-        return await response.json() as Onboarding;
-      })
-      .then(status => {
-        if(cancelled) return;
-        const complete=!!status&&isComplete(status);
-        if(complete){try{window.localStorage.setItem(key,"1")}catch{}}
-        setSetupStatus({tenantId,state:complete?"done":"required"});
-      })
-      .catch(() => { if(!cancelled)setSetupStatus({tenantId,state:"required"}); });
-    return () => {cancelled=true;};
-  },[tenantId,pathname]);
+    let cancelled = false;
+    // The backend's persisted completion timestamp is authoritative across
+    // devices. No localStorage flags or browser-specific setup state.
+    const refresh = async () => {
+      try {
+        const response = await apiRequest(
+          "/api/workspaces/" + encodeURIComponent(tenantId) + "/onboarding/"
+        );
+        if (!response.ok) return;
+        const state = await response.json() as Onboarding;
+        if (!cancelled) {
+          setSetupStatus({ tenantId, state: state.completed ? "done" : "required" });
+        }
+      } catch {
+        // A network outage must never falsely mark setup complete.
+      }
+    };
+    void refresh();
+    const onFocus = () => { void refresh(); };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    // Mailbox provisioning can complete while this layout stays mounted on
+    // the same route; refresh on explicit operations as well as navigation.
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("matemail:workspace-onboarding-updated", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("matemail:workspace-onboarding-updated", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [tenantId, pathname]);
 
   useEffect(() => {
     if (!searchOpen) return;
