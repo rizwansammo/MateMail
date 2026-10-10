@@ -195,6 +195,7 @@ def retirement_ready(row, now):
 def retirement_job(row):
     payload = job(row)
     payload["lifecycle"] = row.lifecycle
+    payload["cleanup_ready"] = retirement_ready(row, timezone.now())
     payload["cleanup_after"] = (
         (row.deactivation_dns_absent_since + timedelta(seconds=CACHE_DRAIN_SECONDS)).isoformat()
         if row.deactivation_dns_absent_since else None
