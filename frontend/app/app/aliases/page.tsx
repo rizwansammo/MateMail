@@ -138,9 +138,9 @@ function AliasesPageContent() {
   }, [fetchAll, tenant?.id]);
 
   useEffect(() => {
-    // Direct links from Global Search remain shareable and survive a reload.
-    // The effect also handles Next.js soft navigation to a new query.
-    setQuery(requestedSearch);
+    // Sync incoming query after mount (no render-cascade state update).
+    const id = window.setTimeout(() => setQuery(requestedSearch), 0);
+    return () => window.clearTimeout(id);
   }, [requestedSearch]);
 
   const filteredAliases = useMemo(() => {
