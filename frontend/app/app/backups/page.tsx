@@ -110,7 +110,7 @@ export default function BackupsPage() {
   const active = jobs.filter((job) => job.status === "pending" || job.status === "running").length;
 
   return (
-    <div className="portal-page">
+    <div className="portal-page astra-resource-page astra-advanced-page astra-operations-page">
       <PortalPageHeading
         title="Backups"
         description="Visibility into organization-level backup requests recorded by MateMail."
