@@ -9,6 +9,11 @@ on:
       - "frontend/scripts/astra-visual-qa.mjs"
       - "frontend/scripts/astra-phase2a-qa.mjs"
       - "frontend/scripts/astra-phase2b-qa.mjs"
+      - "frontend/scripts/astra-phase2c-qa.mjs"
+      - "frontend/app/app/astra-routing.css"
+      - "frontend/app/app/aliases/**"
+      - "frontend/app/app/forwarding/**"
+      - "frontend/app/app/delegation/**"
       - "frontend/app/app/astra-collaboration.css"
       - "frontend/app/app/team-boxes/**"
       - "frontend/app/app/forward-groups/**"
@@ -73,6 +78,12 @@ jobs:
           VISUAL_QA_URL: http://127.0.0.1:3100
           VISUAL_QA_OUTPUT: visual-qa-artifacts
         run: node scripts/astra-phase2b-qa.mjs
+      - name: Phase 2C Aliases, Forwarding and Delegation browser contracts
+        working-directory: frontend
+        env:
+          VISUAL_QA_URL: http://127.0.0.1:3100
+          VISUAL_QA_OUTPUT: visual-qa-artifacts
+        run: node scripts/astra-phase2c-qa.mjs
       - name: Upload screenshots and QA report
         if: always()
         uses: actions/upload-artifact@v4
