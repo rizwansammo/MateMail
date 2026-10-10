@@ -115,7 +115,8 @@ try{
  verify("Mailbox creation preserves POST payload, domain and quota",sample.requests.mailbox.length===1&&sample.requests.mailbox[0].local_part==="newmember"&&sample.requests.mailbox[0].domain_id===initialDomain.id&&sample.requests.mailbox[0].full_name==="New Member",{requests:sample.requests.mailbox.map(({password,...data})=>data)});
  verify("Mailbox creation updates real table",(await sample.page.getByText("newmember@example.test").count())>0);
  verify("Mailbox modal closes after successful create",!(await modal.isVisible()));
- await sample.page.goto(base+"/app/mailboxes/"+initialMailbox.id,{waitUntil:"domcontentloaded"});
+ await sample.page.locator('tr[aria-label="Open mailbox existing@example.test"]').focus();
+ await sample.page.keyboard.press("Enter");
  await sample.page.getByRole("heading",{name:"Existing User"}).waitFor({timeout:30000});
  await screenshot(sample.page,"phase2a-03-mailbox-detail");
  verify("Mailbox detail loads existing API into Astra layout",await sample.page.locator(".astra-resource-page .portal-mailbox-hero").count()===1);
@@ -128,6 +129,11 @@ try{
  m=await tableMetrics(sample.page);
  verify("Domains show backend records and Astra card radius",(await sample.page.getByText("example.test").count())>0&&m.cardRadius==="4px",m);
  verify("Domain table uses Astra 41px header",m.tableHeadHeight===41,m);
+ await sample.page.locator('tr[aria-label="Open domain example.test"]').focus();
+ await sample.page.keyboard.press("Enter");
+ await sample.page.locator(".portal-domain-title").waitFor({timeout:7000});
+ verify("Domain row keyboard navigation reaches existing detail",await sample.page.locator(".portal-domain-title").innerText()==="example.test");
+ await ready(sample.page,"Domains");
  const addDomain=sample.page.getByRole("button",{name:"Add domain"}).first();
  await addDomain.waitFor({state:"visible"});
  await addDomain.click();
