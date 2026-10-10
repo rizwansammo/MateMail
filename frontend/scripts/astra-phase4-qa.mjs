@@ -106,8 +106,8 @@ try{
  check("Delegation searches delegate and filters by target",await t.page.getByRole("searchbox",{name:"Search delegations"}).inputValue()==="alice@example.test");
  await open(t,"/app/mailboxes");
  dialog=await search(t,"alice@example.test");
- await dialog.getByRole("option",{name:"alice@example.test"}).waitFor({timeout:8000});
- await dialog.getByRole("option",{name:"alice@example.test"}).click();
+ await dialog.getByRole("group",{name:"Mailboxes"}).getByRole("option",{name:"alice@example.test"}).waitFor({timeout:8000});
+ await dialog.getByRole("group",{name:"Mailboxes"}).getByRole("option",{name:"alice@example.test"}).click();
  await t.page.waitForURL("**/app/mailboxes/"+mailboxId,{timeout:8000});
  check("Mailbox search navigates to exact detail route",t.page.url().endsWith(mailboxId));
  await open(t);
