@@ -77,6 +77,9 @@ function DelegationPageContent() {
   const requestedSearch = routeParams.get("q") || "";
   const { tenant, user } = useAuth();
   const [myRole, setMyRole] = useState(tenant?.role || "");
+  const canAdmin = myRole === "owner" || myRole === "admin";
+  const [delegations, setDelegations] = useState<Delegation[]>([]);
+  const [query, setQuery] = useState("");
   const filteredDelegations = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) return delegations;
@@ -86,9 +89,7 @@ function DelegationPageContent() {
     );
   },[delegations,query]);
 
-  const canAdmin = myRole === "owner" || myRole === "admin";
-  const [delegations, setDelegations] = useState<Delegation[]>([]);
-  const [query, setQuery] = useState("");
+
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
