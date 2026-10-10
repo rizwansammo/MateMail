@@ -7,8 +7,8 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Activity, Building2, CheckCircle2, ChevronDown, ChevronRight,
   Clock, DatabaseBackup, ExternalLink, Globe2, HardDrive, Inbox,
-  KeyRound, LayoutDashboard, Link2, Lock, LogOut, Mail, Menu, Moon,
-  Network, Plug, Search, Settings, Shield, ShieldCheck, Sun,
+  KeyRound, LayoutDashboard, Link2, Lock, LogOut, Mail, Moon,
+  Network, PanelLeft, Plug, Search, Settings, Shield, ShieldCheck, Sun,
   Users, Waypoints, X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -267,7 +267,7 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
           <div className="topbar-left">
             <button type="button" className="astra-icon-button" aria-label={collapsed?"Expand sidebar":"Collapse sidebar"}
               onClick={()=>window.innerWidth<=800?setMobileOpen(true):setCollapsed(old=>!old)}>
-              <Menu size={17}/>
+              <PanelLeft size={17}/>
             </button>
             <span className="topbar-separator"/>
             <Building2 size={15}/>
