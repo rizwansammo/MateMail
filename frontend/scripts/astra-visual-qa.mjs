@@ -26,8 +26,8 @@ async function setup(viewport){
     else if(endpoint==="/api/auth/me/")response=user;
     else if(endpoint==="/api/workspaces/"+tid+"/")response={...tenant,my_role:"owner",plan:"business",domain_count:1,mailbox_count:1,member_count:1,approved_at:"2026-01-01T00:00:00Z",review_reason:"",outbound_disabled:false,created_at:"2026-01-01T00:00:00Z"};
     else if(endpoint==="/api/workspaces/"+tid+"/onboarding/")response={workspace_created:true,domain_added:completed,dns_verified:completed,first_mailbox_created:completed,completed,completed_at:completed?"2026-01-01T00:00:00Z":null};
-    else if(endpoint==="/api/workspaces/"+tid+"/stats/")response={my_role:"owner",tenant_status:"active",mailbox_count:1,domain_count:1,member_count:1};
-    else if(endpoint==="/api/domains/")response=[{id:"cccccccc-cccc-4ccc-8ccc-cccccccccccc",domain:"example.test",status:"active",ownership_verified:true,dns_health_score:100}];
+    else if(endpoint==="/api/workspaces/"+tid+"/stats/")response={my_role:"owner",tenant_status:"active",tenant_plan:"business",mailbox_count:1,active_mailbox_count:1,domain_count:1,active_domain_count:1,storage_used_mb:512,storage_quota_mb:10240,member_count:1};
+    else if(endpoint==="/api/domains/")response=[{id:"cccccccc-cccc-4ccc-8ccc-cccccccccccc",domain:"example.test",status:"active",ownership_verified:true,dns_health_score:100,mail_service_ready:true}];
     else if(endpoint==="/api/mailboxes/")response=[{id:"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",email:"qa@example.test",full_name:"QA Inbox",kind:"personal",status:"active",quota_mb:10240,storage_used_mb:0}];
     else if(endpoint==="/api/billing/")response={subscription:null};
     await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(response)});
