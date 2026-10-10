@@ -8,6 +8,7 @@ import "./app/portal-premium.css";
 import "./app/astra-shell.css";
 import "./app/astra-resources.css";
 import "./app/astra-collaboration.css";
+import "./app/astra-routing.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
