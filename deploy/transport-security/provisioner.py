@@ -381,6 +381,20 @@ def managed_site(host):
 def retire_to_none(data):
     retire_authorize(data, "serve-none")
     host = data["hostname"]
+    path, link = site_file(host), enabled_file(host)
+    # A worker may have failed before writing its first Nginx site.
+    # Such a request can retire only when no policy certificate or public
+    # security TXT exists, and no colliding unmanaged host owns the name.
+    if not path.exists() and not link.is_symlink():
+        collision_check(host)
+        if (Path("/etc/letsencrypt/renewal").joinpath(host + ".conf").exists()
+                or Path("/etc/letsencrypt/live").joinpath(host).exists()
+                or (POLICIES / host).exists()
+                or not public_txt_absent(data)):
+            raise EdgeError("Cannot retire unprovisioned policy without DNS and edge proof")
+        retire_authorize(data, "serve-none")
+        retire_state(data, "mode-none")
+        return
     managed_site(host)
     if cert_ok(host):
         root = POLICIES / host / ".well-known"
@@ -422,7 +436,18 @@ def retirement_receipt(data):
         if actual != identity:
             raise EdgeError("Retirement journal ownership mismatch")
     else:
-        managed_site(data["hostname"])
+        host = data["hostname"]
+        site, enabled = site_file(host), enabled_file(host)
+        if not site.exists() and not enabled.is_symlink():
+            # Explicitly unprovisioned request. No certificate, host or policy
+            # may survive, otherwise require operator review, never guessing.
+            collision_check(host)
+            if ((POLICIES / host).exists()
+                    or (Path("/etc/letsencrypt/live") / host).exists()
+                    or (Path("/etc/letsencrypt/renewal") / (host + ".conf")).exists()):
+                raise EdgeError("Unprovisioned site still has edge resources")
+        else:
+            managed_site(host)
         atomic(path, json.dumps(identity, sort_keys=True).encode())
         path.chmod(0o600)
     return path
