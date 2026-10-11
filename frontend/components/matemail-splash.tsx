@@ -73,7 +73,7 @@ export function MateMailSplash({ surface }: { surface: MateMailSurface }) {
           event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
-      const link = target.closest("a[href]");
+      const link = target.closest<HTMLAnchorElement>("a[href]");
       if (!link || link.hasAttribute("download") ||
           (link.target && link.target !== "_self")) return;
       try {
