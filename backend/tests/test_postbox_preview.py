@@ -37,6 +37,40 @@ class PostBoxPreviewParsingTests(SimpleTestCase):
         self.assertNotIn("secret-script", result)
         self.assertNotIn("<p>", result)
 
+    def test_plain_reply_excludes_quoted_sender_history(self):
+        raw = (
+            "Hi Rizwan,\nYes, your signature is working.\nThanks.\n"
+            "Regards,\nTeam NetaMate\n"
+            "On Sun, Oct 11, 2026 at 10:13 AM NetaMate Solutions "
+            "<contact@netamate.com> wrote:\n"
+            "> Hello, can you check the signature?\n"
+        ).encode("utf-8")
+        snippet = imap._preview_from_partial(raw, "text/plain; charset=utf-8", "7bit")
+        self.assertIn("Yes, your signature is working.", snippet)
+        self.assertNotIn("On Sun", snippet)
+        self.assertNotIn("contact@netamate.com", snippet)
+
+    def test_quote_lines_are_not_part_of_snippet(self):
+        raw = b"Fresh response.\n> Previous long email\n> Older reply\n"
+        self.assertEqual(imap._preview_from_partial(raw, "text/plain", "7bit"), "Fresh response.")
+
+    def test_html_blockquote_is_not_part_of_snippet(self):
+        raw = (b"<p>Here is my new answer.</p>"
+               b"<blockquote>From: old@example.com<br>Old text</blockquote>")
+        snippet = imap._preview_from_partial(raw, "text/html; charset=utf-8", "7bit")
+        self.assertEqual(snippet, "Here is my new answer.")
+
+    def test_outlook_quote_header_does_not_leak(self):
+        raw = (b"Yes, everything works.\n-----Original Message-----\n"
+               b"From: Someone <old@example.com>\nTo: Me\nOld message")
+        snippet = imap._preview_from_partial(raw, "text/plain; charset=utf-8", "7bit")
+        self.assertEqual(snippet, "Yes, everything works.")
+
+    def test_non_reply_keeps_own_body(self):
+        raw = b"We discussed the roadmap on Monday. Please send updates."
+        self.assertEqual(imap._preview_from_partial(raw, "text/plain", "7bit"),
+                         "We discussed the roadmap on Monday. Please send updates.")
+
     def test_non_text_and_empty_payload_have_no_snippet(self):
         self.assertEqual(imap._preview_from_partial(b"", "text/plain", "7bit"), "")
         self.assertEqual(imap._preview_from_partial(

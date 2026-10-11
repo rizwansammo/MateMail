@@ -12,6 +12,16 @@
   overflow:hidden;
   min-width:0;
 }
+/*
+ * The custom list's display:flex otherwise overrides Tailwind's .hidden,
+ * and "Full message" inadvertently renders the list above the reader.
+ */
+.pb-premium-shell.pb-astra-postbox .pb-mail-layout > [data-pane-hidden="true"] {
+  display:none !important;
+  flex:0 0 0 !important;
+  min-height:0 !important;
+  min-width:0 !important;
+}
 .pb-premium-shell.pb-astra-postbox .pb-astra-list-scroll {
   flex:1 1 auto;
   min-height:0;

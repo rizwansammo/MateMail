@@ -924,6 +924,30 @@ def _structure_has_attachment(meta: bytes) -> bool:
     return b'"ATTACHMENT"' in meta.upper()
 
 
+# Snippets describe only the new reply, not quoted mail history.
+_PREVIEW_REPLY_HEADER = re.compile(
+    r"\bOn\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?\b.{0,190}?\bwrote\s*:",
+    re.IGNORECASE | re.DOTALL,
+)
+_PREVIEW_ORIGINAL_BLOCK = re.compile(
+    r"(?im)^\s*(?:[- ]{2,}Original Message[- ]{2,}|From:\s+\S[^\n]*"
+    r"(?:\n\s*(?:Sent|To|Subject):[^\n]*){1,4})"
+)
+
+
+def _preview_without_quoted_history(value: str) -> str:
+    """Clean just a bounded list snippet, never the original message body."""
+    value = value.replace("\x00", " ")[:6000]
+    positions = [
+        m.start() for pattern in (_PREVIEW_REPLY_HEADER, _PREVIEW_ORIGINAL_BLOCK)
+        if (m := pattern.search(value))
+    ]
+    if positions:
+        value = value[:min(positions)]
+    value = re.split(r"(?m)^\s*>\s?", value, maxsplit=1)[0]
+    return " ".join(value.split())[:180]
+
+
 class _PreviewText(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -931,13 +955,13 @@ class _PreviewText(HTMLParser):
         self.hidden = 0
 
     def handle_starttag(self, tag, attrs):
-        if tag.lower() in {"script", "style", "head", "template", "svg"}:
+        if tag.lower() in {"script", "style", "head", "template", "svg", "blockquote"}:
             self.hidden += 1
         elif tag.lower() in {"div", "p", "br", "li"}:
             self.parts.append(" ")
 
     def handle_endtag(self, tag):
-        if tag.lower() in {"script", "style", "head", "template", "svg"}:
+        if tag.lower() in {"script", "style", "head", "template", "svg", "blockquote"}:
             self.hidden = max(0, self.hidden - 1)
         elif tag.lower() in {"div", "p", "li"}:
             self.parts.append(" ")
@@ -981,9 +1005,9 @@ def _preview_from_partial(raw: bytes, content_type: str, transfer_encoding: str)
                     parser = _PreviewText()
                     parser.feed(value[:6000])
                     value = " ".join(parser.parts)
-                value = " ".join(value.replace("\x00", " ").split())
+                value = _preview_without_quoted_history(value)
                 if value:
-                    return value[:180]
+                    return value
     except (ValueError, TypeError, UnicodeError):
         pass
     return ""
