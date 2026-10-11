@@ -1,5 +1,4 @@
 from django.db import migrations, models
-from django.db.models import Q
 
 
 def backfill_primary(apps, schema_editor):
@@ -8,7 +7,7 @@ def backfill_primary(apps, schema_editor):
     # This makes no changes to mailboxes or to mail routing/DNS records.
     tenant_ids = Domain.objects.filter(
         ownership_status="verified", status="active"
-    ).values_list("tenant_id", flat=True).distinct()
+    ).order_by().values_list("tenant_id", flat=True).distinct()
     for tenant_id in tenant_ids.iterator():
         first = (Domain.objects.filter(
             tenant_id=tenant_id, ownership_status="verified", status="active"
@@ -19,6 +18,9 @@ def backfill_primary(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [("domains", "0006_domain_ownership_recheck_failures")]
+    # Backfill writes to domains_domain. Postgres requires a COMMIT before
+    # CREATE INDEX on this table due to pending trigger events. The uniqueness
+    # index is installed by 0008, its own atomic migration.
 
     operations = [
         migrations.AddField(
@@ -27,12 +29,4 @@ class Migration(migrations.Migration):
             field=models.BooleanField(default=False, db_index=True),
         ),
         migrations.RunPython(backfill_primary, migrations.RunPython.noop),
-        migrations.AddConstraint(
-            model_name="domain",
-            constraint=models.UniqueConstraint(
-                fields=["tenant"],
-                condition=Q(is_primary=True),
-                name="uniq_primary_domain_per_tenant",
-            ),
-        ),
     ]
