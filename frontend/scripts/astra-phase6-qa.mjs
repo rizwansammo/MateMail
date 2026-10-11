@@ -34,12 +34,22 @@ async function prepare(viewport) {
       data = { id: uid, email: "owner@example.test", full_name: "QA Owner", email_verified: true,
         two_factor_enabled: false, is_platform_admin: false };
     else if (endpoint === "/api/workspaces/" + tid + "/")
-      data = { id: tid, name: "QA Workspace", slug: "qa-workspace", status: "active", role: "owner" };
+      data = { id: tid, name: "QA Workspace", slug: "qa-workspace", status: "active" }; // Backend does not include member role in detail payload.
     else if (endpoint === "/api/workspaces/" + tid + "/onboarding/")
       data = { workspace_created: true, domain_added: true, dns_verified: true,
         first_mailbox_created: true, completed: true, completed_at: "2026-01-01T00:00:00Z" };
     else if (endpoint === "/api/workspaces/" + tid + "/stats/")
-      data = { my_role: "owner", tenant_status: "active" };
+      data = { my_role: "owner", tenant_status: "active", tenant_plan: "business", mailbox_count: 7, active_mailbox_count: 6, domain_count: 2, active_domain_count: 1, storage_used_mb: 1536, storage_quota_mb: 10240, member_count: 2 };
+    else if (endpoint === "/api/workspaces/" + tid + "/members/")
+      data = [{ id: "a1", email: "owner@example.test", full_name: "QA Owner", role: "owner", status: "active" },
+              { id: "a2", email: "admin@example.test", full_name: "QA Admin", role: "admin", status: "active" }];
+    else if (endpoint === "/api/domains/")
+      data = [
+        { id:"d1", domain:"healthy.example.test", status:"active", ownership_verified:true, dns_health_score:100, mail_service_ready:true },
+        { id:"d2", domain:"pending.example.test", status:"pending", ownership_verified:false, dns_health_score:10, mail_service_ready:false }
+      ];
+    else if (endpoint === "/api/logs/")
+      data = [{ id:"l1", event_type:"domain_verified", source:"healthy.example.test", result:"success", created_at:"2026-10-10T00:00:00Z" }];
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data) });
   });
   const page = await context.newPage();
@@ -74,6 +84,29 @@ const report = { phase: "Phase 6 Astra approved baseline acceptance",
 try {
   const desktop = await prepare({ width: 1440, height: 900 });
   let m = await measure(desktop.page);
+  await desktop.page.getByRole("heading", { name: "Your workspace, in focus." }).waitFor();
+  check("Overview uses approved Astra welcome, not legacy dashboard",
+    (await desktop.page.getByRole("heading", { name: "Your workspace, in focus." }).count()) === 1
+    && (await desktop.page.getByText("Workspace overview").count()) === 0
+    && (await desktop.page.locator(".portal-metrics-grid").count()) === 0);
+  for (const section of ["Domain readiness","Needs attention","Recent activity","Workspace essentials"]) {
+    check("Approved Astra Overview section: " + section,
+      (await desktop.page.getByRole("heading", { name: section }).count()) === 1);
+  }
+  check("Real fixture stats mapped into Astra metrics, without seed/demo numbers",
+    (await desktop.page.getByText("7", { exact: true }).count()) > 0 &&
+    (await desktop.page.getByText("2", { exact: true }).count()) > 0 &&
+    (await desktop.page.getByText("healthy.example.test").count()) > 0 &&
+    (await desktop.page.getByText("Northstar Studio").count()) === 0);
+  check("Original organization identity card is visible in sidebar",
+    (await desktop.page.locator(".astra-sidebar .astra-org-card").count()) === 1 &&
+    (await desktop.page.locator(".astra-sidebar").getByText("QA Workspace").count()) === 1);
+  await desktop.page.getByRole("link", { name: "Quarantine" }).waitFor();
+  for (const label of ["Delegation","Quarantine","Mail queue","Activity log","Backup history","Connected apps"]) {
+    check("Original prototype navigation preserved: " + label,
+      (await desktop.page.locator(".astra-sidebar").getByRole("link", { name: label, exact: true }).count()) === 1);
+  }
+
   check("Light design tokens match approved Astra reference",
     m.primary === "#3d54b8" && m.background === "#f7f8fa" && m.radius === "4px", m);
   check("Desktop shell matches 244px/60px approved geometry",

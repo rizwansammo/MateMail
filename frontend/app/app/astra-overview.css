@@ -1,0 +1,115 @@
+/* Approved Astra Overview — scoped exclusively to the authenticated Hub.
+   Source of geometry/visual rhythm: MateMail-Hub-NextJS prototype.
+   Data, statuses and actions come from real tenant APIs, never demo fixtures. */
+.ws.astra-hub .astra-overview{color:var(--foreground);min-width:0}
+.ws.astra-hub .astra-ov-topline{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;font-size:.75rem}
+.ws.astra-hub .astra-ov-topline>span{font-size:.625rem;letter-spacing:.12em;font-weight:600;color:var(--muted-foreground)}
+.ws.astra-hub .astra-ov-topline time{color:var(--muted-foreground);font-size:.75rem}
+.ws.astra-hub .astra-ov-welcome{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:21px}
+.ws.astra-hub .astra-ov-welcome h1{font-size:1.85rem;font-weight:650;letter-spacing:-.025em;line-height:1.26}
+.ws.astra-hub .astra-ov-welcome p{font-size:.9375rem;color:var(--muted-foreground);margin-top:8px}
+.ws.astra-hub .astra-ov-create{position:relative;flex-shrink:0;z-index:12}
+.ws.astra-hub .astra-ov-create>button{display:flex;align-items:center;gap:9px;background:var(--primary);color:var(--primary-foreground);height:36px;padding:0 14px;border:1px solid transparent;border-radius:4px;cursor:pointer;font-size:.8125rem;font-weight:550}
+.ws.astra-hub .astra-ov-create>button:hover{filter:brightness(.94)}
+.ws.astra-hub .astra-ov-create-options{position:absolute;right:0;top:calc(100% + 5px);min-width:178px;padding:6px;border:1px solid var(--border);border-radius:4px;background:var(--popover);box-shadow:0 12px 24px #00000018}
+.ws.astra-hub .astra-ov-create-options a{display:block;padding:9px 11px;border-radius:3px;font-size:.8125rem}
+.ws.astra-hub .astra-ov-create-options a:hover{background:var(--accent)}
+.ws.astra-hub .astra-ov-statusline{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:.75rem;color:var(--muted-foreground);margin-bottom:26px}
+.ws.astra-hub .astra-ov-statusline svg,.ws.astra-hub .astra-ov-statusline strong{color:var(--good)}
+.ws.astra-hub .astra-ov-statusline strong{font-weight:600}
+.ws.astra-hub .astra-ov-divider{height:12px;width:1px;background:var(--border);margin:0 5px}
+.ws.astra-hub .astra-ov-plan{margin-left:auto;text-transform:capitalize}
+.ws.astra-hub .astra-ov-setup{display:flex;align-items:center;gap:9px;padding:12px 15px;border:1px solid var(--border);border-radius:4px;margin-bottom:20px;background:var(--soft);font-size:.8125rem;color:var(--foreground)}
+.ws.astra-hub .astra-ov-setup svg{color:var(--warn);flex-shrink:0}
+.ws.astra-hub .astra-ov-setup a{margin-left:auto;display:inline-flex;align-items:center;gap:3px;color:var(--primary);font-weight:600}
+.ws.astra-hub .astra-ov-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--border);background:var(--card);border-radius:4px;margin-bottom:25px}
+.ws.astra-hub .astra-ov-metric{padding:21px 23px 19px;min-height:146px;min-width:0;position:relative}
+.ws.astra-hub .astra-ov-metric+.astra-ov-metric{border-left:1px solid var(--border)}
+.ws.astra-hub .astra-ov-metric-label{font-size:.8125rem;color:var(--muted-foreground);margin-bottom:12px}
+.ws.astra-hub .astra-ov-metric-value{font-size:1.75rem;font-weight:650;line-height:1.16;letter-spacing:-.035em;overflow-wrap:anywhere}
+.ws.astra-hub .astra-ov-metric-value span{font-size:.78rem;color:var(--muted-foreground);font-weight:450;letter-spacing:0}
+.ws.astra-hub .astra-ov-metric p{font-size:.75rem;color:var(--muted-foreground);margin-top:10px}
+.ws.astra-hub .astra-ov-metric-note{font-size:.73rem;color:var(--warn);margin-top:10px}
+.ws.astra-hub .astra-ov-progress{height:3px;margin-top:17px;max-width:190px;background:var(--muted);overflow:hidden}
+.ws.astra-hub .astra-ov-progress span{height:100%;display:block;background:var(--primary)}
+.ws.astra-hub .astra-ov-avatars{display:flex;margin-top:13px;padding-left:2px}
+.ws.astra-hub .astra-ov-avatars span{height:24px;min-width:24px;border:2px solid var(--card);border-radius:50%;margin-left:-3px;display:inline-flex;align-items:center;justify-content:center;background:var(--muted);color:var(--muted-foreground);font-weight:600;font-size:.575rem}
+.ws.astra-hub .astra-ov-loading>div{min-height:120px;background:linear-gradient(90deg,var(--muted),var(--card),var(--muted));background-size:200% 100%;animation:astra-ov-shimmer 1.3s linear infinite}
+@keyframes astra-ov-shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
+.ws.astra-hub .astra-ov-grid{display:grid;grid-template-columns:minmax(0,1.62fr) minmax(280px,1fr);gap:22px;margin-bottom:22px}
+.ws.astra-hub .astra-ov-panel{background:var(--card);border:1px solid var(--border);border-radius:4px;min-width:0;overflow:hidden}
+.ws.astra-hub .astra-ov-panel-head{display:flex;align-items:center;justify-content:space-between;gap:13px;padding:20px 21px 17px;border-bottom:1px solid var(--border)}
+.ws.astra-hub .astra-ov-panel-head h2{font-weight:600;font-size:.9375rem}
+.ws.astra-hub .astra-ov-panel-head p{font-size:.75rem;color:var(--muted-foreground);margin-top:5px}
+.ws.astra-hub .astra-ov-panel-head a{font-size:.75rem;font-weight:550;color:var(--primary);display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.ws.astra-hub .astra-ov-count{background:var(--muted);color:var(--muted-foreground);font-size:.6875rem;padding:2px 7px;border-radius:3px}
+.ws.astra-hub .astra-ov-domain,.ws.astra-hub .astra-ov-attention,.ws.astra-hub .astra-ov-quick{display:flex;align-items:center;width:100%;text-align:left;border-bottom:1px solid var(--border);color:var(--foreground);text-decoration:none}
+.ws.astra-hub .astra-ov-domain:last-child,.ws.astra-hub .astra-ov-attention:last-child,.ws.astra-hub .astra-ov-quick:last-child,.ws.astra-hub .astra-ov-activity:last-child{border-bottom:0}
+.ws.astra-hub .astra-ov-domain:hover,.ws.astra-hub .astra-ov-attention:hover,.ws.astra-hub .astra-ov-quick:hover{background:var(--soft)}
+.ws.astra-hub .astra-ov-domain{padding:20px 21px;gap:13px;min-height:84px}
+.ws.astra-hub .astra-ov-domain>svg{color:var(--muted-foreground);flex-shrink:0;stroke-width:1.5}
+.ws.astra-hub .astra-ov-domain-name{flex:1;min-width:0;overflow-wrap:anywhere}
+.ws.astra-hub .astra-ov-domain-name strong{display:block;font-size:.8125rem;font-weight:600}
+.ws.astra-hub .astra-ov-domain-name small{display:block;margin-top:4px;color:var(--muted-foreground);font-size:.6875rem}
+.ws.astra-hub .astra-ov-pill{font-size:.6875rem;border-radius:3px;padding:3px 6px;white-space:nowrap;flex-shrink:0}
+.ws.astra-hub .astra-ov-pill.good{background:var(--good-bg);color:var(--good)}
+.ws.astra-hub .astra-ov-pill.warn{background:var(--warn-bg);color:var(--warn)}
+.ws.astra-hub .astra-ov-attention{padding:18px 20px;gap:11px}
+.ws.astra-hub .astra-ov-counter{border:1px solid var(--border);border-radius:3px;padding:2px 5px;color:var(--muted-foreground);font-size:.625rem}
+.ws.astra-hub .astra-ov-attention>span:nth-child(2),.ws.astra-hub .astra-ov-quick>span{flex:1;min-width:0}
+.ws.astra-hub .astra-ov-attention strong,.ws.astra-hub .astra-ov-quick strong,.ws.astra-hub .astra-ov-activity strong{font-size:.8125rem;font-weight:600;display:block}
+.ws.astra-hub .astra-ov-attention small,.ws.astra-hub .astra-ov-quick small,.ws.astra-hub .astra-ov-activity small{font-size:.6875rem;color:var(--muted-foreground);margin-top:4px;display:block;overflow-wrap:anywhere}
+.ws.astra-hub .astra-ov-attention>svg,.ws.astra-hub .astra-ov-quick>svg:last-child{color:var(--muted-foreground);flex-shrink:0}
+.ws.astra-hub .astra-ov-allclear{padding:35px 25px;text-align:center}
+.ws.astra-hub .astra-ov-allclear>svg{margin:0 auto 10px;color:var(--good)}
+.ws.astra-hub .astra-ov-allclear h3{font-size:.875rem;font-weight:600}
+.ws.astra-hub .astra-ov-allclear p{font-size:.75rem;color:var(--muted-foreground);margin-top:7px}
+.ws.astra-hub .astra-ov-empty{font-size:.8125rem;padding:26px 20px;color:var(--muted-foreground)}
+.ws.astra-hub .astra-ov-empty a{color:var(--primary);font-weight:600}
+.ws.astra-hub .astra-ov-activity{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--border);padding:14px 21px}
+.ws.astra-hub .astra-ov-activity>svg{flex-shrink:0;color:var(--muted-foreground)}
+.ws.astra-hub .astra-ov-activity>div{flex:1;min-width:0}
+.ws.astra-hub .astra-ov-activity time{white-space:nowrap;font-size:.65rem;color:var(--muted-foreground)}
+.ws.astra-hub .astra-ov-quick{gap:13px;padding:19px 21px}
+.ws.astra-hub .astra-ov-quick>svg:first-child{stroke-width:1.5;color:var(--muted-foreground);flex-shrink:0}
+@media(min-width:1600px){
+  .ws.astra-hub .astra-ov-grid{grid-template-columns:1.75fr 1fr}
+  .ws.astra-hub .astra-ov-metric{padding:25px 28px}
+  .ws.astra-hub .astra-ov-domain{min-height:96px}
+}
+@media(max-width:1200px){
+  .ws.astra-hub .astra-ov-metric{padding:18px}
+  .ws.astra-hub .astra-ov-grid{grid-template-columns:minmax(0,1.4fr) minmax(260px,1fr);gap:17px}
+}
+@media(max-width:1000px){
+  .ws.astra-hub .astra-ov-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ws.astra-hub .astra-ov-metric:nth-child(3){border-left:0;border-top:1px solid var(--border)}
+  .ws.astra-hub .astra-ov-metric:nth-child(4){border-top:1px solid var(--border)}
+  .ws.astra-hub .astra-ov-grid{grid-template-columns:1fr}
+}
+@media(max-width:600px){
+  .ws.astra-hub .astra-ov-topline{align-items:flex-start;gap:5px;flex-direction:column}
+  .ws.astra-hub .astra-ov-welcome{flex-wrap:wrap;align-items:flex-start;gap:15px}
+  .ws.astra-hub .astra-ov-welcome h1{font-size:1.65rem}
+  .ws.astra-hub .astra-ov-welcome p{font-size:.875rem}
+  .ws.astra-hub .astra-ov-statusline{gap:6px}
+  .ws.astra-hub .astra-ov-plan{display:none}
+  .ws.astra-hub .astra-ov-metric{padding:16px;min-height:130px}
+  .ws.astra-hub .astra-ov-metric-value{font-size:1.5rem}
+  .ws.astra-hub .astra-ov-panel-head{padding:17px}
+  .ws.astra-hub .astra-ov-domain{padding:17px;gap:10px;flex-wrap:wrap}
+  .ws.astra-hub .astra-ov-domain-name{flex:1}
+  .ws.astra-hub .astra-ov-domain .astra-ov-pill{margin-left:32px}
+  .ws.astra-hub .astra-ov-attention,.ws.astra-hub .astra-ov-quick,.ws.astra-hub .astra-ov-activity{padding:16px}
+  .ws.astra-hub .astra-ov-setup{flex-wrap:wrap}
+}
+
+/* Organization identity card: matches the supplied Astra sidebar screenshots.
+   Kept inside the Hub scope and hidden in collapsed/mobile-icon mode. */
+.ws.astra-hub .astra-org-card{display:flex;align-items:center;gap:10px;min-width:0;min-height:64px;margin:8px 18px 8px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:13px 0}
+.ws.astra-hub .astra-org-monogram{display:grid;place-items:center;flex:0 0 31px;height:31px;background:var(--muted);color:var(--foreground);border:1px solid var(--border);font-size:.875rem;font-weight:600}
+.ws.astra-hub .astra-org-card-name{flex:1;min-width:0}
+.ws.astra-hub .astra-org-card-name strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8125rem;font-weight:600}
+.ws.astra-hub .astra-org-card-name small{display:block;font-size:.75rem;color:var(--muted-foreground);margin-top:2px}
+.ws.astra-hub .astra-org-card>svg{flex-shrink:0;color:var(--muted-foreground)}
+.ws.astra-hub .astra-sidebar[data-collapsed=true] .astra-org-card{display:none}

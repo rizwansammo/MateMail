@@ -1,32 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import {
-  Activity,
-  AlertCircle,
-  CheckCircle2,
-  Globe2,
-  HardDrive,
-  Mail,
-  ShieldCheck,
-  Sparkles,
-  Users,
+  Activity, AlertCircle, CheckCircle2, ChevronDown, ChevronRight,
+  Globe2, Inbox, Plus, ShieldCheck, Users,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { api, apiRequest } from "@/lib/api";
-import {
-  PortalButton,
-  PortalCard,
-  PortalEmptyState,
-  PortalMetric,
-  PortalNotice,
-  PortalPageHeading,
-  PortalProgress,
-  PortalSkeleton,
-  PortalStatus,
-} from "@/components/workspace/premium-ui";
+import { apiRequest } from "@/lib/api";
 
 interface WorkspaceStats {
   domain_count: number;
@@ -40,425 +22,255 @@ interface WorkspaceStats {
   tenant_status: string;
   tenant_plan: string;
 }
-
-interface OnboardingStatus {
-  workspace_created: boolean;
-  domain_added: boolean;
-  dns_verified: boolean;
-  first_mailbox_created: boolean;
-  completed: boolean;
-  completed_at: string | null;
-}
-
-interface DomainSummary {
+interface Domain {
   id: string;
   domain: string;
   status: string;
-  dns_health_score: number;
   ownership_verified: boolean;
+  dns_health_score: number | null;
   mail_service_ready: boolean;
 }
-
-interface AuditEvent {
+interface Member {
+  id: string;
+  email?: string;
+  full_name?: string;
+  role: string;
+  status: string;
+}
+interface Event {
   id: string;
   event_type: string;
-  source: string;
-  result: string;
-  metadata: Record<string, unknown>;
+  source?: string;
+  result?: string;
+  metadata?: Record<string, unknown>;
   created_at: string;
 }
+interface Onboarding { completed: boolean; workspace_created: boolean; domain_added: boolean;
+  dns_verified: boolean; first_mailbox_created: boolean; }
 
-function pretty(value?: string | null) {
-  if (!value) return "Unknown";
-  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+function items<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === "object" && "results" in data) {
+    const rows = (data as {results?: unknown}).results;
+    if (Array.isArray(rows)) return rows as T[];
+  }
+  return [];
+}
+function formatDate(date: string): string {
+  const d = new Date(date);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, {month:"short",day:"numeric",year:"numeric"});
+}
+function tone(domain: Domain): "good"|"warn" {
+  return domain.ownership_verified && domain.status==="active"
+    && domain.mail_service_ready && (domain.dns_health_score ?? 0)>=95 ? "good" : "warn";
+}
+function domainHelp(domain: Domain): {label:string;description:string} {
+  if (!domain.ownership_verified) return {label:"Verify ownership",description:"Publish your domain verification record"};
+  if (!domain.mail_service_ready) return {label:"Review mail service",description:"Check mail-service provisioning"};
+  if (domain.status!=="active" || (domain.dns_health_score ?? 0)<95)
+    return {label:"Review DNS",description:"Review mail DNS configuration"};
+  return {label:"Configured",description:"Ownership and mail configuration healthy"};
+}
+function Metric({label,value,unit,description,progress,children}: {
+  label:string;value:string|number;unit?:string;description:string;progress?:number;children?:ReactNode;
+}) {
+  return <div className="astra-ov-metric">
+    <div className="astra-ov-metric-label">{label}</div>
+    <div className="astra-ov-metric-value">{value}{unit&&<span> {unit}</span>}</div>
+    <p>{description}</p>
+    {progress!==undefined&&<div className="astra-ov-progress" aria-label={label+" usage"}
+      role="progressbar" aria-valuenow={Math.round(progress)} aria-valuemin={0} aria-valuemax={100}>
+      <span style={{width:Math.min(100,Math.max(0,progress))+"%"}}/>
+    </div>}
+    {children}
+  </div>;
+}
+function PanelHeader({title,subtitle,href,label}: {
+  title:string;subtitle:string;href?:string;label?:string;
+}) {
+  return <div className="astra-ov-panel-head">
+    <div><h2>{title}</h2><p>{subtitle}</p></div>
+    {href&&<Link href={href}>{label||"View all"} <ChevronRight size={14}/></Link>}
+  </div>;
+}
+function initials(name: string) {
+  return name.split(/[\s@._-]+/).filter(Boolean).slice(0,2)
+    .map(part=>part[0].toUpperCase()).join("")||"M";
 }
 
-function eventLabel(value: string) {
-  return pretty(value);
-}
-
-function relativeTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const diff = Math.max(0, Date.now() - date.getTime());
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function metadataTarget(event: AuditEvent) {
-  const metadata = event.metadata || {};
-  const target =
-    metadata.domain ??
-    metadata.mailbox ??
-    metadata.email ??
-    metadata.target ??
-    metadata.name;
-  return typeof target === "string" && target ? target : event.source || "Workspace";
-}
-
-function ApprovalNotice({ status }: { status: string }) {
-  if (status === "active") return null;
-  const content: Record<string, { tone: "info" | "warn" | "danger"; title: string; text: string }> = {
-    pending_approval: {
-      tone: "info",
-      title: "Private Beta approval pending",
-      text: "You can review your workspace while approval is pending. Mail provisioning actions become available after platform approval.",
-    },
-    rejected: {
-      tone: "danger",
-      title: "Workspace application was not approved",
-      text: "Mail provisioning is unavailable for this workspace.",
-    },
-    suspended: {
-      tone: "danger",
-      title: "Workspace suspended",
-      text: "Mail sending, receiving and provisioning actions are currently unavailable.",
-    },
-    cancelled: {
-      tone: "danger",
-      title: "Workspace cancelled",
-      text: "This workspace can no longer provision or operate mail services.",
-    },
-  };
-  const item = content[status] ?? {
-    tone: "warn" as const,
-    title: pretty(status),
-    text: "Some mail operations may be unavailable in the current workspace state.",
-  };
-  return (
-    <div className="portal-approval-banner">
-      <PortalNotice tone={item.tone}>
-        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-        <span><strong>{item.title}.</strong> {item.text}</span>
-      </PortalNotice>
-    </div>
-  );
-}
-
+/** The original Astra overview structure, populated only by authenticated APIs.
+ * No prototype demo records, seeded storage usage, or fictional plan quotas. */
 export default function DashboardPage() {
-  const { user, tenant } = useAuth();
-  const [stats, setStats] = useState<WorkspaceStats | null>(null);
-  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
-  const [domains, setDomains] = useState<DomainSummary[]>([]);
-  const [events, setEvents] = useState<AuditEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [verifyMessage, setVerifyMessage] = useState("");
-  const [verifyBusy, setVerifyBusy] = useState(false);
+  const {tenant,user}=useAuth();
+  const tenantId=tenant?.id;
+  const [stats,setStats]=useState<WorkspaceStats|null>(null);
+  const [domains,setDomains]=useState<Domain[]>([]);
+  const [members,setMembers]=useState<Member[]|null>(null);
+  const [events,setEvents]=useState<Event[]|null>(null);
+  const [onboarding,setOnboarding]=useState<Onboarding|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [createOpen,setCreateOpen]=useState(false);
 
-  useEffect(() => {
-    if (!tenant?.id) return;
-    let cancelled = false;
-
-    Promise.allSettled([
-      apiRequest(`/api/workspaces/${tenant.id}/stats/`).then(async (res) => res.ok ? res.json() : null),
-      apiRequest(`/api/workspaces/${tenant.id}/onboarding/`).then(async (res) => res.ok ? res.json() : null),
-      apiRequest("/api/domains/").then(async (res) => res.ok ? res.json() : []),
-      apiRequest("/api/logs/").then(async (res) => res.ok ? res.json() : []),
-    ]).then((results) => {
-      if (cancelled) return;
-      const [statsResult, onboardingResult, domainResult, logResult] = results;
-      if (statsResult.status === "fulfilled" && statsResult.value) setStats(statsResult.value);
-      if (onboardingResult.status === "fulfilled" && onboardingResult.value) setOnboarding(onboardingResult.value);
-      if (domainResult.status === "fulfilled" && Array.isArray(domainResult.value)) setDomains(domainResult.value);
-      if (logResult.status === "fulfilled" && Array.isArray(logResult.value)) setEvents(logResult.value.slice(0, 4));
+  useEffect(()=>{
+    if(!tenantId){setLoading(false);return;}
+    let cancelled=false;
+    setLoading(true);
+    setStats(null);
+    setDomains([]);
+    setMembers(null);
+    setEvents(null);
+    setOnboarding(null);
+    const get=async(url:string)=>{
+      const response=await apiRequest(url);
+      if(!response.ok)throw new Error("Resource unavailable");
+      return response.json() as Promise<unknown>;
+    };
+    void Promise.allSettled([
+      get("/api/workspaces/"+encodeURIComponent(tenantId)+"/stats/"),
+      get("/api/domains/"),
+      get("/api/workspaces/"+encodeURIComponent(tenantId)+"/members/"),
+      get("/api/logs/"),
+      get("/api/workspaces/"+encodeURIComponent(tenantId)+"/onboarding/"),
+    ]).then(results=>{
+      if(cancelled)return;
+      const [st,dom,mem,log,setup]=results;
+      if(st.status==="fulfilled" && st.value && typeof st.value==="object")
+        setStats(st.value as WorkspaceStats);
+      if(dom.status==="fulfilled")setDomains(items<Domain>(dom.value));
+      if(mem.status==="fulfilled")setMembers(items<Member>(mem.value));
+      if(log.status==="fulfilled")setEvents(items<Event>(log.value).slice(0,4));
+      if(setup.status==="fulfilled" && setup.value && typeof setup.value==="object")
+        setOnboarding(setup.value as Onboarding);
       setLoading(false);
     });
+    return()=>{cancelled=true;};
+  },[tenantId]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [tenant?.id]);
+  const authorized=stats?.my_role==="owner"||stats?.my_role==="admin";
+  const overviewStatus=stats?.tenant_status || tenant?.status || "unknown";
+  const active=overviewStatus==="active";
+  const adminMembers=members?.filter(m=>m.status==="active"&&(m.role==="owner"||m.role==="admin"))||[];
+  const pendingMembers=members?.filter(m=>m.status!=="active").length || 0;
+  const usedGb=(stats?.storage_used_mb||0)/1024;
+  const quotaGb=(stats?.storage_quota_mb||0)/1024;
+  const attention=useMemo(()=>domains.filter(d=>tone(d)!=="good"),[domains]);
+  const memberPreview=adminMembers.slice(0,4);
+  const liveDate=useMemo(()=>new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"}),[]);
 
-  const setupSteps = useMemo(() => {
-    if (!onboarding) return 0;
-    return [
-      onboarding.workspace_created,
-      onboarding.domain_added,
-      onboarding.dns_verified,
-      onboarding.first_mailbox_created,
-    ].filter(Boolean).length;
-  }, [onboarding]);
+  if(loading && !stats) return <div className="astra-overview" aria-busy="true">
+    <div className="astra-ov-topline"><span>ORGANIZATION OVERVIEW</span></div>
+    <div className="astra-ov-welcome"><div><h1>Your workspace, in focus.</h1>
+      <p>Loading verified organization data…</p></div></div>
+    <div className="astra-ov-metrics astra-ov-loading">{[0,1,2,3].map(n=><div key={n}/>)}</div>
+  </div>;
 
-  // Permanent organization-wide completion is authoritative: a later DNS
-  // incident belongs in Domains, never in the one-time onboarding wizard.
-  const setupComplete = onboarding?.completed === true || setupSteps === 4;
-  const storageUsedGb = stats ? stats.storage_used_mb / 1024 : 0;
-  const storageQuotaGb = stats ? stats.storage_quota_mb / 1024 : 0;
-
-  const healthScore = useMemo(() => {
-    if (!stats?.domain_count) return null;
-    if (domains.length) {
-      return Math.round(
-        domains.reduce((sum, domain) => sum + (domain.dns_health_score || 0), 0) /
-          domains.length
-      );
-    }
-    return Math.round((stats.active_domain_count / Math.max(stats.domain_count, 1)) * 100);
-  }, [domains, stats]);
-
-  async function resendVerification() {
-    setVerifyBusy(true);
-    setVerifyMessage("");
-    try {
-      const result = await api.post<{ detail?: string }>("/api/auth/resend-verification/");
-      setVerifyMessage(result.detail ?? "Verification email sent.");
-    } catch {
-      setVerifyMessage("Could not send the verification email right now.");
-    } finally {
-      setVerifyBusy(false);
-    }
-  }
-
-  if (loading && !stats) {
-    return (
-      <div className="portal-page">
-        <PortalSkeleton className="mb-5 h-16 w-full" />
-        <div className="portal-metrics-grid">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <PortalSkeleton key={index} className="h-32 w-full" />
-          ))}
-        </div>
-        <PortalSkeleton className="h-72 w-full" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="portal-page">
-      <PortalPageHeading
-        title="Workspace overview"
-        description="A clear view of your organization’s email."
-        actions={
-          user?.email_verified && stats?.tenant_status === "active" ? (
-            <Link href="/app/mailboxes" className="portal-button primary">
-              <Mail className="h-4 w-4" />
-              Create mailbox
-            </Link>
-          ) : (
-            <PortalButton type="button" disabled>
-              <Mail className="h-4 w-4" />
-              Create mailbox
-            </PortalButton>
-          )
-        }
-      />
-
-      <ApprovalNotice status={stats?.tenant_status || tenant?.status || "active"} />
-
-      {user && !user.email_verified && (
-        <div className="mb-5">
-          <PortalNotice tone="warn">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="flex-1">
-              <strong>Verify your email address.</strong> Domain and provisioning actions require a verified account.
-              {verifyMessage && <span className="ml-1">{verifyMessage}</span>}
-            </div>
-            <PortalButton variant="secondary" type="button" disabled={verifyBusy} onClick={resendVerification}>
-              {verifyBusy ? "Sending…" : "Resend"}
-            </PortalButton>
-          </PortalNotice>
-        </div>
-      )}
-
-      <div className="portal-metrics-grid">
-        <PortalMetric
-          icon={<Globe2 className="h-4 w-4" />}
-          label="Connected domains"
-          value={String(stats?.domain_count ?? 0).padStart(2, "0")}
-          detail={
-            stats?.domain_count
-              ? stats.active_domain_count === stats.domain_count
-                ? "All domains healthy"
-                : `${stats.domain_count - stats.active_domain_count} need attention`
-              : "Connect your first domain"
-          }
-          href="/app/domains"
-        />
-        <PortalMetric
-          icon={<Mail className="h-4 w-4" />}
-          label="Total mailboxes"
-          value={String(stats?.mailbox_count ?? 0).padStart(2, "0")}
-          detail={stats ? `${stats.active_mailbox_count} active` : "—"}
-          href="/app/mailboxes"
-        />
-        <PortalMetric
-          icon={<Users className="h-4 w-4" />}
-          label="Team members"
-          value={String(stats?.member_count ?? 0).padStart(2, "0")}
-          detail={stats ? `Your role: ${pretty(stats.my_role)}` : "—"}
-          href="/app/team"
-        />
-        <PortalMetric
-          icon={<HardDrive className="h-4 w-4" />}
-          label="Storage used"
-          value={<>{storageUsedGb.toFixed(1)}<small>GB</small></>}
-          detail={storageQuotaGb > 0 ? `of ${storageQuotaGb.toFixed(storageQuotaGb % 1 ? 1 : 0)} GB allocated` : "No mailbox quota allocated yet"}
-          href="/app/mailboxes"
-        />
-      </div>
-
-      {!setupComplete && (
-        <div className="portal-setup-banner">
-          <span className="portal-setup-icon"><Sparkles className="h-5 w-5" /></span>
-          <div className="portal-setup-copy">
-            <h3>{stats?.domain_count ? "You’re almost set up" : "Let’s get your email workspace ready"}</h3>
-            <p>Connect your domain, verify DNS, and create your first mailbox.</p>
-          </div>
-          <div className="portal-setup-progress">
-            <span>{setupSteps} of 4 core steps complete</span>
-            <PortalProgress value={setupSteps * 25} />
-          </div>
-          <Link href="/app/onboarding" className="portal-button secondary">Continue setup</Link>
-        </div>
-      )}
-
-      <div className="portal-overview-grid">
-        <PortalCard
-          title="Workspace readiness"
-          subtitle="Real configuration status from your workspace."
-          action={<ShieldCheck className="h-4 w-4 text-[var(--portal-muted)]" />}
-        >
-          {stats?.domain_count ? (
-            <>
-              <div
-                className="portal-health-score"
-                style={{ "--health-angle": `${Math.round((healthScore ?? 0) * 3.6)}deg` } as CSSProperties}
-              >
-                <span className="portal-health-ring" />
-                <div>
-                  <strong>{healthScore ?? 0}%</strong>
-                  <small>average DNS health</small>
-                </div>
-              </div>
-              <div className="portal-health-rows">
-                <div className="portal-health-row">
-                  <span><Globe2 className="h-4 w-4" />Domain readiness</span>
-                  <span>{stats.active_domain_count}/{stats.domain_count} active</span>
-                </div>
-                <div className="portal-health-row">
-                  <span><ShieldCheck className="h-4 w-4" />Ownership</span>
-                  <span>{domains.length ? `${domains.filter((item) => item.ownership_verified).length}/${stats.domain_count} verified` : "Awaiting domain data"}</span>
-                </div>
-                <div className="portal-health-row">
-                  <span><Mail className="h-4 w-4" />Mail services</span>
-                  <span>{domains.length ? `${domains.filter((item) => item.mail_service_ready).length}/${stats.domain_count} ready` : "Awaiting domain data"}</span>
-                </div>
-              </div>
-            </>
-          ) : (
-            <PortalEmptyState
-              title="Workspace health starts with a domain"
-              description="Connect your business domain to begin ownership, DNS and mail-service checks."
-              action={<Link href="/app/domains" className="portal-button primary">Add domain</Link>}
-            />
-          )}
-        </PortalCard>
-
-        <PortalCard
-          title="Workspace status"
-          subtitle="Approval and resource state."
-        >
-          <div className="portal-detail-grid">
-            <div className="portal-fact">
-              <span>Workspace</span>
-              <strong>{tenant?.name || "—"}</strong>
-            </div>
-            <div className="portal-fact">
-              <span>Status</span>
-              <div className="mt-2"><PortalStatus value={pretty(stats?.tenant_status || tenant?.status)} /></div>
-            </div>
-            <div className="portal-fact">
-              <span>Plan</span>
-              <strong>{pretty(stats?.tenant_plan)}</strong>
-            </div>
-            <div className="portal-fact">
-              <span>Your role</span>
-              <strong>{pretty(stats?.my_role)}</strong>
-            </div>
-          </div>
-          <div className="mt-4">
-            <PortalNotice tone={stats?.tenant_status === "active" ? "success" : "info"}>
-              {stats?.tenant_status === "active"
-                ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                : <Activity className="mt-0.5 h-4 w-4 shrink-0" />}
-              <span>
-                {stats?.tenant_status === "active"
-                  ? "Workspace mail operations are approved."
-                  : "Approval state is enforced by the backend; unavailable mail actions stay blocked."}
-              </span>
-            </PortalNotice>
-          </div>
-        </PortalCard>
-      </div>
-
-      <div className="portal-overview-bottom">
-        <PortalCard
-          title="Your domains"
-          subtitle="Connected to this workspace."
-          action={<Link href="/app/domains" className="auth-text-button">View all domains</Link>}
-        >
-          {domains.length ? (
-            <>
-              <div className="portal-domain-mini-head">
-                <span>Domain</span>
-                <span>Health</span>
-                <span>Status</span>
-              </div>
-              {domains.slice(0, 3).map((domain) => (
-                <Link className="portal-domain-mini" key={domain.id} href={`/app/domains/${domain.id}`}>
-                  <span className="portal-domain-identity">
-                    <span className="portal-domain-symbol"><Globe2 className="h-4 w-4" /></span>
-                    <span>
-                      <strong>{domain.domain}</strong>
-                      <small>{domain.ownership_verified ? "Ownership verified" : "Ownership pending"}</small>
-                    </span>
-                  </span>
-                  <span>{domain.dns_health_score}%</span>
-                  <PortalStatus value={pretty(domain.status)} />
-                </Link>
-              ))}
-              <div className="mt-3">
-                <Link href="/app/domains" className="portal-button secondary">
-                  Manage domains
-                </Link>
-              </div>
-            </>
-          ) : (
-            <PortalEmptyState
-              title="Connect your first domain"
-              description="Use your own domain for professional email."
-              action={<Link href="/app/domains" className="portal-button primary">Add domain</Link>}
-            />
-          )}
-        </PortalCard>
-
-        <PortalCard title="Recent activity" subtitle="Latest workspace audit events available to your role.">
-          {events.length ? (
-            <div className="portal-activity-list">
-              {events.map((event) => (
-                <div className="portal-activity-row" key={event.id}>
-                  <span className="portal-activity-icon"><Activity className="h-3.5 w-3.5" /></span>
-                  <span className="portal-activity-copy">
-                    <strong>{eventLabel(event.event_type)}</strong>
-                    <small>{metadataTarget(event)} · {pretty(event.result)}</small>
-                  </span>
-                  <time>{relativeTime(event.created_at)}</time>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <PortalEmptyState
-              title="No activity to show"
-              description="Audit events will appear here when available to your workspace role."
-            />
-          )}
-        </PortalCard>
-      </div>
+  return <div className="astra-overview">
+    <div className="astra-ov-topline">
+      <span>ORGANIZATION OVERVIEW</span><time>{liveDate}</time>
     </div>
-  );
+    <div className="astra-ov-welcome">
+      <div><h1>Your workspace, in focus.</h1>
+        <p>Manage email, people and access for {tenant?.name||"your organization"}.</p></div>
+      {authorized&&<div className="astra-ov-create">
+        <button type="button" aria-expanded={createOpen} aria-label="Create new"
+          onClick={()=>setCreateOpen(v=>!v)}><Plus size={16}/> Create new <ChevronDown size={14}/></button>
+        {createOpen&&<div className="astra-ov-create-options" role="menu">
+          <Link role="menuitem" href="/app/mailboxes" onClick={()=>setCreateOpen(false)}>Mailbox</Link>
+          <Link role="menuitem" href="/app/team-boxes" onClick={()=>setCreateOpen(false)}>TeamBox</Link>
+          <Link role="menuitem" href="/app/domains" onClick={()=>setCreateOpen(false)}>Domain</Link>
+          <Link role="menuitem" href="/app/forward-groups" onClick={()=>setCreateOpen(false)}>Forward Group</Link>
+        </div>}
+      </div>}
+    </div>
+    <div className="astra-ov-statusline">
+      {active?<CheckCircle2 size={15}/>:<AlertCircle size={15}/>}
+      <strong>{active?"Organization active":"Organization "+overviewStatus.replaceAll("_"," ")}</strong>
+      <span className="astra-ov-divider"/>
+      <span>{active?"Mail provisioning enabled":"Some provisioning actions may be unavailable"}</span>
+      {stats?.tenant_plan&&<span className="astra-ov-plan">{stats.tenant_plan.replaceAll("_"," ")} plan</span>}
+    </div>
+    {onboarding && !onboarding.completed && <div className="astra-ov-setup" role="status">
+      <AlertCircle size={16}/><span>Finish setting up your organization.</span>
+      <Link href="/app/onboarding">Open Getting started <ChevronRight size={14}/></Link>
+    </div>}
+    {!user?.email_verified&&<div className="astra-ov-setup" role="status">
+      <AlertCircle size={16}/><span>Verify your Hub account email to enable administrative provisioning.</span>
+      <Link href="/verify-email?sent=1">Verification options <ChevronRight size={14}/></Link>
+    </div>}
+
+    <div className="astra-ov-metrics" aria-label="Workspace statistics">
+      <Metric label="Mailboxes" value={stats?.mailbox_count ?? "—"}
+        description={stats?stats.active_mailbox_count+" active mailboxes":"Data unavailable"}/>
+      <Metric label="Domains" value={stats?.domain_count ?? "—"}
+        description={stats?domains.filter(d=>d.ownership_verified).length+" ownership verified":"Data unavailable"}>
+        {attention.length>0&&<div className="astra-ov-metric-note">{attention.length} need attention</div>}
+      </Metric>
+      <Metric label="Storage used" value={stats?usedGb.toFixed(1):"—"} unit="GB"
+        description={quotaGb>0?"of "+quotaGb.toFixed(1)+" GB allocated":"Storage allocation unavailable"}
+        progress={quotaGb>0?usedGb/quotaGb*100:undefined}/>
+      <Metric label="Administrators" value={members?adminMembers.length:"—"}
+        description={members?pendingMembers+" pending invitation/member"+(pendingMembers===1?"":"s"):"Team data unavailable"}>
+        {memberPreview.length>0&&<div className="astra-ov-avatars" aria-label="Workspace administrators">
+          {memberPreview.map(m=><span key={m.id} title={m.full_name||m.email||"Administrator"}>{initials(m.full_name||m.email||"Admin")}</span>)}
+        </div>}
+      </Metric>
+    </div>
+
+    <div className="astra-ov-grid">
+      <section className="astra-ov-panel">
+        <PanelHeader title="Domain readiness" subtitle="Ownership and mail configuration"
+          href="/app/domains" label="View domains"/>
+        {domains.length===0?<div className="astra-ov-empty">No domains yet. <Link href="/app/domains">Add your first domain</Link></div>:
+          <div className="astra-ov-domains">{domains.slice(0,5).map(d=>{
+            const help=domainHelp(d);
+            return <Link key={d.id} href={"/app/domains/"+encodeURIComponent(d.id)} className="astra-ov-domain">
+              <Globe2 size={20}/>
+              <span className="astra-ov-domain-name"><strong>{d.domain}</strong><small>{help.description}</small></span>
+              <span className={"astra-ov-pill "+tone(d)}>{help.label}</span><ChevronRight size={15}/>
+            </Link>;
+          })}</div>}
+      </section>
+      <section className="astra-ov-panel">
+        <div className="astra-ov-panel-head"><div><h2>Needs attention</h2>
+          <p>A clear next step for every issue</p></div>
+          <span className="astra-ov-count">{attention.length}</span></div>
+        {attention.length===0?<div className="astra-ov-allclear"><CheckCircle2 size={23}/>
+          <h3>Nothing needs your attention</h3>
+          <p>{domains.length?"No domain issues detected in the available data.":"Connect a domain to start monitoring its health."}</p>
+          </div>:
+          attention.slice(0,5).map((domain,index)=>{
+            const help=domainHelp(domain);
+            return <Link key={domain.id} className="astra-ov-attention" href={"/app/domains/"+encodeURIComponent(domain.id)}>
+              <span className="astra-ov-counter">{String(index+1).padStart(2,"0")}</span>
+              <span><strong>{help.label==="Verify ownership"?"Verify your new domain":help.label==="Review DNS"?"Review DNS configuration":help.label}</strong>
+                <small>{domain.domain}</small></span><ChevronRight size={15}/>
+            </Link>;
+          })}
+      </section>
+    </div>
+
+    <div className="astra-ov-grid astra-ov-lower">
+      <section className="astra-ov-panel">
+        <PanelHeader title="Recent activity" subtitle="Changes across your organization"
+          href={authorized?"/app/logs":undefined} label="View activity"/>
+        {!authorized?<div className="astra-ov-empty">Activity details are available to owners and administrators.</div>:
+          !events?.length?<div className="astra-ov-empty">No recent activity available.</div>:
+          events.map(e=><div key={e.id} className="astra-ov-activity">
+            <Activity size={15}/><div><strong>{e.event_type.replaceAll("_"," ")}</strong>
+              <small>{e.source||"Organization"} · {e.result||"Event"}</small></div>
+            <time>{formatDate(e.created_at)}</time>
+          </div>)}
+      </section>
+      <section className="astra-ov-panel">
+        <PanelHeader title="Workspace essentials" subtitle="Bring the right people together"/>
+        {[
+          {href:"/app/team-boxes",name:"Shared mailboxes",detail:"Manage TeamBox access",icon:Inbox},
+          {href:"/app/forward-groups",name:"Distribution groups",detail:"Review group recipients",icon:Users},
+          {href:"/app/team",name:"Administrator access",detail:"People, roles and invitations",icon:ShieldCheck},
+        ].map(item=><Link className="astra-ov-quick" key={item.href} href={item.href}>
+          <item.icon size={20}/><span><strong>{item.name}</strong><small>{item.detail}</small></span><ChevronRight size={15}/>
+        </Link>)}
+      </section>
+    </div>
+  </div>;
 }
