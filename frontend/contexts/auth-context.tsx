@@ -26,7 +26,7 @@ export interface AuthTenant {
   status: string;
   role?: string;
   my_role?: string | null;
-
+}
 
 interface AuthContextValue {
   user: AuthUser | null;
