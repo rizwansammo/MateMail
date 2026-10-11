@@ -323,6 +323,19 @@ class PremiumPortalDesignIntegrationTest(SimpleTestCase):
                         f"{'/'.join(parts)} has drifted out of the premium portal system",
                     )
 
+    def test_credentials_resolve_authoritative_workspace_role(self):
+        auth = read("contexts", "auth-context.tsx")
+        api_keys = read("app", "app", "settings", "api-keys", "page.tsx")
+        connected = read("app", "app", "settings", "integrations", "page.tsx")
+        self.assertIn("workspace.my_role", auth)
+        self.assertIn("withWorkspaceRole(ws)", auth)
+        self.assertIn("withWorkspaceRole(workspace)", auth)
+        self.assertIn("/api/workspaces/", auth)
+        self.assertIn('tenant?.role === "owner" || tenant?.role === "admin"', api_keys)
+        self.assertIn('tenant?.role === "owner" || tenant?.role === "admin"', connected)
+        self.assertIn("!canManageCredentials", api_keys)
+        self.assertIn("!mailboxes.length || !canManageCredentials", connected)
+
     def test_workspace_shell_imports_the_scoped_premium_styles(self):
         layout = read("app", "app", "layout.tsx")
         shell = read("components", "workspace", "astra-shell.tsx")
