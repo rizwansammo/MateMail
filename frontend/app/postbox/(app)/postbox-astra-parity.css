@@ -16,7 +16,7 @@
   width:var(--pb-rail-width);
   min-width:var(--pb-rail-width);
   flex:0 0 var(--pb-rail-width);
-  padding:0 7px 12px;
+  padding:14px 7px 12px;
   gap:0;
   align-items:stretch;
   background:var(--pb-surface-2);
@@ -42,10 +42,10 @@
   background:var(--pb-sidebar);
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-brand {
-  height:78px;
-  flex:0 0 78px;
-  padding:0 4px;
-  gap:8px;
+  height:64px;
+  flex:0 0 64px;
+  padding:0;
+  gap:10px;
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-brand-mark {
   width:29px;height:29px;flex:0 0 29px;
@@ -57,12 +57,12 @@
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-compose-wrap {
   padding:0;
-  margin:0 0 18px;
+  margin:0 0 16px;
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-compose {
   height:40px;
   min-height:40px;
-  padding:0 14px;
+  padding:0 11px;
   font-size:13px;
   gap:10px;
   border-radius:3px;
@@ -175,7 +175,7 @@
     --pb-rail-width:49px;
   }
   .pb-premium-shell.pb-astra-postbox .pb-astra-app-rail {
-    padding:0 3px 10px;
+    padding:14px 3px 10px;
   }
   .pb-premium-shell.pb-astra-postbox .pb-astra-rail-item {
     min-height:51px;height:51px;margin-bottom:9px;font-size:9px;
