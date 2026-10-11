@@ -222,6 +222,43 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      # PostBox B6 only: screenshots and interaction checks against an isolated
+      # Next.js preview, with synthetic browser-intercepted APIs. Never hits
+      # production and adds zero overhead to main branch CI.
+      - name: Install temporary Playwright browser for PostBox B6
+        if: github.event_name == 'pull_request' && github.head_ref == 'feature/postbox-premium-integration'
+        working-directory: frontend
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      - name: PostBox B6 isolated visual and interaction tests
+        if: github.event_name == 'pull_request' && github.head_ref == 'feature/postbox-premium-integration'
+        working-directory: frontend
+        env:
+          POSTBOX_QA_URL: http://127.0.0.1:3101
+          POSTBOX_QA_OUTPUT: postbox-qa-artifacts
+        run: |
+          nohup npm run start -- -p 3101 > "$RUNNER_TEMP/postbox-visual-preview.log" 2>&1 &
+          for try in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:3101/postbox?folder=INBOX" -o /dev/null; then break; fi
+            sleep 2
+          done
+          if ! curl -fsS "http://127.0.0.1:3101/postbox" -o /dev/null; then
+            cat "$RUNNER_TEMP/postbox-visual-preview.log"
+            exit 1
+          fi
+          node scripts/postbox-browser-qa.mjs
+
+      - name: Upload PostBox B6 screenshots and browser report
+        if: always() && github.event_name == 'pull_request' && github.head_ref == 'feature/postbox-premium-integration'
+        uses: actions/upload-artifact@v4
+        with:
+          name: postbox-premium-b6-visual-review
+          path: frontend/postbox-qa-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
   # ── Compose validation ──────────────────────────────────────────────────────
   compose:
     name: Validate production compose
