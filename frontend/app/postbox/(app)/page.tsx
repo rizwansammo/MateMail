@@ -35,6 +35,7 @@ import {
   MailOpen,
   MoreHorizontal,
   Paperclip,
+  PanelRight,
   RefreshCw,
   RotateCcw,
   Search,
@@ -977,38 +978,32 @@ function Mailbox() {
                 applySort(event.target.value === "oldest" ? "oldest" : "newest")
               }
             >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
             </select>
-            <button
-              type="button"
-              className="pb-premium-icon-button"
-              aria-label="Refresh mailbox"
-              title="Refresh mailbox"
-              disabled={loading || (conversationMode && conversations.loading)}
-              onClick={() => {
-                loadList();
-                if (conversationMode) conversations.reload();
-                window.dispatchEvent(new Event("postbox:refresh-folders"));
-              }}
-            >
-              <RefreshCw className={`h-[18px] w-[18px] ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
-            </button>
-            <details className="pb-premium-mail-more">
-              <summary className="pb-premium-icon-button" aria-label="Mailbox actions" title="Mailbox actions">
-                <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
+            <details className="pb-premium-mail-more pb-astra-pane-menu">
+              <summary className="pb-premium-icon-button" aria-label="Reading pane and mailbox actions" title="Reading pane">
+                <PanelRight size={18} aria-hidden="true" />
               </summary>
               <div className="pb-premium-mail-menu">
+                <button type="button" onClick={() => void updatePreferences({ reading_pane: "off" })
+                  .catch(error => setNotice(describePostBoxError(error, "Could not change reading pane.")))}>
+                  {preferences.reading_pane === "off" ? "✓ " : ""}Full message
+                </button>
+                <button type="button" onClick={() => void updatePreferences({ reading_pane: "right" })
+                  .catch(error => setNotice(describePostBoxError(error, "Could not change reading pane.")))}>
+                  {preferences.reading_pane === "right" ? "✓ " : ""}Right pane
+                </button>
+                <button type="button" onClick={() => void updatePreferences({ reading_pane: "bottom" })
+                  .catch(error => setNotice(describePostBoxError(error, "Could not change reading pane.")))}>
+                  {preferences.reading_pane === "bottom" ? "✓ " : ""}Bottom pane
+                </button>
                 {canManageMailbox && !isCrossFolderView && !conversationMode && !folderIsSent && (
-                  <button
-                    type="button"
-                    disabled={rows.length === 0}
-                    onClick={() => void act("read", rows.map((row) => row.uid))}
-                  >
+                  <button type="button" disabled={rows.length===0}
+                    onClick={() => void act("read", rows.map((row) => row.uid))}>
                     Mark visible messages as read
                   </button>
                 )}
-                <a href="/postbox/settings">Change reading layout</a>
               </div>
             </details>
           </div>
@@ -1479,6 +1474,13 @@ function Mailbox() {
           )}
         </div>
       </div>
+
+      {!detail && (
+        <footer className="pb-astra-app-status" aria-label="PostBox status">
+          <span><span className="pb-astra-status-dot" aria-hidden="true" />MateMail mailbox</span>
+          <span>{mailbox?.kind === "team_box" ? "TeamBox" : isSharedMailbox ? "Delegated mailbox" : "Personal mailbox"} · {mailbox?.full_name || mailbox?.email}</span>
+        </footer>
+      )}
 
       {compose && (
         <Compose

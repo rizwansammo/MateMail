@@ -165,6 +165,14 @@ try{
   check('Message footer is visible with real count and selected density',
     await page.locator('.pb-astra-list-footer').isVisible()&&
     (await page.locator('.pb-astra-list-footer').innerText()).includes('extra compact'));
+  check('Prototype bottom status strip shows real mailbox context',
+    await page.locator('.pb-astra-app-status').isVisible()&&
+    (await page.locator('.pb-astra-app-status').innerText()).includes('Personal mailbox'));
+  const strip=await page.locator('.pb-astra-app-status').evaluate(el=>Math.round(el.getBoundingClientRect().height));
+  check('Prototype application status strip height is 27px',strip===27,{strip});
+  check('Toolbar has real reading pane control rather than a More icon',
+    await page.getByRole('button',{name:'Reading pane and mailbox actions'}).count()===0&&
+    await page.locator('.pb-astra-pane-menu summary').count()===1);
   check('Sidebar keeps real management but uses prototype presentation',
     await page.getByText('MY FOLDERS',{exact:true}).count()===1&&
     await page.locator('.pb-astra-nav-label-swatch').count()>=1);

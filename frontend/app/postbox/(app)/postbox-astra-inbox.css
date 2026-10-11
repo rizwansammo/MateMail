@@ -434,3 +434,35 @@
   }
   .pb-premium-shell.pb-astra-postbox .pb-astra-list-footer{padding-inline:11px}
 }
+
+/* The approved prototype includes a second 27px application status line.
+   Display real active mailbox context, never fictional prototype copy. */
+.pb-premium-shell.pb-astra-postbox .pb-astra-app-status{
+  display:flex;align-items:center;justify-content:space-between;
+  height:27px;min-height:27px;flex:0 0 27px;
+  border-top:1px solid var(--pb-border);
+  padding:0 22px;
+  background:var(--pb-surface-2);
+  color:var(--pb-muted);
+  font-size:9px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-app-status>span{
+  display:flex;align-items:center;gap:7px;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-status-dot{
+  flex:0 0 5px;width:5px;height:5px;
+  border-radius:50%;background:var(--pb-success);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-pane-menu summary{
+  display:grid;place-items:center;
+  width:31px;height:31px;border:0;
+  color:var(--pb-muted);
+  background:transparent;border-radius:3px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-pane-menu summary:hover{
+  background:var(--pb-surface-2);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-sort-select{
+  border:0;border-radius:0;background:transparent;
+}
