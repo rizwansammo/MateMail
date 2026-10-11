@@ -30,7 +30,7 @@ async function make(role="owner",viewport={width:1440,height:900}) {
    let body=[],status=200;
    if(q==="/api/auth/refresh/") body={access:token};
    else if(q==="/api/auth/me/") body=profile;
-   else if(q==="/api/workspaces/"+tid+"/")body={id:tid,name:"QA Workspace",slug:"qa-workspace",status:"active",role,my_role:role,plan:"business",domain_count:1,mailbox_count:1,member_count:1,approved_at:now,review_reason:"",outbound_disabled:false,created_at:now};
+   else if(q==="/api/workspaces/"+tid+"/")body={id:tid,name:"QA Workspace",slug:"qa-workspace",status:"active",my_role:role,plan:"business",domain_count:1,mailbox_count:1,member_count:1,approved_at:now,review_reason:"",outbound_disabled:false,created_at:now}; // Actual backend returns my_role, not role.
    else if(q==="/api/workspaces/"+tid+"/stats/")body={my_role:role,tenant_status:"active",member_count:1,domain_count:1,mailbox_count:1};
    else if(q==="/api/workspaces/"+tid+"/onboarding/")body={workspace_created:true,domain_added:true,dns_verified:true,first_mailbox_created:true,completed:true,completed_at:now};
    else if(q==="/api/mailboxes/")body=[mailbox];
@@ -90,7 +90,9 @@ try{
  check("Custom Hostnames keeps separate Hub and PostBox panels",await t.page.getByText("MateMail Hub",{exact:true}).count()>0&&await t.page.getByText("PostBox",{exact:true}).count()>0);
  check("Custom Hostnames retains CNAME migration guidance",await t.page.getByText("One CNAME per URL").count()===1);
  await open(t,"/app/settings/api-keys");
- await t.page.getByRole("button",{name:"New API key"}).click();
+ const ownerKeyAction=t.page.getByRole("button",{name:"New API key"});
+ check("Owner API Keys action enabled when Workspace Detail supplies only my_role",await ownerKeyAction.isEnabled());
+ await ownerKeyAction.click();
  const kd=t.page.getByRole("dialog",{name:"Create API key"});
  await kd.waitFor({state:"visible"});
  check("API key create uses native Astra dialog and accessible inputs",await kd.getByLabel("Key name").count()===1&&await kd.getByLabel("Expiry date (optional)").count()===1);
@@ -104,7 +106,9 @@ try{
  check("API key creation preserves read and scope controls",key?.data.name==="QA CI key"&&key.data.scopes.includes("read"),{payload:key?.data});
  // Never screenshot credential display, even synthetic data.
  await open(t,"/app/settings/integrations");
- await t.page.getByRole("button",{name:"Create connected app"}).click();
+ const ownerConnectedAction=t.page.getByRole("button",{name:"Create connected app"});
+ check("Owner Connected Apps action enabled when Workspace Detail supplies only my_role",await ownerConnectedAction.isEnabled());
+ await ownerConnectedAction.click();
  const cd=t.page.getByRole("dialog",{name:"Create connected app"});
  await cd.waitFor({state:"visible"});
  check("Connected Apps modal has accessible name, purpose, mailbox",await cd.getByLabel("Application name").count()===1&&await cd.getByLabel("Purpose").count()===1&&await cd.getByLabel("Mailbox",{exact:true}).count()===1);
@@ -115,6 +119,14 @@ try{
  check("Connected App credential bound to chosen mailbox and scopes",app?.data.name==="QA HelpDesk"&&app.data.mailbox_id===mailboxId&&Array.isArray(app.data.permissions),{payload:app?.data});
  check("Advanced desktop has no JS exceptions",t.errors.length===0,{errors:t.errors});
  await t.context.close();
+
+ const admin=await make("admin");
+ await open(admin,"/app/settings/api-keys");
+ check("Admin API Keys action enabled",await admin.page.getByRole("button",{name:"New API key"}).isEnabled());
+ await open(admin,"/app/settings/integrations");
+ check("Admin Connected Apps action enabled",await admin.page.getByRole("button",{name:"Create connected app"}).isEnabled());
+ check("Admin test performs no credential mutations",admin.calls.length===0);
+ await admin.context.close();
 
  const viewer=await make("read_only",{width:390,height:844});
  await open(viewer,"/app/settings");

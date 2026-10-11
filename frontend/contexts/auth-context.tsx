@@ -25,6 +25,7 @@ export interface AuthTenant {
   slug: string;
   status: string;
   role?: string;
+  my_role?: string | null;
 }
 
 interface AuthContextValue {
@@ -50,12 +51,38 @@ interface AuthContextValue {
   setAuthResult: (data: { access: string; user: AuthUser; tenant: AuthTenant }) => void;
 }
 
+// Workspace Detail uses my_role for the authenticated membership.
+// The short tenant payload returned by login/signup does not include it.
+function withWorkspaceRole(workspace: AuthTenant): AuthTenant {
+  return { ...workspace, role: workspace.my_role ?? undefined };
+}
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [tenant, setTenant] = useState<AuthTenant | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Resolve membership from the authenticated workspace API after login,
+  // signup or 2FA. Until then, admin actions stay disabled (fail closed).
+  useEffect(() => {
+    if (!tenant?.id || tenant.role) return;
+    const id = tenant.id;
+    let cancelled = false;
+    const resolveRole = async () => {
+      try {
+        const workspace = await api.get<AuthTenant>(`/api/workspaces/${id}/`);
+        if (!cancelled) {
+          setTenant((current) => current?.id === id ? withWorkspaceRole(workspace) : current);
+        }
+      } catch {
+        // A failed role lookup must not grant management permissions.
+      }
+    };
+    void resolveRole();
+    return () => { cancelled = true; };
+  }, [tenant?.id, tenant?.role]);
 
   const setAuthResult = useCallback(
     (data: { access: string; user: AuthUser; tenant: AuthTenant }) => {
@@ -91,7 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (payload?.tenant_id) {
           try {
             const ws = await api.get<AuthTenant>(`/api/workspaces/${payload.tenant_id}/`);
-            if (!cancelled) setTenant(ws);
+            if (!cancelled) setTenant(withWorkspaceRole(ws));
           } catch {
             // tenant lookup failed — leave as null
           }
@@ -188,7 +215,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshTenant = useCallback(async () => {
     if (!tenant?.id) return;
     const workspace = await api.get<AuthTenant>(`/api/workspaces/${tenant.id}/`);
-    setTenant(workspace);
+    setTenant(withWorkspaceRole(workspace));
   }, [tenant?.id]);
 
   return (
