@@ -293,7 +293,7 @@ def _summary_payload(summary: imap.MessageSummary) -> dict:
         "folder": summary.folder,
         "message_id": summary.message_id,
         "subject": summary.subject,
-        "preview": summary.preview,
+        "preview": getattr(summary, "preview", ""),
         "from": {"name": summary.from_name, "address": summary.from_address},
         "to": summary.to,
         "cc": summary.cc,
@@ -439,18 +439,8 @@ class MessageListView(PostBoxView):
             total = len(collected)
             start = (page - 1) * size
             window = collected[start:start + size]
-            grouped: dict[str, list[imap.MessageSummary]] = {}
-            for row in window:
-                grouped.setdefault(row.folder, []).append(row)
-            for folder_name, entries in grouped.items():
-                try:
-                    info = connection.select(folder_name, readonly=True)
-                    connection.fetch_previews(
-                        [row for row in entries if row.uid_validity == info.uid_validity]
-                    )
-                except (imap.MailAccessError, OSError):
-                    # Optional snippet must never make a valid search fail.
-                    continue
+            # Global search must keep its original bounded header scan.
+            # No extra folder selects or body reads in cross-folder searches.
         return Response({
             "folder": folder,
             "scope": scope,

@@ -259,7 +259,10 @@ class ConversationAPITest(TestCase):
             )
             opener.assert_called_once_with(self.mailbox.email)
             scanned = [call.args[0] for call in connection.select.call_args_list]
-            self.assertEqual(["INBOX", "Sent", "Archive"], scanned)
+            self.assertEqual(["INBOX", "Sent", "Archive", "Sent"], scanned)
+            # The final select previews only the visible latest message, and
+            # never opens a second authenticated IMAP connection.
+            connection.fetch_previews.assert_called_once()
 
         self.assertEqual(200, response.status_code)
         body = response.json()
