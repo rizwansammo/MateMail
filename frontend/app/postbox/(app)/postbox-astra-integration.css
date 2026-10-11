@@ -221,3 +221,41 @@
     font-size: 23px;
   }
 }
+
+/* Approved compact account popover; real session and permission APIs retained. */
+.pb-astra-postbox .pb-premium-account-panel{
+ width:min(385px,calc(100vw - 24px));max-height:min(735px,calc(100dvh - 90px));
+ overflow-y:auto;scrollbar-width:thin;border-radius:8px;padding:8px;
+ background:var(--pb-bg);box-shadow:0 19px 55px rgb(19 36 59 / .16);
+}
+.pb-astra-postbox .pb-premium-account-current{padding:17px 14px 14px}
+.pb-astra-postbox .pb-premium-account-avatar-lg{width:62px;height:62px;border-radius:50%;background:var(--pb-selected);color:var(--pb-accent-fg)}
+.pb-astra-postbox .pb-premium-account-copy{padding:10px 4px}
+.pb-astra-postbox .pb-premium-account-manage{border-radius:6px;font-size:12px}
+.pb-astra-postbox .pb-premium-account-switcher{border-color:var(--pb-border);padding:9px 3px 5px}
+.pb-astra-postbox .pb-premium-account-section-label{font-size:10px;letter-spacing:.065em}
+.pb-astra-postbox .pb-premium-account-row,
+.pb-astra-postbox .pb-premium-account-add,
+.pb-astra-postbox .pb-premium-account-footer a,
+.pb-astra-postbox .pb-premium-account-footer button{
+ min-height:39px;border-radius:5px;padding:8px 7px;font-size:12px;
+}
+.pb-astra-postbox .pb-premium-account-avatar-sm{background:var(--pb-selected);color:var(--pb-accent-fg)}
+.pb-astra-postbox .pb-premium-account-row-copy{min-width:0}
+.pb-astra-postbox .pb-premium-account-row-copy strong{font-size:12px}
+.pb-astra-postbox .pb-premium-account-row-copy small{font-size:10.5px}
+.pb-astra-postbox .pb-premium-account-row-copy .pb-premium-permission-label{
+ display:block;font-size:10px;color:var(--pb-muted);margin-top:2px;
+}
+.pb-astra-postbox .pb-premium-theme,
+.pb-astra-postbox .pb-premium-theme-row{border-radius:5px}
+/* Existing 11-section production settings; center cards and sharpen surfaces. */
+.pb-astra-postbox .pb-premium-settings-nav{width:230px;flex-basis:230px}
+.pb-astra-postbox .pb-settings-heading,
+.pb-astra-postbox .pb-settings-content{width:100%;max-width:880px;margin-left:auto;margin-right:auto}
+.pb-astra-postbox .pb-setting-card{border-radius:6px}
+.pb-astra-postbox .pb-settings-heading-icon{border-radius:6px}
+@media(max-width:767px){
+ .pb-astra-postbox .pb-premium-settings-nav{width:100%;flex-basis:auto}
+ .pb-astra-postbox .pb-premium-account-panel{width:min(385px,calc(100vw - 24px))}
+}
