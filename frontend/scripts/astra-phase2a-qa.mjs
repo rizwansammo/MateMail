@@ -146,6 +146,7 @@ try{
  await sample.page.getByRole("button",{name:"Set as primary"}).click();
  verify("Selecting a primary updates only the target domain with POST",
    sample.requests.primary.length===1&&sample.requests.primary[0]===secondaryDomain.id);
+ await sample.page.locator('tr[aria-label="Open domain secondary.test"]').getByText("Primary",{exact:true}).waitFor({state:"visible"});
  verify("Primary badge moves after an authorized change",
    (await sample.page.locator('tr[aria-label="Open domain secondary.test"]').getByText("Primary",{exact:true}).count())===1);
  await sample.page.locator('tr[aria-label="Open domain example.test"]').focus();
