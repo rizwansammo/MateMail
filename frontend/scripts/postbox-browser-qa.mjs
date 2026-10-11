@@ -184,12 +184,51 @@ try{
       topbar:rect('.pb-premium-topbar'),compose:rect('.pb-premium-compose'),toolbar:rect('.pb-premium-mail-toolbar'),
       firstFolder:rect('.pb-premium-nav-link')};
   });
-  check('sidebar width matches screenshot 245px',geometry.sidebar?.width===245,geometry);
-  check('brand height matches screenshot 64px',geometry.brand?.height===64,geometry);
+  check('sidebar width matches approved source 227px',geometry.sidebar?.width===227,geometry);
+  check('brand height matches approved source 78px',geometry.brand?.height===78,geometry);
   check('topbar height matches approved 65px',geometry.topbar?.height===65,geometry);
   check('compose launcher matches approved 40px',geometry.compose?.height===40,geometry);
   check('Inbox toolbar matches approved 44px',geometry.toolbar?.height===44,geometry);
   check('folder rows match approved 34px',geometry.firstFolder?.height===34,geometry);
+  const sidebarGeometry=await page.evaluate(()=>{
+    const get=selector=>document.querySelector(selector);
+    const r=selector=>{const rect=get(selector)?.getBoundingClientRect();
+      return rect?{x:Math.round(rect.x),y:Math.round(rect.y),width:Math.round(rect.width),
+      height:Math.round(rect.height),bottom:Math.round(rect.bottom)}:null};
+    const side=get('.pb-premium-sidebar');
+    const nav=get('.pb-premium-nav');
+    const pinned=[...document.querySelectorAll('.pb-premium-nav > .pb-premium-nav-link[data-role]')];
+    const headers=[...document.querySelectorAll('.pb-organize-section-header')];
+    const firstLabel=get('.pb-organize-nav-row .pb-premium-nav-link');
+    return {sidebar:r('.pb-premium-sidebar'),nav:r('.pb-premium-nav'),
+      sidebarPaddingLeft:parseFloat(getComputedStyle(side).paddingLeft),
+      sidebarPaddingRight:parseFloat(getComputedStyle(side).paddingRight),
+      navPaddingBottom:parseFloat(getComputedStyle(nav).paddingBottom),
+      pinned:pinned.map(n=>({role:n.getAttribute('data-role'),
+        y:Math.round(n.getBoundingClientRect().y),height:Math.round(n.getBoundingClientRect().height)})),
+      headers:headers.map(n=>({y:Math.round(n.getBoundingClientRect().y),
+        height:Math.round(n.getBoundingClientRect().height),
+        marginTop:parseFloat(getComputedStyle(n).marginTop)})),
+      firstCustom:firstLabel?{height:Math.round(firstLabel.getBoundingClientRect().height)}:null
+    };
+  });
+  check('sidebar fills viewport height with 13px side padding',
+    sidebarGeometry.sidebar?.height===900&&sidebarGeometry.sidebarPaddingLeft===13&&
+    sidebarGeometry.sidebarPaddingRight===13,sidebarGeometry);
+  check('sidebar scroll area preserves prototype 18px bottom padding',
+    sidebarGeometry.nav?.height>200&&sidebarGeometry.navPaddingBottom===18,sidebarGeometry);
+  check('standard folder rows have 2px gaps with source order',
+    sidebarGeometry.pinned.length>=6&&sidebarGeometry.pinned.every((row,i,arr)=>
+      row.height===34&&(i===0||row.y-arr[i-1].y===36)),sidebarGeometry);
+  check('folder/label headers use 22px group gap and 30px heading',
+    sidebarGeometry.headers.length===2&&sidebarGeometry.headers.every(h=>
+      h.marginTop===22&&h.height===30),sidebarGeometry);
+  check('first section starts after pinned folders and 22px margin',
+    sidebarGeometry.headers.length===2&&sidebarGeometry.pinned.length>=6&&
+    sidebarGeometry.headers[0].y - 
+    (sidebarGeometry.pinned[sidebarGeometry.pinned.length-1].y+34)===22,
+    sidebarGeometry);
+
   const alignment=await page.evaluate(()=>{
     const get=selector=>document.querySelector(selector);
     const box=node=>node?.getBoundingClientRect()||null;
@@ -217,17 +256,19 @@ try{
     };
   });
   const near=(a,b,tolerance=1)=>a!==null&&b!==null&&Math.abs(a-b)<=tolerance;
-  check('logo, Compose and Inbox share one left edge',
-    near(alignment.brandIconX,alignment.composeBoxX)&&near(alignment.composeBoxX,alignment.inboxBoxX),alignment);
-  check('Compose and Inbox icons align horizontally',
-    near(alignment.composeIconX,alignment.inboxIconX),alignment);
-  check('brand wordmark, Compose and Inbox labels align horizontally',
-    near(alignment.wordmarkTextX,alignment.composeTextX,2)&&near(alignment.composeTextX,alignment.inboxTextX,2),alignment);
-  check('rail icon and brand align near top of app',
-    alignment.railFirstY===14&&alignment.brandIconY>=17&&alignment.brandIconY<=19&&
+  check('brand 4px inset and Compose/Inbox box alignment match source',
+    alignment.brandIconX===alignment.composeBoxX+4&&
+    near(alignment.composeBoxX,alignment.inboxBoxX),alignment);
+  check('Compose icon has 4px offset including 1px button border',
+    alignment.composeIconX===alignment.inboxIconX+4,alignment);
+  check('sidebar wordmark, Compose and Inbox label offsets match source',
+    near(alignment.wordmarkTextX,alignment.composeTextX,3)&&
+    near(alignment.composeTextX,alignment.inboxTextX,4),alignment);
+  check('rail and 78px branded header align in approved composition',
+    alignment.railFirstY===14&&alignment.brandIconY>=24&&alignment.brandIconY<=25&&
     Math.abs(alignment.railIconY-alignment.brandIconY)<=7,alignment);
-  check('New Message and Inbox follow screenshot vertical rhythm',
-    alignment.composeY===64&&alignment.inboxY===120,alignment);
+  check('New Message and Inbox follow approved 78px header and 18px spacer',
+    alignment.composeY===78&&alignment.inboxY===136,alignment);
   const railStart=await page.locator('.pb-astra-app-rail').evaluate(el=>{
     const first=el.querySelector('.pb-astra-rail-item');
     return {railTop:el.getBoundingClientRect().top,
@@ -301,7 +342,8 @@ try{
    check('Label fixed near right edge on Full HD screenshot',
      size.viewport===1920&&size.labelX>1550&&size.labelX<1810&&size.scroll<=size.viewport+2,size);
    const sidebarEdge=await page.locator('.pb-premium-sidebar').evaluate(el=>Math.round(el.getBoundingClientRect().right));
-   check('Full HD mail content starts at exact screenshot X=307',sidebarEdge===307,{sidebarEdge});
+   check('Full HD mail content follows original 62px rail and 227px sidebar',
+     sidebarEdge===289,{sidebarEdge});
    check('Full HD Inbox has no JS errors',errors.length===0,{errors});
  });
  for(const density of ['comfortable','compact','extra_compact']){
@@ -369,11 +411,11 @@ try{
       composeTop:Math.round(compose?.top??-1),inboxTop:Math.round(inbox?.top??-1),
       railFirstTop:Math.round(rail?.top??-1)};
   });
-  check('mobile sidebar brand, compose, inbox share left edge',
-    mobileAlignment.brandLeft===mobileAlignment.composeLeft&&
+  check('mobile brand 4px inset and compose/Inbox box alignment',
+    mobileAlignment.brandLeft===mobileAlignment.composeLeft+4&&
     mobileAlignment.composeLeft===mobileAlignment.inboxLeft,mobileAlignment);
-  check('mobile sidebar vertical rhythm matches screenshot',
-    mobileAlignment.railFirstTop===14&&mobileAlignment.composeTop===64&&mobileAlignment.inboxTop===120,
+  check('mobile sidebar matches approved 78px brand and 18px spacer',
+    mobileAlignment.railFirstTop===14&&mobileAlignment.composeTop===78&&mobileAlignment.inboxTop===136,
     mobileAlignment);
   check('mobile no JS exception',errors.length===0,{errors});
  });

@@ -9,7 +9,7 @@
  */
 .pb-premium-shell.pb-astra-postbox {
   --pb-rail-width: 62px;
-  --pb-folder-width: 245px;
+  --pb-folder-width: 227px;
   --pb-ui-corner: 3px;
 }
 .pb-premium-shell.pb-astra-postbox .pb-astra-app-rail {
@@ -42,10 +42,10 @@
   background:var(--pb-sidebar);
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-brand {
-  height:64px;
-  flex:0 0 64px;
-  padding:0;
-  gap:10px;
+  height:78px;
+  flex:0 0 78px;
+  padding:0 4px;
+  gap:9px;
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-brand-mark {
   width:29px;height:29px;flex:0 0 29px;
@@ -57,12 +57,12 @@
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-compose-wrap {
   padding:0;
-  margin:0 0 16px;
+  margin:0 0 18px;
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-compose {
   height:40px;
   min-height:40px;
-  padding:0 11px;
+  padding:0 14px;
   font-size:13px;
   gap:10px;
   border-radius:3px;
@@ -203,4 +203,127 @@
 /* Settings is a different approved screen; never force mail rail there. */
 .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-settings {
   width:100%;
+}
+
+
+/*
+ * Sidebar navigation's original Astra reference geometry. The installed
+ * source stylesheet has 227px sidebar / 78px brand / 40px launcher,
+ * 34px pinned rows with 2px spacing, and 22px between groups.
+ * Folder/label creation/edit/deletion still runs existing MateMail handlers.
+ */
+.pb-premium-shell.pb-astra-postbox .pb-premium-sidebar {
+  height:100%;
+  min-height:0;
+  overflow:hidden;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-nav{
+  min-height:0;
+  flex:1 1 auto;
+  overflow-y:auto;
+  overflow-x:hidden;
+  scrollbar-width:thin;
+  padding:0 0 18px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-nav > .pb-premium-nav-link[data-role]:not([data-role="trash"]){
+  margin-bottom:2px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-section-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin:22px 0 0;
+  padding:0 5px 6px 6px;
+  width:100%;
+  height:30px;
+  min-height:30px;
+  font-size:9px;
+  font-weight:600;
+  letter-spacing:.09em;
+  color:var(--pb-muted);
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-section-header>button:first-child {
+  display:flex;align-items:center;
+  gap:4px;
+  width:auto;
+  height:24px;
+  min-height:24px;
+  border:0;
+  border-radius:3px;
+  background:transparent;
+  padding:0;
+  font-size:9px;
+  font-weight:600;
+  line-height:1;
+  letter-spacing:.09em;
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-section-header>button:first-child svg {
+  width:12px;height:12px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-section-header>button:last-child {
+  display:grid;
+  place-items:center;
+  width:24px;
+  height:24px;
+  min-height:24px;
+  border:0;
+  border-radius:3px;
+  padding:0;
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-section-header>button:last-child svg {
+  width:14px;height:14px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-nav-row{
+  position:relative;
+  display:flex;
+  align-items:center;
+  height:31px;
+  min-height:31px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-nav-row > .pb-premium-nav-link {
+  flex:1;
+  min-width:0;
+  height:31px;
+  min-height:31px;
+  padding-left:11px;
+  padding-right:25px;
+  gap:10px;
+  font-size:12px;
+  border-radius:3px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-item-menu{
+  position:absolute;
+  right:2px;
+  top:2px;
+  opacity:0;
+  z-index:5;
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-item-menu summary {
+  display:grid;
+  place-items:center;
+  width:22px;
+  height:24px;
+  border-radius:3px;
+  color:var(--pb-muted);
+}
+.pb-premium-shell.pb-astra-postbox .pb-organize-nav-row:hover .pb-organize-item-menu,
+.pb-premium-shell.pb-astra-postbox .pb-organize-nav-row:focus-within .pb-organize-item-menu,
+.pb-premium-shell.pb-astra-postbox .pb-organize-item-menu[open] {
+  opacity:1;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-premium-nav > .pb-premium-nav-link[data-role] {
+  height:35px;
+  min-height:35px;
+}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact)
+.pb-premium-nav > .pb-premium-nav-link[data-role] {
+  height:38px;
+  min-height:38px;
+}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact)
+.pb-organize-nav-row,
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact)
+.pb-organize-nav-row > .pb-premium-nav-link {
+  height:34px;
+  min-height:34px;
 }
