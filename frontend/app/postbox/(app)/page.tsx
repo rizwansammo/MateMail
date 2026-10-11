@@ -959,10 +959,10 @@ function Mailbox() {
           <div className="pb-premium-mail-toolbar-actions">
             {conversationEligible && (
               <div className="pb-conversation-switch" role="group" aria-label="Mailbox layout">
-                <button type="button" aria-pressed={conversationMode}
-                  onClick={() => changeConversationMode("conversations")}>Conversations</button>
                 <button type="button" aria-pressed={!conversationMode}
                   onClick={() => changeConversationMode("messages")}>Messages</button>
+                <button type="button" aria-pressed={conversationMode}
+                  onClick={() => changeConversationMode("conversations")}>Conversations</button>
               </div>
             )}
             <select
@@ -1182,6 +1182,7 @@ function Mailbox() {
                         </span>
                         <span className="pb-thread-list-subject">
                           {conversation.subject || "(no subject)"}
+                          <span className="pb-astra-row-preview" title={conversation.latest.preview || undefined}>{conversation.latest.preview ? " — " + conversation.latest.preview : ""}</span>
                           <MessageLabelBadges labels={conversation.latest.labels} palette={mailLabels} />
                           {conversation.unread_count > 0 && (
                             <span className="ml-2 pb-premium-unread-dot"
@@ -1340,6 +1341,7 @@ function Mailbox() {
                       <span className="pb-premium-row-copy">
                         <span className="pb-row-subject">
                           {row.subject || "(no subject)"}
+                          <span className="pb-astra-row-preview" title={row.preview || undefined}>{row.preview ? " — " + row.preview : ""}</span>
                           <MessageLabelBadges labels={row.labels} palette={mailLabels} />
                         </span>
                       </span>

@@ -23,11 +23,13 @@ import {
   Inbox,
   Loader2,
   LogOut,
+  Mail,
   PenLine,
   Menu,
   Moon,
   Monitor,
   Search,
+  RefreshCw,
   Send,
   Settings,
   Settings2,
@@ -42,6 +44,8 @@ import {
 } from "lucide-react";
 
 import { usePostBox } from "@/contexts/postbox-context";
+import "./postbox-astra-integration.css";
+import "./postbox-astra-reader.css";
 import {
   POSTBOX_MAILBOX_EVENT,
   announcePostBoxMailboxChange,
@@ -58,10 +62,9 @@ import {
 /**
  * The standard folders, in the order they belong.
  *
- * Reading order first — Inbox, Starred, Scheduled — then the things you
- * sent, then storage, then the two bins. Starred and Scheduled used to be
- * appended after this list, which put them below Trash; they are among the
- * most-used views and were the hardest to find.
+ * Approved design order: Inbox, Starred, Drafts, Sent, Scheduled, Archive,
+ * Spam and Trash. Starred is a filter; every real folder keeps its backend
+ * role and permission checks.
  *
  * Every entry has its own icon. They previously shared one because the
  * folders were falling through to the custom branch, which hardcoded
@@ -85,9 +88,9 @@ const PINNED: Array<{
   { role: "inbox", label: "Inbox", icon: Inbox },
   // Not a folder — a filter over INBOX, so it carries its own href.
   { role: "starred", label: "Starred", icon: Star, href: "/postbox?folder=INBOX&starred=true&scope=all" },
-  { role: "scheduled", label: "Scheduled", icon: Clock },
-  { role: "sent", label: "Sent", icon: Send },
   { role: "drafts", label: "Drafts", icon: FileText },
+  { role: "sent", label: "Sent", icon: Send },
+  { role: "scheduled", label: "Scheduled", icon: Clock },
   { role: "archive", label: "Archive", icon: Archive },
   { role: "junk", label: "Spam", icon: ShieldAlert },
   { role: "trash", label: "Trash", icon: Trash2 },
@@ -513,7 +516,7 @@ function PremiumPostBoxShell({
   }, [canSendMailbox, router]);
 
   return (
-    <div className={`pb pb-premium-shell ${
+    <div className={`pb pb-premium-shell pb-astra-postbox ${
       preferences.density === "compact"
         ? "pb-density-compact"
         : preferences.density === "extra_compact"
@@ -521,6 +524,24 @@ function PremiumPostBoxShell({
           : ""
     }`}>
       {railOpen && <button type="button" className="pb-premium-overlay" aria-label="Close folders" onClick={closeRail} />}
+
+      <nav className="pb-astra-app-rail" aria-label="PostBox applications">
+        <Link href="/postbox?folder=INBOX" className="pb-astra-rail-item"
+          aria-current={!pathname.startsWith("/postbox/contacts") && !pathname.startsWith("/postbox/settings") ? "page" : undefined}
+          onClick={() => { closeRail(); window.dispatchEvent(new Event("postbox:return-to-list")); }}>
+          <Mail size={19} aria-hidden="true" /><span>Mail</span>
+        </Link>
+        <Link href="/postbox/contacts" className="pb-astra-rail-item"
+          aria-current={pathname.startsWith("/postbox/contacts") ? "page" : undefined}
+          onClick={closeRail}>
+          <Users size={19} aria-hidden="true" /><span>Contacts</span>
+        </Link>
+        <Link href="/postbox/settings?section=appearance" className="pb-astra-rail-item"
+          aria-current={pathname.startsWith("/postbox/settings") ? "page" : undefined}
+          onClick={closeRail}>
+          <Settings2 size={19} aria-hidden="true" /><span>Settings</span>
+        </Link>
+      </nav>
 
       <aside className="pb-premium-sidebar" data-open={railOpen ? "true" : "false"}>
         <Link
@@ -554,7 +575,7 @@ function PremiumPostBoxShell({
           <div className="pb-premium-compose-wrap">
             <Link href="/postbox?compose=new" className="pb-premium-compose" onClick={closeRail}>
               <PenLine className="h-[18px] w-[18px]" aria-hidden="true" />
-              Compose
+              New message
               <kbd>C</kbd>
             </Link>
           </div>
@@ -594,6 +615,12 @@ function PremiumPostBoxShell({
             <Menu className="h-5 w-5" aria-hidden="true" />
           </button>
 
+          <div className="pb-astra-breadcrumb" aria-label="Current PostBox location">
+            <span>{pathname.startsWith("/postbox/contacts") ? "People" : pathname.startsWith("/postbox/settings") ? "Settings" : "Mail"}</span>
+            <ChevronRight size={12} aria-hidden="true" />
+            <strong>{mailbox.full_name || mailbox.email}</strong>
+          </div>
+
           {canReadMailbox ? (
             <Suspense fallback={<div className="pb-premium-search" aria-hidden="true" />}>
               <PremiumSearch />
@@ -606,6 +633,14 @@ function PremiumPostBoxShell({
           )}
 
           <div className="pb-premium-top-actions">
+            <button type="button" className="pb-premium-icon-link pb-astra-refresh"
+              aria-label="Refresh mail" title="Refresh mail"
+              onClick={() => {
+                window.dispatchEvent(new Event(POSTBOX_MAILBOX_EVENT));
+                window.dispatchEvent(new Event("postbox:refresh-folders"));
+              }}>
+              <RefreshCw className="h-5 w-5" aria-hidden="true" />
+            </button>
             <Link
               href="/postbox/settings?section=appearance"
               className="pb-premium-icon-link"
@@ -644,6 +679,67 @@ function PremiumPostBoxShell({
                   </Link>
                 </div>
 
+                {otherAccounts.length > 0 && (
+                  <div className="pb-premium-account-switcher">
+                    <div className="pb-premium-account-section-label">
+                      Accounts on this device
+                    </div>
+                    {otherAccounts.map((item) => {
+                      const itemInitials = accountInitials(
+                        item.mailbox.full_name,
+                        item.mailbox.email,
+                      );
+                      const switching = switchingAccount === item.session_id;
+                      return (
+                        <button
+                          key={item.session_id}
+                          type="button"
+                          className="pb-premium-account-row"
+                          disabled={Boolean(switchingAccount)}
+                          onClick={async () => {
+                            setAccountMenuError(null);
+                            setSwitchingAccount(item.session_id);
+                            try {
+                              await postbox.switchAccount(item.session_id);
+                              window.location.assign("/postbox?folder=INBOX");
+                            } catch {
+                              setAccountMenuError(
+                                "This account needs to be signed in again.",
+                              );
+                              setSavedAccounts((current) =>
+                                current.filter(
+                                  (saved) => saved.session_id !== item.session_id,
+                                ),
+                              );
+                              setSwitchingAccount(null);
+                            }
+                          }}
+                        >
+                          <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                            {itemInitials || "PB"}
+                          </span>
+                          <span className="pb-premium-account-row-copy">
+                            <strong>
+                              {item.mailbox.full_name || item.mailbox.email}
+                            </strong>
+                            <small>{item.mailbox.email}</small>
+                          </span>
+                          {switching ? (
+                            <Loader2
+                              className="h-4 w-4 animate-spin pb-muted"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <span className="pb-premium-account-switch-label">
+                              Switch
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {(mailbox.kind === "team_box" || teamBoxes.length > 0) && authenticatedMailbox && (
                   <div className="pb-premium-account-switcher">
                     <div className="pb-premium-account-section-label">TeamBoxes</div>
@@ -669,7 +765,7 @@ function PremiumPostBoxShell({
                         </span>
                         <span className="pb-premium-account-row-copy">
                           <strong>{authenticatedMailbox.full_name || authenticatedMailbox.email}</strong>
-                          <small>{authenticatedMailbox.email} · My mailbox</small>
+                          <small>{authenticatedMailbox.email} · Back to my mailbox</small>
                         </span>
                         {switchingMailbox === authenticatedMailbox.id ? (
                           <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
@@ -756,7 +852,7 @@ function PremiumPostBoxShell({
                         </span>
                         <span className="pb-premium-account-row-copy">
                           <strong>{authenticatedMailbox.full_name || authenticatedMailbox.email}</strong>
-                          <small>{authenticatedMailbox.email} · My mailbox</small>
+                          <small>{authenticatedMailbox.email} · Back to my mailbox</small>
                         </span>
                         {switchingMailbox === authenticatedMailbox.id ? (
                           <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
@@ -808,72 +904,20 @@ function PremiumPostBoxShell({
                               {target.email}
                               {!canRead && canSend ? " · Send only" : ""}
                             </small>
+                            <small className="pb-premium-permission-label">
+                              Delegated · {entry.permissions.can_send_on_behalf
+                                ? "Send on behalf"
+                                : entry.permissions.can_send_as
+                                  ? "Send as"
+                                  : entry.permissions.can_manage
+                                    ? "Read & Manage"
+                                    : entry.permissions.can_read ? "Read only" : "No access"}
+                            </small>
                           </span>
                           {switching ? (
                             <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
                           ) : (
                             <span className="pb-premium-account-switch-label">Open</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {otherAccounts.length > 0 && (
-                  <div className="pb-premium-account-switcher">
-                    <div className="pb-premium-account-section-label">
-                      Accounts on this device
-                    </div>
-                    {otherAccounts.map((item) => {
-                      const itemInitials = accountInitials(
-                        item.mailbox.full_name,
-                        item.mailbox.email,
-                      );
-                      const switching = switchingAccount === item.session_id;
-                      return (
-                        <button
-                          key={item.session_id}
-                          type="button"
-                          className="pb-premium-account-row"
-                          disabled={Boolean(switchingAccount)}
-                          onClick={async () => {
-                            setAccountMenuError(null);
-                            setSwitchingAccount(item.session_id);
-                            try {
-                              await postbox.switchAccount(item.session_id);
-                              window.location.assign("/postbox?folder=INBOX");
-                            } catch {
-                              setAccountMenuError(
-                                "This account needs to be signed in again.",
-                              );
-                              setSavedAccounts((current) =>
-                                current.filter(
-                                  (saved) => saved.session_id !== item.session_id,
-                                ),
-                              );
-                              setSwitchingAccount(null);
-                            }
-                          }}
-                        >
-                          <span className="pb-premium-account-avatar-sm" aria-hidden="true">
-                            {itemInitials || "PB"}
-                          </span>
-                          <span className="pb-premium-account-row-copy">
-                            <strong>
-                              {item.mailbox.full_name || item.mailbox.email}
-                            </strong>
-                            <small>{item.mailbox.email}</small>
-                          </span>
-                          {switching ? (
-                            <Loader2
-                              className="h-4 w-4 animate-spin pb-muted"
-                              aria-hidden="true"
-                            />
-                          ) : (
-                            <span className="pb-premium-account-switch-label">
-                              Switch
-                            </span>
                           )}
                         </button>
                       );
@@ -912,16 +956,6 @@ function PremiumPostBoxShell({
                   <p className="pb-premium-account-error" role="alert">
                     {accountMenuError}
                   </p>
-                )}
-
-                {canReadMailbox && (
-                  <Link
-                    href="/postbox/contacts"
-                    className="pb-premium-account-contacts"
-                  >
-                    <Users className="h-4 w-4" aria-hidden="true" />
-                    Contacts
-                  </Link>
                 )}
 
                 <div className="pb-premium-account-footer">

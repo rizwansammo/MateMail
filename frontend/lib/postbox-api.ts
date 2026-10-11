@@ -185,6 +185,7 @@ export interface MessageSummary {
   labels?: MessageLabel[];
   sent_origin?: boolean;
   subject: string;
+  preview?: string;
   from: { name: string; address: string };
   to: string[];
   cc: string[];

@@ -1,0 +1,353 @@
+/*
+ * Astra PostBox shell integration — approved layout, MateMail data.
+ *
+ * Scope everything to .pb-astra-postbox. Do not import the prototype's global
+ * resets or demo state. Original production PostBox provider, API calls,
+ * authentication, SSE, tenant guards and folder operations stay authoritative.
+ */
+.pb-premium-shell.pb-astra-postbox {
+  --pb-bg: #fff;
+  --pb-fg: #202b3d;
+  --pb-surface: #fff;
+  --pb-surface-2: #f2f5fa;
+  --pb-sidebar: #f7f8fb;
+  --pb-selected: #eaf0fd;
+  --pb-border: #e3e8ef;
+  --pb-border-strong: #d3dbe7;
+  --pb-primary: #415fc2;
+  --pb-primary-fg: #fff;
+  --pb-accent: #eaf0fd;
+  --pb-accent-fg: #334fae;
+  --pb-muted: #69768a;
+  --pb-subtle: #8e99aa;
+  --pb-ring: #758ada;
+  --pb-font: Inter, 'Segoe UI', Arial, sans-serif;
+  --pb-radius: 4px;
+}
+.pb-astra-postbox .pb-astra-app-rail {
+  display: flex;
+  flex: 0 0 57px;
+  width: 57px;
+  min-width: 57px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  padding: 70px 4px 12px;
+  border-right: 1px solid var(--pb-border);
+  background: #edf0f6;
+  z-index: 41;
+}
+.pb-astra-postbox .pb-astra-rail-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  min-height: 62px;
+  gap: 5px;
+  border-radius: 3px;
+  color: var(--pb-muted);
+  font-size: 10px;
+  line-height: 1.15;
+  text-align: center;
+  text-decoration: none;
+}
+.pb-astra-postbox .pb-astra-rail-item:hover {
+  background: var(--pb-surface-2);
+  color: var(--pb-fg);
+}
+.pb-astra-postbox .pb-astra-rail-item[aria-current="page"] {
+  background: var(--pb-selected);
+  color: var(--pb-primary);
+}
+.pb-astra-postbox .pb-premium-sidebar {
+  width: 229px;
+  flex-basis: 229px;
+  background: var(--pb-sidebar);
+}
+.pb-astra-postbox .pb-premium-brand {
+  height: 64px;
+  flex-basis: 64px;
+  padding: 13px 17px;
+  gap: 8px;
+}
+.pb-astra-postbox .pb-premium-brand-mark {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  border-radius: 0;
+}
+.pb-astra-postbox .pb-premium-wordmark {
+  font-size: 24px;
+}
+.pb-astra-postbox .pb-premium-compose-wrap {
+  padding: 11px 13px 12px;
+}
+.pb-astra-postbox .pb-premium-compose {
+  min-height: 38px;
+  padding: 8px 13px;
+  gap: 9px;
+  border-radius: 3px;
+  font-size: 12px;
+  box-shadow: none;
+}
+.pb-astra-postbox .pb-premium-nav {
+  padding: 0 11px 12px;
+}
+.pb-astra-postbox .pb-premium-nav-link {
+  height: 35px;
+  gap: 10px;
+  padding-inline: 11px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.pb-astra-postbox .pb-premium-topbar {
+  height: 59px;
+  flex-basis: 59px;
+  gap: 14px;
+  padding: 0 25px;
+  background: var(--pb-bg);
+}
+.pb-astra-postbox .pb-premium-search {
+  width: min(520px, 50%);
+  height: 33px;
+  padding: 0 10px;
+  gap: 9px;
+  border: 1px solid var(--pb-border);
+  border-radius: 4px;
+  background: var(--pb-sidebar);
+}
+.pb-astra-postbox .pb-premium-search input {
+  font-size: 12px;
+}
+.pb-astra-postbox .pb-premium-top-actions {
+  gap: 10px;
+}
+.pb-astra-postbox .pb-premium-account-panel {
+  border-radius: 8px;
+}
+.pb-astra-postbox :is(button, a, summary):focus-visible {
+  outline: 2px solid var(--pb-ring);
+  outline-offset: 2px;
+}
+:root[data-pb-theme="dark"] .pb-premium-shell.pb-astra-postbox {
+  --pb-bg: #1b2533;
+  --pb-fg: #e0e7f2;
+  --pb-surface: #1b2533;
+  --pb-surface-2: #253246;
+  --pb-sidebar: #192331;
+  --pb-selected: #2b3d61;
+  --pb-border: #303e52;
+  --pb-border-strong: #44546c;
+  --pb-primary: #9aafff;
+  --pb-primary-fg: #172347;
+  --pb-accent: #2b3d61;
+  --pb-accent-fg: #bdcbff;
+  --pb-muted: #a1afc4;
+  --pb-subtle: #8494ad;
+  --pb-ring: #9aafff;
+}
+:root[data-pb-theme="dark"] .pb-astra-postbox .pb-astra-app-rail {
+  background: #141d2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-pb-theme="light"]) .pb-premium-shell.pb-astra-postbox {
+    --pb-bg: #1b2533;
+    --pb-fg: #e0e7f2;
+    --pb-surface: #1b2533;
+    --pb-surface-2: #253246;
+    --pb-sidebar: #192331;
+    --pb-selected: #2b3d61;
+    --pb-border: #303e52;
+    --pb-border-strong: #44546c;
+    --pb-primary: #9aafff;
+    --pb-primary-fg: #172347;
+    --pb-accent: #2b3d61;
+    --pb-accent-fg: #bdcbff;
+    --pb-muted: #a1afc4;
+    --pb-subtle: #8494ad;
+    --pb-ring: #9aafff;
+  }
+  :root:not([data-pb-theme="light"]) .pb-astra-postbox .pb-astra-app-rail {
+    background: #141d2a;
+  }
+}
+@media(max-width:1100px) and (min-width:768px) {
+  .pb-astra-postbox .pb-premium-sidebar {
+    width: 208px;
+    flex-basis: 208px;
+  }
+  .pb-astra-postbox .pb-premium-topbar {
+    padding-inline: 17px;
+  }
+  .pb-astra-postbox .pb-premium-search {
+    width: 55%;
+  }
+}
+@media(max-width:767px) {
+  .pb-astra-postbox .pb-astra-app-rail {
+    width: 49px;
+    min-width: 49px;
+    flex-basis: 49px;
+    padding: 59px 3px 10px;
+  }
+  .pb-astra-postbox .pb-astra-rail-item {
+    min-height: 60px;
+    font-size: 9px;
+  }
+  .pb-astra-postbox .pb-premium-sidebar {
+    position: fixed;
+    inset: 0 auto 0 49px;
+    width: min(calc(100vw - 49px), 280px);
+    flex-basis: auto;
+    transform: translateX(-110%);
+  }
+  .pb-astra-postbox .pb-premium-sidebar[data-open="true"] {
+    transform: translateX(0);
+  }
+  .pb-astra-postbox .pb-premium-overlay {
+    left: 49px;
+  }
+  .pb-astra-postbox .pb-premium-topbar {
+    height: 58px;
+    flex-basis: 58px;
+    padding-inline: 10px;
+    gap: 8px;
+  }
+  .pb-astra-postbox .pb-premium-search {
+    flex: 1;
+    width: auto;
+  }
+  .pb-astra-postbox .pb-premium-wordmark {
+    font-size: 23px;
+  }
+}
+
+/* Approved compact account popover; real session and permission APIs retained. */
+.pb-astra-postbox .pb-premium-account-panel{
+ width:min(385px,calc(100vw - 24px));max-height:min(735px,calc(100dvh - 90px));
+ overflow-y:auto;scrollbar-width:thin;border-radius:8px;padding:8px;
+ background:var(--pb-bg);box-shadow:0 19px 55px rgb(19 36 59 / .16);
+}
+.pb-astra-postbox .pb-premium-account-current{padding:17px 14px 14px}
+.pb-astra-postbox .pb-premium-account-avatar-lg{width:62px;height:62px;border-radius:50%;background:var(--pb-selected);color:var(--pb-accent-fg)}
+.pb-astra-postbox .pb-premium-account-copy{padding:10px 4px}
+.pb-astra-postbox .pb-premium-account-manage{border-radius:6px;font-size:12px}
+.pb-astra-postbox .pb-premium-account-switcher{border-color:var(--pb-border);padding:9px 3px 5px}
+.pb-astra-postbox .pb-premium-account-section-label{font-size:10px;letter-spacing:.065em}
+.pb-astra-postbox .pb-premium-account-row,
+.pb-astra-postbox .pb-premium-account-add,
+.pb-astra-postbox .pb-premium-account-footer a,
+.pb-astra-postbox .pb-premium-account-footer button{
+ min-height:39px;border-radius:5px;padding:8px 7px;font-size:12px;
+}
+.pb-astra-postbox .pb-premium-account-avatar-sm{background:var(--pb-selected);color:var(--pb-accent-fg)}
+.pb-astra-postbox .pb-premium-account-row-copy{min-width:0}
+.pb-astra-postbox .pb-premium-account-row-copy strong{font-size:12px}
+.pb-astra-postbox .pb-premium-account-row-copy small{font-size:10.5px}
+.pb-astra-postbox .pb-premium-account-row-copy .pb-premium-permission-label{
+ display:block;font-size:10px;color:var(--pb-muted);margin-top:2px;
+}
+.pb-astra-postbox .pb-premium-theme,
+.pb-astra-postbox .pb-premium-theme-row{border-radius:5px}
+/* Existing 11-section production settings; center cards and sharpen surfaces. */
+.pb-astra-postbox .pb-premium-settings-nav{width:230px;flex-basis:230px}
+.pb-astra-postbox .pb-settings-heading,
+.pb-astra-postbox .pb-settings-content{width:100%;max-width:880px;margin-left:auto;margin-right:auto}
+.pb-astra-postbox .pb-setting-card{border-radius:6px}
+.pb-astra-postbox .pb-settings-heading-icon{border-radius:6px}
+@media(max-width:767px){
+ .pb-astra-postbox .pb-premium-settings-nav{width:100%;flex-basis:auto}
+ .pb-astra-postbox .pb-premium-account-panel{width:min(385px,calc(100vw - 24px))}
+}
+
+/* B3: approved Inbox list geometry; no changes to data fetching or list actions. */
+.pb-astra-postbox .pb-premium-mail-toolbar{min-height:46px;gap:12px;padding:6px 23px}
+.pb-astra-postbox .pb-premium-mail-tabs{gap:4px}
+.pb-astra-postbox .pb-premium-mail-tabs button{height:31px;padding:0 12px;font-size:12px;border-radius:3px}
+.pb-astra-postbox .pb-conversation-switch{border-radius:4px;background:var(--pb-bg);gap:2px;padding:2px}
+.pb-astra-postbox .pb-conversation-switch button{border-radius:3px;font-size:11px;padding:5px 9px}
+.pb-astra-postbox .pb-premium-sort-select{border:0;border-radius:3px;font-size:11px}
+.pb-astra-postbox .pb-premium-message-row{gap:10px;padding-inline:21px;background:var(--pb-bg)}
+.pb-astra-postbox .pb-premium-message-open{gap:12px}
+.pb-astra-postbox .pb-premium-message-row .pb-row-from{width:160px;flex-basis:160px}
+.pb-astra-postbox .pb-premium-message-row .pb-row-subject{font-weight:500}
+.pb-astra-postbox .pb-premium-row-avatar{background:var(--pb-selected);color:var(--pb-accent-fg)}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-row{min-height:41px;padding-inline:23px}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-open{height:40px;gap:9px}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-row-avatar{display:none}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-row .pb-row-from{width:160px;flex-basis:160px;font-size:12px}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-row .pb-row-subject{font-size:12px}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-open time{font-size:11px}
+.pb-astra-postbox.pb-density-compact .pb-premium-message-row{min-height:49px}
+.pb-astra-postbox.pb-density-compact .pb-premium-message-open{height:48px}
+.pb-astra-postbox.pb-density-compact .pb-premium-message-row .pb-row-from,
+.pb-astra-postbox.pb-density-compact .pb-premium-message-row .pb-row-subject{font-size:13px}
+.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-message-row{min-height:69px}
+.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-message-open{height:68px}
+/* B4: preserve real Compose, autosave, scheduling and attachment behavior. */
+.pb-astra-postbox .pb-premium-compose-shell{border-radius:6px;border-color:var(--pb-border-strong)}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-head{min-height:51px;padding:0 18px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-head>p{font-size:14px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-fields{padding-inline:18px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-fields>div{min-height:43px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-fields label{font-size:11px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-footer{padding:9px 14px;gap:7px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-body{font-size:13px;line-height:1.65}
+.pb-astra-postbox .pb-premium-compose-shell .pb-btn{border-radius:4px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-file-pill{border-radius:4px}
+.pb-astra-postbox .pb-thread-compose-host .pb-premium-compose-shell.pb-thread-inline-panel{border-radius:5px}
+@media(max-width:767px){
+ .pb-astra-postbox .pb-premium-mail-toolbar{padding:7px 10px;gap:5px}
+ .pb-astra-postbox .pb-premium-message-row{padding-inline:12px;gap:8px}
+ .pb-astra-postbox .pb-premium-message-row .pb-row-from{width:110px;flex-basis:110px}
+}
+@media(max-width:639px){
+ .pb-astra-postbox .pb-premium-compose-shell{border-radius:0}
+ .pb-astra-postbox .pb-premium-compose-shell .pb-compose-head{padding-inline:13px}
+ .pb-astra-postbox .pb-premium-compose-shell .pb-compose-fields{padding-inline:13px}
+}
+
+/* B2 top bar breadcrumb and refresh; source is authenticated mailbox. */
+.pb-astra-postbox .pb-astra-breadcrumb{
+ display:flex;align-items:center;gap:10px;min-width:140px;max-width:290px;
+ flex:0 1 27%;color:var(--pb-muted);font-size:12px;white-space:nowrap;
+}
+.pb-astra-postbox .pb-astra-breadcrumb strong{
+ min-width:0;color:var(--pb-fg);font-size:12px;font-weight:600;
+ overflow:hidden;text-overflow:ellipsis;
+}
+.pb-astra-postbox .pb-premium-search{margin-left:auto;margin-right:auto}
+.pb-astra-postbox .pb-astra-refresh{display:inline-flex;align-items:center;justify-content:center}
+@media(max-width:1050px){.pb-astra-postbox .pb-astra-breadcrumb{display:none}}
+@media(max-width:767px){.pb-astra-postbox .pb-astra-refresh{display:none}}
+
+/* Approved Settings composition: Settings replaces the Mail rail and folders.
+   Only this route is affected; Inbox and Contacts retain their navigation. */
+.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-astra-app-rail,
+.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-sidebar{
+ display:none;
+}
+.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-astra-breadcrumb,
+.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-mobile-trigger{
+ display:none;
+}
+.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-search{
+ margin-left:0;margin-right:auto;width:min(510px,50%);
+}
+.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-settings{
+ width:100%;
+}
+@media(max-width:820px){
+ .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-search{
+   flex:1;width:auto;max-width:510px;
+ }
+}
+ 
+/* Prototype label mark only; existing MateMail folder and label management untouched. */
+.pb-astra-postbox .pb-message-labels{display:inline-flex;align-items:center;flex:none;gap:4px;margin-left:8px;max-width:125px;white-space:nowrap}
+.pb-astra-postbox .pb-message-label{display:inline-flex;max-width:90px;min-width:0;align-items:center;justify-content:center;border:1px solid color-mix(in srgb,var(--pb-label-color) 38%,transparent);border-radius:3px;padding:1px 6px;background:color-mix(in srgb,var(--pb-label-color) 12%,var(--pb-bg));color:var(--pb-label-color);font-size:10px;font-weight:650;line-height:16px}
+.pb-astra-postbox .pb-message-label svg{display:none}
+.pb-astra-postbox .pb-premium-message-row .pb-row-subject,.pb-astra-postbox .pb-thread-list-subject{display:flex;align-items:baseline;min-width:0;gap:0}
+.pb-astra-postbox .pb-astra-row-preview{color:var(--pb-muted);font-weight:400;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;font-size:11px}
+.pb-astra-postbox.pb-density-extra-compact .pb-message-label{font-size:9px;line-height:15px;padding:0 5px}
+@media(max-width:767px){.pb-astra-postbox .pb-astra-row-preview{display:none}.pb-astra-postbox .pb-message-labels{max-width:90px;margin-left:5px}}

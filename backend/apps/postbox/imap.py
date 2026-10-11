@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import contextlib
 import email.utils
+import email.policy
 import imaplib
+from html.parser import HTMLParser
 import logging
 import re
 import ssl
@@ -154,6 +156,9 @@ class MessageSummary:
     folder: str
     message_id: str = ""
     subject: str = ""
+    preview: str = ""
+    mime_type: str = "text/plain; charset=utf-8"
+    transfer_encoding: str = "7bit"
     from_name: str = ""
     from_address: str = ""
     to: list[str] = field(default_factory=list)
@@ -520,7 +525,8 @@ class MailboxConnection:
         wanted = (
             "(UID FLAGS RFC822.SIZE BODYSTRUCTURE "
             "BODY.PEEK[HEADER.FIELDS "
-            "(FROM TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO)])"
+            "(FROM TO CC SUBJECT DATE MESSAGE-ID REFERENCES IN-REPLY-TO "
+            "CONTENT-TYPE CONTENT-TRANSFER-ENCODING)])"
         )
         status, data = self._imap.uid("FETCH", ",".join(str(u) for u in uids), wanted)
         if status != "OK":
@@ -529,6 +535,44 @@ class MailboxConnection:
         summaries = {s.uid: s for s in _parse_fetch(data, self._selected or "", self._uid_validity)}
         # Returned in the order asked for, which is the order the caller paged.
         return [summaries[u] for u in uids if u in summaries]
+
+    def fetch_previews(self, summaries: list[MessageSummary]) -> None:
+        """Best-effort, one batched and bounded PEEK for a visible page only.
+
+        Does not alter Seen flags, download full MIME bodies, or use a cache.
+        A broken preview must not block actual email listing.
+        """
+        window = summaries[:100]
+        if not window:
+            return
+        uids = [str(s.uid) for s in window if s.uid > 0]
+        if not uids:
+            return
+        try:
+            status, data = self._imap.uid(
+                "FETCH", ",".join(uids), "(UID BODY.PEEK[TEXT]<0.2048>)"
+            )
+            if status != "OK":
+                logger.warning("Optional preview FETCH did not succeed")
+                return
+            by_uid = {s.uid: s for s in window}
+            for item in data or []:
+                if not isinstance(item, tuple) or len(item) < 2:
+                    continue
+                meta, raw = item[0], item[1]
+                if not isinstance(meta, bytes) or not isinstance(raw, bytes):
+                    continue
+                if not re.search(rb"BODY\[TEXT\](?:<\d+>)?\s*\{", meta, re.I):
+                    continue
+                uid = _FETCH_UID.search(meta)
+                if uid:
+                    row = by_uid.get(int(uid.group(1)))
+                    if row is not None:
+                        row.preview = _preview_from_partial(
+                            raw[:2048], row.mime_type, row.transfer_encoding
+                        )
+        except (imaplib.IMAP4.error, MailAccessError, OSError, ValueError):
+            logger.warning("Optional preview FETCH unavailable")
 
     def fetch_headers(self, uid: int) -> bytes:
         """Fetch original RFC 5322 header bytes only, without the MIME body."""
@@ -847,6 +891,8 @@ def _parse_fetch(data, folder: str, uid_validity: int) -> list[MessageSummary]:
                 folder=folder,
                 message_id=header("Message-ID"),
                 subject=header("Subject"),
+                mime_type=header("Content-Type") or "text/plain; charset=utf-8",
+                transfer_encoding=header("Content-Transfer-Encoding") or "7bit",
                 from_name=from_name,
                 from_address=from_address,
                 to=[a for _, a in email.utils.getaddresses([headers.get("To", "")]) if a],
@@ -876,3 +922,68 @@ def _structure_has_attachment(meta: bytes) -> bool:
     attachment", and an inline image is not one.
     """
     return b'"ATTACHMENT"' in meta.upper()
+
+
+class _PreviewText(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.hidden = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in {"script", "style", "head", "template", "svg"}:
+            self.hidden += 1
+        elif tag.lower() in {"div", "p", "br", "li"}:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag):
+        if tag.lower() in {"script", "style", "head", "template", "svg"}:
+            self.hidden = max(0, self.hidden - 1)
+        elif tag.lower() in {"div", "p", "li"}:
+            self.parts.append(" ")
+
+    def handle_data(self, data):
+        if not self.hidden:
+            self.parts.append(data)
+
+
+def _preview_from_partial(raw: bytes, content_type: str, transfer_encoding: str) -> str:
+    """Extract text from at most 2 KiB of IMAP body data, never remote resources."""
+    import email
+
+    if not raw:
+        return ""
+    try:
+        head = (
+            "MIME-Version: 1.0\r\nContent-Type: "
+            + content_type.replace("\r", "").replace("\n", "")
+            + "\r\nContent-Transfer-Encoding: "
+            + transfer_encoding.replace("\r", "").replace("\n", "")
+            + "\r\n\r\n"
+        ).encode("utf-8")
+        message = email.message_from_bytes(head + raw[:2048], policy=email.policy.default)
+        parts = list(message.walk()) if message.is_multipart() else [message]
+        for kind in ("text/plain", "text/html"):
+            for part in parts:
+                if part.is_multipart() or part.get_content_type() != kind:
+                    continue
+                if part.get_content_disposition() == "attachment":
+                    continue
+                payload = part.get_payload(decode=True)
+                if payload is None:
+                    continue
+                charset = part.get_content_charset() or "utf-8"
+                try:
+                    value = payload.decode(charset, "replace")
+                except (LookupError, UnicodeError):
+                    value = payload.decode("utf-8", "replace")
+                if kind == "text/html":
+                    parser = _PreviewText()
+                    parser.feed(value[:6000])
+                    value = " ".join(parser.parts)
+                value = " ".join(value.replace("\x00", " ").split())
+                if value:
+                    return value[:180]
+    except (ValueError, TypeError, UnicodeError):
+        pass
+    return ""

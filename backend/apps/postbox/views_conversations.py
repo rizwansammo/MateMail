@@ -78,7 +78,11 @@ class ConversationMixin(PostBoxView):
                 detail="Too many conversation requests. Please wait a moment.",
             )
 
-    def _conversations(self, anchor: tuple[str, int, int] | None = None):
+    def _conversations(
+        self,
+        anchor: tuple[str, int, int] | None = None,
+        preview_window: tuple[str, int, int] | None = None,
+    ):
         with imap.open_mailbox(self.mailbox.email) as connection:
             folders = [
                 item for item in connection.list_folders()
@@ -132,9 +136,30 @@ class ConversationMixin(PostBoxView):
                     )
                 collected.extend(summaries)
 
-        if not anchor_found:
-            return None, Response({"detail": "That message was not found."}, status=404)
-        return threading.build_conversations(collected, role_by_folder), None
+            if not anchor_found:
+                return None, Response({"detail": "That message was not found."}, status=404)
+            conversations = threading.build_conversations(collected, role_by_folder)
+            if preview_window is not None:
+                scope, page, size = preview_window
+                visible = (
+                    [item for item in conversations if item.has_inbox]
+                    if scope == "inbox" else conversations
+                )
+                selected = visible[(page - 1) * size:page * size]
+                grouped: dict[str, list[imap.MessageSummary]] = {}
+                for item in selected:
+                    row = item.latest.primary
+                    grouped.setdefault(row.folder, []).append(row)
+                for folder_name, entries in grouped.items():
+                    try:
+                        info = connection.select(folder_name, readonly=True)
+                        connection.fetch_previews(
+                            [row for row in entries if row.uid_validity == info.uid_validity]
+                        )
+                    except (imap.MailAccessError, OSError):
+                        # Preview is optional; broken folder cannot block threads.
+                        continue
+            return conversations, None
 
 
 class ConversationListView(ConversationMixin):
@@ -154,7 +179,7 @@ class ConversationListView(ConversationMixin):
             return Response({"detail": "Invalid conversation pagination."}, status=400)
 
         self._rate_limit()
-        conversations, error = self._conversations()
+        conversations, error = self._conversations(preview_window=(scope, page, page_size))
         if error is not None:
             return error
 

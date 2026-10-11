@@ -293,6 +293,7 @@ def _summary_payload(summary: imap.MessageSummary) -> dict:
         "folder": summary.folder,
         "message_id": summary.message_id,
         "subject": summary.subject,
+        "preview": getattr(summary, "preview", ""),
         "from": {"name": summary.from_name, "address": summary.from_address},
         "to": summary.to,
         "cc": summary.cc,
@@ -373,6 +374,7 @@ class MessageListView(PostBoxView):
                     start = (page - 1) * size
                     window = uids[start:start + size]
                     summaries = connection.fetch_summaries(window)
+                    connection.fetch_previews(summaries)
                     total = len(uids)
                 else:
                     summaries = _fetch_summaries_chunked(connection, uids)
@@ -384,6 +386,7 @@ class MessageListView(PostBoxView):
                     total = len(summaries)
                     start = (page - 1) * size
                     summaries = summaries[start:start + size]
+                    connection.fetch_previews(summaries)
 
                 return Response({
                     "folder": folder,
@@ -432,10 +435,12 @@ class MessageListView(PostBoxView):
                     ]
                 collected.extend(summaries)
 
-        collected.sort(key=_global_message_sort_key, reverse=newest)
-        total = len(collected)
-        start = (page - 1) * size
-        window = collected[start:start + size]
+            collected.sort(key=_global_message_sort_key, reverse=newest)
+            total = len(collected)
+            start = (page - 1) * size
+            window = collected[start:start + size]
+            # Global search must keep its original bounded header scan.
+            # No extra folder selects or body reads in cross-folder searches.
         return Response({
             "folder": folder,
             "scope": scope,
