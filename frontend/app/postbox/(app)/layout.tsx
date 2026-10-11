@@ -62,10 +62,9 @@ import {
 /**
  * The standard folders, in the order they belong.
  *
- * Reading order first — Inbox, Starred, Scheduled — then the things you
- * sent, then storage, then the two bins. Starred and Scheduled used to be
- * appended after this list, which put them below Trash; they are among the
- * most-used views and were the hardest to find.
+ * Approved design order: Inbox, Starred, Drafts, Sent, Scheduled, Archive,
+ * Spam and Trash. Starred is a filter; every real folder keeps its backend
+ * role and permission checks.
  *
  * Every entry has its own icon. They previously shared one because the
  * folders were falling through to the custom branch, which hardcoded

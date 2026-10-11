@@ -102,13 +102,12 @@ class FolderPresentationTest(SimpleTestCase):
 
     def test_the_standard_folder_order(self):
         """
-        Reading order first, then what you sent, then storage, then the bins.
-        Starred and Scheduled used to be appended after the loop, which put
-        them below Trash.
+        Approved PostBox navigation order: Inbox, Starred, Drafts, Sent,
+        Scheduled, Archive, Spam and Trash. All standard roles remain present.
         """
         expected = [
-            "inbox", "starred", "scheduled", "sent",
-            "drafts", "archive", "junk", "trash",
+            "inbox", "starred", "drafts", "sent",
+            "scheduled", "archive", "junk", "trash",
         ]
         block = self.source.split("const PINNED", 1)[1].split("];", 1)[0]
 
@@ -771,14 +770,15 @@ class ThreadOriginalAndProfileDismissalTest(SimpleTestCase):
         self.assertIn("postbox.switchAccount(item.session_id)", layout)
         self.assertIn("onClick={() => void updatePreferences({ theme: value })}", layout)
 
-    def test_sidebar_only_lists_mail_folders_but_contacts_and_settings_survive_in_profile(self):
+    def test_sidebar_mail_only_and_contacts_settings_survive_in_app_rail(self):
         layout = read("app", "postbox", "(app)", "layout.tsx")
         nav = layout.split("function PremiumFolderNavigation(", 1)[1]
         self.assertNotIn('href="/postbox/contacts"', nav)
         self.assertNotIn('href="/postbox/settings"', nav)
         self.assertNotIn('pb-premium-separator', nav)
         self.assertIn('href="/postbox/contacts"', layout)
-        self.assertIn('className="pb-premium-account-contacts"', layout)
+        self.assertIn('className="pb-astra-app-rail"', layout)
+        self.assertNotIn('className="pb-premium-account-contacts"', layout)
         self.assertIn('href="/postbox/settings"', layout)
         self.assertIn('href="/postbox/settings?section=appearance"', layout)
         self.assertIn('className="pb-premium-account-footer"', layout)

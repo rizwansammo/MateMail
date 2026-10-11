@@ -79,3 +79,11 @@ test('approved reader density and sharp thread corners are scoped', () => {
   assert.doesNotMatch(shell, /import .*['"]\.\/model['"]/);
   assert.doesNotMatch(shell, /seed\(/);
 });
+
+test('approved list controls show Messages before Conversations', () => {
+  const start=mailbox.indexOf('className="pb-conversation-switch"');
+  assert.ok(start>=0);
+  const segment=mailbox.slice(start,start+560);
+  assert.ok(segment.indexOf('>Messages</button>')<segment.indexOf('>Conversations</button>'));
+});
+

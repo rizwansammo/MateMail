@@ -959,10 +959,10 @@ function Mailbox() {
           <div className="pb-premium-mail-toolbar-actions">
             {conversationEligible && (
               <div className="pb-conversation-switch" role="group" aria-label="Mailbox layout">
-                <button type="button" aria-pressed={conversationMode}
-                  onClick={() => changeConversationMode("conversations")}>Conversations</button>
                 <button type="button" aria-pressed={!conversationMode}
                   onClick={() => changeConversationMode("messages")}>Messages</button>
+                <button type="button" aria-pressed={conversationMode}
+                  onClick={() => changeConversationMode("conversations")}>Conversations</button>
               </div>
             )}
             <select
