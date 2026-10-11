@@ -66,8 +66,8 @@ async function shot(page,name){
  await page.screenshot({path:path.join(out,filename),animations:'disabled',fullPage:false});
  report.screenshots.push(filename);
 }
-async function prepare({viewport={width:1440,height:900},density='extra_compact',theme='light',readerView='single',listView='messages'}={}){
- const state={preferences:{...defaults,density,theme,reader_view:readerView,list_view:listView},mailbox:person,auth:person,switches:[]};
+async function prepare({viewport={width:1440,height:900},density='extra_compact',theme='light',readerView='single',listView='messages',readingPane='off'}={}){
+ const state={preferences:{...defaults,density,theme,reader_view:readerView,list_view:listView,reading_pane:readingPane},mailbox:person,auth:person,switches:[]};
  const context=await browser.newContext({viewport,deviceScaleFactor:1,reducedMotion:'reduce',colorScheme:theme==='dark'?'dark':'light'});
  await context.route('**/api/postbox/**',async route=>{
   const req=route.request();const url=new URL(req.url()),endpoint=url.pathname.slice('/api/postbox'.length),method=req.method();
@@ -355,6 +355,24 @@ try{
    const fontsize=await page.locator('.pb-premium-reader-heading h1').evaluate(el=>parseFloat(getComputedStyle(el).fontSize));
    check('single reader heading scales for '+density,density==='extra_compact'?fontsize<=22:density==='compact'?fontsize<=25:fontsize>=24,{fontsize});
    check('reader has Back control',await page.getByRole('button',{name:'Back to mailbox'}).count()===1);
+   const fullPane=await page.locator('.pb-mail-layout').evaluate(el=>{
+     const list=el.querySelector('.pb-mail-list-pane'),reader=el.querySelector('.pb-mail-reader-pane');
+     const rect=x=>x?.getBoundingClientRect();
+     return {layout:el.className,listVisible:getComputedStyle(list).display!=='none',
+       readerVisible:getComputedStyle(reader).display!=='none',
+       readerHeight:Math.round(rect(reader)?.height||0),
+       layoutHeight:Math.round(rect(el)?.height||0),
+       readerTop:Math.round(rect(reader)?.top||0),layoutTop:Math.round(rect(el)?.top||0)};
+   });
+   check('Full message hides Inbox list instead of rendering bottom pane '+density,
+     fullPane.layout.includes('pb-layout-full')&&
+     fullPane.listVisible===false&&fullPane.readerVisible===true&&
+     fullPane.readerHeight>=fullPane.layoutHeight-2&&
+     Math.abs(fullPane.readerTop-fullPane.layoutTop)<=2,fullPane);
+   await page.getByRole('button',{name:'Back to mailbox'}).click();
+   check('Back restores list and hides full reader '+density,
+     await page.locator('.pb-mail-list-pane').isVisible()&&
+     !await page.locator('.pb-mail-reader-pane').isVisible());
    check('no reader JS exception '+density,errors.length===0,{errors});
   });
  }
@@ -368,6 +386,30 @@ try{
    const target={comfortable:10,compact:6,extra_compact:3}[density];
    check('thread card radius '+density,radius===target,{radius,target});
    check('no conversation JS exception '+density,errors.length===0,{errors});
+  });
+ }
+ for(const readingPane of ['right','bottom']){
+  await scenario({label:'reader preserves '+readingPane+' reading pane',options:{readingPane}},async({page,errors})=>{
+   await visit(page);
+   await page.locator('.pb-premium-message-open').first().click();
+   await page.locator('.pb-premium-reader-heading').waitFor({state:'visible',timeout:15000});
+   const panes=await page.locator('.pb-mail-layout').evaluate(el=>{
+     const list=el.querySelector('.pb-mail-list-pane'),reader=el.querySelector('.pb-mail-reader-pane');
+     const a=list.getBoundingClientRect(),b=reader.getBoundingClientRect();
+     return {cls:el.className,listVisible:getComputedStyle(list).display!=='none',
+       readerVisible:getComputedStyle(reader).display!=='none',
+       list:{x:Math.round(a.x),y:Math.round(a.y),width:Math.round(a.width),height:Math.round(a.height)},
+       reader:{x:Math.round(b.x),y:Math.round(b.y),width:Math.round(b.width),height:Math.round(b.height)}};
+   });
+   const correct=readingPane==='right'
+     ? panes.cls.includes('pb-layout-right')&&panes.reader.x>panes.list.x&&
+       Math.abs(panes.reader.y-panes.list.y)<=2
+     : panes.cls.includes('pb-layout-bottom')&&panes.reader.y>panes.list.y&&
+       Math.abs(panes.reader.x-panes.list.x)<=2;
+   check('Reading pane '+readingPane+' keeps two separate visible panes',
+     panes.listVisible&&panes.readerVisible&&correct,panes);
+   await shot(page,'04-reader-layout-'+readingPane);
+   check('No reader layout JS errors '+readingPane,errors.length===0,{errors});
   });
  }
  await scenario({label:'settings centered and live-API shape',options:{}},async({page,errors})=>{

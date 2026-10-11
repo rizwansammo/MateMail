@@ -1147,6 +1147,7 @@ function Mailbox() {
                 : "flex-1 border-b"
           }`}
           style={{ borderColor: "var(--pb-border)" }}
+          data-pane-hidden={Boolean(detail && paneOff)}
         >
           <div className="pb-astra-list-scroll">
           {conversationMode ? (
@@ -1393,7 +1394,7 @@ function Mailbox() {
 
         <div className={`pb-mail-reader-pane pb-scroll min-h-0 flex-1 ${
           detail ? "block" : paneOff ? "hidden" : "hidden md:block"
-        }`}>
+        }`} data-pane-hidden={!detail && paneOff}>
           {detailLoading ? (
             <CentredSpinner />
           ) : !detail ? (
