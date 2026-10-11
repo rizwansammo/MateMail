@@ -170,7 +170,31 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
-  const admin = accountRole==="admin"||accountRole==="owner";
+  // WorkspaceDetailSerializer does not return membership.role. Resolve it
+  // from the authenticated, tenant-scoped stats endpoint instead. Never infer
+  // administrator privileges from a missing field or from client storage.
+  const [resolvedRole,setResolvedRole] = useState<{tenantId:string;value:string}|null>(null);
+  useEffect(()=>{
+    if(!tenantId){return;}
+    let cancelled=false;
+    const readRole=async()=>{
+      try{
+        const response=await apiRequest("/api/workspaces/"+encodeURIComponent(tenantId)+"/stats/");
+        if(!response.ok)return;
+        const result=await response.json() as {my_role?:unknown};
+        if(!cancelled&&typeof result.my_role==="string"
+          &&["owner","admin","support","read_only"].includes(result.my_role)){
+          setResolvedRole({tenantId,value:result.my_role});
+        }
+      }catch{/* Fail closed: roles never gain privileges on network errors. */}
+    };
+    void readRole();
+    const refresh=()=>void readRole();
+    window.addEventListener("focus",refresh);
+    return()=>{cancelled=true;window.removeEventListener("focus",refresh);};
+  },[tenantId]);
+  const currentRole=resolvedRole?.tenantId===tenantId?resolvedRole.value:accountRole;
+  const admin = currentRole==="admin"||currentRole==="owner";
   const current = currentItem(pathname);
   const done = setupStatus?.tenantId===tenantId && setupStatus.state==="done";
   // While the initial API response is loading or unavailable, show Getting Started.
@@ -327,6 +351,11 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
         <div data-slot="sidebar-header"><div className="brand">
           <BrandMark size={30}/><span className="wordmark">MateMail</span><span className="brand-hub">HUB</span>
         </div></div>
+        <div className="astra-org-card" aria-label="Current organization">
+          <span className="astra-org-monogram">{initials(workspaceName).slice(0,1)}</span>
+          <span className="astra-org-card-name"><strong title={workspaceName}>{workspaceName}</strong><small>Organization</small></span>
+          <Lock size={13} aria-hidden="true"/>
+        </div>
         <nav data-slot="sidebar-content">
           <div data-slot="sidebar-group"><ul data-slot="sidebar-menu">{shortLinks.map(navLink)}</ul></div>
           {sections.map(group=><div key={group.label} data-slot="sidebar-group">
@@ -336,7 +365,7 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
               </button>
             </div>
             {(!closedGroups.includes(group.label)||collapsed)&&<div data-slot="sidebar-group-content">
-              <ul data-slot="sidebar-menu">{group.items.filter(item=>accessible(item,admin)).map(navLink)}</ul>
+              <ul data-slot="sidebar-menu">{group.items.map(navLink)}</ul>
             </div>}
           </div>)}
           <div data-slot="sidebar-group"><ul data-slot="sidebar-menu">{navLink(settings)}</ul></div>
@@ -366,7 +395,7 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
             </button>
           </div>
           {accountOpen&&<div className="astra-account-menu">
-            <div className="astra-account-label"><strong>{accountName}</strong><small>{accountEmail} · {accountRole}</small></div>
+            <div className="astra-account-label"><strong>{accountName}</strong><small>{accountEmail} · {currentRole}</small></div>
             <Link href="/app/settings" onClick={()=>setAccountOpen(false)}><Settings size={15}/> Workspace settings</Link>
             <Link href="/app/security" onClick={()=>setAccountOpen(false)}><ShieldCheck size={15}/> My account & security</Link>
             <Link href="/app/settings/api-keys" onClick={()=>setAccountOpen(false)}><KeyRound size={15}/> API keys</Link>

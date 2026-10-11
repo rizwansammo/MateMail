@@ -303,10 +303,24 @@ class PremiumPortalDesignIntegrationTest(SimpleTestCase):
         for parts in self.PHASE_PAGES:
             source = read(*parts)
             with self.subTest(path="/".join(parts)):
-                self.assertTrue(
-                    "portal-page" in source or "portal-auth" in source,
-                    f"{'/'.join(parts)} has drifted out of the premium portal system",
-                )
+                if parts == ("app", "app", "page.tsx"):
+                    # The Overview is intentionally the approved Astra layout,
+                    # not a legacy PortalMetric/PortalCard surface. Require
+                    # design and real API fidelity instead of the old CSS name.
+                    self.assertIn("astra-overview", source)
+                    self.assertIn("Your workspace, in focus.", source)
+                    self.assertIn("Domain readiness", source)
+                    self.assertIn("Needs attention", source)
+                    self.assertIn("Recent activity", source)
+                    self.assertIn("Workspace essentials", source)
+                    self.assertIn("/api/workspaces/", source)
+                    self.assertIn('get("/api/custom-hostnames/")', source)
+                    self.assertNotIn("portal-metrics-grid", source)
+                else:
+                    self.assertTrue(
+                        "portal-page" in source or "portal-auth" in source,
+                        f"{'/'.join(parts)} has drifted out of the premium portal system",
+                    )
 
     def test_workspace_shell_imports_the_scoped_premium_styles(self):
         layout = read("app", "app", "layout.tsx")
@@ -316,6 +330,9 @@ class PremiumPortalDesignIntegrationTest(SimpleTestCase):
         astra_css = read("app", "app", "astra-shell.css")
         self.assertIn("<AstraWorkspaceShell>", layout)
         self.assertIn('import "./app/astra-shell.css";', root_layout)
+        self.assertIn('import "./app/astra-overview.css";', root_layout)
+        self.assertIn("group.items.map(navLink)", shell)
+        self.assertIn('"/stats/"', shell)
         self.assertIn("portal-premium.css", root_layout)
         self.assertIn("ws portal-premium astra-hub", shell)
         self.assertIn(".ws.portal-premium.astra-hub", astra_css)

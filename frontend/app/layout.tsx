@@ -11,6 +11,7 @@ import "./app/astra-collaboration.css";
 import "./app/astra-routing.css";
 import "./app/astra-users.css";
 import "./app/astra-advanced.css";
+import "./app/astra-overview.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
