@@ -146,6 +146,14 @@ try{
   check('badge uses visible color and sharp corners',badge.background!=='rgba(0, 0, 0, 0)'&&badge.radius==='3px',badge);
   const layout=await page.evaluate(()=>({width:document.documentElement.scrollWidth,inner:innerWidth,rail:Math.round(document.querySelector('.pb-astra-app-rail')?.getBoundingClientRect().width||0)}));
   check('desktop rail is compact',layout.rail>=45&&layout.rail<=70,layout);
+  const railStart=await page.locator('.pb-astra-app-rail').evaluate(el=>{
+    const first=el.querySelector('.pb-astra-rail-item');
+    return {railTop:el.getBoundingClientRect().top,
+      firstItemTop:first?.getBoundingClientRect().top ?? -1,
+      inset:Math.round((first?.getBoundingClientRect().top ?? 0)-el.getBoundingClientRect().top)};
+  });
+  check('desktop Mail app icon starts at top without blank logo slot',
+    railStart.inset>=0&&railStart.inset<=16,railStart);
   await page.locator('details.pb-premium-account summary').click();
   await page.locator('.pb-premium-account-panel').waitFor({state:'visible'});
   await shot(page,'02-account-popover');
@@ -205,6 +213,12 @@ try{
   await shot(page,'07-phone-closed-dark');
   const w=await page.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth}));
   check('no mobile document horizontal overflow',w.document<=w.viewport+2,w);
+  const mobileRailStart=await page.locator('.pb-astra-app-rail').evaluate(el=>{
+    const first=el.querySelector('.pb-astra-rail-item');
+    return {inset:Math.round((first?.getBoundingClientRect().top ?? 0)-el.getBoundingClientRect().top)};
+  });
+  check('mobile Mail app icon starts at top without blank logo slot',
+    mobileRailStart.inset>=0&&mobileRailStart.inset<=16,mobileRailStart);
   await page.getByRole('button',{name:'Open folders'}).click();
   await shot(page,'08-phone-sidebar-open');
   check('mobile folder drawer opens',await page.locator('.pb-premium-sidebar[data-open=true]').count()===1);

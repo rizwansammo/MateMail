@@ -32,7 +32,9 @@
   flex-direction: column;
   align-items: stretch;
   gap: 7px;
-  padding: 70px 4px 12px;
+  /* The approved prototype starts the Mail rail at the top.
+     Do not reserve a brand/logo slot above the first app icon. */
+  padding: 8px 4px 12px;
   border-right: 1px solid var(--pb-border);
   background: #edf0f6;
   z-index: 41;
@@ -188,7 +190,7 @@
     width: 49px;
     min-width: 49px;
     flex-basis: 49px;
-    padding: 59px 3px 10px;
+    padding: 8px 3px 10px;
   }
   .pb-astra-postbox .pb-astra-rail-item {
     min-height: 60px;
