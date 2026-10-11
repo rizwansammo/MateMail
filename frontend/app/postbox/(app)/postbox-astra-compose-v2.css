@@ -1,0 +1,350 @@
+/*
+ * Approved Astra compose.tsx + globals.css geometry.
+ * Real PostBox Compose owns all payload, drafts, attachment and permission
+ * logic. These rules apply ONLY to non-inline floating Compose.
+ */
+.pb-premium-shell.pb-astra-postbox .pb-astra-compose-host {
+  position:fixed !important;
+  inset:0 !important;
+  z-index:50;
+  display:flex !important;
+  align-items:flex-end !important;
+  justify-content:flex-end !important;
+  padding:0 30px 27px 0 !important;
+  pointer-events:none;
+  background:transparent;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window {
+  pointer-events:auto;
+  flex:0 0 auto;
+  width:575px !important;
+  height:min(680px, calc(100dvh - 110px)) !important;
+  min-height:200px;
+  max-height:none !important;
+  display:flex;
+  flex-direction:column;
+  padding:0;
+  border:1px solid var(--pb-border-strong) !important;
+  border-radius:5px 5px 0 0 !important;
+  background:var(--pb-bg);
+  overflow:hidden;
+  box-shadow:0 18px 56px rgb(20 34 57 / .20) !important;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-head {
+  height:44px !important;
+  min-height:44px !important;
+  flex:0 0 44px;
+  padding:0 12px 0 19px !important;
+  border-bottom:1px solid var(--pb-border) !important;
+  background:var(--pb-surface-2) !important;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-head>p {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:0;
+  font-size:12px !important;
+  line-height:1.2;
+  font-weight:600;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-head .pb-btn {
+  width:26px;
+  min-width:26px;
+  height:26px;
+  min-height:26px;
+  padding:0;
+  border:0;
+  border-radius:3px;
+  display:grid;
+  place-items:center;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-head .pb-btn svg {
+  width:14px;height:14px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-content {
+  flex:1 1 auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  display:flex;
+  flex-direction:column;
+  padding:0 !important;
+  overflow-y:auto !important;
+  background:var(--pb-bg);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields {
+  flex:0 0 auto;
+  padding:0 20px !important;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields>div {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  min-height:39px !important;
+  height:auto;
+  margin:0 !important;
+  gap:10px;
+  border-bottom:1px solid var(--pb-border);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields>div:last-child {
+  min-height:44px !important;
+  height:44px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields label.pb-label {
+  width:32px !important;
+  min-width:32px;
+  flex:0 0 32px;
+  font-size:11px;
+  font-weight:400;
+  color:var(--pb-muted);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields>div:last-child>label {
+  position:absolute;
+  width:1px !important;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  clip:rect(0,0,0,0);
+  overflow:hidden;
+  white-space:nowrap;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields>div:last-child>div {
+  margin-left:0;
+  width:100%;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields .pb-input,
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields .pb-select {
+  width:100%;
+  height:36px !important;
+  border:0;
+  border-radius:0;
+  outline:none !important;
+  padding:0 !important;
+  background:transparent;
+  box-shadow:none !important;
+  color:var(--pb-fg);
+  font-size:12px !important;
+  line-height:1.4;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields>div:last-child .pb-input {
+  height:44px !important;
+  font-size:13px !important;
+  font-weight:500;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields .pb-btn {
+  min-height:27px;
+  font-size:10px;
+  padding:0 2px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-editor {
+  display:block;
+  min-height:160px;
+  flex:1 0 160px;
+  padding:20px;
+  outline:none !important;
+  font-size:14px;
+  line-height:1.8;
+  color:var(--pb-fg);
+  overflow-wrap:anywhere;
+  white-space:pre-wrap;
+  cursor:text;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-editor:empty::before {
+  content:attr(data-placeholder);
+  color:var(--pb-subtle);
+  pointer-events:none;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-editor ul {
+  list-style:disc;
+  padding-left:22px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-editor ol {
+  list-style:decimal;
+  padding-left:22px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-editor a {
+  text-decoration:underline;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-signature {
+  margin:4px 20px 13px !important;
+  flex:0 0 auto;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-attachments {
+  padding:9px 20px;
+  flex:0 0 auto;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-format {
+  flex:0 0 42px;
+  min-height:42px;
+  padding:7px 17px;
+  display:flex;
+  align-items:center;
+  gap:3px;
+  border-top:1px solid var(--pb-border);
+  background:var(--pb-bg);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-format button {
+  display:grid;
+  place-items:center;
+  flex:0 0 28px;
+  width:28px;
+  height:27px;
+  padding:0;
+  border:0;
+  border-radius:3px;
+  color:var(--pb-muted);
+  background:transparent;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-format button:hover {
+  background:var(--pb-surface-2);
+  color:var(--pb-fg);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-format-divider {
+  width:1px;height:20px;
+  margin:0 5px;
+  background:var(--pb-border);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-format select {
+  min-width:0;
+  max-width:140px;
+  margin-left:auto;
+  border:1px solid var(--pb-border);
+  border-radius:3px;
+  background:var(--pb-bg);
+  padding:4px;
+  color:var(--pb-muted);
+  font-size:10px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-link {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:8px 16px;
+  border-top:1px solid var(--pb-border);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-link input {
+  min-width:0;flex:1;
+  border:1px solid var(--pb-border);
+  background:var(--pb-bg);
+  color:var(--pb-fg);
+  border-radius:3px;
+  padding:5px 8px;
+  font-size:11px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-link button {
+  border:1px solid var(--pb-border);
+  border-radius:3px;
+  background:var(--pb-bg);
+  color:var(--pb-fg);
+  padding:5px;
+  font-size:11px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-footer {
+  min-height:52px !important;
+  height:auto;
+  flex:0 0 auto;
+  display:flex;
+  gap:17px;
+  flex-wrap:nowrap;
+  padding:10px 18px 8px !important;
+  border-top:1px solid var(--pb-border);
+  background:var(--pb-bg);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-send-group {
+  display:flex;
+  align-items:center;
+  flex:0 0 auto;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-send-group>.pb-btn {
+  height:34px;
+  min-height:34px;
+  padding:0 15px;
+  min-width:89px;
+  border-radius:3px 0 0 3px !important;
+  font-size:12px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-send-group>.pb-astra-compose-schedule-trigger {
+  min-width:30px;
+  width:30px;
+  padding:0;
+  border-left:1px solid color-mix(in srgb,var(--pb-primary-fg) 24%,var(--pb-primary));
+  border-radius:0 3px 3px 0 !important;
+  display:grid;
+  place-items:center;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-draft-status {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  border:0;
+  padding:0;
+  background:transparent;
+  color:var(--pb-muted);
+  font-size:10px;
+  min-width:0;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-discard {
+  margin-left:auto !important;
+  width:28px;height:28px;min-height:28px;
+  padding:0;
+  border-radius:3px;
+  display:grid;place-items:center;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-schedule {
+  background:var(--pb-surface-2);
+  padding:12px 20px;
+  border-radius:0;
+  margin:0 !important;
+}
+/* Expand & minimize the SAME editor subtree; drafts and text remain mounted. */
+.pb-premium-shell.pb-astra-postbox .pb-astra-compose-host:has(.pb-astra-expanded) {
+  padding:0 60px 20px 0 !important;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window.pb-astra-expanded {
+  width:min(1000px,calc(100vw - 120px)) !important;
+  height:calc(100dvh - 65px) !important;
+  border-radius:5px !important;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window.pb-astra-minimized {
+  width:310px !important;
+  height:45px !important;
+  min-height:45px !important;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window.pb-astra-minimized .pb-compose-content,
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window.pb-astra-minimized .pb-astra-compose-format,
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window.pb-astra-minimized .pb-compose-footer,
+.pb-premium-shell.pb-astra-postbox .pb-astra-composer-window.pb-astra-minimized .pb-astra-compose-link {
+  display:none !important;
+}
+@media(max-width:639px) {
+  .pb-premium-shell.pb-astra-postbox .pb-astra-compose-host {
+    padding:0 !important;
+    align-items:stretch !important;
+    justify-content:stretch !important;
+    pointer-events:auto;
+    background:rgb(19 28 39 / .45);
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-astra-composer-window,
+  .pb-premium-shell.pb-astra-postbox .pb-astra-composer-window.pb-astra-expanded {
+    width:100vw !important;
+    height:100dvh !important;
+    min-height:0 !important;
+    max-height:100dvh !important;
+    border:0 !important;
+    border-radius:0 !important;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-fields {
+    padding:0 13px !important;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-astra-compose-editor {
+    padding:18px 13px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-astra-composer-window .pb-compose-footer {
+    padding:10px 13px !important;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-astra-composer-window.pb-astra-minimized {
+    height:45px !important;
+    min-height:45px !important;
+    width:100vw !important;
+    margin-top:auto;
+  }
+}

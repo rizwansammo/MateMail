@@ -1,0 +1,206 @@
+/*
+ * Approved Astra Prototype geometry (9bab1302ff92), on production PostBox.
+ * Do NOT introduce prototype demo stores, authentication, or folder state.
+ * One source of truth for visual dimensions; scoped to this PostBox shell.
+ *
+ * Geometry from the reference source:
+ * rail 62, folder 227, brand 78, topbar 65, search 35,
+ * compose launcher 40, folder rows 34, Inbox toolbar 44.
+ */
+.pb-premium-shell.pb-astra-postbox {
+  --pb-rail-width: 62px;
+  --pb-folder-width: 227px;
+  --pb-ui-corner: 3px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-app-rail {
+  width:var(--pb-rail-width);
+  min-width:var(--pb-rail-width);
+  flex:0 0 var(--pb-rail-width);
+  padding:0 7px 12px;
+  gap:0;
+  align-items:stretch;
+  background:var(--pb-surface-2);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-rail-item {
+  min-height:51px;
+  height:51px;
+  padding:9px 0 8px;
+  margin-bottom:13px;
+  gap:5px;
+  border-radius:4px;
+  font-size:9px;
+  line-height:1;
+  font-weight:500;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-rail-item svg {
+  width:20px;height:20px;flex:none;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-sidebar {
+  width:var(--pb-folder-width);
+  flex:0 0 var(--pb-folder-width);
+  padding:0 13px;
+  background:var(--pb-sidebar);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-brand {
+  height:78px;
+  flex:0 0 78px;
+  padding:0 4px;
+  gap:8px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-brand-mark {
+  width:29px;height:29px;flex:0 0 29px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-wordmark {
+  font-size:27px;
+  letter-spacing:-.025em;
+  font-weight:700;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-compose-wrap {
+  padding:0;
+  margin:0 0 18px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-compose {
+  height:40px;
+  min-height:40px;
+  padding:0 14px;
+  font-size:13px;
+  gap:10px;
+  border-radius:3px;
+  line-height:1;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-compose kbd {
+  font-size:10px;
+  border-radius:2px;
+  padding:2px 3px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-nav {
+  padding:0 0 18px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-nav-link {
+  height:34px;
+  min-height:34px;
+  padding:0 11px;
+  gap:11px;
+  font-size:13px;
+  font-weight:400;
+  border-radius:3px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-nav-link[aria-current="page"] {
+  font-weight:600;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-nav-link svg {
+  width:17px;height:17px;flex:none;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-topbar {
+  height:65px;
+  flex:0 0 65px;
+  gap:17px;
+  padding:0 25px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-search {
+  width:46%;
+  max-width:500px;
+  height:35px;
+  flex:0 1 500px;
+  margin-left:auto;
+  margin-right:0;
+  padding:0 12px;
+  gap:9px;
+  border-radius:4px;
+  background:var(--pb-surface-2);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-search input {
+  font-size:12px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-top-actions {
+  gap:5px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-breadcrumb {
+  gap:8px;
+  font-size:11px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-breadcrumb strong {
+  font-size:11px;
+  font-weight:500;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-mail-toolbar {
+  height:44px;
+  min-height:44px;
+  padding:0 22px;
+  gap:9px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-mail-tabs {
+  gap:21px;
+  height:43px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-mail-tabs button {
+  height:43px;
+  padding:0 2px;
+  margin:0;
+  border-bottom:2px solid transparent;
+  border-radius:0;
+  font-size:12px;
+  background:transparent;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-mail-tabs button[data-active="true"] {
+  border-bottom-color:var(--pb-primary);
+  border-radius:0;
+  background:transparent;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row {
+  padding-inline:22px;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-row {
+  min-height:44px;
+  padding-inline:22px;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-open {
+  height:43px;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-premium-message-row {min-height:61px}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-premium-message-open {height:60px}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-premium-mail-toolbar {height:48px;min-height:48px}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-message-row {min-height:78px;padding-inline:25px}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-message-open {height:77px}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-mail-toolbar {height:54px;min-height:54px}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-topbar {height:71px;flex-basis:71px}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-compose {height:44px;min-height:44px}
+@media(max-width:1100px) and (min-width:768px) {
+  .pb-premium-shell.pb-astra-postbox .pb-premium-sidebar {
+    width:210px;flex-basis:210px;
+  }
+}
+@media(max-width:767px) {
+  .pb-premium-shell.pb-astra-postbox {
+    --pb-rail-width:49px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-astra-app-rail {
+    padding:0 3px 10px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-astra-rail-item {
+    min-height:51px;height:51px;margin-bottom:9px;font-size:9px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-premium-sidebar {
+    position:fixed;
+    inset:0 auto 0 var(--pb-rail-width);
+    width:min(calc(100vw - var(--pb-rail-width)),280px);
+    flex-basis:auto;
+    padding:0 13px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-premium-overlay {
+    left:var(--pb-rail-width);
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-premium-topbar {
+    height:58px;flex-basis:58px;padding-inline:10px;gap:8px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-premium-search {
+    flex:1;width:auto;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-premium-mail-toolbar {
+    padding-inline:10px;
+  }
+}
+/* Settings is a different approved screen; never force mail rail there. */
+.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-settings {
+  width:100%;
+}

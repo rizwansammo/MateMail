@@ -13,9 +13,17 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Bold,
+  Check,
   ChevronDown,
   ChevronUp,
   Clock,
+  Italic,
+  Link2,
+  List,
+  Minus,
+  PenLine,
+  Underline,
   Loader2,
   Maximize2,
   Minimize2,
@@ -132,8 +140,22 @@ export function Compose({
    * size would remount the form and lose every one of them.
    */
   const [expanded, setExpanded] = useState(false);
+  const [minimized, setMinimized] = useState(false);
+  const [showLink, setShowLink] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
   const [subject, setSubject] = useState(initial.subject ?? "");
   const [body, setBody] = useState(initial.text ?? "");
+  const [htmlBody, setHtmlBody] = useState(initial.html ?? "");
+  const editor = useRef<HTMLDivElement | null>(null);
+  const selectedLinkRange = useRef<Range | null>(null);
+  // Draft/reply HTML is sanitised by MateMail's existing message parser.
+  // Initialize once per incoming draft; React does not replace editor markup
+  // on every autosave render, so typing and selection are never lost.
+  useEffect(() => {
+    if (inline || !editor.current) return;
+    if (initial.html) editor.current.innerHTML = initial.html;
+    else editor.current.textContent = initial.text ?? "";
+  }, [inline, initial.html, initial.text]);
   // The original is separate from editable text, including after reopening a draft.
   const [includeOriginal, setIncludeOriginal] = useState(
     initial.mode === "draft" && Boolean(initial.quoted_text),
@@ -179,6 +201,7 @@ export function Compose({
       bcc: splitAddresses(bcc),
       subject,
       text: body,
+      html: inline ? "" : htmlBody,
       quoted_text: includeOriginal ? initial.quoted_text ?? "" : "",
       in_reply_to: initial.in_reply_to ?? "",
       references: initial.references ?? [],
@@ -205,6 +228,8 @@ export function Compose({
       bcc,
       subject,
       body,
+      htmlBody,
+      inline,
       includeOriginal,
       signatureId,
       attachments,
@@ -356,6 +381,40 @@ export function Compose({
     markDirty();
   }, []);
 
+  const syncRichEditor = () => {
+    if (!editor.current) return;
+    setBody(editor.current.innerText);
+    setHtmlBody(editor.current.innerHTML);
+    markDirty();
+  };
+
+  const formatEditor = (command: string, value?: string) => {
+    if (!editor.current || busy) return;
+    editor.current.focus();
+    document.execCommand(command, false, value);
+    syncRichEditor();
+  };
+
+  const insertLink = () => {
+    const value = linkUrl.trim();
+    // Never generate script:, data:, or relative links in outgoing HTML.
+    if (!/^https?:\/\//i.test(value)) {
+      setError("Enter an http:// or https:// link.");
+      return;
+    }
+    editor.current?.focus();
+    if (selectedLinkRange.current) {
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(selectedLinkRange.current);
+    }
+    document.execCommand("createLink", false, value);
+    syncRichEditor();
+    setShowLink(false);
+    setLinkUrl("");
+    selectedLinkRange.current = null;
+  };
+
   const submit = useCallback(
     async (schedule: boolean) => {
       setError(null);
@@ -452,7 +511,7 @@ export function Compose({
 
   return (
     <div
-      className={inline ? "pb-thread-compose-host" : `pb-compose-backdrop fixed inset-0 z-50 flex items-stretch justify-center p-0 ${
+      className={inline ? "pb-thread-compose-host" : `pb-compose-backdrop pb-astra-compose-host fixed inset-0 z-50 flex items-stretch justify-center p-0 ${
         expanded
           ? "sm:items-center sm:justify-center sm:p-6"
           : "sm:items-end sm:justify-end sm:p-4"
@@ -479,7 +538,7 @@ export function Compose({
       aria-label={inline ? "Inline reply editor" : "Compose message"}
     >
       <div
-        className={inline ? "pb-panel pb-compose-shell pb-premium-compose-shell pb-thread-inline-panel flex w-full flex-col" : `pb-panel pb-compose-shell pb-premium-compose-shell flex w-full flex-col ${
+        className={inline ? "pb-panel pb-compose-shell pb-premium-compose-shell pb-thread-inline-panel flex w-full flex-col" : `pb-panel pb-compose-shell pb-premium-compose-shell pb-astra-composer-window ${minimized ? "pb-astra-minimized " : ""}${expanded ? "pb-astra-expanded " : ""}flex w-full flex-col ${
           expanded
             ? // Underscores, not spaces: Tailwind arbitrary values cannot contain
             // spaces, and `calc` is invalid without them around the operator.
@@ -496,6 +555,7 @@ export function Compose({
           style={{ borderColor: "var(--pb-border)", background: "var(--pb-surface-2)" }}
         >
           <p className="text-sm font-semibold">
+            {!inline && <PenLine className="pb-astra-header-pen" size={16} aria-hidden="true" />}
             {initial.mode === "forward"
               ? "Forward"
               : initial.mode.startsWith("reply")
@@ -505,11 +565,18 @@ export function Compose({
                   : "New message"}
           </p>
           <div className="flex items-center gap-1">
-            {saving ? (
+            {inline && (saving ? (
               <span className="pb-compose-save-state">Saving draft…</span>
             ) : savedAt ? (
               <span className="pb-compose-save-state">Draft saved</span>
-            ) : null}
+            ) : null)}
+            {!inline && (
+              <button type="button" className="pb-btn pb-btn-plain" title={minimized ? "Restore composer" : "Minimize composer"}
+                aria-label={minimized ? "Restore composer" : "Minimize composer"}
+                onClick={() => setMinimized(current => !current)}>
+                <Minus className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
             {/*
               Hidden below `sm`, where Compose already fills the screen and
               there is nothing to expand into. Wrapped in a div because
@@ -525,7 +592,7 @@ export function Compose({
                 aria-label={expanded ? "Restore compose" : "Expand compose"}
                 title={expanded ? "Restore down" : "Expand"}
                 aria-pressed={expanded}
-                onClick={() => setExpanded((current) => !current)}
+                onClick={() => { setExpanded((current) => !current); setMinimized(false); }}
               >
                 {expanded ? (
                   <Minimize2 className="h-4 w-4" aria-hidden="true" />
@@ -641,6 +708,7 @@ export function Compose({
               <input
                 id={fieldId("subject")}
                 className="pb-input"
+                placeholder="Subject"
                 value={subject}
                 onChange={(event) => {
                   setSubject(event.target.value);
@@ -650,16 +718,35 @@ export function Compose({
             </Field>
           </div>
 
-          <textarea
-            id={fieldId("body")}
-            aria-label="Message"
-            className="pb-textarea pb-compose-body mt-3"
-            value={body}
-            onChange={(event) => {
-              setBody(event.target.value);
-              markDirty();
-            }}
-          />
+          {inline ? (
+            <textarea
+              id={fieldId("body")}
+              aria-label="Message"
+              className="pb-textarea pb-compose-body mt-3"
+              value={body}
+              onChange={(event) => {
+                setBody(event.target.value);
+                markDirty();
+              }}
+            />
+          ) : (
+            <div
+              id={fieldId("body")}
+              ref={editor}
+              role="textbox"
+              aria-label="Message body"
+              aria-multiline="true"
+              contentEditable
+              suppressContentEditableWarning
+              className="pb-astra-compose-editor"
+              data-placeholder="Write your message…"
+              onInput={syncRichEditor}
+              onPaste={(event) => {
+                event.preventDefault();
+                document.execCommand("insertText", false, event.clipboardData.getData("text/plain"));
+              }}
+            />
+          )}
 
           {/*
             The signature, shown but NOT editable and NOT part of `body`.
@@ -687,7 +774,7 @@ export function Compose({
             </div>
           )}
 
-          {signatures.length > 0 && (
+          {inline && signatures.length > 0 && (
             <div className="mt-2 flex items-center gap-2">
               <label htmlFor={fieldId("signature")} className="pb-label">
                 Signature
@@ -844,81 +931,89 @@ export function Compose({
           )}
         </div>
 
+        {!inline && (
+          <>
+            <div className="pb-astra-compose-format" role="toolbar" aria-label="Message formatting">
+              <button type="button" title="Bold" aria-label="Bold" onMouseDown={e => e.preventDefault()} onClick={() => formatEditor("bold")}><Bold size={15} /></button>
+              <button type="button" title="Italic" aria-label="Italic" onMouseDown={e => e.preventDefault()} onClick={() => formatEditor("italic")}><Italic size={15} /></button>
+              <button type="button" title="Underline" aria-label="Underline" onMouseDown={e => e.preventDefault()} onClick={() => formatEditor("underline")}><Underline size={15} /></button>
+              <span className="pb-astra-compose-format-divider" />
+              <button type="button" title="Bulleted list" aria-label="Bulleted list" onMouseDown={e => e.preventDefault()} onClick={() => formatEditor("insertUnorderedList")}><List size={15} /></button>
+              <button type="button" title="Insert link" aria-label="Insert link"
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => {
+                  const sel = window.getSelection();
+                  selectedLinkRange.current = sel?.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+                  setShowLink(open => !open);
+                }}><Link2 size={15} /></button>
+              <button type="button" title="Attach files" aria-label="Attach files" onClick={() => fileInput.current?.click()}><Paperclip size={15} /></button>
+              {signatures.length > 0 && (
+                <select aria-label="Signature" value={signatureId}
+                  onChange={event => { setSignatureId(event.target.value); markDirty(); }}>
+                  <option value="">No signature</option>
+                  {signatures.map(signature => <option key={signature.id} value={signature.id}>{signature.name}</option>)}
+                </select>
+              )}
+            </div>
+            {showLink && (
+              <div className="pb-astra-compose-link">
+                <input type="url" aria-label="Link URL" placeholder="https://example.com"
+                  value={linkUrl} onChange={e => setLinkUrl(e.target.value)} onKeyDown={e => { if(e.key==="Enter"){e.preventDefault();insertLink();} }} />
+                <button type="button" onClick={insertLink}>Insert link</button>
+                <button type="button" onClick={() => setShowLink(false)}>Cancel</button>
+              </div>
+            )}
+          </>
+        )}
         <div
           className="pb-compose-footer flex shrink-0 flex-wrap items-center gap-2 border-t px-3 py-2"
           style={{ borderColor: "var(--pb-border)" }}
         >
-          <button
-            type="button"
-            className="pb-btn pb-btn-primary"
-            disabled={busy || saving}
-            onClick={() => void submit(false)}
-          >
-            {busy ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : (
-              <Send className="h-3.5 w-3.5" aria-hidden="true" />
+          <div className="pb-astra-compose-send-group">
+            <button type="button" className="pb-btn pb-btn-primary" disabled={busy || saving}
+              onClick={() => void submit(false)}>
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> :
+                <Send className="h-3.5 w-3.5" aria-hidden="true" />}
+              Send
+            </button>
+            {schedulingEnabled && (
+              <button type="button" className="pb-btn pb-btn-primary pb-astra-compose-schedule-trigger"
+                title="Schedule send" aria-label="Schedule send" aria-expanded={showSchedule}
+                disabled={busy || saving}
+                onClick={() => setShowSchedule(open => !open)}>
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
             )}
-            Send
-          </button>
-
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={(event) => {
-              void addFiles(event.target.files);
-              event.currentTarget.value = "";
-            }}
-          />
-          <button
-            type="button"
-            className="pb-btn pb-btn-ghost"
-            onClick={() => fileInput.current?.click()}
-          >
-            <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
-            Attach
-          </button>
-
-          {schedulingEnabled && (
-            <button
-              type="button"
-              className="pb-btn pb-btn-ghost"
-              aria-pressed={showSchedule}
-              disabled={busy || saving}
-              onClick={() => setShowSchedule((open) => !open)}
-            >
-              <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-              Schedule
-            </button>
+          </div>
+          <input ref={fileInput} type="file" multiple className="hidden" onChange={event => {
+            void addFiles(event.target.files);
+            event.currentTarget.value = "";
+          }} />
+          {inline && (
+            <>
+              <button type="button" className="pb-btn pb-btn-ghost" onClick={() => fileInput.current?.click()}>
+                <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />Attach
+              </button>
+              {schedulingEnabled && <button type="button" className="pb-btn pb-btn-ghost"
+                aria-pressed={showSchedule} disabled={busy || saving}
+                onClick={() => setShowSchedule(open => !open)}>
+                <Clock className="h-3.5 w-3.5" aria-hidden="true" />Schedule
+              </button>}
+            </>
           )}
-
           {draftsEnabled && (
-            <button
-              type="button"
-              className="pb-btn pb-btn-ghost pb-compose-save-draft"
-              disabled={saving || busy}
-              onClick={() => void saveDraftNow(false)}
-            >
-              {saving ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              ) : (
-                <Save className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-              Save draft
+            <button type="button" className="pb-astra-compose-draft-status"
+              disabled={saving || busy} title="Save draft now" onClick={() => void saveDraftNow(false)}>
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> :
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+              {saving ? "Saving…" : savedAt ? "Draft saved" : "Draft"}
             </button>
           )}
-
-
-          <button
-            type="button"
-            className="pb-btn pb-btn-plain ml-auto"
-            onClick={() => void discard()}
-            disabled={saving || busy}
-          >
-            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Discard
+          {!draftsEnabled && <small className="pb-astra-compose-draft-status">Send only</small>}
+          <button type="button" className="pb-btn pb-btn-plain pb-astra-compose-discard"
+            title="Discard draft" aria-label="Discard draft" onClick={() => void discard()}
+            disabled={saving || busy}>
+            <Trash2 size={16} aria-hidden="true" />
           </button>
         </div>
       </div>
