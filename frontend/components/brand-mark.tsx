@@ -21,7 +21,7 @@ export function BrandMark({
       style={{ width: size, height: size }} aria-hidden="true">
       <Image src="/assets/matemail-mark.svg" alt="" width={size}
         height={size} preload={preload} className="mm-official-brand-default" />
-      <Image src="/assets/matemail-mark-inverse.svg" alt="" width={size}
+      <Image src="/assets/matemail-mark-black.svg" alt="" width={size}
         height={size} className="mm-official-brand-inverse" />
     </span>
   );
