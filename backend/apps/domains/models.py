@@ -53,6 +53,8 @@ class Domain(models.Model):
         max_length=20, choices=DomainStatus.choices, default=DomainStatus.PENDING
     )
     dns_health_score = models.IntegerField(default=0)
+    # Tenant-wide mailbox creation preference. Not a DNS/MX or Mail Engine setting.
+    is_primary = models.BooleanField(default=False, db_index=True)
 
     # ── Ownership verification (P3) ─────────────────────────────────────────
     ownership_status = models.CharField(
@@ -122,6 +124,11 @@ class Domain(models.Model):
         db_table = "domains_domain"
         ordering = ["-added_at"]
         constraints = [
+            models.UniqueConstraint(
+                fields=["tenant"],
+                condition=Q(is_primary=True),
+                name="uniq_primary_domain_per_tenant",
+            ),
             # One tenant cannot stack duplicate claims on the same name.
             models.UniqueConstraint(
                 fields=["tenant", "domain"],

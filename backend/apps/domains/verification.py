@@ -113,6 +113,10 @@ def rotate_verification_token(domain: Domain) -> str:
     domain.ownership_status = DomainOwnership.PENDING
     domain.ownership_verified_at = None
     domain.verification_last_error = ""
+    # An unverified claim cannot remain the primary domain.
+    was_primary = domain.is_primary
+    if was_primary:
+        domain.is_primary = False
     domain.save(
         update_fields=[
             "verification_token",
@@ -120,6 +124,7 @@ def rotate_verification_token(domain: Domain) -> str:
             "ownership_verified_at",
             "verification_last_error",
             "updated_at",
+            *(["is_primary"] if was_primary else []),
         ]
     )
     logger.info("Verification token rotated for domain %s", domain.domain)

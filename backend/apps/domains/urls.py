@@ -8,6 +8,7 @@ from .views import (
     DomainDetailView,
     DomainListCreateView,
     DomainProvisionView,
+    DomainSetPrimaryView,
     DomainRotateVerificationTokenView,
     DomainVerifyOwnershipView,
 )
@@ -15,6 +16,7 @@ from .views import (
 urlpatterns = [
     path("", DomainListCreateView.as_view(), name="domain-list"),
     path("<uuid:pk>/", DomainDetailView.as_view(), name="domain-detail"),
+    path("<uuid:pk>/set-primary/", DomainSetPrimaryView.as_view(), name="domain-set-primary"),
     path("<uuid:pk>/records/", DomainDNSRecordsView.as_view(), name="domain-dns-records"),
     path("<uuid:pk>/dmarc-reports/", DomainDmarcReportsView.as_view(), name="domain-dmarc-reports"),
     path("<uuid:pk>/tls-reports/", DomainTlsReportsView.as_view(), name="domain-tls-reports"),

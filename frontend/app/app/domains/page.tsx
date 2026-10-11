@@ -29,6 +29,7 @@ interface Domain {
   dns_health_score: number;
   mail_service_ready: boolean;
   ownership_verified: boolean;
+  is_primary: boolean;
   added_at: string;
 }
 
@@ -49,6 +50,9 @@ export default function DomainsPage() {
   const [newDomain, setNewDomain] = useState("");
   const [addError, setAddError] = useState("");
   const [adding, setAdding] = useState(false);
+  const [settingPrimary, setSettingPrimary] = useState<string | null>(null);
+  const [primaryFeedback, setPrimaryFeedback] = useState("");
+  const [primaryError, setPrimaryError] = useState("");
 
   const fetchDomains = useCallback(async () => {
     setLoading(true);
@@ -113,6 +117,26 @@ export default function DomainsPage() {
       setAddError("Failed to add domain. Please try again.");
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function handleSetPrimary(domain: Domain) {
+    setSettingPrimary(domain.id);
+    setPrimaryFeedback("");
+    setPrimaryError("");
+    try {
+      const response = await apiRequest(`/api/domains/${domain.id}/set-primary/`, { method: "POST" });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        setPrimaryError(result?.detail ?? "Primary domain could not be updated.");
+        return;
+      }
+      setDomains((current) => current.map((item) => ({ ...item, is_primary: item.id === domain.id })));
+      setPrimaryFeedback(`${domain.domain} is now the primary domain for new mailboxes.`);
+    } catch {
+      setPrimaryError("Primary domain could not be updated. Please try again.");
+    } finally {
+      setSettingPrimary(null);
     }
   }
 
@@ -226,6 +250,14 @@ export default function DomainsPage() {
         </div>
       )}
 
+      {(primaryError || primaryFeedback) && (
+        <div className="mb-4">
+          <PortalNotice tone={primaryError ? "danger" : "success"}>
+            {primaryError || primaryFeedback}
+          </PortalNotice>
+        </div>
+      )}
+
       <PortalCard bodyClassName="!p-0">
         <div className="portal-domain-toolbar">
           <div className="flex min-w-0 flex-1 items-center gap-2 text-[var(--portal-muted)]">
@@ -283,6 +315,7 @@ export default function DomainsPage() {
                   <th>DNS health</th>
                   <th>Mail service</th>
                   <th>Status</th>
+                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -304,7 +337,12 @@ export default function DomainsPage() {
                       <div className="portal-domain-identity">
                         <span className="portal-domain-symbol"><Globe2 className="h-4 w-4" /></span>
                         <span>
-                          <strong>{domain.domain}</strong>
+                          <strong className="inline-flex items-center gap-2">
+                             {domain.domain}
+                             {domain.is_primary && (
+                               <span className="rounded-[3px] border border-[var(--portal-border)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--portal-muted)]">Primary</span>
+                             )}
+                           </strong>
                           <small>Added {new Date(domain.added_at).toLocaleDateString()}</small>
                         </span>
                       </div>
@@ -324,6 +362,22 @@ export default function DomainsPage() {
                       <PortalStatus value={domain.mail_service_ready ? "Ready" : "Not ready"} />
                     </td>
                     <td><PortalStatus value={pretty(domain.status)} /></td>
+                     <td>
+                       {!domain.is_primary && domain.ownership_verified && domain.status === "active" && canAdmin && (
+                         <PortalButton
+                           type="button"
+                           variant="secondary"
+                           disabled={!user?.email_verified || settingPrimary !== null}
+                           onClick={(event) => {
+                             event.stopPropagation();
+                             void handleSetPrimary(domain);
+                           }}
+                           onKeyDown={(event) => event.stopPropagation()}
+                         >
+                           {settingPrimary === domain.id ? "Saving…" : "Set as primary"}
+                         </PortalButton>
+                       )}
+                     </td>
                   </tr>
                 ))}
               </tbody>
