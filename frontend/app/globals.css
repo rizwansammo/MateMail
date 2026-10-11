@@ -6427,3 +6427,11 @@ body {
 :root[data-pb-theme="dark"] .pb-premium-login-mark {
   background-image: url("/assets/matemail-mark.svg");
 }
+
+/* System appearance uses the dark logo when the OS is dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-pb-theme="light"]) .pb-premium-brand-mark,
+  :root:not([data-pb-theme="light"]) .pb-premium-login-mark {
+    background-image: url("/assets/matemail-mark.svg");
+  }
+}
