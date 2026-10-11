@@ -184,7 +184,7 @@ try{
       topbar:rect('.pb-premium-topbar'),compose:rect('.pb-premium-compose'),toolbar:rect('.pb-premium-mail-toolbar'),
       firstFolder:rect('.pb-premium-nav-link')};
   });
-  check('sidebar width matches approved 227px',geometry.sidebar?.width===227,geometry);
+  check('sidebar width matches screenshot 245px',geometry.sidebar?.width===245,geometry);
   check('brand height matches screenshot 64px',geometry.brand?.height===64,geometry);
   check('topbar height matches approved 65px',geometry.topbar?.height===65,geometry);
   check('compose launcher matches approved 40px',geometry.compose?.height===40,geometry);
@@ -300,6 +300,8 @@ try{
    });
    check('Label fixed near right edge on Full HD screenshot',
      size.viewport===1920&&size.labelX>1550&&size.labelX<1810&&size.scroll<=size.viewport+2,size);
+   const sidebarEdge=await page.locator('.pb-premium-sidebar').evaluate(el=>Math.round(el.getBoundingClientRect().right));
+   check('Full HD mail content starts at exact screenshot X=307',sidebarEdge===307,{sidebarEdge});
    check('Full HD Inbox has no JS errors',errors.length===0,{errors});
  });
  for(const density of ['comfortable','compact','extra_compact']){
