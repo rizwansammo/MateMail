@@ -259,8 +259,8 @@ try{
   check('brand 4px inset and Compose/Inbox box alignment match source',
     alignment.brandIconX===alignment.composeBoxX+4&&
     near(alignment.composeBoxX,alignment.inboxBoxX),alignment);
-  check('Compose icon 3px after Inbox icon matches approved source',
-    alignment.composeIconX===alignment.inboxIconX+3,alignment);
+  check('Compose icon has 4px offset including 1px button border',
+    alignment.composeIconX===alignment.inboxIconX+4,alignment);
   check('sidebar wordmark, Compose and Inbox label offsets match source',
     near(alignment.wordmarkTextX,alignment.composeTextX,3)&&
     near(alignment.composeTextX,alignment.inboxTextX,4),alignment);
