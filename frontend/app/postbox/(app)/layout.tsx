@@ -23,6 +23,7 @@ import {
   Inbox,
   Loader2,
   LogOut,
+  Mail,
   PenLine,
   Menu,
   Moon,
@@ -42,6 +43,7 @@ import {
 } from "lucide-react";
 
 import { usePostBox } from "@/contexts/postbox-context";
+import "./postbox-astra-integration.css";
 import {
   POSTBOX_MAILBOX_EVENT,
   announcePostBoxMailboxChange,
@@ -85,9 +87,9 @@ const PINNED: Array<{
   { role: "inbox", label: "Inbox", icon: Inbox },
   // Not a folder — a filter over INBOX, so it carries its own href.
   { role: "starred", label: "Starred", icon: Star, href: "/postbox?folder=INBOX&starred=true&scope=all" },
-  { role: "scheduled", label: "Scheduled", icon: Clock },
-  { role: "sent", label: "Sent", icon: Send },
   { role: "drafts", label: "Drafts", icon: FileText },
+  { role: "sent", label: "Sent", icon: Send },
+  { role: "scheduled", label: "Scheduled", icon: Clock },
   { role: "archive", label: "Archive", icon: Archive },
   { role: "junk", label: "Spam", icon: ShieldAlert },
   { role: "trash", label: "Trash", icon: Trash2 },
@@ -513,7 +515,7 @@ function PremiumPostBoxShell({
   }, [canSendMailbox, router]);
 
   return (
-    <div className={`pb pb-premium-shell ${
+    <div className={`pb pb-premium-shell pb-astra-postbox ${
       preferences.density === "compact"
         ? "pb-density-compact"
         : preferences.density === "extra_compact"
@@ -521,6 +523,24 @@ function PremiumPostBoxShell({
           : ""
     }`}>
       {railOpen && <button type="button" className="pb-premium-overlay" aria-label="Close folders" onClick={closeRail} />}
+
+      <nav className="pb-astra-app-rail" aria-label="PostBox applications">
+        <Link href="/postbox?folder=INBOX" className="pb-astra-rail-item"
+          aria-current={!pathname.startsWith("/postbox/contacts") && !pathname.startsWith("/postbox/settings") ? "page" : undefined}
+          onClick={() => { closeRail(); window.dispatchEvent(new Event("postbox:return-to-list")); }}>
+          <Mail size={19} aria-hidden="true" /><span>Mail</span>
+        </Link>
+        <Link href="/postbox/contacts" className="pb-astra-rail-item"
+          aria-current={pathname.startsWith("/postbox/contacts") ? "page" : undefined}
+          onClick={closeRail}>
+          <Users size={19} aria-hidden="true" /><span>Contacts</span>
+        </Link>
+        <Link href="/postbox/settings?section=appearance" className="pb-astra-rail-item"
+          aria-current={pathname.startsWith("/postbox/settings") ? "page" : undefined}
+          onClick={closeRail}>
+          <Settings2 size={19} aria-hidden="true" /><span>Settings</span>
+        </Link>
+      </nav>
 
       <aside className="pb-premium-sidebar" data-open={railOpen ? "true" : "false"}>
         <Link
@@ -554,7 +574,7 @@ function PremiumPostBoxShell({
           <div className="pb-premium-compose-wrap">
             <Link href="/postbox?compose=new" className="pb-premium-compose" onClick={closeRail}>
               <PenLine className="h-[18px] w-[18px]" aria-hidden="true" />
-              Compose
+              New message
               <kbd>C</kbd>
             </Link>
           </div>

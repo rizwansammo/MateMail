@@ -1,0 +1,223 @@
+/*
+ * Astra PostBox shell integration — approved layout, MateMail data.
+ *
+ * Scope everything to .pb-astra-postbox. Do not import the prototype's global
+ * resets or demo state. Original production PostBox provider, API calls,
+ * authentication, SSE, tenant guards and folder operations stay authoritative.
+ */
+.pb-premium-shell.pb-astra-postbox {
+  --pb-bg: #fff;
+  --pb-fg: #202b3d;
+  --pb-surface: #fff;
+  --pb-surface-2: #f2f5fa;
+  --pb-sidebar: #f7f8fb;
+  --pb-selected: #eaf0fd;
+  --pb-border: #e3e8ef;
+  --pb-border-strong: #d3dbe7;
+  --pb-primary: #415fc2;
+  --pb-primary-fg: #fff;
+  --pb-accent: #eaf0fd;
+  --pb-accent-fg: #334fae;
+  --pb-muted: #69768a;
+  --pb-subtle: #8e99aa;
+  --pb-ring: #758ada;
+  --pb-font: Inter, 'Segoe UI', Arial, sans-serif;
+  --pb-radius: 4px;
+}
+.pb-astra-postbox .pb-astra-app-rail {
+  display: flex;
+  flex: 0 0 57px;
+  width: 57px;
+  min-width: 57px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  padding: 70px 4px 12px;
+  border-right: 1px solid var(--pb-border);
+  background: #edf0f6;
+  z-index: 41;
+}
+.pb-astra-postbox .pb-astra-rail-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  min-height: 62px;
+  gap: 5px;
+  border-radius: 3px;
+  color: var(--pb-muted);
+  font-size: 10px;
+  line-height: 1.15;
+  text-align: center;
+  text-decoration: none;
+}
+.pb-astra-postbox .pb-astra-rail-item:hover {
+  background: var(--pb-surface-2);
+  color: var(--pb-fg);
+}
+.pb-astra-postbox .pb-astra-rail-item[aria-current="page"] {
+  background: var(--pb-selected);
+  color: var(--pb-primary);
+}
+.pb-astra-postbox .pb-premium-sidebar {
+  width: 229px;
+  flex-basis: 229px;
+  background: var(--pb-sidebar);
+}
+.pb-astra-postbox .pb-premium-brand {
+  height: 64px;
+  flex-basis: 64px;
+  padding: 13px 17px;
+  gap: 8px;
+}
+.pb-astra-postbox .pb-premium-brand-mark {
+  width: 28px;
+  height: 28px;
+  flex-basis: 28px;
+  border-radius: 0;
+}
+.pb-astra-postbox .pb-premium-wordmark {
+  font-size: 24px;
+}
+.pb-astra-postbox .pb-premium-compose-wrap {
+  padding: 11px 13px 12px;
+}
+.pb-astra-postbox .pb-premium-compose {
+  min-height: 38px;
+  padding: 8px 13px;
+  gap: 9px;
+  border-radius: 3px;
+  font-size: 12px;
+  box-shadow: none;
+}
+.pb-astra-postbox .pb-premium-nav {
+  padding: 0 11px 12px;
+}
+.pb-astra-postbox .pb-premium-nav-link {
+  height: 35px;
+  gap: 10px;
+  padding-inline: 11px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.pb-astra-postbox .pb-premium-topbar {
+  height: 59px;
+  flex-basis: 59px;
+  gap: 14px;
+  padding: 0 25px;
+  background: var(--pb-bg);
+}
+.pb-astra-postbox .pb-premium-search {
+  width: min(520px, 50%);
+  height: 33px;
+  padding: 0 10px;
+  gap: 9px;
+  border: 1px solid var(--pb-border);
+  border-radius: 4px;
+  background: var(--pb-sidebar);
+}
+.pb-astra-postbox .pb-premium-search input {
+  font-size: 12px;
+}
+.pb-astra-postbox .pb-premium-top-actions {
+  gap: 10px;
+}
+.pb-astra-postbox .pb-premium-account-panel {
+  border-radius: 8px;
+}
+.pb-astra-postbox :is(button, a, summary):focus-visible {
+  outline: 2px solid var(--pb-ring);
+  outline-offset: 2px;
+}
+:root[data-pb-theme="dark"] .pb-premium-shell.pb-astra-postbox {
+  --pb-bg: #1b2533;
+  --pb-fg: #e0e7f2;
+  --pb-surface: #1b2533;
+  --pb-surface-2: #253246;
+  --pb-sidebar: #192331;
+  --pb-selected: #2b3d61;
+  --pb-border: #303e52;
+  --pb-border-strong: #44546c;
+  --pb-primary: #9aafff;
+  --pb-primary-fg: #172347;
+  --pb-accent: #2b3d61;
+  --pb-accent-fg: #bdcbff;
+  --pb-muted: #a1afc4;
+  --pb-subtle: #8494ad;
+  --pb-ring: #9aafff;
+}
+:root[data-pb-theme="dark"] .pb-astra-postbox .pb-astra-app-rail {
+  background: #141d2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-pb-theme="light"]) .pb-premium-shell.pb-astra-postbox {
+    --pb-bg: #1b2533;
+    --pb-fg: #e0e7f2;
+    --pb-surface: #1b2533;
+    --pb-surface-2: #253246;
+    --pb-sidebar: #192331;
+    --pb-selected: #2b3d61;
+    --pb-border: #303e52;
+    --pb-border-strong: #44546c;
+    --pb-primary: #9aafff;
+    --pb-primary-fg: #172347;
+    --pb-accent: #2b3d61;
+    --pb-accent-fg: #bdcbff;
+    --pb-muted: #a1afc4;
+    --pb-subtle: #8494ad;
+    --pb-ring: #9aafff;
+  }
+  :root:not([data-pb-theme="light"]) .pb-astra-postbox .pb-astra-app-rail {
+    background: #141d2a;
+  }
+}
+@media(max-width:1100px) and (min-width:768px) {
+  .pb-astra-postbox .pb-premium-sidebar {
+    width: 208px;
+    flex-basis: 208px;
+  }
+  .pb-astra-postbox .pb-premium-topbar {
+    padding-inline: 17px;
+  }
+  .pb-astra-postbox .pb-premium-search {
+    width: 55%;
+  }
+}
+@media(max-width:767px) {
+  .pb-astra-postbox .pb-astra-app-rail {
+    width: 49px;
+    min-width: 49px;
+    flex-basis: 49px;
+    padding: 59px 3px 10px;
+  }
+  .pb-astra-postbox .pb-astra-rail-item {
+    min-height: 60px;
+    font-size: 9px;
+  }
+  .pb-astra-postbox .pb-premium-sidebar {
+    position: fixed;
+    inset: 0 auto 0 49px;
+    width: min(calc(100vw - 49px), 280px);
+    flex-basis: auto;
+    transform: translateX(-110%);
+  }
+  .pb-astra-postbox .pb-premium-sidebar[data-open="true"] {
+    transform: translateX(0);
+  }
+  .pb-astra-postbox .pb-premium-overlay {
+    left: 49px;
+  }
+  .pb-astra-postbox .pb-premium-topbar {
+    height: 58px;
+    flex-basis: 58px;
+    padding-inline: 10px;
+    gap: 8px;
+  }
+  .pb-astra-postbox .pb-premium-search {
+    flex: 1;
+    width: auto;
+  }
+  .pb-astra-postbox .pb-premium-wordmark {
+    font-size: 23px;
+  }
+}
