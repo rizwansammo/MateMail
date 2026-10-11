@@ -556,21 +556,7 @@ function PremiumPostBoxShell({
             window.dispatchEvent(new Event("postbox:return-to-list"));
           }}
         >
-          <svg
-            className="pb-premium-brand-mark"
-            viewBox="0 0 64 64"
-            aria-hidden="true"
-          >
-            <rect width="64" height="64" fill="#0B1F44" />
-            <path
-              fill="#FFFFFF"
-              d="M13.5 27L13.5 50.5L50.5 50.5L50.5 27L45.5 27L45.5 45.5L18.5 45.5L18.5 27Z"
-            />
-            <path
-              fill="#6FA8FF"
-              d="M13.5 12L32 25.875L50.5 12L50.5 18.25L32 32.125L13.5 18.25Z"
-            />
-          </svg>
+          <span className="pb-premium-brand-mark" aria-hidden="true" />
           <span className="pb-premium-wordmark">PostBox</span>
         </Link>
 

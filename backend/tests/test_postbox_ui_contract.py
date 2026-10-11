@@ -315,7 +315,7 @@ class DedicatedBrandParityTest(SimpleTestCase):
         self.assertIn('"MateMail · Organization Hub"', root)
         self.assertNotIn("NetaMate Email", root)
         self.assertNotIn("NETAMATE_LOGO_SRC", root)
-        self.assertIn('url: "/postbox/favicon?v=3"', postbox)
+        self.assertIn('url: "/postbox/favicon?v=4"', postbox)
         self.assertNotIn("NetaMate Email", postbox)
         self.assertNotIn("NETAMATE_LOGO_SRC", postbox)
 
@@ -510,17 +510,17 @@ class PostBoxTabBrandingRegressionTest(SimpleTestCase):
     def test_standard_postbox_owns_its_tab_title_and_favicon(self):
         layout = read("app", "postbox", "layout.tsx")
         self.assertIn('default: "PostBox"', layout)
-        self.assertIn('url: "/postbox/favicon?v=3"', layout)
+        self.assertIn('url: "/postbox/favicon?v=4"', layout)
         self.assertNotIn('default: "MateMail PostBox"', layout)
 
 
 class PostBoxPublicAssetIndependenceTest(SimpleTestCase):
-    def test_login_logo_is_inline_and_favicon_uses_app_route(self):
+    def test_login_logo_uses_official_asset_and_favicon_route(self):
         login = read("app", "postbox", "login", "page.tsx")
         layout = read("app", "postbox", "layout.tsx")
         self.assertIn('className="pb-premium-login-mark"', login)
         self.assertNotIn('src="/postbox-mark.svg"', login)
-        self.assertIn('url: "/postbox/favicon?v=3"', layout)
+        self.assertIn('url: "/postbox/favicon?v=4"', layout)
         self.assertNotIn('url: "/postbox-mark.svg"', layout)
 
 
@@ -882,3 +882,37 @@ class TeamBoxPostBoxUiContractTest(SimpleTestCase):
         self.assertIn("schedulingEnabled = true", self.compose)
         self.assertIn("if (!draftsEnabled)", self.compose)
         self.assertIn("if (schedule && !schedulingEnabled)", self.compose)
+
+
+class MateMailOfficial05BBrandTest(SimpleTestCase):
+    """Official revision 2 assets are shared, with no legacy SVG mark left active."""
+
+    def test_logo_pack_replaces_all_former_active_svgs(self):
+        navy = read("public", "assets", "matemail-mark.svg")
+        light = read("public", "assets", "matemail-mark-light.svg")
+        self.assertIn("MateMail-05B", navy)
+        self.assertIn("MateMail-05B", light)
+        self.assertIn("#112845", navy)
+        self.assertIn("#F4F7FB", light)
+        self.assertEqual(navy, read("public", "postbox-mark.svg"))
+        self.assertEqual(navy, read("app", "icon.svg"))
+        self.assertTrue((FRONTEND / "app" / "favicon.ico").is_file())
+        self.assertTrue((FRONTEND / "app" / "apple-icon.png").is_file())
+
+    def test_postbox_brand_uses_theme_assets_without_changing_wordmark(self):
+        layout = read("app", "postbox", "(app)", "layout.tsx")
+        login = read("app", "postbox", "login", "page.tsx")
+        add_account = read("app", "postbox", "add-account", "page.tsx")
+        css = read("app", "globals.css")
+        favicon = read("app", "postbox", "favicon", "route.ts")
+        for source in (layout, login, add_account, favicon):
+            self.assertNotIn("#0B1F44", source)
+            self.assertNotIn("#6FA8FF", source)
+        for source in (login, add_account):
+            self.assertIn('className="pb-premium-login-mark"', source)
+            self.assertIn('<span className="pb-premium-wordmark">PostBox</span>', source)
+        self.assertIn('className="pb-premium-brand-mark"', layout)
+        self.assertIn('background-image: url("/assets/matemail-mark-light.svg")', css)
+        self.assertIn('background-image: url("/assets/matemail-mark.svg")', css)
+        self.assertIn(':root[data-pb-theme="dark"]', css)
+        self.assertIn("MateMail-05B", favicon)

@@ -6414,3 +6414,16 @@ body {
   }
 }
 
+
+/* Official MateMail 05B logo assets. Maintain the approved Astra geometry. */
+.pb-premium-brand-mark,
+.pb-premium-login-mark {
+  background-image: url("/assets/matemail-mark-light.svg");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+:root[data-pb-theme="dark"] .pb-premium-brand-mark,
+:root[data-pb-theme="dark"] .pb-premium-login-mark {
+  background-image: url("/assets/matemail-mark.svg");
+}
