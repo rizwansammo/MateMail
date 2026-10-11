@@ -87,3 +87,16 @@ test('approved list controls show Messages before Conversations', () => {
   assert.ok(segment.indexOf('>Messages</button>')<segment.indexOf('>Conversations</button>'));
 });
 
+
+test('independent app sidebar preferences default On and preserve routes', () => {
+  const pref=read('lib/postbox-app-rail.ts');
+  assert.match(pref,/getItem\(KEY \+ area\) !== "off"/);
+  assert.match(pref,/setItem\(KEY \+ area/);
+  assert.match(settings,/label="Show App Sidebar in Mailbox"/);
+  assert.match(settings,/label="Show App Sidebar in Settings"/);
+  assert.match(shell,/pb-app-rail-hidden/);
+  assert.match(shell,/\{showAppRail && <nav className="pb-astra-app-rail"/);
+  assert.match(settings,/\{!showSettingsRail && \(/);
+  assert.doesNotMatch(visual,/:has\(\.pb-premium-settings\) \.pb-astra-app-rail/);
+  assert.doesNotMatch(visual,/:has\(\.pb-premium-settings\) \.pb-premium-search/);
+});

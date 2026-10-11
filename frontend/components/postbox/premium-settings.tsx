@@ -33,6 +33,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { useAsyncData } from "@/components/postbox/use-async";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
+import { usePostBoxAppRail } from "@/lib/postbox-app-rail";
 import {
   postbox,
   type AccountInfo,
@@ -83,6 +84,7 @@ function isSettingsArea(value: string | null): value is Area {
 export default function PremiumSettings() {
   const router = useRouter();
   const params = useSearchParams();
+  const { visible: showSettingsRail } = usePostBoxAppRail("settings");
   const requestedArea = params.get("section");
   const area: Area = isSettingsArea(requestedArea) ? requestedArea : "appearance";
   const current = AREAS.find(([key]) => key === area)!;
@@ -98,10 +100,12 @@ export default function PremiumSettings() {
   return (
     <div className="pb-premium-settings">
       <aside className="pb-premium-settings-nav">
-        <Link href="/postbox" className="pb-settings-back">
-          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-          Back to mailbox
-        </Link>
+        {!showSettingsRail && (
+          <Link href="/postbox" className="pb-settings-back">
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            Back to mailbox
+          </Link>
+        )}
         <div className="pb-settings-nav-title">Settings</div>
         <nav aria-label="Settings sections">
           {AREAS.map(([key, label, AreaIcon]) => (
@@ -231,6 +235,8 @@ function InlineError({ message }: { message: string | null }) {
 
 function AppearanceSection() {
   const { preferences, updatePreferences } = usePostBox();
+  const mailboxRail = usePostBoxAppRail("mailbox");
+  const settingsRail = usePostBoxAppRail("settings");
   const [error, setError] = useState<string | null>(null);
 
   const save = useCallback(
@@ -308,6 +314,20 @@ function AppearanceSection() {
             ))}
           </div>
         </SettingRow>
+      </SettingsCard>
+      <SettingsCard title="App Sidebar">
+        <ToggleRow
+          label="Show App Sidebar in Mailbox"
+          description="Show Mail, Contacts and Settings alongside your mailbox."
+          checked={mailboxRail.visible}
+          onChange={mailboxRail.setVisible}
+        />
+        <ToggleRow
+          label="Show App Sidebar in Settings"
+          description="Keep Mail, Contacts and Settings visible while changing preferences."
+          checked={settingsRail.visible}
+          onChange={settingsRail.setVisible}
+        />
       </SettingsCard>
       <InlineError message={error} />
     </>

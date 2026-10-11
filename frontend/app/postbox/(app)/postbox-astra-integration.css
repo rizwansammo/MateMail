@@ -323,28 +323,19 @@
 @media(max-width:1050px){.pb-astra-postbox .pb-astra-breadcrumb{display:none}}
 @media(max-width:767px){.pb-astra-postbox .pb-astra-refresh{display:none}}
 
-/* Approved Settings composition: Settings replaces the Mail rail and folders.
-   Only this route is affected; Inbox and Contacts retain their navigation. */
-.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-astra-app-rail,
+/* Settings keeps the optional app rail and its own navigation.
+   Search keeps the standard Mailbox topbar alignment. */
 .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-sidebar{
- display:none;
+  display:none;
 }
 .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-astra-breadcrumb,
 .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-mobile-trigger{
- display:none;
-}
-.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-search{
- margin-left:0;margin-right:auto;width:min(510px,50%);
+  display:none;
 }
 .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-settings{
- width:100%;
+  width:100%;
 }
-@media(max-width:820px){
- .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-search{
-   flex:1;width:auto;max-width:510px;
- }
-}
- 
+
 /* Prototype label mark only; existing MateMail folder and label management untouched. */
 .pb-astra-postbox .pb-message-labels{display:inline-flex;align-items:center;flex:none;gap:4px;margin-left:8px;max-width:125px;white-space:nowrap}
 .pb-astra-postbox .pb-message-label{display:inline-flex;max-width:90px;min-width:0;align-items:center;justify-content:center;border:1px solid color-mix(in srgb,var(--pb-label-color) 38%,transparent);border-radius:3px;padding:1px 6px;background:color-mix(in srgb,var(--pb-label-color) 12%,var(--pb-bg));color:var(--pb-label-color);font-size:10px;font-weight:650;line-height:16px}

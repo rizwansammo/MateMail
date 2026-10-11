@@ -48,7 +48,7 @@
   gap:9px;
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-brand-mark {
-  width:29px;height:29px;flex:0 0 29px;
+  width:33px;height:29px;flex:0 0 33px;
 }
 .pb-premium-shell.pb-astra-postbox .pb-premium-wordmark {
   font-size:27px;
@@ -200,7 +200,7 @@
     padding-inline:10px;
   }
 }
-/* Settings is a different approved screen; never force mail rail there. */
+/* Settings uses separate navigation and an optional application rail. */
 .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-settings {
   width:100%;
 }
@@ -327,3 +327,6 @@
   height:34px;
   min-height:34px;
 }
+
+/* When the app rail is hidden, the mobile drawer starts at the viewport edge. */
+.pb-premium-shell.pb-astra-postbox.pb-app-rail-hidden { --pb-rail-width:0px; }
