@@ -186,6 +186,7 @@ class MateMailHubBrandingContractTest(SimpleTestCase):
         self.assertIn('<span className="brand-hub">HUB</span>', layout)
         # The organization is named once, in Topbar, not again below the logo.
         self.assertNotIn('className="org-sidebar"', layout)
+        self.assertNotIn('className="astra-org-card"', layout)
         self.assertIn("workspaceName", layout)
         self.assertNotIn("Switch workspace", layout)
         self.assertNotIn('href="/workspaces"', layout)

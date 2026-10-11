@@ -103,13 +103,3 @@
   .ws.astra-hub .astra-ov-attention,.ws.astra-hub .astra-ov-quick,.ws.astra-hub .astra-ov-activity{padding:16px}
   .ws.astra-hub .astra-ov-setup{flex-wrap:wrap}
 }
-
-/* Organization identity card: matches the supplied Astra sidebar screenshots.
-   Kept inside the Hub scope and hidden in collapsed/mobile-icon mode. */
-.ws.astra-hub .astra-org-card{display:flex;align-items:center;gap:10px;min-width:0;min-height:64px;margin:8px 18px 8px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:13px 0}
-.ws.astra-hub .astra-org-monogram{display:grid;place-items:center;flex:0 0 31px;height:31px;background:var(--muted);color:var(--foreground);border:1px solid var(--border);font-size:.875rem;font-weight:600}
-.ws.astra-hub .astra-org-card-name{flex:1;min-width:0}
-.ws.astra-hub .astra-org-card-name strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.8125rem;font-weight:600}
-.ws.astra-hub .astra-org-card-name small{display:block;font-size:.75rem;color:var(--muted-foreground);margin-top:2px}
-.ws.astra-hub .astra-org-card>svg{flex-shrink:0;color:var(--muted-foreground)}
-.ws.astra-hub .astra-sidebar[data-collapsed=true] .astra-org-card{display:none}

@@ -103,9 +103,9 @@ try {
   check("Custom hostname attention is sourced from backend, not prototype seed",
     (await desktop.page.getByText("Finish your custom address").count()) === 1 &&
     (await desktop.page.getByText("manage.pending.example.test").count()) === 1);
-  check("Original organization identity card is visible in sidebar",
-    (await desktop.page.locator(".astra-sidebar .astra-org-card").count()) === 1 &&
-    (await desktop.page.locator(".astra-sidebar").getByText("QA Workspace").count()) === 1);
+  check("Sidebar contains only navigation, no duplicate organization identity card",
+    (await desktop.page.locator(".astra-sidebar .astra-org-card").count()) === 0 &&
+    (await desktop.page.locator(".astra-sidebar").getByText("Organization", { exact: true }).count()) === 1);
   await desktop.page.getByRole("link", { name: "Quarantine" }).waitFor();
   for (const label of ["Delegation","Quarantine","Mail queue","Activity log","Backup history","Connected apps"]) {
     check("Original prototype navigation preserved: " + label,

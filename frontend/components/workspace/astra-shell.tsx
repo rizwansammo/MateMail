@@ -351,11 +351,6 @@ function AstraWorkspaceShell({ children,pathname,tenantId,workspaceName,accountN
         <div data-slot="sidebar-header"><div className="brand">
           <BrandMark size={30}/><span className="wordmark">MateMail</span><span className="brand-hub">HUB</span>
         </div></div>
-        <div className="astra-org-card" aria-label="Current organization">
-          <span className="astra-org-monogram">{initials(workspaceName).slice(0,1)}</span>
-          <span className="astra-org-card-name"><strong title={workspaceName}>{workspaceName}</strong><small>Organization</small></span>
-          <Lock size={13} aria-hidden="true"/>
-        </div>
         <nav data-slot="sidebar-content">
           <div data-slot="sidebar-group"><ul data-slot="sidebar-menu">{shortLinks.map(navLink)}</ul></div>
           {sections.map(group=><div key={group.label} data-slot="sidebar-group">
