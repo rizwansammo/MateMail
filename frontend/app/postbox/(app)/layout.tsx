@@ -665,6 +665,67 @@ function PremiumPostBoxShell({
                   </Link>
                 </div>
 
+                {otherAccounts.length > 0 && (
+                  <div className="pb-premium-account-switcher">
+                    <div className="pb-premium-account-section-label">
+                      Accounts on this device
+                    </div>
+                    {otherAccounts.map((item) => {
+                      const itemInitials = accountInitials(
+                        item.mailbox.full_name,
+                        item.mailbox.email,
+                      );
+                      const switching = switchingAccount === item.session_id;
+                      return (
+                        <button
+                          key={item.session_id}
+                          type="button"
+                          className="pb-premium-account-row"
+                          disabled={Boolean(switchingAccount)}
+                          onClick={async () => {
+                            setAccountMenuError(null);
+                            setSwitchingAccount(item.session_id);
+                            try {
+                              await postbox.switchAccount(item.session_id);
+                              window.location.assign("/postbox?folder=INBOX");
+                            } catch {
+                              setAccountMenuError(
+                                "This account needs to be signed in again.",
+                              );
+                              setSavedAccounts((current) =>
+                                current.filter(
+                                  (saved) => saved.session_id !== item.session_id,
+                                ),
+                              );
+                              setSwitchingAccount(null);
+                            }
+                          }}
+                        >
+                          <span className="pb-premium-account-avatar-sm" aria-hidden="true">
+                            {itemInitials || "PB"}
+                          </span>
+                          <span className="pb-premium-account-row-copy">
+                            <strong>
+                              {item.mailbox.full_name || item.mailbox.email}
+                            </strong>
+                            <small>{item.mailbox.email}</small>
+                          </span>
+                          {switching ? (
+                            <Loader2
+                              className="h-4 w-4 animate-spin pb-muted"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <span className="pb-premium-account-switch-label">
+                              Switch
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {(mailbox.kind === "team_box" || teamBoxes.length > 0) && authenticatedMailbox && (
                   <div className="pb-premium-account-switcher">
                     <div className="pb-premium-account-section-label">TeamBoxes</div>
@@ -690,7 +751,7 @@ function PremiumPostBoxShell({
                         </span>
                         <span className="pb-premium-account-row-copy">
                           <strong>{authenticatedMailbox.full_name || authenticatedMailbox.email}</strong>
-                          <small>{authenticatedMailbox.email} · My mailbox</small>
+                          <small>{authenticatedMailbox.email} · Back to my mailbox</small>
                         </span>
                         {switchingMailbox === authenticatedMailbox.id ? (
                           <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
@@ -777,7 +838,7 @@ function PremiumPostBoxShell({
                         </span>
                         <span className="pb-premium-account-row-copy">
                           <strong>{authenticatedMailbox.full_name || authenticatedMailbox.email}</strong>
-                          <small>{authenticatedMailbox.email} · My mailbox</small>
+                          <small>{authenticatedMailbox.email} · Back to my mailbox</small>
                         </span>
                         {switchingMailbox === authenticatedMailbox.id ? (
                           <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
@@ -829,72 +890,20 @@ function PremiumPostBoxShell({
                               {target.email}
                               {!canRead && canSend ? " · Send only" : ""}
                             </small>
+                            <small className="pb-premium-permission-label">
+                              Delegated · {entry.permissions.can_send_on_behalf
+                                ? "Send on behalf"
+                                : entry.permissions.can_send_as
+                                  ? "Send as"
+                                  : entry.permissions.can_manage
+                                    ? "Read & Manage"
+                                    : entry.permissions.can_read ? "Read only" : "No access"}
+                            </small>
                           </span>
                           {switching ? (
                             <Loader2 className="h-4 w-4 animate-spin pb-muted" aria-hidden="true" />
                           ) : (
                             <span className="pb-premium-account-switch-label">Open</span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {otherAccounts.length > 0 && (
-                  <div className="pb-premium-account-switcher">
-                    <div className="pb-premium-account-section-label">
-                      Accounts on this device
-                    </div>
-                    {otherAccounts.map((item) => {
-                      const itemInitials = accountInitials(
-                        item.mailbox.full_name,
-                        item.mailbox.email,
-                      );
-                      const switching = switchingAccount === item.session_id;
-                      return (
-                        <button
-                          key={item.session_id}
-                          type="button"
-                          className="pb-premium-account-row"
-                          disabled={Boolean(switchingAccount)}
-                          onClick={async () => {
-                            setAccountMenuError(null);
-                            setSwitchingAccount(item.session_id);
-                            try {
-                              await postbox.switchAccount(item.session_id);
-                              window.location.assign("/postbox?folder=INBOX");
-                            } catch {
-                              setAccountMenuError(
-                                "This account needs to be signed in again.",
-                              );
-                              setSavedAccounts((current) =>
-                                current.filter(
-                                  (saved) => saved.session_id !== item.session_id,
-                                ),
-                              );
-                              setSwitchingAccount(null);
-                            }
-                          }}
-                        >
-                          <span className="pb-premium-account-avatar-sm" aria-hidden="true">
-                            {itemInitials || "PB"}
-                          </span>
-                          <span className="pb-premium-account-row-copy">
-                            <strong>
-                              {item.mailbox.full_name || item.mailbox.email}
-                            </strong>
-                            <small>{item.mailbox.email}</small>
-                          </span>
-                          {switching ? (
-                            <Loader2
-                              className="h-4 w-4 animate-spin pb-muted"
-                              aria-hidden="true"
-                            />
-                          ) : (
-                            <span className="pb-premium-account-switch-label">
-                              Switch
-                            </span>
                           )}
                         </button>
                       );
@@ -933,16 +942,6 @@ function PremiumPostBoxShell({
                   <p className="pb-premium-account-error" role="alert">
                     {accountMenuError}
                   </p>
-                )}
-
-                {canReadMailbox && (
-                  <Link
-                    href="/postbox/contacts"
-                    className="pb-premium-account-contacts"
-                  >
-                    <Users className="h-4 w-4" aria-hidden="true" />
-                    Contacts
-                  </Link>
                 )}
 
                 <div className="pb-premium-account-footer">
