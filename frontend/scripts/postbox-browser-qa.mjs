@@ -145,7 +145,19 @@ try{
   });
   check('badge uses visible color and sharp corners',badge.background!=='rgba(0, 0, 0, 0)'&&badge.radius==='3px',badge);
   const layout=await page.evaluate(()=>({width:document.documentElement.scrollWidth,inner:innerWidth,rail:Math.round(document.querySelector('.pb-astra-app-rail')?.getBoundingClientRect().width||0)}));
-  check('desktop rail is compact',layout.rail>=45&&layout.rail<=70,layout);
+  check('desktop rail matches approved 62px',layout.rail===62,layout);
+  const geometry=await page.evaluate(()=>{
+    const rect=s=>{const n=document.querySelector(s);if(!n)return null;const x=n.getBoundingClientRect();return {width:Math.round(x.width),height:Math.round(x.height),left:Math.round(x.left),top:Math.round(x.top)}};
+    return {rail:rect('.pb-astra-app-rail'),sidebar:rect('.pb-premium-sidebar'),brand:rect('.pb-premium-brand'),
+      topbar:rect('.pb-premium-topbar'),compose:rect('.pb-premium-compose'),toolbar:rect('.pb-premium-mail-toolbar'),
+      firstFolder:rect('.pb-premium-nav-link')};
+  });
+  check('sidebar width matches approved 227px',geometry.sidebar?.width===227,geometry);
+  check('brand height matches approved 78px',geometry.brand?.height===78,geometry);
+  check('topbar height matches approved 65px',geometry.topbar?.height===65,geometry);
+  check('compose launcher matches approved 40px',geometry.compose?.height===40,geometry);
+  check('Inbox toolbar matches approved 44px',geometry.toolbar?.height===44,geometry);
+  check('folder rows match approved 34px',geometry.firstFolder?.height===34,geometry);
   const railStart=await page.locator('.pb-astra-app-rail').evaluate(el=>{
     const first=el.querySelector('.pb-astra-rail-item');
     return {railTop:el.getBoundingClientRect().top,
@@ -161,9 +173,37 @@ try{
   check('Contacts is not inside account menu',await page.locator('.pb-premium-account-contacts').count()===0);
   await page.locator('details.pb-premium-account summary').click();
   await page.goto(base+'/postbox?compose=new',{waitUntil:'domcontentloaded'});
-  await page.locator('.pb-premium-compose-shell').waitFor({state:'visible',timeout:15000});
+  await page.locator('.pb-astra-composer-window').waitFor({state:'visible',timeout:15000});
   await shot(page,'03-compose');
   check('compose is real production component',await page.locator('.pb-compose-fields').count()>=1);
+  const composeGeometry=await page.locator('.pb-astra-composer-window').evaluate(el=>{
+    const head=el.querySelector('.pb-compose-head'),format=el.querySelector('.pb-astra-compose-format');
+    const rect=n=>Math.round(n?.getBoundingClientRect().height||0);
+    return {width:Math.round(el.getBoundingClientRect().width),height:rect(el),
+      header:rect(head),format:rect(format),bottom:Math.round(innerHeight-el.getBoundingClientRect().bottom)};
+  });
+  check('Compose width matches approved 575px',composeGeometry.width===575,composeGeometry);
+  check('Compose header matches approved 44px',composeGeometry.header===44,composeGeometry);
+  check('Compose toolbar matches approved 42px',composeGeometry.format===42,composeGeometry);
+  check('Compose is a floating bottom-right window',composeGeometry.bottom>=20&&composeGeometry.bottom<=32,composeGeometry);
+  check('Prototype rich editing tools are present',
+    await page.getByRole('button',{name:'Bold'}).count()===1&&
+    await page.getByRole('button',{name:'Italic'}).count()===1&&
+    await page.getByRole('button',{name:'Underline'}).count()===1&&
+    await page.getByRole('button',{name:'Schedule send'}).count()===1);
+  const editor=page.getByRole('textbox',{name:'Message body'});
+  await editor.fill('This draft must survive minimizing.');
+  await page.getByRole('button',{name:'Minimize composer'}).click();
+  const minimizedHeight=await page.locator('.pb-astra-composer-window').evaluate(el=>Math.round(el.getBoundingClientRect().height));
+  check('minimized Compose matches approved 45px',minimizedHeight===45,{minimizedHeight});
+  await page.getByRole('button',{name:'Restore composer'}).click();
+  check('Compose draft text survives minimize/restore',(await editor.innerText()).includes('This draft must survive minimizing.'));
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.getByRole('button',{name:'Bold'}).click();
+  const richHtml=await editor.innerHTML();
+  check('Bold toolbar produces real outgoing HTML',/<(b|strong)(\s|>)/i.test(richHtml),{html:richHtml.slice(0,240)});
+  await shot(page,'03-compose-richtext');
   check('no desktop JS exception',errors.length===0,{errors});
  });
  for(const density of ['comfortable','compact','extra_compact']){

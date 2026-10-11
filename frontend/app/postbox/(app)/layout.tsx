@@ -46,6 +46,8 @@ import {
 import { usePostBox } from "@/contexts/postbox-context";
 import "./postbox-astra-integration.css";
 import "./postbox-astra-reader.css";
+import "./postbox-astra-parity.css";
+import "./postbox-astra-compose-v2.css";
 import {
   POSTBOX_MAILBOX_EVENT,
   announcePostBoxMailboxChange,
