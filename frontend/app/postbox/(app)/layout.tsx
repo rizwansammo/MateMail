@@ -48,6 +48,7 @@ import "./postbox-astra-integration.css";
 import "./postbox-astra-reader.css";
 import "./postbox-astra-parity.css";
 import "./postbox-astra-compose-v2.css";
+import "./postbox-astra-inbox.css";
 import {
   POSTBOX_MAILBOX_EVENT,
   announcePostBoxMailboxChange,
@@ -1276,7 +1277,7 @@ function PremiumFolderNavigation({
           aria-label={foldersOpen ? "Collapse folders" : "Expand folders"}
           onClick={() => setFoldersOpen(!foldersOpen)}>
           {foldersOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-          <span>FOLDERS</span>
+          <span>MY FOLDERS</span>
         </button>
         {canManage && (
           <button type="button" aria-label="Create folder" title="Create folder"
@@ -1342,7 +1343,7 @@ function PremiumFolderNavigation({
               onNavigate();
               window.dispatchEvent(new Event("postbox:return-to-list"));
             }}>
-            <Tag size={17} aria-hidden="true" style={{ color: label.color || LABEL_COLOR_DEFAULT }} />
+            <span className="pb-astra-nav-label-swatch" aria-hidden="true" style={{ backgroundColor: label.color || LABEL_COLOR_DEFAULT }} />
             <span className="truncate">{label.name}</span>
           </Link>
           {canManage && (

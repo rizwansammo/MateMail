@@ -37,7 +37,7 @@ const msg=(uid,subject,from,date)=>({
  to:[person.email],cc:[],date,size:2048,seen:uid===2,flagged:uid===1,
  answered:false,draft:false,has_attachments:false,in_reply_to:'',references:[],
  preview:uid===1?'Here is the updated roadmap and our next delivery milestones.':'Project documentation and next steps.',
- labels:uid===1?[{id:'label-1',name:'Priority',color:'#3560a3'}]:[]
+ labels:uid===1?[{id:'label-1',name:'Priority',color:'#3560a3'}]:uid===2?[{id:'label-2',name:'Projects',color:'#21886d'}]:[]
 });
 const messages=[
  msg(1,'Quarterly roadmap and delivery milestones','Jamie Chen','2026-10-11T09:18:00Z'),
@@ -144,6 +144,38 @@ try{
     const style=getComputedStyle(el);return {background:style.backgroundColor,color:style.color,radius:style.borderRadius};
   });
   check('badge uses visible color and sharp corners',badge.background!=='rgba(0, 0, 0, 0)'&&badge.radius==='3px',badge);
+  const rows=await page.locator('.pb-premium-message-row').evaluateAll(items=>items.slice(0,2).map(el=>{
+    const rect=node=>{const r=node?.getBoundingClientRect();return r?{x:Math.round(r.x),y:Math.round(r.y),width:Math.round(r.width),right:Math.round(r.right),height:Math.round(r.height)}:null};
+    return {row:rect(el),sender:rect(el.querySelector('.pb-row-from')),
+      content:rect(el.querySelector('.pb-astra-row-content')),preview:rect(el.querySelector('.pb-astra-row-preview')),
+      label:rect(el.querySelector('.pb-astra-row-label-cell')),badge:rect(el.querySelector('.pb-message-label')),
+      attachment:rect(el.querySelector('.pb-premium-row-indicators')),time:rect(el.querySelector('time'))};
+  }));
+  check('Inbox rows match approved Extra Compact 44px height',rows.length===2&&rows.every(r=>r.row?.height===44),rows);
+  check('Label is a separate sibling of preview',await page.locator('.pb-premium-message-row .pb-astra-row-content .pb-message-label').count()===0);
+  check('Labels share one fixed right-side column regardless of preview length',
+    rows.length===2&&rows.every(r=>r.label&&r.badge&&r.preview)&&
+    rows[0].label.x===rows[1].label.x&&rows[0].label.width===80&&
+    rows[0].label.x>rows[0].content.right-2&&
+    rows.every(r=>r.label.right<=r.attachment.x&&r.attachment.right<=r.time.x),rows);
+  check('Subject and sender columns align across rows',rows.length===2&&
+    rows[0].sender.x===rows[1].sender.x&&rows[0].content.x===rows[1].content.x,rows);
+  check('Subject starts close to approved prototype x-position',
+    rows[0].content.x>500&&rows[0].content.x<600,rows);
+  check('Message footer is visible with real count and selected density',
+    await page.locator('.pb-astra-list-footer').isVisible()&&
+    (await page.locator('.pb-astra-list-footer').innerText()).includes('extra compact'));
+  check('Prototype bottom status strip shows real mailbox context',
+    await page.locator('.pb-astra-app-status').isVisible()&&
+    (await page.locator('.pb-astra-app-status').innerText()).includes('Personal mailbox'));
+  const strip=await page.locator('.pb-astra-app-status').evaluate(el=>Math.round(el.getBoundingClientRect().height));
+  check('Prototype application status strip height is 27px',strip===27,{strip});
+  check('Toolbar has real reading pane control rather than a More icon',
+    await page.getByRole('button',{name:'Reading pane and mailbox actions'}).count()===0&&
+    await page.locator('.pb-astra-pane-menu summary').count()===1);
+  check('Sidebar keeps real management but uses prototype presentation',
+    await page.getByText('MY FOLDERS',{exact:true}).count()===1&&
+    await page.locator('.pb-astra-nav-label-swatch').count()>=1);
   const layout=await page.evaluate(()=>({width:document.documentElement.scrollWidth,inner:innerWidth,rail:Math.round(document.querySelector('.pb-astra-app-rail')?.getBoundingClientRect().width||0)}));
   check('desktop rail matches approved 62px',layout.rail===62,layout);
   const geometry=await page.evaluate(()=>{
@@ -152,7 +184,7 @@ try{
       topbar:rect('.pb-premium-topbar'),compose:rect('.pb-premium-compose'),toolbar:rect('.pb-premium-mail-toolbar'),
       firstFolder:rect('.pb-premium-nav-link')};
   });
-  check('sidebar width matches approved 227px',geometry.sidebar?.width===227,geometry);
+  check('sidebar width matches screenshot 245px',geometry.sidebar?.width===245,geometry);
   check('brand height matches screenshot 64px',geometry.brand?.height===64,geometry);
   check('topbar height matches approved 65px',geometry.topbar?.height===65,geometry);
   check('compose launcher matches approved 40px',geometry.compose?.height===40,geometry);
@@ -243,6 +275,34 @@ try{
   check('Bold toolbar produces real outgoing HTML',/<(b|strong)(\s|>)/i.test(richHtml),{html:richHtml.slice(0,240)});
   await shot(page,'03-compose-richtext');
   check('no desktop JS exception',errors.length===0,{errors});
+ });
+ await scenario({label:'Conversation list has same single-line geometry',options:{listView:'conversations'}},async({page,errors})=>{
+   await visit(page,'/postbox?folder=INBOX&view=conversations');
+   await page.locator('.pb-astra-conversation-row').first().waitFor({state:'visible',timeout:15000});
+   await shot(page,'01-conversations-list');
+   const row=await page.locator('.pb-astra-conversation-row').first().evaluate(el=>{
+     const r=el.getBoundingClientRect(),label=el.querySelector('.pb-astra-row-label-cell')?.getBoundingClientRect();
+     return {height:Math.round(r.height),labelWidth:Math.round(label?.width||0)};
+   });
+   check('Conversation row uses approved 44px list and fixed label column',row.height===44&&row.labelWidth===80,row);
+   check('Conversation rows retain real click-to-open action',
+     await page.locator('.pb-astra-conversation-open').first().isVisible());
+   check('No conversation list JS errors',errors.length===0,{errors});
+ });
+ await scenario({label:'Full HD 1920px Inbox visual geometry',options:{viewport:{width:1920,height:900}}},async({page,errors})=>{
+   await visit(page);
+   await page.locator('.pb-premium-message-row').first().waitFor({state:'visible'});
+   await shot(page,'01-inbox-reference-1920');
+   const size=await page.evaluate(()=>{
+     const label=document.querySelector('.pb-premium-message-row .pb-astra-row-label-cell')?.getBoundingClientRect();
+     const row=document.querySelector('.pb-premium-message-row')?.getBoundingClientRect();
+     return {labelX:Math.round(label?.x||0),rowWidth:Math.round(row?.width||0),viewport:innerWidth,scroll:document.documentElement.scrollWidth};
+   });
+   check('Label fixed near right edge on Full HD screenshot',
+     size.viewport===1920&&size.labelX>1550&&size.labelX<1810&&size.scroll<=size.viewport+2,size);
+   const sidebarEdge=await page.locator('.pb-premium-sidebar').evaluate(el=>Math.round(el.getBoundingClientRect().right));
+   check('Full HD mail content starts at exact screenshot X=307',sidebarEdge===307,{sidebarEdge});
+   check('Full HD Inbox has no JS errors',errors.length===0,{errors});
  });
  for(const density of ['comfortable','compact','extra_compact']){
   await scenario({label:'reader '+density,options:{density,readerView:'single'}},async({page,errors})=>{

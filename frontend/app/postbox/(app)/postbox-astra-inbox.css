@@ -1,0 +1,468 @@
+/*
+ * Astra-approved Inbox and Message List composition.
+ * Reference: PostBox-NextJS-GPTAstra@9bab1302ff92.
+ *
+ * This is a STRUCTURE layer, not a badge patch. Production IMAP, folders,
+ * labels, session permissions, message actions and selection remain intact.
+ * Only scoped PostBox presentation is changed.
+ */
+.pb-premium-shell.pb-astra-postbox .pb-mail-list-pane {
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  min-width:0;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-list-scroll {
+  flex:1 1 auto;
+  min-height:0;
+  min-width:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  scrollbar-width:thin;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-list-footer {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  flex:0 0 41px;
+  height:41px;
+  width:100%;
+  border-top:1px solid var(--pb-border);
+  padding:5px 22px;
+  font-size:10px;
+  color:var(--pb-muted);
+  background:var(--pb-bg);
+  font-variant-numeric:tabular-nums;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-footer-separator {
+  margin:0 8px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-footer-pager {
+  display:flex;align-items:center;gap:8px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-footer-pager button {
+  height:25px;width:25px;border:0;border-radius:3px;
+  display:grid;place-items:center;
+  background:transparent;color:var(--pb-muted);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-footer-pager button:not(:disabled):hover {
+  background:var(--pb-surface-2);color:var(--pb-primary);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-footer-pager button:disabled{opacity:.35}
+.pb-premium-shell.pb-astra-postbox .pb-astra-select-chevron {
+  flex:none;
+  color:var(--pb-muted);
+  margin-left:-5px;
+  margin-right:9px;
+}
+/* Inbox toolbar: reference 44px tall, 22px horizontal inset, subtle underline. */
+.pb-premium-shell.pb-astra-postbox .pb-premium-mail-toolbar {
+  border-top:1px solid var(--pb-border);
+  border-bottom:1px solid var(--pb-border);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-mail-tabs button {
+  margin-top:2px;
+  color:var(--pb-muted);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-mail-tabs button[data-active="true"] {
+  color:var(--pb-primary);
+  font-weight:600;
+  background:transparent;
+}
+.pb-premium-shell.pb-astra-postbox .pb-conversation-switch {
+  border:1px solid var(--pb-border);
+  border-radius:4px;
+  padding:2px;
+  background:var(--pb-bg);
+}
+.pb-premium-shell.pb-astra-postbox .pb-conversation-switch button {
+  height:26px;
+  border:1px solid transparent;
+  border-radius:3px;
+  font-size:11px;
+  padding:4px 8px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-conversation-switch button[aria-pressed="true"] {
+  border-color:var(--pb-border);
+  background:var(--pb-bg);
+  color:var(--pb-fg);
+  box-shadow:0 1px 3px rgb(34 52 80 / .07);
+}
+/* Core 44px mail row; checkbox | star | sender | content | label | attach | time.
+   Crucially: the label is a SIBLING of the flexible message content. */
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-row {
+  position:relative;
+  display:flex;
+  align-items:center;
+  width:100%;
+  min-height:44px;
+  height:44px;
+  padding:0 22px;
+  gap:10px;
+  border-bottom:1px solid var(--pb-border);
+  border-radius:0;
+  background:var(--pb-surface-2);
+  color:var(--pb-fg);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row[data-unread="true"],
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-row[data-unread="true"] {
+  background:var(--pb-bg);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row[data-unread="true"]::before,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-row[data-unread="true"]::before {
+  content:"";
+  position:absolute;
+  left:0;top:0;bottom:0;
+  width:2px;
+  height:auto;
+  border-radius:0;
+  opacity:.85;
+  background:var(--pb-primary);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row[data-selected="true"],
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-row[data-selected="true"] {
+  background:var(--pb-selected);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row:hover,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-row:hover {
+  background:var(--pb-surface-2);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row>input,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-row>input {
+  display:block;width:14px;height:14px;
+  flex:0 0 14px;margin:0;
+  accent-color:var(--pb-primary);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-row-star,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-star {
+  display:grid;place-items:center;
+  flex:0 0 16px;
+  width:16px;height:25px;
+  border:0;padding:0;
+  color:var(--pb-subtle);
+  background:transparent;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-row-star svg,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-star svg {
+  width:15px;height:15px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-open,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-open {
+  display:flex;
+  align-items:center;
+  gap:14px;
+  flex:1 1 auto;
+  min-width:0;
+  height:43px;
+  padding:0;
+  color:inherit;
+  text-align:left;
+  border:0;
+  background:transparent;
+  cursor:pointer;
+}
+/* Extra Compact hides the avatar exactly as the Astra reference does. */
+.pb-premium-shell.pb-astra-postbox.pb-density-extra-compact .pb-premium-row-avatar {
+  display:none;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row .pb-row-from,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-sender {
+  display:flex;
+  align-items:center;
+  gap:5px;
+  width:147px;
+  min-width:0;
+  flex:0 0 147px;
+  overflow:hidden;
+  font-size:12px;
+  font-weight:400;
+  color:var(--pb-fg);
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-sender strong,
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row .pb-row-from strong{
+  font-weight:400;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row[data-unread="true"] .pb-row-from,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-row[data-unread="true"] .pb-astra-conversation-sender strong{
+  font-weight:600;color:var(--pb-fg);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-thread-count {
+  font-size:9px;
+  line-height:14px;
+  border:1px solid var(--pb-border);
+  border-radius:3px;
+  color:var(--pb-muted);
+  background:var(--pb-surface-2);
+  padding:0 4px;
+  flex:none;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-content {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  flex:1 1 0;
+  min-width:0;
+  width:0;
+  font-size:12px;
+  white-space:nowrap;
+  overflow:hidden;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-subject {
+  display:block;
+  flex:0 1 auto;
+  min-width:0;
+  max-width:65%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:12px;
+  color:var(--pb-fg);
+  font-weight:400;
+}
+.pb-premium-shell.pb-astra-postbox [data-unread="true"] .pb-astra-row-subject {
+  font-weight:600;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-dash {
+  flex:none;
+  font-weight:400;
+  color:var(--pb-subtle);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-content .pb-astra-row-preview {
+  display:block;
+  flex:1 1 0;
+  width:0;
+  min-width:0;
+  font-size:12px;
+  color:var(--pb-muted);
+  font-weight:400;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+/* This column NEVER follows the end of the snippet. */
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-label-cell {
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  flex:0 0 80px;
+  width:80px;
+  min-width:80px;
+  overflow:hidden;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-label-cell .pb-message-labels {
+  display:flex;
+  gap:0;
+  align-items:center;
+  margin:0;
+  padding:0;
+  max-width:80px;
+  overflow:hidden;
+  flex:none;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-label-cell .pb-message-label {
+  display:inline-flex;
+  align-items:center;
+  max-width:80px;
+  border-radius:3px;
+  padding:2px 6px;
+  line-height:1.5;
+  font-size:10px;
+  font-weight:400;
+  color:color-mix(in srgb,var(--pb-label-color) 85%,var(--pb-fg));
+  background:color-mix(in srgb,var(--pb-label-color) 9%,var(--pb-bg));
+  border:1px solid color-mix(in srgb,var(--pb-label-color) 18%,var(--pb-bg));
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-label-cell .pb-message-label span {
+  display:block;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-row-indicators {
+  display:flex;align-items:center;justify-content:center;
+  width:14px;min-width:14px;flex:0 0 14px;
+  color:var(--pb-muted);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-open time,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-open time {
+  display:block;
+  width:39px;
+  flex:0 0 39px;
+  text-align:right;
+  font-size:10px;
+  color:var(--pb-muted);
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row[data-unread="true"] time,
+.pb-premium-shell.pb-astra-postbox .pb-astra-conversation-row[data-unread="true"] time {
+  color:var(--pb-primary);
+  font-weight:500;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-hover-actions {
+  position:absolute;
+  right:12px;
+  top:0;bottom:0;
+  display:none;
+  align-items:center;
+  gap:1px;
+  padding-left:8px;
+  background:var(--pb-surface-2);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-hover-actions button {
+  display:grid;place-items:center;
+  width:31px;height:31px;
+  border:0;border-radius:3px;
+  color:var(--pb-muted);
+  background:transparent;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-row-hover-actions button:hover {
+  background:var(--pb-selected);
+  color:var(--pb-primary);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row:hover .pb-astra-row-hover-actions,
+.pb-premium-shell.pb-astra-postbox .pb-premium-message-row:focus-within .pb-astra-row-hover-actions{
+  display:flex;
+}
+/* Compact and Comfortable clone Astra's two-line row grid. */
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-premium-message-row,
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-astra-conversation-row {
+  min-height:61px;height:61px;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-premium-message-open,
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-astra-conversation-open {
+  height:60px;
+  display:grid;
+  grid-template-columns:29px 144px minmax(0,1fr) 80px 14px 40px;
+  column-gap:12px;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-premium-row-avatar {
+  display:flex;
+  width:29px;height:29px;flex:0 0 29px;font-size:9px;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-premium-message-row .pb-row-from,
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-astra-conversation-sender{
+  width:144px;flex:0 0 144px;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-astra-row-content{
+  display:flex;flex-direction:column;align-items:flex-start;
+  justify-content:center;gap:2px;width:auto;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-astra-row-subject{
+  max-width:100%;
+  font-size:12px;
+}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-astra-row-dash{display:none}
+.pb-premium-shell.pb-astra-postbox.pb-density-compact .pb-astra-row-content .pb-astra-row-preview{
+  display:block;width:100%;max-width:100%;flex:0 0 auto;font-size:11px;
+}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-message-row,
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-astra-conversation-row {
+  min-height:78px;height:78px;
+  padding-inline:25px;gap:13px;
+}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-message-open,
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-astra-conversation-open {
+  display:grid;
+  height:77px;
+  grid-template-columns:37px 151px minmax(0,1fr) 80px 15px 40px;
+  column-gap:16px;
+}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-row-avatar {
+  display:flex;
+  width:37px;height:37px;flex:0 0 37px;font-size:11px;
+}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-message-row .pb-row-from,
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-astra-conversation-sender{
+  width:151px;flex:0 0 151px;font-size:13px;
+}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-astra-row-content{
+  display:flex;flex-direction:column;align-items:flex-start;
+  justify-content:center;gap:3px;width:auto;
+}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-astra-row-subject {
+  max-width:100%;
+  font-size:13px;
+}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-astra-row-dash{display:none}
+.pb-premium-shell.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-astra-row-content .pb-astra-row-preview {
+  display:block;width:100%;max-width:100%;flex:0 0 auto;font-size:12px;
+}
+/* Visual swatches match the prototype; label CRUD still uses real MateMail UI. */
+.pb-premium-shell.pb-astra-postbox .pb-astra-nav-label-swatch{
+  display:inline-block;
+  width:7px;height:7px;
+  min-width:7px;flex:0 0 7px;
+  border-radius:1px;
+}
+/* Narrow right reading pane and phones: avoid overlap, preserve real actions. */
+@media(max-width:1050px) {
+  .pb-premium-shell.pb-astra-postbox .pb-astra-row-label-cell{
+    flex-basis:70px;min-width:70px;width:70px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-premium-message-row .pb-row-from,
+  .pb-premium-shell.pb-astra-postbox .pb-astra-conversation-sender{
+    width:125px;flex-basis:125px;
+  }
+}
+@media(max-width:767px) {
+  .pb-premium-shell.pb-astra-postbox .pb-astra-row-content .pb-astra-row-preview,
+  .pb-premium-shell.pb-astra-postbox .pb-astra-row-dash {
+    display:none;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-premium-message-row,
+  .pb-premium-shell.pb-astra-postbox .pb-astra-conversation-row {
+    padding-inline:11px;gap:7px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-premium-message-open,
+  .pb-premium-shell.pb-astra-postbox .pb-astra-conversation-open {gap:7px}
+  .pb-premium-shell.pb-astra-postbox .pb-premium-message-row .pb-row-from,
+  .pb-premium-shell.pb-astra-postbox .pb-astra-conversation-sender{
+    width:95px;flex-basis:95px;font-size:11px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-astra-row-label-cell {
+    width:52px;min-width:52px;flex-basis:52px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-premium-message-open time,
+  .pb-premium-shell.pb-astra-postbox .pb-astra-conversation-open time{
+    width:36px;flex-basis:36px;font-size:9px;
+  }
+  .pb-premium-shell.pb-astra-postbox .pb-astra-list-footer{padding-inline:11px}
+}
+
+/* The approved prototype includes a second 27px application status line.
+   Display real active mailbox context, never fictional prototype copy. */
+.pb-premium-shell.pb-astra-postbox .pb-astra-app-status{
+  display:flex;align-items:center;justify-content:space-between;
+  height:27px;min-height:27px;flex:0 0 27px;
+  border-top:1px solid var(--pb-border);
+  padding:0 22px;
+  background:var(--pb-surface-2);
+  color:var(--pb-muted);
+  font-size:9px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-app-status>span{
+  display:flex;align-items:center;gap:7px;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-status-dot{
+  flex:0 0 5px;width:5px;height:5px;
+  border-radius:50%;background:var(--pb-success);
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-pane-menu summary{
+  display:grid;place-items:center;
+  width:31px;height:31px;border:0;
+  color:var(--pb-muted);
+  background:transparent;border-radius:3px;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-pane-menu summary:hover{
+  background:var(--pb-surface-2);
+}
+.pb-premium-shell.pb-astra-postbox .pb-premium-sort-select{
+  border:0;border-radius:0;background:transparent;
+}

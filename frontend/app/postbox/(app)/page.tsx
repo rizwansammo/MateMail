@@ -19,6 +19,7 @@ import {
   Archive,
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -34,6 +35,7 @@ import {
   MailOpen,
   MoreHorizontal,
   Paperclip,
+  PanelRight,
   RefreshCw,
   RotateCcw,
   Search,
@@ -885,6 +887,9 @@ function Mailbox() {
               }
             />
           )}
+          {canManageMailbox && !isCrossFolderView && !conversationMode && (
+            <ChevronDown className="pb-astra-select-chevron" size={12} aria-hidden="true" />
+          )}
 
           {selected.size > 0 ? (
             <div className="pb-premium-selection-actions">
@@ -973,38 +978,32 @@ function Mailbox() {
                 applySort(event.target.value === "oldest" ? "oldest" : "newest")
               }
             >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
             </select>
-            <button
-              type="button"
-              className="pb-premium-icon-button"
-              aria-label="Refresh mailbox"
-              title="Refresh mailbox"
-              disabled={loading || (conversationMode && conversations.loading)}
-              onClick={() => {
-                loadList();
-                if (conversationMode) conversations.reload();
-                window.dispatchEvent(new Event("postbox:refresh-folders"));
-              }}
-            >
-              <RefreshCw className={`h-[18px] w-[18px] ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
-            </button>
-            <details className="pb-premium-mail-more">
-              <summary className="pb-premium-icon-button" aria-label="Mailbox actions" title="Mailbox actions">
-                <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
+            <details className="pb-premium-mail-more pb-astra-pane-menu">
+              <summary className="pb-premium-icon-button" aria-label="Reading pane and mailbox actions" title="Reading pane">
+                <PanelRight size={18} aria-hidden="true" />
               </summary>
               <div className="pb-premium-mail-menu">
+                <button type="button" onClick={() => void updatePreferences({ reading_pane: "off" })
+                  .catch(error => setNotice(describePostBoxError(error, "Could not change reading pane.")))}>
+                  {preferences.reading_pane === "off" ? "✓ " : ""}Full message
+                </button>
+                <button type="button" onClick={() => void updatePreferences({ reading_pane: "right" })
+                  .catch(error => setNotice(describePostBoxError(error, "Could not change reading pane.")))}>
+                  {preferences.reading_pane === "right" ? "✓ " : ""}Right pane
+                </button>
+                <button type="button" onClick={() => void updatePreferences({ reading_pane: "bottom" })
+                  .catch(error => setNotice(describePostBoxError(error, "Could not change reading pane.")))}>
+                  {preferences.reading_pane === "bottom" ? "✓ " : ""}Bottom pane
+                </button>
                 {canManageMailbox && !isCrossFolderView && !conversationMode && !folderIsSent && (
-                  <button
-                    type="button"
-                    disabled={rows.length === 0}
-                    onClick={() => void act("read", rows.map((row) => row.uid))}
-                  >
+                  <button type="button" disabled={rows.length===0}
+                    onClick={() => void act("read", rows.map((row) => row.uid))}>
                     Mark visible messages as read
                   </button>
                 )}
-                <a href="/postbox/settings">Change reading layout</a>
               </div>
             </details>
           </div>
@@ -1149,6 +1148,7 @@ function Mailbox() {
           }`}
           style={{ borderColor: "var(--pb-border)" }}
         >
+          <div className="pb-astra-list-scroll">
           {conversationMode ? (
             conversations.loading ? <CentredSpinner /> :
             conversations.error ? (
@@ -1165,55 +1165,43 @@ function Mailbox() {
             ) : (
               <>
                 {conversations.data.results.map((conversation: ConversationSummary) => (
-                  <div className="pb-thread-list-item"
+                  <div className="pb-row pb-astra-conversation-row"
                     key={conversation.id}
                     data-unread={conversation.unread_count > 0}
                     data-selected={thread?.id === conversation.id}>
-                    <button type="button"
+                    <input type="checkbox" disabled aria-label={"Conversation: " + (conversation.subject || "(no subject)")} />
+                    <span className="pb-astra-conversation-star">
+                      <Star size={15}
+                        style={{ color: conversation.flagged ? "var(--pb-warn)" : "var(--pb-subtle)" }}
+                        fill={conversation.flagged ? "currentColor" : "none"} aria-hidden="true" />
+                    </span>
+                    <button type="button" className="pb-astra-conversation-open"
                       onClick={() => void openMessage(conversation.latest)}
                       aria-label={"Open conversation: " + (conversation.subject || "(no subject)")}>
                       <span className="pb-premium-row-avatar" aria-hidden="true">
                         {senderInitials(conversation.latest.from.name || conversation.latest.from.address)}
                       </span>
-                      <span className="pb-thread-list-copy">
-                        <span className="pb-thread-list-top">
-                          <strong>{conversation.latest.from.name || conversation.latest.from.address}</strong>
-                          <time>{formatMessageDate(conversation.latest_date)}</time>
-                        </span>
-                        <span className="pb-thread-list-subject">
-                          {conversation.subject || "(no subject)"}
-                          <span className="pb-astra-row-preview" title={conversation.latest.preview || undefined}>{conversation.latest.preview ? " — " + conversation.latest.preview : ""}</span>
-                          <MessageLabelBadges labels={conversation.latest.labels} palette={mailLabels} />
-                          {conversation.unread_count > 0 && (
-                            <span className="ml-2 pb-premium-unread-dot"
-                              aria-label={conversation.unread_count + " unread"} />
-                          )}
-                        </span>
+                      <span className="pb-astra-conversation-sender">
+                        <strong>{conversation.latest.from.name || conversation.latest.from.address}</strong>
+                        {conversation.message_count > 1 && <small className="pb-astra-thread-count">{conversation.message_count}</small>}
                       </span>
-                      {conversation.flagged && <Star className="h-4 w-4 shrink-0"
-                        style={{ color: "var(--pb-warn)" }} fill="currentColor"
-                        aria-label="Contains starred messages" />}
-                      <span className="pb-thread-count" aria-label={
-                        conversation.message_count + " messages"
-                      }>{conversation.message_count}</span>
+                      <span className="pb-astra-row-content">
+                        <span className="pb-astra-row-subject">{conversation.subject || "(no subject)"}</span>
+                        {conversation.latest.preview && <>
+                          <span className="pb-astra-row-dash" aria-hidden="true">—</span>
+                          <span className="pb-astra-row-preview">{conversation.latest.preview}</span>
+                        </>}
+                      </span>
+                      <span className="pb-astra-row-label-cell">
+                        <MessageLabelBadges labels={conversation.latest.labels?.slice(0,1)} palette={mailLabels} />
+                      </span>
+                      <span className="pb-premium-row-indicators">
+                        {conversation.latest.has_attachments && <Paperclip className="h-3.5 w-3.5" aria-label="Has attachments" />}
+                      </span>
+                      <time>{formatMessageDate(conversation.latest_date)}</time>
                     </button>
                   </div>
                 ))}
-                {conversations.data.total > conversations.data.page_size && (
-                  <div className="flex items-center justify-between gap-2 p-3 text-xs pb-subtle">
-                    <span>{(pageNumber - 1) * conversations.data.page_size + 1}–{
-                      Math.min(pageNumber * conversations.data.page_size, conversations.data.total)
-                    } of {conversations.data.total} conversations</span>
-                    <div className="flex gap-2">
-                      <button type="button" className="pb-btn pb-btn-ghost"
-                        disabled={pageNumber <= 1}
-                        onClick={() => setPageNumber((n) => n - 1)}>Newer</button>
-                      <button type="button" className="pb-btn pb-btn-ghost"
-                        disabled={!conversations.data.has_next}
-                        onClick={() => setPageNumber((n) => n + 1)}>Older</button>
-                    </div>
-                  </div>
-                )}
               </>
             )
           ) : loading ? (
@@ -1338,12 +1326,15 @@ function Mailbox() {
                           row.from.name || row.from.address || "(unknown sender)"
                         )}
                       </span>
-                      <span className="pb-premium-row-copy">
-                        <span className="pb-row-subject">
-                          {row.subject || "(no subject)"}
-                          <span className="pb-astra-row-preview" title={row.preview || undefined}>{row.preview ? " — " + row.preview : ""}</span>
-                          <MessageLabelBadges labels={row.labels} palette={mailLabels} />
-                        </span>
+                      <span className="pb-astra-row-content">
+                        <span className="pb-astra-row-subject">{row.subject || "(no subject)"}</span>
+                        {row.preview && <>
+                          <span className="pb-astra-row-dash" aria-hidden="true">—</span>
+                          <span className="pb-astra-row-preview" title={row.preview}>{row.preview}</span>
+                        </>}
+                      </span>
+                      <span className="pb-astra-row-label-cell">
+                        <MessageLabelBadges labels={row.labels?.slice(0, 1)} palette={mailLabels} />
                       </span>
                       <span className="pb-premium-row-indicators">
                         {row.has_attachments && (
@@ -1351,37 +1342,52 @@ function Mailbox() {
                         )}
                       </span>
                       <time>{formatMessageDate(row.date)}</time>
-                      {!row.seen && !rowIsSent && <span className="pb-premium-unread-dot" aria-hidden="true" />}
                     </button>
+                    {canManageMailbox && !isCrossFolderView && (
+                      <span className="pb-astra-row-hover-actions">
+                        {!rowIsSent && !folderIsTrash && (
+                          <button type="button" aria-label={"Archive " + (row.subject || "message")}
+                            onClick={() => void act("archive", [row.uid], {}, row.folder)}>
+                            <Archive size={15} aria-hidden="true" />
+                          </button>
+                        )}
+                        <button type="button" aria-label={"Trash " + (row.subject || "message")}
+                          onClick={() => void act(folderIsTrash ? "delete" : "trash", [row.uid], {}, row.folder)}>
+                          <Trash2 size={15} aria-hidden="true" />
+                        </button>
+                      </span>
+                    )}
                   </div>
                 );
               })}
 
-              {page && page.total > page.page_size && (
-                <div className="flex items-center justify-between px-3 py-2 text-xs pb-subtle">
-                  <span className="pb-num">
-                    {(page.page - 1) * page.page_size + 1}–
-                    {Math.min(page.page * page.page_size, page.total)} of {page.total}
-                  </span>
-                  <span className="flex gap-1">
-                    <button type="button" className="pb-btn pb-btn-ghost"
-                      aria-label="Previous page"
-                      disabled={page.page <= 1}
-                      onClick={() => setPageNumber((n) => n - 1)}>
-                      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                      Newer
-                    </button>
-                    <button type="button" className="pb-btn pb-btn-ghost"
-                      aria-label="Next page"
-                      disabled={!page.has_next}
-                      onClick={() => setPageNumber((n) => n + 1)}>
-                      Older
-                      <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  </span>
-                </div>
-              )}
             </>
+          )}
+          </div>
+          {!detail && (
+            <footer className="pb-astra-list-footer" aria-label="Message list pagination">
+              <span>
+                {conversationMode
+                  ? (conversations.data?.total
+                    ? `${(pageNumber - 1) * conversations.data.page_size + 1}–${Math.min(pageNumber * conversations.data.page_size, conversations.data.total)} of ${conversations.data.total}`
+                    : "No conversations")
+                  : (page?.total
+                    ? `${(page.page - 1) * page.page_size + 1}–${Math.min(page.page * page.page_size, page.total)} of ${page.total}`
+                    : "No messages")}
+                <span className="pb-astra-footer-separator">·</span>
+                {preferences.density.replace(/_/g, " ")}
+              </span>
+              <span className="pb-astra-footer-pager">
+                <button type="button" aria-label="Previous page" disabled={pageNumber <= 1}
+                  onClick={() => setPageNumber((n) => Math.max(1,n - 1))}><ChevronLeft size={15}/></button>
+                <span>{pageNumber} / {conversationMode
+                  ? Math.max(1,Math.ceil((conversations.data?.total||0)/(conversations.data?.page_size||25)))
+                  : Math.max(1,Math.ceil((page?.total||0)/(page?.page_size||25)))}</span>
+                <button type="button" aria-label="Next page" disabled={conversationMode
+                    ? !conversations.data?.has_next : !page?.has_next}
+                  onClick={() => setPageNumber((n) => n + 1)}><ChevronRight size={15}/></button>
+              </span>
+            </footer>
           )}
         </div>
 
@@ -1468,6 +1474,13 @@ function Mailbox() {
           )}
         </div>
       </div>
+
+      {!detail && (
+        <footer className="pb-astra-app-status" aria-label="PostBox status">
+          <span><span className="pb-astra-status-dot" aria-hidden="true" />MateMail mailbox</span>
+          <span>{mailbox?.kind === "team_box" ? "TeamBox" : isSharedMailbox ? "Delegated mailbox" : "Personal mailbox"} · {mailbox?.full_name || mailbox?.email}</span>
+        </footer>
+      )}
 
       {compose && (
         <Compose
