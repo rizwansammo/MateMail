@@ -4,9 +4,8 @@ import { cn } from "@/lib/utils";
 /**
  * Canonical MateMail Hub mark.
  *
- * The SVG is the same square mark used by the approved Portal prototype and
- * by the browser favicon. It already contains its navy background, so callers
- * must not wrap it in the legacy white logo tile.
+ * Identical square dimensions for the official 05B Light and Dark variants.
+ * The active product appearance determines which mark is shown.
  */
 export function BrandMark({
   size = 32,
@@ -18,13 +17,12 @@ export function BrandMark({
   preload?: boolean;
 }) {
   return (
-    <Image
-      src="/assets/matemail-mark.svg"
-      alt=""
-      width={size}
-      height={size}
-      preload={preload}
-      className={cn("shrink-0", className)}
-    />
+    <span className={cn("mm-official-brand", className)}
+      style={{ width: size, height: size }} aria-hidden="true">
+      <Image src="/assets/matemail-mark.svg" alt="" width={size}
+        height={size} preload={preload} className="mm-official-brand-default" />
+      <Image src="/assets/matemail-mark-inverse.svg" alt="" width={size}
+        height={size} className="mm-official-brand-inverse" />
+    </span>
   );
 }

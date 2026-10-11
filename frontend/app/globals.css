@@ -6415,23 +6415,38 @@ body {
 }
 
 
-/* Official MateMail 05B logo assets. Maintain the approved Astra geometry. */
+/* The exact 05B logo masters are shown at cap height on a contrasting tile. */
 .pb-premium-brand-mark,
 .pb-premium-login-mark {
-  background-image: url("/assets/matemail-mark-light.svg");
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: contain;
+  background-color:#112845;
+  background-image:url("/assets/matemail-logo-white.svg");
+  background-position:center;
+  background-repeat:no-repeat;
+  background-size:auto 22px;
+  border-radius:4px;
 }
+.pb-premium-login-mark { background-size:auto 25px; }
 :root[data-pb-theme="dark"] .pb-premium-brand-mark,
 :root[data-pb-theme="dark"] .pb-premium-login-mark {
-  background-image: url("/assets/matemail-mark.svg");
+  background-color:#FFFFFF;
+  background-image:url("/assets/matemail-logo-color.svg");
 }
-
-/* System appearance uses the dark logo when the OS is dark. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-pb-theme="light"]) .pb-premium-brand-mark,
   :root:not([data-pb-theme="light"]) .pb-premium-login-mark {
-    background-image: url("/assets/matemail-mark.svg");
+    background-color:#FFFFFF;
+    background-image:url("/assets/matemail-logo-color.svg");
   }
+}
+/* The Hub and Platform marks retain identical dimensions across themes. */
+.mm-official-brand {display:inline-flex;position:relative;flex-shrink:0;align-items:center;justify-content:center;vertical-align:middle}
+.mm-official-brand img {display:block;width:100%;height:100%;object-fit:contain}
+.mm-official-brand img.mm-official-brand-inverse {display:none}
+:root[data-ws-theme="dark"] .mm-official-brand img.mm-official-brand-default,
+:root[data-pf-theme="dark"] .mm-official-brand img.mm-official-brand-default {display:none}
+:root[data-ws-theme="dark"] .mm-official-brand img.mm-official-brand-inverse,
+:root[data-pf-theme="dark"] .mm-official-brand img.mm-official-brand-inverse {display:block}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-pf-theme="light"]):not([data-pf-theme="dark"]) .pf .mm-official-brand img.mm-official-brand-default {display:none}
+  :root:not([data-pf-theme="light"]):not([data-pf-theme="dark"]) .pf .mm-official-brand img.mm-official-brand-inverse {display:block}
 }

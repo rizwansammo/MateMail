@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 
 import { usePostBox } from "@/contexts/postbox-context";
+import { usePostBoxAppRail } from "@/lib/postbox-app-rail";
 import "./postbox-astra-integration.css";
 import "./postbox-astra-reader.css";
 import "./postbox-astra-parity.css";
@@ -262,6 +263,10 @@ function PremiumPostBoxShell({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const mailboxRail = usePostBoxAppRail("mailbox");
+  const settingsRail = usePostBoxAppRail("settings");
+  const showAppRail = pathname.startsWith("/postbox/settings")
+    ? settingsRail.visible : mailboxRail.visible;
   const accountMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [savedAccounts, setSavedAccounts] = useState<SavedPostBoxAccount[]>([]);
   const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
@@ -519,7 +524,7 @@ function PremiumPostBoxShell({
   }, [canSendMailbox, router]);
 
   return (
-    <div className={`pb pb-premium-shell pb-astra-postbox ${
+    <div className={`pb pb-premium-shell pb-astra-postbox ${showAppRail ? "" : "pb-app-rail-hidden"} ${
       preferences.density === "compact"
         ? "pb-density-compact"
         : preferences.density === "extra_compact"
@@ -528,7 +533,7 @@ function PremiumPostBoxShell({
     }`}>
       {railOpen && <button type="button" className="pb-premium-overlay" aria-label="Close folders" onClick={closeRail} />}
 
-      <nav className="pb-astra-app-rail" aria-label="PostBox applications">
+      {showAppRail && <nav className="pb-astra-app-rail" aria-label="PostBox applications">
         <Link href="/postbox?folder=INBOX" className="pb-astra-rail-item"
           aria-current={!pathname.startsWith("/postbox/contacts") && !pathname.startsWith("/postbox/settings") ? "page" : undefined}
           onClick={() => { closeRail(); window.dispatchEvent(new Event("postbox:return-to-list")); }}>
@@ -544,7 +549,7 @@ function PremiumPostBoxShell({
           onClick={closeRail}>
           <Settings2 size={19} aria-hidden="true" /><span>Settings</span>
         </Link>
-      </nav>
+      </nav>}
 
       <aside className="pb-premium-sidebar" data-open={railOpen ? "true" : "false"}>
         <Link

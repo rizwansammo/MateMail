@@ -912,7 +912,31 @@ class MateMailOfficial05BBrandTest(SimpleTestCase):
             self.assertIn('className="pb-premium-login-mark"', source)
             self.assertIn('<span className="pb-premium-wordmark">PostBox</span>', source)
         self.assertIn('className="pb-premium-brand-mark"', layout)
-        self.assertIn('background-image: url("/assets/matemail-mark-light.svg")', css)
-        self.assertIn('background-image: url("/assets/matemail-mark.svg")', css)
+        self.assertIn('background-image:url("/assets/matemail-logo-white.svg")', css)
+        self.assertIn('background-image:url("/assets/matemail-logo-color.svg")', css)
         self.assertIn(':root[data-pb-theme="dark"]', css)
         self.assertIn("MateMail-05B", favicon)
+
+class AppRailVisualPreferenceContractTest(SimpleTestCase):
+    """PostBox app rail is configurable without changing mail APIs."""
+
+    def test_two_default_on_app_rails(self):
+        settings = read("components", "postbox", "premium-settings.tsx")
+        shell = read("app", "postbox", "(app)", "layout.tsx")
+        visual = read("app", "postbox", "(app)", "postbox-astra-integration.css")
+        ui = read("lib", "postbox-app-rail.ts")
+        for route in ("Mailbox", "Settings"):
+            self.assertIn(f'label="Show App Sidebar in {route}"', settings)
+        self.assertIn('getItem(KEY + area) !== "off"', ui)
+        self.assertIn('showAppRail && <nav className="pb-astra-app-rail"', shell)
+        self.assertIn('!showSettingsRail && (', settings)
+        self.assertNotIn(':has(.pb-premium-settings) .pb-astra-app-rail', visual)
+        self.assertNotIn(':has(.pb-premium-settings) .pb-premium-search', visual)
+
+    def test_dark_mark_uses_same_geometry_and_white_background(self):
+        original = read("public", "assets", "matemail-mark-light.svg")
+        inverse = read("public", "assets", "matemail-mark-inverse.svg")
+        self.assertEqual(inverse, original.replace('#F4F7FB', '#FFFFFF'))
+        component = read("components", "brand-mark.tsx")
+        self.assertIn("mm-official-brand-default", component)
+        self.assertIn("mm-official-brand-inverse", component)

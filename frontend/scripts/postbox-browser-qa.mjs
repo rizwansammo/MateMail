@@ -425,9 +425,38 @@ try{
   const settingNav=await page.locator('.pb-premium-settings-nav').evaluate(el=>{
     const rect=el.getBoundingClientRect();return {x:Math.round(rect.x),width:Math.round(rect.width)};
   });
-  check('Settings begins with its own left navigation',settingNav.x<=2,settingNav);
-  check('Settings hides Mail and Folder navigation',!(await page.locator('.pb-astra-app-rail').isVisible())
-    &&!(await page.locator('.pb-premium-sidebar').isVisible()));
+  check('Settings nav follows the app rail',Math.abs(settingNav.x-62)<=2,settingNav);
+  check('Settings app rail visible by default',await page.locator('.pb-astra-app-rail').isVisible());
+  check('Settings hides Mail folders',!(await page.locator('.pb-premium-sidebar').isVisible()));
+  check('Settings Back link hidden when rail visible',!(await page.locator('.pb-settings-back').isVisible()));
+  const searchGap=await page.evaluate(()=>{
+    const s=document.querySelector('.pb-premium-search')?.getBoundingClientRect();
+    const actions=document.querySelector('.pb-premium-top-actions')?.getBoundingClientRect();
+    return s&&actions ? Math.round(actions.left-s.right) : -1;
+  });
+  check('Settings search stays alongside topbar controls',searchGap>=0&&searchGap<=40,{searchGap});
+  await visit(page,'/postbox/settings?section=appearance');
+  const settingsToggle=page.locator('.pb-setting-toggle').filter({hasText:'Show App Sidebar in Settings'}).locator('input');
+  const mailboxToggle=page.locator('.pb-setting-toggle').filter({hasText:'Show App Sidebar in Mailbox'}).locator('input');
+  check('Both app rails default On',await settingsToggle.isChecked()&&await mailboxToggle.isChecked());
+  await settingsToggle.uncheck();
+  check('Settings rail Off reveals Back to mailbox',!(await page.locator('.pb-astra-app-rail').isVisible())
+    &&await page.locator('.pb-settings-back').isVisible());
+  await page.reload();
+  check('Settings rail choice persists on reload',!(await page.locator('.pb-astra-app-rail').isVisible()));
+  await settingsToggle.check();
+  check('Settings rail On restores navigation',await page.locator('.pb-astra-app-rail').isVisible()
+    &&!(await page.locator('.pb-settings-back').isVisible()));
+  await mailboxToggle.uncheck();
+  await page.goto(base+'/postbox?folder=INBOX&view=messages');
+  await page.locator('.pb-premium-topbar').waitFor({state:'visible'});
+  check('Mailbox rail Off hides the rail',!(await page.locator('.pb-astra-app-rail').isVisible()));
+  await page.reload();
+  check('Mailbox rail choice persists',!(await page.locator('.pb-astra-app-rail').isVisible()));
+  await visit(page,'/postbox/settings?section=appearance');
+  await mailboxToggle.check();
+  await visit(page);
+  check('Mailbox rail On restores navigation',await page.locator('.pb-astra-app-rail').isVisible());
   check('settings page without JS exception',errors.length===0,{errors});
  });
  await scenario({label:'dark theme and mobile layout',options:{viewport:{width:390,height:844},theme:'dark',density:'extra_compact'}},async({page,errors})=>{
