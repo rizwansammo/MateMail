@@ -30,6 +30,7 @@ interface Domain {
   id: string;
   domain: string;
   ownership_verified: boolean;
+  is_primary: boolean;
 }
 
 interface BillingData {
@@ -132,7 +133,7 @@ export default function MailboxesPage() {
         setDomainId((current) =>
           verifiedDomains.some((domain) => domain.id === current)
             ? current
-            : verifiedDomains[0]?.id || ""
+            : verifiedDomains.find((domain) => domain.is_primary)?.id || verifiedDomains[0]?.id || ""
         );
       }
 
@@ -230,6 +231,7 @@ export default function MailboxesPage() {
             type="button"
             disabled={!canCreate}
             onClick={() => {
+              setDomainId(domains.find((domain) => domain.is_primary)?.id || domains[0]?.id || "");
               setAddOpen(true);
               setAddErrors({});
             }}
@@ -434,7 +436,10 @@ export default function MailboxesPage() {
             description="Create a mailbox on a verified domain to begin sending and receiving mail."
             action={
               canCreate ? (
-                <PortalButton type="button" onClick={() => setAddOpen(true)}>
+                <PortalButton type="button" onClick={() => {
+                    setDomainId(domains.find((domain) => domain.is_primary)?.id || domains[0]?.id || "");
+                    setAddOpen(true);
+                  }}>
                   <Plus className="h-4 w-4" />
                   Create mailbox
                 </PortalButton>

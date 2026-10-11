@@ -340,4 +340,8 @@ def check_dns_for_domain(domain_obj):
                 },
             )
         domain_obj.save(update_fields=["dns_health_score", "status", "verified_at"])
+    if domain_obj.status == DomainStatus.ACTIVE and domain_obj.is_ownership_verified:
+        # Take the tenant lock after DNS writes commit (lock order safety).
+        from apps.domains.primary import choose_initial_primary
+        choose_initial_primary(domain_obj.tenant_id)
     return domain_obj

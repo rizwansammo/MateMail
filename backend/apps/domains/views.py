@@ -27,6 +27,7 @@ from .verification import (
     verify_domain_ownership,
 )
 from .models import Domain
+from .primary import choose_initial_primary, set_primary_domain
 from .serializers import DomainCreateSerializer, DomainSerializer
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,23 @@ class DomainListCreateView(APIView):
         return Response(DomainSerializer(domain).data, status=201)
 
 
+class DomainSetPrimaryView(APIView):
+    """POST /api/domains/{id}/set-primary/ changes only this tenant's default."""
+
+    permission_classes = [IsAuthenticated, TenantReadAdminWrite, IsEmailVerified]
+
+    def post(self, request, pk):
+        domain, problem = set_primary_domain(request.tenant.id, pk)
+        if problem == "missing":
+            return Response({"detail": "Domain not found."}, status=404)
+        if problem == "ineligible":
+            return Response(
+                {"detail": "Only verified, active domains can be set as primary."},
+                status=409,
+            )
+        return Response({"domain": DomainSerializer(domain).data})
+
+
 class DomainDetailView(APIView):
     permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
@@ -117,6 +135,9 @@ class DomainDetailView(APIView):
 
     @transaction.atomic
     def delete(self, request, pk):
+        # Lock organization before the domain, consistent with set-primary.
+        from apps.tenants.models import Tenant
+        Tenant.objects.select_for_update().get(pk=request.tenant.id)
         # Serialize deletes against domain-level security opt-in and verification.
         domain = Domain.objects.for_tenant(request.tenant).select_for_update().filter(pk=pk).first()
         if not domain:
@@ -197,7 +218,11 @@ class DomainDetailView(APIView):
         ).first()
         if disabled_policy is not None:
             disabled_policy.delete()
+        was_primary = domain.is_primary
+        tenant_id = domain.tenant_id
         domain.delete()
+        if was_primary:
+            choose_initial_primary(tenant_id)
         return Response(status=204)
 
 
@@ -288,6 +313,9 @@ class DomainVerifyOwnershipView(APIView):
         ensure_verification_token(domain)
 
         verified, message = verify_domain_ownership(domain)
+        if verified:
+            choose_initial_primary(domain.tenant_id)
+            domain.refresh_from_db(fields=["is_primary"])
 
         # Ownership verification is the event that unlocks the mail service.
         # Queue provisioning immediately so DKIM material is generated without
@@ -343,13 +371,21 @@ class DomainRotateVerificationTokenView(APIView):
 
     permission_classes = [IsAuthenticated, TenantReadAdminWrite]
 
+    @transaction.atomic
     def post(self, request, pk):
-        domain = Domain.objects.for_tenant(request.tenant).filter(pk=pk).first()
+        # Match set-primary's tenant-first lock order.
+        from apps.tenants.models import Tenant
+        Tenant.objects.select_for_update().get(pk=request.tenant.id)
+        domain = Domain.objects.for_tenant(request.tenant).select_for_update().filter(pk=pk).first()
         if not domain:
             return Response({"detail": "Not found."}, status=404)
 
         was_verified = domain.is_ownership_verified
+        was_primary = domain.is_primary
         rotate_verification_token(domain)
+        if was_primary:
+            choose_initial_primary(domain.tenant_id)
+        domain.refresh_from_db(fields=["is_primary"])
 
         log_event(
             request.tenant,

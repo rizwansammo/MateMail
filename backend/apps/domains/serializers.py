@@ -27,7 +27,7 @@ class DomainSerializer(serializers.ModelSerializer):
     class Meta:
         model = Domain
         fields = [
-            "id", "domain", "status", "dns_health_score",
+            "id", "domain", "status", "dns_health_score", "is_primary",
             "dkim_selector", "dkim_public_key",
             "mail_service_ready", "mail_service_message",
             "ownership_status", "ownership_verified", "ownership_verified_at",

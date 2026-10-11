@@ -13,7 +13,8 @@ const tid="d9bdde9d-1234-4123-8123-777777777777";
 const uid="bd1a5653-1234-4234-8234-888888888888";
 const token=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",Buffer.from(JSON.stringify({tenant_id:tid,exp:Math.floor(Date.now()/1000)+3600})).toString("base64url"),"qa-not-a-real-signature"].join(".");
 const initialMailbox={id:"e1111111-1111-4111-8111-111111111111",email:"existing@example.test",full_name:"Existing User",local_part:"existing",domain:"example.test",domain_name:"example.test",status:"active",kind:"personal",quota_mb:1024,storage_used_mb:230,mail_service_ready:true,mail_service_message:"",last_login:null,created_at:"2026-01-01T00:00:00Z"};
-const initialDomain={id:"d1111111-1111-4111-8111-111111111111",domain:"example.test",status:"active",dns_health_score:100,mail_service_ready:true,ownership_verified:true,added_at:"2026-01-01T00:00:00Z"};
+const initialDomain={id:"d1111111-1111-4111-8111-111111111111",domain:"example.test",status:"active",dns_health_score:100,mail_service_ready:true,ownership_verified:true,is_primary:true,added_at:"2026-01-01T00:00:00Z"};
+const secondaryDomain={...initialDomain,id:"d3333333-3333-4333-8333-333333333333",domain:"secondary.test",is_primary:false,added_at:"2026-06-01T00:00:00Z"};
 const report={test:"Astra Phase 2A real pages with mocked API",checks:[]};
 const browser=await chromium.launch({headless:true,args:["--no-sandbox"]});
 
@@ -23,9 +24,10 @@ function verify(name,good,detail={}){
 }
 async function setup(viewport,role="owner"){
  const ctx=await browser.newContext({viewport,deviceScaleFactor:1,reducedMotion:"reduce"});
- const requests={mailbox:[],domain:[],status:[]};
+ const requests={mailbox:[],domain:[],status:[],primary:[]};
  const mailboxes=[{...initialMailbox}];
- const domains=[{...initialDomain}];
+ // Newest domain arrives first in the API list, primary must still win.
+ const domains=[{...secondaryDomain},{...initialDomain}];
  await ctx.route("**/api/**",async route=>{
   const endpoint=new URL(route.request().url()).pathname;
   const method=route.request().method();
@@ -42,6 +44,11 @@ async function setup(viewport,role="owner"){
     const domain=domains.find(d=>d.id===value.domain_id)??domains[0];
     const row={...initialMailbox,id:"e2222222-2222-4222-8222-222222222222",email:value.local_part+"@"+domain.domain,local_part:value.local_part,full_name:value.full_name,quota_mb:value.quota_mb,storage_used_mb:0,last_login:null};
     mailboxes.push(row);body=row;
+  }
+  else if(endpoint.startsWith("/api/domains/")&&endpoint.endsWith("/set-primary/")&&method==="POST"){
+    const domain=domains.find(row=>endpoint.includes(row.id));
+    if(domain){for(const row of domains)row.is_primary=row.id===domain.id;requests.primary.push(domain.id);body={domain:{...domain}};}
+    else body={detail:"Not found."};
   }
   else if(endpoint==="/api/domains/"&&method==="POST"){
     const value=JSON.parse(route.request().postData()||"{}");
@@ -102,6 +109,11 @@ try{
  const modal=sample.page.getByRole("dialog",{name:"Create a mailbox"});
  await modal.waitFor({state:"visible"});
  await screenshot(sample.page,"phase2a-02-mailbox-create");
+ const createDomainSelect=modal.locator("select").first();
+ verify("Mailbox creation selects saved primary instead of newest domain",
+    (await createDomainSelect.inputValue())===initialDomain.id);
+ verify("Dropdown displays only plain domain names",
+    JSON.stringify(await createDomainSelect.locator("option").allTextContents())===JSON.stringify(["secondary.test","example.test"]));
  verify("Mailbox creation uses native accessible Astra dialog",(await modal.count())===1&&(await tableMetrics(sample.page)).modalRadius==="4px");
  await sample.page.keyboard.press("Escape");
  await sample.page.waitForTimeout(120);
@@ -129,6 +141,13 @@ try{
  m=await tableMetrics(sample.page);
  verify("Domains show backend records and Astra card radius",(await sample.page.getByText("example.test").count())>0&&m.cardRadius==="4px",m);
  verify("Domain table uses Astra 41px header",m.tableHeadHeight===41,m);
+ verify("Primary indicator appears only on Domains management page",
+   (await sample.page.locator('tr[aria-label="Open domain example.test"]').getByText("Primary",{exact:true}).count())===1);
+ await sample.page.getByRole("button",{name:"Set as primary"}).click();
+ verify("Selecting a primary updates only the target domain with POST",
+   sample.requests.primary.length===1&&sample.requests.primary[0]===secondaryDomain.id);
+ verify("Primary badge moves after an authorized change",
+   (await sample.page.locator('tr[aria-label="Open domain secondary.test"]').getByText("Primary",{exact:true}).count())===1);
  await sample.page.locator('tr[aria-label="Open domain example.test"]').focus();
  await sample.page.keyboard.press("Enter");
  await sample.page.locator(".portal-domain-title").waitFor({timeout:7000});
@@ -148,6 +167,20 @@ try{
  await sample.page.locator(".portal-domain-title").waitFor({timeout:7000});
  await screenshot(sample.page,"phase2a-06-domain-detail");
  verify("Domain detail retains actual DNS verification tab",await sample.page.getByRole("button",{name:"DNS & verification"}).count()===1);
+ await ready(sample.page,"Mailboxes");
+ await sample.page.getByRole("button",{name:"Create mailbox"}).first().click();
+ const nextDialog=sample.page.getByRole("dialog",{name:"Create a mailbox"});
+ const nextSelect=nextDialog.locator("select").first();
+ verify("Primary change becomes the default in a fresh Mailbox form",
+   (await nextSelect.inputValue())===secondaryDomain.id);
+ await nextSelect.selectOption(initialDomain.id);
+ await nextDialog.getByRole("button",{name:"Cancel"}).click();
+ await sample.page.getByRole("button",{name:"Create mailbox"}).first().click();
+ verify("Reopened form resets manual override back to primary",
+   (await nextSelect.inputValue())===secondaryDomain.id);
+ verify("Dropdown stays plain after primary change",
+   (await nextSelect.locator("option").allTextContents()).every(label=>!label.includes("Primary")));
+ await sample.page.keyboard.press("Escape");
  verify("No runtime errors in main list flows",sample.errors.length===0,{errors:sample.errors});
  await sample.ctx.close();
 
@@ -161,6 +194,8 @@ try{
  await limited.page.waitForTimeout(450);
  await screenshot(limited.page,"phase2a-08-domains-mobile-readonly");
  verify("Read-only member cannot create a domain",await limited.page.getByRole("button",{name:"Add domain"}).first().isDisabled());
+ verify("Read-only member cannot change primary domain",
+   (await limited.page.getByRole("button",{name:"Set as primary"}).count())===0);
  verify("Mobile Domains document has no horizontal overflow",(await tableMetrics(limited.page)).scroll<=391,await tableMetrics(limited.page));
  await limited.ctx.close();
 }catch(err){report.error=err.stack||String(err);process.exitCode=1;}
