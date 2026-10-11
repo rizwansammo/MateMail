@@ -328,9 +328,18 @@
 .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-sidebar{
   display:none;
 }
-.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-astra-breadcrumb,
 .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-mobile-trigger{
   display:none;
+}
+/* Prototype Settings breadcrumb replaces blank topbar space; no logo in Settings. */
+.pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-astra-settings-breadcrumb{
+  display:flex;
+  flex:0 1 27%;
+  min-width:140px;
+  max-width:290px;
+}
+@media (max-width:767px){
+  .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-astra-settings-breadcrumb{display:none}
 }
 .pb-premium-shell.pb-astra-postbox:has(.pb-premium-settings) .pb-premium-settings{
   width:100%;

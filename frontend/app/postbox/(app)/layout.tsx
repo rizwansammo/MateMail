@@ -609,11 +609,19 @@ function PremiumPostBoxShell({
             <Menu className="h-5 w-5" aria-hidden="true" />
           </button>
 
-          <div className="pb-astra-breadcrumb" aria-label="Current PostBox location">
-            <span>{pathname.startsWith("/postbox/contacts") ? "People" : pathname.startsWith("/postbox/settings") ? "Settings" : "Mail"}</span>
-            <ChevronRight size={12} aria-hidden="true" />
-            <strong>{mailbox.full_name || mailbox.email}</strong>
-          </div>
+          {pathname.startsWith("/postbox/settings") ? (
+            <div className="pb-astra-breadcrumb pb-astra-settings-breadcrumb" aria-label="Settings location">
+              <span>Preferences</span>
+              <ChevronRight size={12} aria-hidden="true" />
+              <strong>Settings</strong>
+            </div>
+          ) : (
+            <div className="pb-astra-breadcrumb" aria-label="Current PostBox location">
+              <span>{pathname.startsWith("/postbox/contacts") ? "People" : "Mail"}</span>
+              <ChevronRight size={12} aria-hidden="true" />
+              <strong>{mailbox.full_name || mailbox.email}</strong>
+            </div>
+          )}
 
           {canReadMailbox ? (
             <Suspense fallback={<div className="pb-premium-search" aria-hidden="true" />}>

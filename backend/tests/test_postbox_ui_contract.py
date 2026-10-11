@@ -913,7 +913,7 @@ class MateMailOfficial05BBrandTest(SimpleTestCase):
             self.assertIn('<span className="pb-premium-wordmark">PostBox</span>', source)
         self.assertIn('className="pb-premium-brand-mark"', layout)
         self.assertIn('background-image:url("/assets/matemail-logo-white.svg")', css)
-        self.assertIn('background-image:url("/assets/matemail-logo-color.svg")', css)
+        self.assertIn('background-image:url("/assets/matemail-logo-black.svg")', css)
         self.assertIn(':root[data-pb-theme="dark"]', css)
         self.assertIn("MateMail-05B", favicon)
 
@@ -936,7 +936,12 @@ class AppRailVisualPreferenceContractTest(SimpleTestCase):
     def test_dark_mark_uses_same_geometry_and_white_background(self):
         original = read("public", "assets", "matemail-mark-light.svg")
         inverse = read("public", "assets", "matemail-mark-inverse.svg")
-        self.assertEqual(inverse, original.replace('#F4F7FB', '#FFFFFF'))
+        black = read("public", "assets", "matemail-mark-black.svg")
+        self.assertEqual(black, inverse.replace('#112845', '#111111').replace('#0C6AF0', '#111111'))
+        self.assertNotIn('#0C6AF0', black)
+        self.assertIn('fill="#FFFFFF"', black)
         component = read("components", "brand-mark.tsx")
         self.assertIn("mm-official-brand-default", component)
         self.assertIn("mm-official-brand-inverse", component)
+        self.assertIn('/assets/matemail-mark-black.svg', component)
+        self.assertIn("pb-astra-settings-breadcrumb", read("app", "postbox", "(app)", "layout.tsx"))

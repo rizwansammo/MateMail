@@ -100,3 +100,11 @@ test('independent app sidebar preferences default On and preserve routes', () =>
   assert.doesNotMatch(visual,/:has\(\.pb-premium-settings\) \.pb-astra-app-rail/);
   assert.doesNotMatch(visual,/:has\(\.pb-premium-settings\) \.pb-premium-search/);
 });
+
+test('Settings has the prototype breadcrumb without duplicate branding', () => {
+  assert.match(shell,/className="pb-astra-breadcrumb pb-astra-settings-breadcrumb"/);
+  assert.match(shell,/aria-label="Settings location"/);
+  assert.match(shell,/<span>Preferences<\/span>/);
+  assert.match(visual,/\.pb-astra-settings-breadcrumb\{\s*display:flex/);
+  assert.doesNotMatch(visual,/:has\(\.pb-premium-settings\) \.pb-astra-breadcrumb,\s*/);
+});

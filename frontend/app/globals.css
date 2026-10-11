@@ -6422,20 +6422,20 @@ body {
   background-image:url("/assets/matemail-logo-white.svg");
   background-position:center;
   background-repeat:no-repeat;
-  background-size:auto 22px;
+  background-size:auto 20px;
   border-radius:4px;
 }
-.pb-premium-login-mark { background-size:auto 25px; }
+.pb-premium-login-mark { background-size:auto 22px; }
 :root[data-pb-theme="dark"] .pb-premium-brand-mark,
 :root[data-pb-theme="dark"] .pb-premium-login-mark {
   background-color:#FFFFFF;
-  background-image:url("/assets/matemail-logo-color.svg");
+  background-image:url("/assets/matemail-logo-black.svg");
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-pb-theme="light"]) .pb-premium-brand-mark,
   :root:not([data-pb-theme="light"]) .pb-premium-login-mark {
     background-color:#FFFFFF;
-    background-image:url("/assets/matemail-logo-color.svg");
+    background-image:url("/assets/matemail-logo-black.svg");
   }
 }
 /* The Hub and Platform marks retain identical dimensions across themes. */

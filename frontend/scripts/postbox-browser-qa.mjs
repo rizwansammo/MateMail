@@ -265,7 +265,7 @@ try{
     near(alignment.wordmarkTextX,alignment.composeTextX,3)&&
     near(alignment.composeTextX,alignment.inboxTextX,4),alignment);
   check('rail and 78px branded header align in approved composition',
-    alignment.railFirstY===14&&alignment.brandIconY>=24&&alignment.brandIconY<=25&&
+    alignment.railFirstY===14&&alignment.brandIconY>=20&&alignment.brandIconY<=22&&
     Math.abs(alignment.railIconY-alignment.brandIconY)<=7,alignment);
   check('New Message and Inbox follow approved 78px header and 18px spacer',
     alignment.composeY===78&&alignment.inboxY===136,alignment);
@@ -427,6 +427,10 @@ try{
   });
   check('Settings nav follows the app rail',Math.abs(settingNav.x-62)<=2,settingNav);
   check('Settings app rail visible by default',await page.locator('.pb-astra-app-rail').isVisible());
+  check('Settings shows prototype breadcrumb, not a logo',
+    await page.getByLabel('Settings location').isVisible() &&
+    await page.getByLabel('Settings location').getByText('Preferences').isVisible() &&
+    !(await page.locator('.pb-premium-brand').isVisible()));
   check('Settings hides Mail folders',!(await page.locator('.pb-premium-sidebar').isVisible()));
   check('Settings Back link hidden when rail visible',!(await page.locator('.pb-settings-back').isVisible()));
   const searchGap=await page.evaluate(()=>{
