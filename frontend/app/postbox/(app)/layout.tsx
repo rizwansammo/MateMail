@@ -29,6 +29,7 @@ import {
   Moon,
   Monitor,
   Search,
+  RefreshCw,
   Send,
   Settings,
   Settings2,
@@ -615,6 +616,12 @@ function PremiumPostBoxShell({
             <Menu className="h-5 w-5" aria-hidden="true" />
           </button>
 
+          <div className="pb-astra-breadcrumb" aria-label="Current PostBox location">
+            <span>{pathname.startsWith("/postbox/contacts") ? "People" : pathname.startsWith("/postbox/settings") ? "Settings" : "Mail"}</span>
+            <ChevronRight size={12} aria-hidden="true" />
+            <strong>{mailbox.full_name || mailbox.email}</strong>
+          </div>
+
           {canReadMailbox ? (
             <Suspense fallback={<div className="pb-premium-search" aria-hidden="true" />}>
               <PremiumSearch />
@@ -627,6 +634,14 @@ function PremiumPostBoxShell({
           )}
 
           <div className="pb-premium-top-actions">
+            <button type="button" className="pb-premium-icon-link pb-astra-refresh"
+              aria-label="Refresh mail" title="Refresh mail"
+              onClick={() => {
+                window.dispatchEvent(new Event(POSTBOX_MAILBOX_EVENT));
+                window.dispatchEvent(new Event("postbox:refresh-folders"));
+              }}>
+              <RefreshCw className="h-5 w-5" aria-hidden="true" />
+            </button>
             <Link
               href="/postbox/settings?section=appearance"
               className="pb-premium-icon-link"

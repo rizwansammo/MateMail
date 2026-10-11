@@ -306,3 +306,17 @@
  .pb-astra-postbox .pb-premium-compose-shell .pb-compose-head{padding-inline:13px}
  .pb-astra-postbox .pb-premium-compose-shell .pb-compose-fields{padding-inline:13px}
 }
+
+/* B2 top bar breadcrumb and refresh; source is authenticated mailbox. */
+.pb-astra-postbox .pb-astra-breadcrumb{
+ display:flex;align-items:center;gap:10px;min-width:140px;max-width:290px;
+ flex:0 1 27%;color:var(--pb-muted);font-size:12px;white-space:nowrap;
+}
+.pb-astra-postbox .pb-astra-breadcrumb strong{
+ min-width:0;color:var(--pb-fg);font-size:12px;font-weight:600;
+ overflow:hidden;text-overflow:ellipsis;
+}
+.pb-astra-postbox .pb-premium-search{margin-left:auto;margin-right:auto}
+.pb-astra-postbox .pb-astra-refresh{display:inline-flex;align-items:center;justify-content:center}
+@media(max-width:1050px){.pb-astra-postbox .pb-astra-breadcrumb{display:none}}
+@media(max-width:767px){.pb-astra-postbox .pb-astra-refresh{display:none}}
