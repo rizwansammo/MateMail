@@ -342,3 +342,12 @@
    flex:1;width:auto;max-width:510px;
  }
 }
+ 
+/* Prototype label mark only; existing MateMail folder and label management untouched. */
+.pb-astra-postbox .pb-message-labels{display:inline-flex;align-items:center;flex:none;gap:4px;margin-left:8px;max-width:125px;white-space:nowrap}
+.pb-astra-postbox .pb-message-label{display:inline-flex;max-width:90px;min-width:0;align-items:center;justify-content:center;border:1px solid color-mix(in srgb,var(--pb-label-color) 38%,transparent);border-radius:3px;padding:1px 6px;background:color-mix(in srgb,var(--pb-label-color) 12%,var(--pb-bg));color:var(--pb-label-color);font-size:10px;font-weight:650;line-height:16px}
+.pb-astra-postbox .pb-message-label svg{display:none}
+.pb-astra-postbox .pb-premium-message-row .pb-row-subject,.pb-astra-postbox .pb-thread-list-subject{display:flex;align-items:baseline;min-width:0;gap:0}
+.pb-astra-postbox .pb-astra-row-preview{color:var(--pb-muted);font-weight:400;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;font-size:11px}
+.pb-astra-postbox.pb-density-extra-compact .pb-message-label{font-size:9px;line-height:15px;padding:0 5px}
+@media(max-width:767px){.pb-astra-postbox .pb-astra-row-preview{display:none}.pb-astra-postbox .pb-message-labels{max-width:90px;margin-left:5px}}

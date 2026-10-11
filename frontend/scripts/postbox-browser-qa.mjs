@@ -35,7 +35,9 @@ const msg=(uid,subject,from,date)=>({
  uid,uid_validity:1001,folder:'INBOX',message_id:'<qa-'+uid+'@northstar.example>',
  subject,from:{name:from,address:from.toLowerCase().replace(/\s+/g,'.')+'@example.test'},
  to:[person.email],cc:[],date,size:2048,seen:uid===2,flagged:uid===1,
- answered:false,draft:false,has_attachments:false,in_reply_to:'',references:[],labels:[]
+ answered:false,draft:false,has_attachments:false,in_reply_to:'',references:[],
+ preview:uid===1?'Here is the updated roadmap and our next delivery milestones.':'Project documentation and next steps.',
+ labels:uid===1?[{id:'label-1',name:'Priority',color:'#3560a3'}]:[]
 });
 const messages=[
  msg(1,'Quarterly roadmap and delivery milestones','Jamie Chen','2026-10-11T09:18:00Z'),
@@ -134,6 +136,14 @@ try{
   await shot(page,'01-inbox-extra-compact');
   check('three application rail routes',await page.locator('.pb-astra-app-rail a').count()===3);
   check('mail list visible',await page.locator('.pb-premium-message-row').count()>=2);
+  check('bounded API preview text rendered in Inbox row',
+    await page.locator('.pb-premium-message-row .pb-astra-row-preview').first().isVisible());
+  check('prototype-style label badge renders real label metadata',
+    await page.locator('.pb-premium-message-row .pb-message-label').first().isVisible());
+  const badge=await page.locator('.pb-premium-message-row .pb-message-label').first().evaluate(el=>{
+    const style=getComputedStyle(el);return {background:style.backgroundColor,color:style.color,radius:style.borderRadius};
+  });
+  check('badge uses visible color and sharp corners',badge.background!=='rgba(0, 0, 0, 0)'&&badge.radius==='3px',badge);
   const layout=await page.evaluate(()=>({width:document.documentElement.scrollWidth,inner:innerWidth,rail:Math.round(document.querySelector('.pb-astra-app-rail')?.getBoundingClientRect().width||0)}));
   check('desktop rail is compact',layout.rail>=45&&layout.rail<=70,layout);
   await page.locator('details.pb-premium-account summary').click();

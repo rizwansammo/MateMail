@@ -165,6 +165,23 @@ class ConversationListView(ConversationMixin):
         mapping = labels_for_summaries(
             self.mailbox, [item.latest.primary for item in window]
         )
+        grouped: dict[str, list[imap.MessageSummary]] = {}
+        for item in window:
+            grouped.setdefault(item.latest.primary.folder, []).append(item.latest.primary)
+        if grouped:
+            try:
+                with imap.open_mailbox(self.mailbox.email) as connection:
+                    for folder_name, entries in grouped.items():
+                        try:
+                            info = connection.select(folder_name, readonly=True)
+                            connection.fetch_previews(
+                                [row for row in entries if row.uid_validity == info.uid_validity]
+                            )
+                        except (imap.MailAccessError, OSError):
+                            # A deleted folder must not break conversation listing.
+                            continue
+            except (imap.MailAccessError, OSError):
+                pass
         results = [_conversation_payload(item) for item in window]
         for result, item in zip(results, window):
             result["latest"]["labels"] = mapping[virtual_label_key(item.latest.primary)]
