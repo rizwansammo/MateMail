@@ -37,6 +37,13 @@ interface Member {
   role: string;
   status: string;
 }
+interface CustomHostname {
+  id: string;
+  hostname: string;
+  surface: "hub" | "postbox";
+  dns_status: string;
+  provisioning_status: string;
+}
 interface Event {
   id: string;
   event_type: string;
@@ -108,18 +115,14 @@ export default function DashboardPage() {
   const [members,setMembers]=useState<Member[]|null>(null);
   const [events,setEvents]=useState<Event[]|null>(null);
   const [onboarding,setOnboarding]=useState<Onboarding|null>(null);
+  const [hostnames,setHostnames]=useState<CustomHostname[]>([]);
   const [loading,setLoading]=useState(true);
+  const [loadedTenant,setLoadedTenant]=useState("");
   const [createOpen,setCreateOpen]=useState(false);
 
   useEffect(()=>{
-    if(!tenantId){setLoading(false);return;}
+    if(!tenantId)return;
     let cancelled=false;
-    setLoading(true);
-    setStats(null);
-    setDomains([]);
-    setMembers(null);
-    setEvents(null);
-    setOnboarding(null);
     const get=async(url:string)=>{
       const response=await apiRequest(url);
       if(!response.ok)throw new Error("Resource unavailable");
@@ -131,16 +134,21 @@ export default function DashboardPage() {
       get("/api/workspaces/"+encodeURIComponent(tenantId)+"/members/"),
       get("/api/logs/"),
       get("/api/workspaces/"+encodeURIComponent(tenantId)+"/onboarding/"),
+      get("/api/custom-hostnames/"),
     ]).then(results=>{
       if(cancelled)return;
-      const [st,dom,mem,log,setup]=results;
-      if(st.status==="fulfilled" && st.value && typeof st.value==="object")
-        setStats(st.value as WorkspaceStats);
-      if(dom.status==="fulfilled")setDomains(items<Domain>(dom.value));
-      if(mem.status==="fulfilled")setMembers(items<Member>(mem.value));
-      if(log.status==="fulfilled")setEvents(items<Event>(log.value).slice(0,4));
-      if(setup.status==="fulfilled" && setup.value && typeof setup.value==="object")
-        setOnboarding(setup.value as Onboarding);
+      const [st,dom,mem,log,setup,hosts]=results;
+      // Reset every result on failed calls: never retain another tenant's
+      // records or display stale role/status after an account transition.
+      setStats(st.status==="fulfilled" && st.value && typeof st.value==="object"
+        ?st.value as WorkspaceStats:null);
+      setDomains(dom.status==="fulfilled"?items<Domain>(dom.value):[]);
+      setMembers(mem.status==="fulfilled"?items<Member>(mem.value):null);
+      setEvents(log.status==="fulfilled"?items<Event>(log.value).slice(0,4):null);
+      setOnboarding(setup.status==="fulfilled" && setup.value && typeof setup.value==="object"
+        ?setup.value as Onboarding:null);
+      setHostnames(hosts.status==="fulfilled"?items<CustomHostname>(hosts.value):[]);
+      setLoadedTenant(tenantId);
       setLoading(false);
     });
     return()=>{cancelled=true;};
@@ -154,10 +162,16 @@ export default function DashboardPage() {
   const usedGb=(stats?.storage_used_mb||0)/1024;
   const quotaGb=(stats?.storage_quota_mb||0)/1024;
   const attention=useMemo(()=>domains.filter(d=>tone(d)!=="good"),[domains]);
+  const hostnameNeeds=useMemo(()=>hostnames.filter(host=>host.provisioning_status!=="active" && host.provisioning_status!=="inactive"),[hostnames]);
   const memberPreview=adminMembers.slice(0,4);
   const liveDate=useMemo(()=>new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"}),[]);
 
-  if(loading && !stats) return <div className="astra-overview" aria-busy="true">
+  if(!tenantId) return <div className="astra-overview">
+    <div className="astra-ov-welcome"><div><h1>Workspace unavailable</h1>
+      <p>No active organization is attached to this Hub session.</p></div></div>
+  </div>;
+
+  if(loading || loadedTenant!==tenantId) return <div className="astra-overview" aria-busy="true">
     <div className="astra-ov-topline"><span>ORGANIZATION OVERVIEW</span></div>
     <div className="astra-ov-welcome"><div><h1>Your workspace, in focus.</h1>
       <p>Loading verified organization data…</p></div></div>
@@ -233,8 +247,8 @@ export default function DashboardPage() {
       <section className="astra-ov-panel">
         <div className="astra-ov-panel-head"><div><h2>Needs attention</h2>
           <p>A clear next step for every issue</p></div>
-          <span className="astra-ov-count">{attention.length}</span></div>
-        {attention.length===0?<div className="astra-ov-allclear"><CheckCircle2 size={23}/>
+          <span className="astra-ov-count">{attention.length+hostnameNeeds.length}</span></div>
+        {attention.length===0&&hostnameNeeds.length===0?<div className="astra-ov-allclear"><CheckCircle2 size={23}/>
           <h3>Nothing needs your attention</h3>
           <p>{domains.length?"No domain issues detected in the available data.":"Connect a domain to start monitoring its health."}</p>
           </div>:
@@ -246,6 +260,12 @@ export default function DashboardPage() {
                 <small>{domain.domain}</small></span><ChevronRight size={15}/>
             </Link>;
           })}
+        {hostnameNeeds.slice(0,Math.max(0,5-attention.length)).map(host=><Link
+          key={host.id} className="astra-ov-attention" href="/app/settings#hub-custom-hostnames">
+          <span className="astra-ov-counter">{String(attention.length+hostnameNeeds.indexOf(host)+1).padStart(2,"0")}</span>
+          <span><strong>Finish your custom address</strong><small>{host.hostname}</small></span>
+          <ChevronRight size={15}/>
+        </Link>)}
       </section>
     </div>
 

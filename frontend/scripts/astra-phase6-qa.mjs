@@ -50,6 +50,8 @@ async function prepare(viewport) {
       ];
     else if (endpoint === "/api/logs/")
       data = [{ id:"l1", event_type:"domain_verified", source:"healthy.example.test", result:"success", created_at:"2026-10-10T00:00:00Z" }];
+    else if (endpoint === "/api/custom-hostnames/")
+      data = [{id:"h1",hostname:"manage.pending.example.test",surface:"hub",dns_status:"pending",provisioning_status:"unprovisioned"}];
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data) });
   });
   const page = await context.newPage();
@@ -98,6 +100,9 @@ try {
     (await desktop.page.getByText("2", { exact: true }).count()) > 0 &&
     (await desktop.page.getByText("healthy.example.test").count()) > 0 &&
     (await desktop.page.getByText("Northstar Studio").count()) === 0);
+  check("Custom hostname attention is sourced from backend, not prototype seed",
+    (await desktop.page.getByText("Finish your custom address").count()) === 1 &&
+    (await desktop.page.getByText("manage.pending.example.test").count()) === 1);
   check("Original organization identity card is visible in sidebar",
     (await desktop.page.locator(".astra-sidebar .astra-org-card").count()) === 1 &&
     (await desktop.page.locator(".astra-sidebar").getByText("QA Workspace").count()) === 1);
