@@ -114,7 +114,8 @@ async function prepare({viewport={width:1440,height:900},density='extra_compact'
 }
 async function visit(p,url='/postbox?folder=INBOX&view=messages'){
  await p.goto(base+url,{waitUntil:'domcontentloaded',timeout:60000});
- await p.locator('.pb-astra-app-rail').waitFor({state:'visible',timeout:30000});
+ const selector=url.startsWith('/postbox/settings')?'.pb-premium-settings-nav':'.pb-astra-app-rail';
+ await p.locator(selector).waitFor({state:'visible',timeout:30000});
 }
 async function scenario(name,fn){
  let context;
@@ -181,6 +182,12 @@ try{
    return {left:Math.round(a.left-b.left),right:Math.round(b.right-a.right)};
   });
   check('settings cards centered',Math.abs(m.left-m.right)<=5,m);
+  const settingNav=await page.locator('.pb-premium-settings-nav').evaluate(el=>{
+    const rect=el.getBoundingClientRect();return {x:Math.round(rect.x),width:Math.round(rect.width)};
+  });
+  check('Settings begins with its own left navigation',settingNav.x<=2,settingNav);
+  check('Settings hides Mail and Folder navigation',!(await page.locator('.pb-astra-app-rail').isVisible())
+    &&!(await page.locator('.pb-premium-sidebar').isVisible()));
   check('settings page without JS exception',errors.length===0,{errors});
  });
  await scenario({label:'dark theme and mobile layout',options:{viewport:{width:390,height:844},theme:'dark',density:'extra_compact'}},async({page,errors})=>{
