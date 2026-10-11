@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <title>MateMail</title>
-  <rect width="64" height="64" fill="#0B1F44"/>
-  <path fill="#FFFFFF" d="M13.5 27L13.5 50.5L50.5 50.5L50.5 27L45.5 27L45.5 45.5L18.5 45.5L18.5 27Z"/>
-  <path fill="#6FA8FF" d="M13.5 12L32 25.875L50.5 12L50.5 18.25L32 32.125L13.5 18.25Z"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="MateMail MateMail-05B app"><title>MateMail MateMail-05B</title><desc>Revision 2. Precise geometric construction of the selected 05B prototype. Straight L/H/V segments and four radius-24 corner arcs. No embedded raster artwork.</desc><rect width="1024" height="1024" rx="164" fill="#112845"/><g transform="translate(-424.81555 31.39411) scale(1.2198119)"><g fill="#FFFFFF"><path d="M473 176 H529 L768 337 L1005 176 H1063 A24 24 0 0 1 1087 200 V588 A24 24 0 0 1 1063 612 H1031 L922 539 V427 L1001 374 V321 L768 475 L534 321 V374 L614 427 V539 L505 612 H473 A24 24 0 0 1 449 588 V200 A24 24 0 0 1 473 176 Z"/></g></g></svg>

@@ -196,6 +196,8 @@ function isInfrastructurePath(pathname: string): boolean {
     pathname.startsWith("/api") ||
     pathname.startsWith("/assets/") ||
     pathname === "/icon.png" ||
+    pathname === "/icon.svg" ||
+    pathname === "/favicon.ico" ||
     pathname === "/apple-icon.png" ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml"
@@ -385,7 +387,7 @@ export const config = {
      * "icon" still receives its CSP.
      */
     {
-      source: "/((?!_next/static|_next/image|icon\\.png$|apple-icon\\.png$).*)",
+      source: "/((?!_next/static|_next/image|icon\\.png$|icon\\.svg$|favicon\\.ico$|apple-icon\\.png$).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

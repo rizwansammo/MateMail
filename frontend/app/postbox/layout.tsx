@@ -22,14 +22,14 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: "/postbox/favicon?v=3",
+        url: "/postbox/favicon?v=4",
         type: "image/svg+xml",
         sizes: "any",
       },
     ],
     shortcut: [
       {
-        url: "/postbox/favicon?v=3",
+        url: "/postbox/favicon?v=4",
         type: "image/svg+xml",
         sizes: "any",
       },
