@@ -658,7 +658,15 @@ jobs:
             # nothing, and setting it to false would have implied a skip that
             # could not happen. A control that does not control is worse than
             # no control.
-            docker compose up -d --remove-orphans
+            if ! docker compose up -d --remove-orphans; then
+              # Failure here is commonly the one-shot migrate service.
+              # A rollback recreates that container and erases its stdout,
+              # so capture its diagnostics before replacing it.
+              echo "ERROR: service startup failed; migration diagnostics follow." >&2
+              docker compose logs --tail=100 migrate 2>&1 || true
+              rollback
+              exit 1
+            fi
 
             echo "▸ Waiting for backend health..."
             for i in $(seq 1 30); do

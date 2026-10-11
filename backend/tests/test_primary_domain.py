@@ -211,3 +211,21 @@ class PrimaryDomainTests(TestCase):
         self.assertEqual(
             Domain.objects.filter(tenant=self.tenant, is_primary=True).count(), 1
         )
+
+    def test_existing_data_backfill_and_unique_index_use_separate_transactions(self):
+        """Regression: production PG rejects CREATE INDEX after uncommitted
+        data updates on domains_domain with pending trigger events."""
+        from importlib import import_module
+        from django.db.migrations.operations.models import AddConstraint
+        from django.db.migrations.operations.special import RunPython
+
+        populate = import_module("apps.domains.migrations.0007_primary_domain").Migration
+        unique = import_module("apps.domains.migrations.0008_unique_primary_domain").Migration
+        self.assertTrue(any(isinstance(op, RunPython) for op in populate.operations))
+        self.assertFalse(any(isinstance(op, AddConstraint) for op in populate.operations))
+        self.assertEqual(unique.dependencies, [("domains", "0007_primary_domain")])
+        self.assertEqual(len(unique.operations), 1)
+        self.assertIsInstance(unique.operations[0], AddConstraint)
+        self.assertEqual(
+            unique.operations[0].constraint.name, "uniq_primary_domain_per_tenant"
+        )
