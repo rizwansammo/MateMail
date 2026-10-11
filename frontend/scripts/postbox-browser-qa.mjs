@@ -153,11 +153,49 @@ try{
       firstFolder:rect('.pb-premium-nav-link')};
   });
   check('sidebar width matches approved 227px',geometry.sidebar?.width===227,geometry);
-  check('brand height matches approved 78px',geometry.brand?.height===78,geometry);
+  check('brand height matches screenshot 64px',geometry.brand?.height===64,geometry);
   check('topbar height matches approved 65px',geometry.topbar?.height===65,geometry);
   check('compose launcher matches approved 40px',geometry.compose?.height===40,geometry);
   check('Inbox toolbar matches approved 44px',geometry.toolbar?.height===44,geometry);
   check('folder rows match approved 34px',geometry.firstFolder?.height===34,geometry);
+  const alignment=await page.evaluate(()=>{
+    const get=selector=>document.querySelector(selector);
+    const box=node=>node?.getBoundingClientRect()||null;
+    const left=node=>{const r=box(node);return r?Math.round(r.left):null};
+    const top=node=>{const r=box(node);return r?Math.round(r.top):null};
+    const brand=get('.pb-premium-brand-mark');
+    const wordmark=get('.pb-premium-wordmark');
+    const button=get('.pb-premium-compose');
+    const inbox=get('.pb-premium-nav-link[data-role="inbox"]');
+    const composeIcon=button?.querySelector('svg');
+    const inboxIcon=inbox?.querySelector('svg');
+    const inboxText=inbox?.querySelector('span');
+    const textNode=Array.from(button?.childNodes||[]).find(n=>n.nodeType===Node.TEXT_NODE&&n.textContent?.trim());
+    const range=document.createRange();
+    if(textNode)range.selectNodeContents(textNode);
+    const railItem=get('.pb-astra-rail-item');
+    return {
+      brandIconX:left(brand),composeBoxX:left(button),inboxBoxX:left(inbox),
+      composeIconX:left(composeIcon),inboxIconX:left(inboxIcon),
+      wordmarkTextX:left(wordmark),composeTextX:textNode?Math.round(range.getBoundingClientRect().left):null,
+      inboxTextX:left(inboxText),
+      railFirstY:top(railItem),brandIconY:top(brand),
+      composeY:top(button),inboxY:top(inbox),
+      railIconY:top(railItem?.querySelector('svg'))
+    };
+  });
+  const near=(a,b,tolerance=1)=>a!==null&&b!==null&&Math.abs(a-b)<=tolerance;
+  check('logo, Compose and Inbox share one left edge',
+    near(alignment.brandIconX,alignment.composeBoxX)&&near(alignment.composeBoxX,alignment.inboxBoxX),alignment);
+  check('Compose and Inbox icons align horizontally',
+    near(alignment.composeIconX,alignment.inboxIconX),alignment);
+  check('brand wordmark, Compose and Inbox labels align horizontally',
+    near(alignment.wordmarkTextX,alignment.composeTextX,2)&&near(alignment.composeTextX,alignment.inboxTextX,2),alignment);
+  check('rail icon and brand align near top of app',
+    alignment.railFirstY===14&&alignment.brandIconY>=17&&alignment.brandIconY<=19&&
+    Math.abs(alignment.railIconY-alignment.brandIconY)<=7,alignment);
+  check('New Message and Inbox follow screenshot vertical rhythm',
+    alignment.composeY===64&&alignment.inboxY===120,alignment);
   const railStart=await page.locator('.pb-astra-app-rail').evaluate(el=>{
     const first=el.querySelector('.pb-astra-rail-item');
     return {railTop:el.getBoundingClientRect().top,
@@ -262,6 +300,21 @@ try{
   await page.getByRole('button',{name:'Open folders'}).click();
   await shot(page,'08-phone-sidebar-open');
   check('mobile folder drawer opens',await page.locator('.pb-premium-sidebar[data-open=true]').count()===1);
+  const mobileAlignment=await page.evaluate(()=>{
+    const box=selector=>document.querySelector(selector)?.getBoundingClientRect();
+    const brand=box('.pb-premium-brand-mark'),compose=box('.pb-premium-compose'),inbox=box('.pb-premium-nav-link[data-role="inbox"]');
+    const rail=box('.pb-astra-rail-item');
+    return {brandLeft:Math.round(brand?.left??-1),composeLeft:Math.round(compose?.left??-1),
+      inboxLeft:Math.round(inbox?.left??-1),brandTop:Math.round(brand?.top??-1),
+      composeTop:Math.round(compose?.top??-1),inboxTop:Math.round(inbox?.top??-1),
+      railFirstTop:Math.round(rail?.top??-1)};
+  });
+  check('mobile sidebar brand, compose, inbox share left edge',
+    mobileAlignment.brandLeft===mobileAlignment.composeLeft&&
+    mobileAlignment.composeLeft===mobileAlignment.inboxLeft,mobileAlignment);
+  check('mobile sidebar vertical rhythm matches screenshot',
+    mobileAlignment.railFirstTop===14&&mobileAlignment.composeTop===64&&mobileAlignment.inboxTop===120,
+    mobileAlignment);
   check('mobile no JS exception',errors.length===0,{errors});
  });
 }catch(e){failed=true;report.errors.push({scenario:'runner',error:e.stack||String(e)})}
