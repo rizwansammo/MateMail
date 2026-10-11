@@ -1,0 +1,60 @@
+@font-face {
+  font-family: "MateMailSplashHemi";
+  src: url("/postbox/HemiHead-Bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+@keyframes mm-splash-spin { to { transform: rotate(360deg); } }
+@keyframes mm-splash-reveal {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.mm-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  background: #0e1522;
+  color: #f6f9ff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.28s ease;
+}
+.mm-splash--out { opacity: 0; pointer-events: none; }
+.mm-splash__ring { position: relative; width: 152px; height: 152px; display: grid; place-items: center; }
+.mm-splash__track, .mm-splash__arc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+.mm-splash__track { border: 2px solid rgba(12, 106, 240, 0.22); }
+.mm-splash__arc {
+  border: 2.5px solid transparent;
+  border-top-color: #0c6af0;
+  border-right-color: #64a5ff;
+  animation: mm-splash-spin 0.9s linear infinite;
+}
+.mm-splash__mark { width: 96px; height: 96px; display: block; object-fit: contain; border-radius: 0; }
+.mm-splash__wordmark {
+  margin-top: 22px;
+  font: 700 22px/1 "MateMailSplashHemi", sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  animation: mm-splash-reveal 0.5s ease 0.12s both;
+}
+.mm-splash__caption {
+  margin-top: 11px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #a5b5cc;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mm-splash__arc, .mm-splash__wordmark { animation: none; }
+  .mm-splash { transition-duration: 0.01ms; }
+}

@@ -218,6 +218,10 @@ jobs:
         working-directory: frontend
         run: node --test scripts/auth-request-policy.test.mjs
 
+      - name: MateMail splash navigation regression tests
+        working-directory: frontend
+        run: node --test scripts/matemail-splash.test.mjs
+
       - name: Production build
         working-directory: frontend
         run: npm run build

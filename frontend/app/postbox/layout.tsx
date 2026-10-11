@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { PostBoxProvider } from "@/contexts/postbox-context";
+import { MateMailSplash } from "@/components/matemail-splash";
 
 /**
  * Everything under /postbox.
@@ -42,5 +43,5 @@ export const metadata: Metadata = {
 export default function PostBoxLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return <PostBoxProvider>{children}</PostBoxProvider>;
+  return <PostBoxProvider><MateMailSplash surface="postbox" />{children}</PostBoxProvider>;
 }
