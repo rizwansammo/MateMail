@@ -259,3 +259,50 @@
  .pb-astra-postbox .pb-premium-settings-nav{width:100%;flex-basis:auto}
  .pb-astra-postbox .pb-premium-account-panel{width:min(385px,calc(100vw - 24px))}
 }
+
+/* B3: approved Inbox list geometry; no changes to data fetching or list actions. */
+.pb-astra-postbox .pb-premium-mail-toolbar{min-height:46px;gap:12px;padding:6px 23px}
+.pb-astra-postbox .pb-premium-mail-tabs{gap:4px}
+.pb-astra-postbox .pb-premium-mail-tabs button{height:31px;padding:0 12px;font-size:12px;border-radius:3px}
+.pb-astra-postbox .pb-conversation-switch{border-radius:4px;background:var(--pb-bg);gap:2px;padding:2px}
+.pb-astra-postbox .pb-conversation-switch button{border-radius:3px;font-size:11px;padding:5px 9px}
+.pb-astra-postbox .pb-premium-sort-select{border:0;border-radius:3px;font-size:11px}
+.pb-astra-postbox .pb-premium-message-row{gap:10px;padding-inline:21px;background:var(--pb-bg)}
+.pb-astra-postbox .pb-premium-message-open{gap:12px}
+.pb-astra-postbox .pb-premium-message-row .pb-row-from{width:160px;flex-basis:160px}
+.pb-astra-postbox .pb-premium-message-row .pb-row-subject{font-weight:500}
+.pb-astra-postbox .pb-premium-row-avatar{background:var(--pb-selected);color:var(--pb-accent-fg)}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-row{min-height:41px;padding-inline:23px}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-open{height:40px;gap:9px}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-row-avatar{display:none}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-row .pb-row-from{width:160px;flex-basis:160px;font-size:12px}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-row .pb-row-subject{font-size:12px}
+.pb-astra-postbox.pb-density-extra-compact .pb-premium-message-open time{font-size:11px}
+.pb-astra-postbox.pb-density-compact .pb-premium-message-row{min-height:49px}
+.pb-astra-postbox.pb-density-compact .pb-premium-message-open{height:48px}
+.pb-astra-postbox.pb-density-compact .pb-premium-message-row .pb-row-from,
+.pb-astra-postbox.pb-density-compact .pb-premium-message-row .pb-row-subject{font-size:13px}
+.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-message-row{min-height:69px}
+.pb-astra-postbox:not(.pb-density-compact):not(.pb-density-extra-compact) .pb-premium-message-open{height:68px}
+/* B4: preserve real Compose, autosave, scheduling and attachment behavior. */
+.pb-astra-postbox .pb-premium-compose-shell{border-radius:6px;border-color:var(--pb-border-strong)}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-head{min-height:51px;padding:0 18px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-head>p{font-size:14px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-fields{padding-inline:18px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-fields>div{min-height:43px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-fields label{font-size:11px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-footer{padding:9px 14px;gap:7px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-body{font-size:13px;line-height:1.65}
+.pb-astra-postbox .pb-premium-compose-shell .pb-btn{border-radius:4px}
+.pb-astra-postbox .pb-premium-compose-shell .pb-compose-file-pill{border-radius:4px}
+.pb-astra-postbox .pb-thread-compose-host .pb-premium-compose-shell.pb-thread-inline-panel{border-radius:5px}
+@media(max-width:767px){
+ .pb-astra-postbox .pb-premium-mail-toolbar{padding:7px 10px;gap:5px}
+ .pb-astra-postbox .pb-premium-message-row{padding-inline:12px;gap:8px}
+ .pb-astra-postbox .pb-premium-message-row .pb-row-from{width:110px;flex-basis:110px}
+}
+@media(max-width:639px){
+ .pb-astra-postbox .pb-premium-compose-shell{border-radius:0}
+ .pb-astra-postbox .pb-premium-compose-shell .pb-compose-head{padding-inline:13px}
+ .pb-astra-postbox .pb-premium-compose-shell .pb-compose-fields{padding-inline:13px}
+}
