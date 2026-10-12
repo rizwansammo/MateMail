@@ -456,6 +456,7 @@ def set_mailbox_rate_limit(conn, address: str, messages: int, window: str) -> di
     first should survive a later review of who changed what.
     """
     name = validation.email_address(address)
+    _refuse_platform_domain(conn, name.rpartition("@")[2])
     if not isinstance(messages, int) or isinstance(messages, bool) or messages < 0:
         raise ValidationError("messages must be a whole number of zero or more",
                               field="messages")
@@ -596,6 +597,7 @@ def ensure_alias(conn, spec: dict) -> dict:
     the alias.
     """
     address = validation.email_address(spec["address"])
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     targets = validation.destinations(spec.get("destinations", []))
     if not targets:
         raise ValidationError("an alias requires at least one destination", "destinations")
@@ -637,6 +639,7 @@ def ensure_alias(conn, spec: dict) -> dict:
 
 def delete_alias(conn, address: str) -> None:
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     with conn.cursor() as cur:
         cur.execute("DELETE FROM alias WHERE address = %s", (address,))
 
@@ -700,6 +703,7 @@ _FORWARD_GROUP_POLICIES = {"anyone", "organization", "members", "selected"}
 
 def ensure_forward_group(conn, spec: dict) -> dict:
     address = validation.email_address(spec["address"])
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     destinations = validation.destinations(spec.get("destinations", []))
     allowed_senders = validation.destinations(spec.get("allowed_senders", []))
     sender_policy = str(spec.get("sender_policy") or "anyone").strip().lower()
@@ -768,6 +772,7 @@ def ensure_forward_group(conn, spec: dict) -> dict:
 
 def delete_forward_group(conn, address: str) -> None:
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     with conn.cursor() as cur:
         cur.execute("DELETE FROM forward_group WHERE address = %s", (address,))
 
@@ -816,6 +821,7 @@ def ensure_forwarding(conn, spec: dict) -> dict:
     grants that address nothing at all.
     """
     address = validation.email_address(spec["mailbox_address"], "mailbox_address")
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     targets = validation.destinations(spec.get("destinations", []))
 
     with conn.cursor() as cur:
@@ -1370,6 +1376,7 @@ def _ensure_dkim_for(conn, domain: str, selector: str) -> None:
 
 
 def rotate_dkim_key(conn, domain: str, selector: str = "") -> dict:
+    _refuse_platform_domain(conn, validation.domain_name(domain))
     with db.dkim_lifecycle_lock(conn):
         result = _rotate_dkim_key_unlocked(conn, domain, selector)
         _publish_selector_map(conn)
@@ -1377,6 +1384,7 @@ def rotate_dkim_key(conn, domain: str, selector: str = "") -> dict:
 
 
 def delete_dkim_key(conn, domain: str) -> None:
+    _refuse_platform_domain(conn, validation.domain_name(domain))
     with db.dkim_lifecycle_lock(conn):
         result = _delete_dkim_key_unlocked(conn, domain)
         _publish_selector_map(conn)

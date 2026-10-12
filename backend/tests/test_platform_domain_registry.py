@@ -67,8 +67,14 @@ class PlatformDomainRegistryTests(TestCase):
         pending = make_unverified_domain(other, first.domain)
         with self.assertRaises(DomainRegistryConflict):
             claim_verified_domain(pending)
+        # Even the same organization cannot reuse a claim with a different
+        # Domain UUID while a previous deletion is awaiting engine cleanup.
+        from types import SimpleNamespace
+        from uuid import uuid4
         with self.assertRaises(DomainRegistryConflict):
-            claim_verified_domain(make_unverified_domain(self.tenant, first.domain))
+            claim_verified_domain(SimpleNamespace(
+                domain=first.domain, tenant_id=self.tenant.id, pk=uuid4(),
+            ))
 
     def test_registry_refuses_provisioning_when_claim_missing(self):
         pending = make_unverified_domain(self.tenant, "registry-missing.example")

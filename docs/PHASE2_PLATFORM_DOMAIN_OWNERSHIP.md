@@ -37,3 +37,12 @@ Run Django migration check and backend regression tests in an isolated test
 database; run Native Engine migration and protection tests against disposable
 PostgreSQL, not the production engine. A successful branch commit alone is not
 a production validation.
+
+## Additional guards
+
+Native DKIM rotation/deletion, aliases, Forward Groups, forwarding and
+mailbox submission limit changes must also respect the platform reservation.
+A verified tenant must never be able to bypass the registry through a stale
+asynchronous delete task. While a customer Domain row still exists, engine
+deprovisioning is blocked; the cleanup path must be checked for queue races
+before this foundation can be approved for deployment.

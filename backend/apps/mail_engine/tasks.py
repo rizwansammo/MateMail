@@ -244,6 +244,13 @@ def deprovision_domain_task(self, domain_name: str):
     if claim is not None and claim.owner_kind == MailDomainOwnerKind.PLATFORM:
         logger.error("Refusing tenant deprovisioning of protected platform domain %s", domain_name)
         return
+    if claim is not None:
+        from apps.domains.models import Domain
+        # A pending claim from another tenant must never deprovision the
+        # domain still owned by the original verified customer.
+        if Domain.objects.filter(pk=claim.source_domain_id).exists():
+            logger.error("Refusing deprovision of %s while registered owner still exists", domain_name)
+            return
 
     adapter = get_adapter()
 
