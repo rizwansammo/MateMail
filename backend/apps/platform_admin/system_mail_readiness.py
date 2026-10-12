@@ -26,7 +26,7 @@ def _platform_claim(name: str) -> bool:
         domain=name,
         owner_kind=MailDomainOwnerKind.PLATFORM,
         tenant__isnull=True,
-        source_domain__isnull=True,
+        source_domain_id__isnull=True,
     ).exists()
 
 
