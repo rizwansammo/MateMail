@@ -44,10 +44,16 @@ A test also needed to preserve a Domain object's UUID before Django's
 
 1. A full project-wide Django/pytest CI run has not been performed. Relevant
    targeted suites passed. Do not describe CI as passing for this branch.
-2. Django migration reverse/forward rehearsal has not been completed in an
-   isolated test database. Test database forward migration succeeded.
-3. Production `matemail-backup.service` previously failed its integrity
-   check because of a Restic repository lock. Recovery is not yet re-verified.
+2. Django migration backfill, blocked platform-domain collision, reverse and
+   reapply rehearsals all PASSED on a disposable PostgreSQL 16 database.
+   A controlled two-database rollback procedure including Native Engine
+   migration 007 still needs release-level verification.
+3. Production `matemail-backup.service` remains in FAILED status because of
+   three stale Restic locks dated 2026-10-10. There were no active Restic
+   processes. A nonmutating `restic check --no-lock --quiet` returned 0, and
+   snapshot 9ab0d872 included the manifest and both DB dump paths. No locks
+   were removed, no service was rerun, and no restore was performed. A normal
+   successful backup and actual restore drill are still required.
 4. The controlled DNS Canary observation and unrelated mail security
    infrastructure must not be interrupted.
 5. The Django registry deliberately retains a deleted domain's ownership
@@ -65,3 +71,32 @@ deployment withheld until all release blockers are cleared.** No repository
 visibility change, PR-triggered workflow, DNS update, system mailbox
 provisioning, running production container replacement, or production database
 schema change was performed as part of this QA.
+
+## Incremental verification, 2026-10-12
+
+The isolated Django migration test completed successfully with the following
+ordered assertions: reject an existing verified tenant claim against
+`system.matemail.pro` atomically (without leaving the registry table), apply
+migration 0009 while preserving the unrelated customer's verified domain,
+backfill ten reserved platform hostnames, reverse to 0008 while retaining
+customer records, and reapply to 0009 with ownership unchanged.
+
+The Restic repository has six snapshots, including 9ab0d872 dated
+2026-10-12. The default `matemail-backup.service` failed its own integrity
+check after creating the snapshot because three 2026-10-10 lock records
+remain. With no running Restic processes, the independent read-only command
+`restic check --no-lock --quiet` returned exit code zero. The snapshot's
+`manifest.json`, `db/matemail.dump`, and `db/native.dump` were verified
+present by read-only listing. This does not substitute for a restore drill,
+and does not fix the service failure.
+
+### Safeguards retained
+
+- No production backup lock, timer, retention, snapshot, Maildir or encryption
+  key was modified by this review.
+- Stale lock removal must be a separately authorized and verified backup
+  maintenance operation; no `restic unlock` was executed.
+- Disposable Docker PostgreSQL 16 and its isolated network were removed after
+  the successful migration rollback rehearsal.
+- The Native Engine v007 rollback compatibility with an earlier API image
+  and complete backup/restore recovery remain preconditions for release.
