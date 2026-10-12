@@ -1,0 +1,39 @@
+"""Platform Console API for system mail configuration drafts only."""
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.tenants.permissions import IsPlatformAdmin
+
+from .system_mail import (
+    DomainNotReserved, RevisionConflict, SystemMailProposalSerializer,
+    proposed_configuration, save_proposed_configuration,
+)
+
+
+class PlatformSystemMailConfigurationView(APIView):
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def get(self, request):
+        return Response(proposed_configuration())
+
+    def post(self, request):
+        serializer = SystemMailProposalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            save_proposed_configuration(
+                actor=request.user, request=request,
+                payload=serializer.validated_data,
+            )
+        except RevisionConflict:
+            return Response(
+                {"detail": "Configuration was updated. Refresh before saving."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except DomainNotReserved:
+            return Response(
+                {"detail": "Platform domain reservation is missing. No changes saved."},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(proposed_configuration(), status=status.HTTP_201_CREATED)
