@@ -63,3 +63,23 @@ The global namespace also reserves known MateMail service hosts:
 `autodiscover`, `admin` and `www` under `matemail.pro`.
 These are reservations only, not mail-provisioned domains. Do not
 reserve the `matemail.pro` apex: it remains a verified organization domain.
+
+## Verified isolated database exercise (2026-10-12)
+
+A temporary PostgreSQL 18 cluster was used with the real engine SQL migrations
+001 through 007, including a legacy platform domain and mailbox seeded before
+migration 007. Every test-only forbidden mutation was rejected; normal login
+timestamp bookkeeping and unrelated tenant domain writes still succeeded.
+The temporary cluster was removed automatically. No production resources were
+modified by the test.
+
+To rerun on a host that supports `pg_virtualenv`, use:
+
+```sh
+bash engine/native_api/tests/run_platform_ownership_sql.sh
+```
+
+`PG_TEST_VERSION` may be set to the available PostgreSQL server version.
+Do not use an existing database for this script. The Django suite and the
+production PostgreSQL 16 compatibility check remain outstanding; this
+evidence alone is not approval to merge or deploy.
