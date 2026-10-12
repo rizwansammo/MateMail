@@ -2204,3 +2204,26 @@ class PlatformDomainGuardTest(EngineDatabaseTestCase):
                     provisioning.ensure_alias(
                         self.conn, {"address": "alias@" + name, "destinations": ["external@example.invalid"]},
                     )
+
+
+class PlatformNativeOperationGuardTest(EngineDatabaseTestCase):
+    """Protected platform resources are refused before any side effects."""
+
+    def test_mutation_apis_fail_before_touching_legacy_system_mailboxes(self):
+        address = "noreply@mail.matemail.pro"
+        operations = (
+            lambda: provisioning.set_mailbox_active(self.conn, address, False),
+            lambda: provisioning.set_mailbox_password(self.conn, address, "test-only-password"),
+            lambda: provisioning.set_mailbox_quota(self.conn, address, 2048),
+            lambda: provisioning.delete_mailbox(self.conn, address),
+            lambda: provisioning.clear_mailbox_rate_limit(self.conn, address),
+            lambda: provisioning.set_mailbox_rate_limit(self.conn, address, 2, "1h"),
+        )
+        for action in operations:
+            with self.subTest(action=action):
+                with self.assertRaises(ValidationError):
+                    action()
+        self.assertEqual(
+            self.row("SELECT COUNT(*) FROM retired_mailbox_storage")[0], 0,
+            "A rejected protected mailbox deletion must not retire its data",
+        )

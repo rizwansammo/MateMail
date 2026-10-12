@@ -327,6 +327,7 @@ def record_login(conn, address: str) -> bool:
 
 def set_mailbox_active(conn, address: str, active: bool) -> None:
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     active = validation.boolean(active, "active")
     with conn.cursor() as cur:
         cur.execute(
@@ -346,6 +347,7 @@ def set_mailbox_password(conn, address: str, password: str) -> None:
     than stored — the adapter contract raises `Rejected` for it.
     """
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     plaintext = validation.password(password)
     with conn.cursor() as cur:
         cur.execute(
@@ -373,6 +375,7 @@ def set_mailbox_password(conn, address: str, password: str) -> None:
 
 def set_mailbox_quota(conn, address: str, quota: int) -> None:
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     quota = validation.quota_mb(quota)
     with conn.cursor() as cur:
         cur.execute(
@@ -400,6 +403,7 @@ def delete_mailbox(conn, address: str) -> None:
     old directory outright.
     """
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     with conn.cursor() as cur:
         # Recorded BEFORE the delete, while the row still exists to be read.
         cur.execute(
