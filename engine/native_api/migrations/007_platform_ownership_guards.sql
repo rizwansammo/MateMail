@@ -17,17 +17,23 @@ ON CONFLICT (name) DO NOTHING;
 CREATE OR REPLACE FUNCTION protect_platform_domain_row()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF TG_OP IN ('UPDATE', 'DELETE') AND EXISTS (
-        SELECT 1 FROM platform_reserved_domain WHERE name = OLD.name
-    ) THEN
-        RAISE EXCEPTION 'protected platform domain cannot be modified'
-            USING ERRCODE = '42501';
+    -- Branch on operation before reading OLD or NEW. INSERT has no OLD row
+    -- and DELETE has no NEW row.
+    IF TG_OP IN ('UPDATE', 'DELETE') THEN
+        IF EXISTS (
+            SELECT 1 FROM platform_reserved_domain WHERE name = OLD.name
+        ) THEN
+            RAISE EXCEPTION 'protected platform domain cannot be modified'
+                USING ERRCODE = '42501';
+        END IF;
     END IF;
-    IF TG_OP IN ('INSERT', 'UPDATE') AND EXISTS (
-        SELECT 1 FROM platform_reserved_domain WHERE name = NEW.name
-    ) THEN
-        RAISE EXCEPTION 'protected platform domain cannot be modified'
-            USING ERRCODE = '42501';
+    IF TG_OP IN ('INSERT', 'UPDATE') THEN
+        IF EXISTS (
+            SELECT 1 FROM platform_reserved_domain WHERE name = NEW.name
+        ) THEN
+            RAISE EXCEPTION 'protected platform domain cannot be modified'
+                USING ERRCODE = '42501';
+        END IF;
     END IF;
     IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
     RETURN NEW;
@@ -44,27 +50,30 @@ DECLARE
     old_domain text;
     new_domain text;
 BEGIN
-    -- Dovecot last-login bookkeeping is not provisioning or a privilege
-    -- change. Do not interrupt legitimate system mailbox authentication.
-    IF TG_OP = 'UPDATE'
-       AND (OLD.domain_id, OLD.address, OLD.local_part, OLD.display_name,
-            OLD.password_hash, OLD.quota_mb, OLD.active, OLD.login_enabled)
-       IS NOT DISTINCT FROM
-           (NEW.domain_id, NEW.address, NEW.local_part, NEW.display_name,
-            NEW.password_hash, NEW.quota_mb, NEW.active, NEW.login_enabled)
-    THEN
-        RETURN NEW;
-    END IF;
+    -- Native Dovecot login auditing only writes last_login_at. Allow exactly
+    -- that field to change without opening a storage_id, password, quota,
+    -- forwarding or sender-authorisation privilege escalation route.
     IF TG_OP IN ('UPDATE', 'DELETE') THEN
         SELECT name INTO old_domain FROM domain WHERE id = OLD.domain_id;
-        IF EXISTS (SELECT 1 FROM platform_reserved_domain WHERE name = old_domain) THEN
+        IF EXISTS (
+            SELECT 1 FROM platform_reserved_domain WHERE name = old_domain
+        ) THEN
+            IF TG_OP = 'UPDATE' THEN
+                IF (to_jsonb(NEW) - 'last_login_at')
+                    IS NOT DISTINCT FROM
+                    (to_jsonb(OLD) - 'last_login_at') THEN
+                    RETURN NEW;
+                END IF;
+            END IF;
             RAISE EXCEPTION 'protected platform mailbox cannot be modified'
                 USING ERRCODE = '42501';
         END IF;
     END IF;
     IF TG_OP IN ('INSERT', 'UPDATE') THEN
         SELECT name INTO new_domain FROM domain WHERE id = NEW.domain_id;
-        IF EXISTS (SELECT 1 FROM platform_reserved_domain WHERE name = new_domain) THEN
+        IF EXISTS (
+            SELECT 1 FROM platform_reserved_domain WHERE name = new_domain
+        ) THEN
             RAISE EXCEPTION 'protected platform mailbox cannot be modified'
                 USING ERRCODE = '42501';
         END IF;
