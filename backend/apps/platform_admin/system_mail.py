@@ -48,7 +48,7 @@ class SystemMailProposalSerializer(serializers.Serializer):
 
     def to_internal_value(self, data):
         if not isinstance(data, Mapping):
-            raise serializers.ValidationError("A JSON configuration object is required.")
+            raise serializers.ValidationError({"non_field_errors": ["A JSON configuration object is required."]})
         unexpected = set(data) - set(self.fields)
         if unexpected:
             raise serializers.ValidationError({key: "Not a supported configuration field." for key in unexpected})
