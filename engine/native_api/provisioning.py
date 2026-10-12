@@ -508,6 +508,7 @@ def clear_mailbox_rate_limit(conn, address: str) -> None:
     unlimited. That is deliberately distinguishable from `messages = 0`.
     """
     name = validation.email_address(address)
+    _refuse_platform_domain(conn, name.rpartition("@")[2])
     with conn.cursor() as cur:
         cur.execute(
             "DELETE FROM mailbox_rate_limit WHERE mailbox_id IN "

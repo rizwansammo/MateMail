@@ -46,3 +46,12 @@ A verified tenant must never be able to bypass the registry through a stale
 asynchronous delete task. While a customer Domain row still exists, engine
 deprovisioning is blocked; the cleanup path must be checked for queue races
 before this foundation can be approved for deployment.
+
+## Outstanding offboarding race
+
+The current domain deletion endpoint queues engine cleanup before committing the
+Django Domain deletion. Phase 2 deliberately does not insert a new test of live
+Domain existence into the Celery task because a fast worker could see the still
+present record and incorrectly skip essential DKIM cleanup. A source ownership
+token bound to queued cleanup plus durable pending-deletion state must be
+implemented and regression-tested before enabling automated claim release.
