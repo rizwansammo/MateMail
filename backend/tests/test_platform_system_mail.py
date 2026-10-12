@@ -124,3 +124,112 @@ class SystemMailConfigurationTests(TestCase):
         response = self.admin_client.post(URL, [self.proposal], format="json")
         self.assertEqual(response.status_code, 400)
         self.assertFalse(PlatformSystemMailRevision.objects.exists())
+
+
+@override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS)
+class SystemMailReadinessTests(TestCase):
+    def setUp(self):
+        disable_throttling(self)
+        self.admin = make_user("readiness-admin@platform.test", is_platform_admin=True)
+        self.customer = make_user("readiness-customer@platform.test")
+        self.tenant = make_tenant(self.customer, name="Customer", slug="phase3-readiness")
+        self.admin_client = auth_client(self.admin)
+        self.tenant_client = auth_client(self.customer, self.tenant)
+
+    def test_only_platform_admin_can_read_readiness_and_history(self):
+        for url in ("/api/platform/system-mail/readiness/", "/api/platform/system-mail/history/"):
+            with self.subTest(url=url):
+                self.assertEqual(self.admin_client.get(url).status_code, 200)
+                self.assertIn(self.tenant_client.get(url).status_code, (401, 403))
+                self.assertIn(APIClient().get(url).status_code, (401, 403))
+
+    def test_stub_adapter_does_not_claim_engine_ready(self):
+        with override_settings(MAIL_ENGINE_ADAPTER="stub"):
+            with mock.patch("apps.platform_admin.system_mail_readiness.get_adapter") as getter:
+                response = self.admin_client.get("/api/platform/system-mail/readiness/")
+        self.assertEqual(response.status_code, 200)
+        getter.assert_not_called()
+        self.assertEqual(response.data["engine"]["status"], "unknown")
+        self.assertFalse(response.data["cutover_ready"])
+        self.assertFalse(response.data["activation_supported"])
+        self.assertEqual(response.data["outstanding_gates"]["smtp_delivery"], "not_tested")
+
+    def test_readiness_calls_only_read_operations_and_hides_customer_inventory(self):
+        from apps.mail_engine.dto import EngineDomain, EngineMailbox
+        adapter = mock.Mock()
+        adapter.list_domains.return_value = [
+            EngineDomain("mail.matemail.pro", active=True),
+            EngineDomain("system.matemail.pro", active=False),
+            EngineDomain("sensitive-customer.example", active=True),
+        ]
+        adapter.list_mailboxes.side_effect = [
+            [EngineMailbox("noreply@mail.matemail.pro", active=True)],
+            [EngineMailbox("security@system.matemail.pro", active=False),
+             EngineMailbox("unknown@system.matemail.pro", active=True)],
+        ]
+        with override_settings(MAIL_ENGINE_ADAPTER="native"):
+            with mock.patch("apps.platform_admin.system_mail_readiness.get_adapter", return_value=adapter):
+                response = self.admin_client.get("/api/platform/system-mail/readiness/")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(adapter.list_domains.call_count, 1)
+        self.assertEqual(adapter.list_mailboxes.call_args_list, [
+            mock.call("mail.matemail.pro"), mock.call("system.matemail.pro"),
+        ])
+        for method in ("ensure_domain", "ensure_mailbox", "delete_domain", "rotate_dkim_key"):
+            getattr(adapter, method).assert_not_called()
+        self.assertEqual(response.data["engine"]["legacy_sender"], "active")
+        self.assertEqual(response.data["engine"]["target_roles"]["security_address"], "inactive")
+        self.assertEqual(response.data["engine"]["target_roles"]["dmarc_address"], "absent")
+        self.assertNotIn("sensitive-customer.example", str(response.data))
+        self.assertNotIn("unknown@system.matemail.pro", str(response.data))
+        self.assertFalse(response.data["cutover_ready"])
+
+    def test_unreachable_engine_never_leaks_sensitive_exception_text(self):
+        adapter = mock.Mock()
+        adapter.list_domains.side_effect = RuntimeError(
+            "private-api.example:8443 Authorization=Bearer LEAKED_SECRET"
+        )
+        with override_settings(MAIL_ENGINE_ADAPTER="native"):
+            with mock.patch("apps.platform_admin.system_mail_readiness.get_adapter", return_value=adapter):
+                response = self.admin_client.get("/api/platform/system-mail/readiness/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["engine"]["status"], "unknown")
+        self.assertNotIn("LEAKED_SECRET", str(response.data))
+        self.assertFalse(response.data["cutover_ready"])
+
+    def test_platform_ownership_missing_is_blocker(self):
+        MailDomainOwnership.objects.filter(domain="system.matemail.pro").delete()
+        response = self.admin_client.get("/api/platform/system-mail/readiness/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["platform_ownership"]["target"], "blocked")
+        self.assertFalse(response.data["cutover_ready"])
+
+    def test_draft_creation_does_not_change_operational_readiness(self):
+        before = self.admin_client.get("/api/platform/system-mail/readiness/").data
+        response = self.admin_client.post(
+            "/api/platform/system-mail/configuration/",
+            dict(DEFAULT_PROPOSAL, expected_revision=0),
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        after = self.admin_client.get("/api/platform/system-mail/readiness/").data
+        self.assertEqual(after["revision"], 1)
+        self.assertTrue(after["draft_present"])
+        self.assertFalse(after["cutover_ready"])
+        self.assertEqual(after["operational"], before["operational"])
+        self.assertEqual(after["outstanding_gates"], before["outstanding_gates"])
+
+    def test_history_returns_immutable_revisions_newest_first(self):
+        endpoint = "/api/platform/system-mail/configuration/"
+        self.assertEqual(self.admin_client.post(
+            endpoint, dict(DEFAULT_PROPOSAL, expected_revision=0), format="json"
+        ).status_code, 201)
+        self.assertEqual(self.admin_client.post(
+            endpoint, dict(DEFAULT_PROPOSAL, expected_revision=1, sender_name="MateMail Security"),
+            format="json",
+        ).status_code, 201)
+        history = self.admin_client.get("/api/platform/system-mail/history/")
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual([x["revision"] for x in history.data["results"]], [2, 1])
+        self.assertFalse(history.data["has_more"])
+        self.assertNotIn("password", str(history.data).lower())

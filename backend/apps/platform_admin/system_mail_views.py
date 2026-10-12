@@ -37,3 +37,29 @@ class PlatformSystemMailConfigurationView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
         return Response(proposed_configuration(), status=status.HTTP_201_CREATED)
+
+
+class PlatformSystemMailReadinessView(APIView):
+    """Read only; does not create an engine session for customer mailboxes."""
+
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def get(self, request):
+        from .system_mail_readiness import system_mail_readiness
+        return Response(system_mail_readiness())
+
+
+class PlatformSystemMailHistoryView(APIView):
+    """Bounded, secret-free history of immutable platform proposals."""
+
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def get(self, request):
+        from .models import PlatformSystemMailRevision
+        from .system_mail import serialize_revision
+
+        rows = list(PlatformSystemMailRevision.objects.order_by("-revision")[:21])
+        return Response({
+            "results": [serialize_revision(row) for row in rows[:20]],
+            "has_more": len(rows) > 20,
+        })

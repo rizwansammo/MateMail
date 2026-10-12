@@ -43,3 +43,25 @@ DELETE is rejected by a database trigger, not merely by the API view.
 Reverting the Phase 3 migration removes the trigger before dropping the table.
 Audit failure aborts the configuration transaction. Nonobject JSON input and
 undeclared fields are rejected with HTTP 400.
+
+## Phase 3 Read-only Integration
+
+New Platform Admin endpoints:
+
+- `GET /api/platform/system-mail/readiness/`
+- `GET /api/platform/system-mail/history/`
+
+Readiness uses **only** the standard Native Engine adapter's
+`list_domains` and `list_mailboxes` operations, scoped to
+`mail.matemail.pro` and `system.matemail.pro`. Other customer names and
+arbitrary mailbox addresses are not returned. In stub mode or whenever the
+Native Engine cannot be inspected, the status is `unknown`, never healthy by
+assumption. Engine errors and connection secrets are not serialised.
+
+The DNS, signing, SMTP/IMAP and credentials gates remain expressly unverified
+until live dedicated validation. The readiness API always returns
+`activation_supported:false` and `cutover_ready:false`: a draft or even
+an active system domain in a read-only inventory never authorises cutover.
+
+The history endpoint returns at most twenty immutable proposed revisions,
+without credentials or secrets. Tenant/API key access remains prohibited.

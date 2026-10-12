@@ -2,7 +2,11 @@ from django.urls import path
 from apps.dmarc_reports.views import PlatformDmarcReportsView
 from apps.tls_reports.views import PlatformTlsReceiverHealthView
 
-from .system_mail_views import PlatformSystemMailConfigurationView
+from .system_mail_views import (
+    PlatformSystemMailConfigurationView,
+    PlatformSystemMailReadinessView,
+    PlatformSystemMailHistoryView,
+)
 
 from .auth_views import (
     PlatformForgotPasswordView,
@@ -106,6 +110,8 @@ urlpatterns = [
     path("health/", PlatformHealthView.as_view(), name="platform-health"),
     path("backups/", PlatformBackupStatusView.as_view(), name="platform-backups"),
     path("system-mail/configuration/", PlatformSystemMailConfigurationView.as_view(), name="platform-system-mail-configuration"),
+    path("system-mail/readiness/", PlatformSystemMailReadinessView.as_view(), name="platform-system-mail-readiness"),
+    path("system-mail/history/", PlatformSystemMailHistoryView.as_view(), name="platform-system-mail-history"),
 
     # ── Oversight actions ───────────────────────────────────────────────────
     # POST disables / releases, DELETE reverses it.
