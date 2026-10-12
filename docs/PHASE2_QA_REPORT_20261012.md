@@ -100,3 +100,55 @@ and does not fix the service failure.
   the successful migration rollback rehearsal.
 - The Native Engine v007 rollback compatibility with an earlier API image
   and complete backup/restore recovery remain preconditions for release.
+
+
+## Final pre-release restore drill and schema compatibility (2026-10-12)
+
+Restic snapshot `ec92ebd9` was restored in full to a private temporary
+`/run` tmpfs directory. No production Docker volume or application
+configuration was mounted or overwritten. The test directory was removed
+after verification.
+
+- Restic full-repository `check --no-lock --read-data`: PASS.
+- All 29 files tracked in the staged-file manifest passed SHA256 and byte-size
+  comparison.
+- 111 restored Maildir files matched the manifest count.
+- All 12 restored DKIM private key files parsed with OpenSSL.
+- The two restored PostgreSQL 16 databases loaded without `pg_restore`
+  errors: MateMail archive 614 objects, Native archive 128 objects.
+- Restored MateMail counts matched the snapshot manifest:
+  3 tenants, 5 domains and 5 mailboxes.
+- Restored Native counts matched:
+  6 domains, 8 mailboxes, 1 retired storage entry, schema version 6.
+- Native migration 007 applied successfully to the **restored test database**
+  and reserved exactly 10 system/transport hostnames.
+- The currently deployed older Native Engine API image, whose minimum required
+  schema is 6, successfully read the upgraded test database at schema 7.
+  Read-only SMTP/IMAP auth and lookup views were accessible (Dovecot auth 7,
+  virtual mailbox 8, sender login 7). Legacy platform mailbox login timestamp
+  bookkeeping remained writable.
+- With the older Native API, protected platform domain reconciliation was
+  denied and a synthetic customer domain could still be provisioned.
+  This confirms the tested API/DB rollback compatibility, not an automatic
+  schema downgrade.
+- The disposable PostgreSQL 16 container, temporary test network, restored
+  data (including copied credentials and DKIM keys), and test files were
+  removed. One expired lock created by an interrupted read-only listing was
+  removed after confirming no Restic processes remained. Subsequent Restic
+  integrity check passed, with zero remaining locks.
+- The normal scheduled Local Restic Backup remains enabled and the last
+  manually executed backup service was successful.
+
+### Release boundaries remaining
+
+The full GitHub Actions CI workflow (including Node frontend build and image
+publishing jobs) was deliberately NOT triggered: it runs on main or a PR
+targeting main, with private-repository minutes and GHCR side effects. Relevant
+isolated backend tests have already passed, but the entire CI matrix has
+not been executed on this branch.
+
+No production Phase 2 migration, merge, deployment, or live SMTP/IMAP
+send/receive test has happened. A controlled production release still needs
+the release owner's explicit approval, a current confirmed backup, a rollback
+plan for the database and application images together, and live post-deploy
+mail authentication/delivery checks.
