@@ -41,6 +41,21 @@ class NotFound(LookupError):
 # ── Domains ──────────────────────────────────────────────────────────────────
 
 
+def _refuse_platform_domain(conn, domain: str) -> None:
+    """Native authority guard; tenant API callers cannot reconcile reserved names.
+
+    This freezes platform resources until the separately authenticated system
+    management API is implemented. No implicit adoption or credential rotation.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM platform_reserved_domain WHERE name = %s",
+            (domain.strip().lower(),),
+        )
+        if cur.fetchone():
+            raise ValidationError("protected platform domain cannot be changed", "domain")
+
+
 def ensure_domain(conn, spec: dict) -> dict:
     """
     Create or reconcile a domain, and make sure it has a DKIM key.
@@ -51,6 +66,7 @@ def ensure_domain(conn, spec: dict) -> dict:
     see `_ensure_dkim_for`.
     """
     name = validation.domain_name(spec["name"])
+    _refuse_platform_domain(conn, name)
     selector = validation.selector(spec.get("dkim_selector") or "mm1")
     default_mb = validation.quota_mb(spec.get("default_quota_mb", 1024), "default_quota_mb")
     max_mb = validation.quota_mb(spec.get("max_quota_mb", 1024), "max_quota_mb")
@@ -104,6 +120,7 @@ def ensure_domain(conn, spec: dict) -> dict:
 
 def set_domain_active(conn, name: str, active: bool) -> None:
     name = validation.domain_name(name)
+    _refuse_platform_domain(conn, name)
     active = validation.boolean(active, "active")
     with conn.cursor() as cur:
         cur.execute(
@@ -127,6 +144,7 @@ def delete_domain(conn, name: str) -> None:
     the previous owner's signing key.
     """
     name = validation.domain_name(name)
+    _refuse_platform_domain(conn, name)
     with conn.cursor() as cur:
         # Mailboxes, aliases, their destinations and forwarding all cascade from
         # the domain row. DKIM does not reference it, so it survives.
@@ -164,6 +182,7 @@ def ensure_mailbox(conn, spec: dict, password: str = "") -> dict:
     """
     address = validation.email_address(spec["address"])
     local_part, _, domain = address.rpartition("@")
+    _refuse_platform_domain(conn, domain)
     quota = validation.quota_mb(spec.get("quota_mb", 1024))
     active = validation.boolean(spec.get("active", True), "active")
     display_name = spec.get("display_name", "") or ""

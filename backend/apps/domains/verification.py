@@ -34,6 +34,9 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .models import Domain, DomainOwnership
+from .ownership_registry import (
+    DomainRegistryConflict, assert_registry_authorizes_domain, claim_verified_domain,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +234,10 @@ def verify_domain_ownership(domain: Domain) -> tuple[bool, str]:
     domain is already owned. No application-level check could close that window.
     """
     if domain.is_ownership_verified:
+        try:
+            assert_registry_authorizes_domain(domain)
+        except DomainRegistryConflict as exc:
+            return False, exc.customer_message
         return True, "This domain is already verified."
 
     found, message, technical = check_ownership_dns(domain)
@@ -253,6 +260,7 @@ def verify_domain_ownership(domain: Domain) -> tuple[bool, str]:
 
     try:
         with transaction.atomic():
+            claim_verified_domain(domain)
             updated = Domain.objects.filter(
                 pk=domain.pk, ownership_status=DomainOwnership.PENDING
             ).update(
@@ -267,7 +275,8 @@ def verify_domain_ownership(domain: Domain) -> tuple[bool, str]:
                 if domain.is_ownership_verified:
                     return True, "This domain is already verified."
                 return False, DomainNotVerified.customer_message
-    except IntegrityError:
+    except (IntegrityError, DomainRegistryConflict):
+        # The global registry or verified-domain index refused the claim.
         # The partial unique index rejected the claim: another tenant holds the
         # verified record for this name.
         logger.warning(
@@ -308,3 +317,10 @@ def assert_provisionable(domain: Domain) -> None:
                 f"ownership={domain.ownership_status}"
             )
         )
+    try:
+        assert_registry_authorizes_domain(domain)
+    except DomainRegistryConflict as exc:
+        raise DomainNotVerified(
+            customer_message=exc.customer_message,
+            technical_detail=f"registry ownership refused for {domain.domain}",
+        ) from exc

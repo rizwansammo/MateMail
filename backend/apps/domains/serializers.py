@@ -3,6 +3,7 @@ import re
 from rest_framework import serializers
 
 from .models import Domain
+from .ownership_registry import DomainRegistryConflict, assert_available_for_organization
 
 
 class DomainSerializer(serializers.ModelSerializer):
@@ -75,6 +76,10 @@ class DomainCreateSerializer(serializers.Serializer):
 
         if not _HOSTNAME_RE.match(value):
             raise serializers.ValidationError("Enter a valid domain name (e.g. example.com).")
+        try:
+            assert_available_for_organization(value)
+        except DomainRegistryConflict as exc:
+            raise serializers.ValidationError(exc.customer_message) from exc
         if Domain.objects.filter(domain=value).exists():
             raise serializers.ValidationError("This domain is already registered.")
         return value

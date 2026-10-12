@@ -237,6 +237,14 @@ def deprovision_domain_task(self, domain_name: str):
     """
     from .factory import get_adapter
 
+    from apps.domains.models import MailDomainOwnerKind
+    from apps.domains.ownership_registry import ownership_for
+
+    claim = ownership_for(domain_name)
+    if claim is not None and claim.owner_kind == MailDomainOwnerKind.PLATFORM:
+        logger.error("Refusing tenant deprovisioning of protected platform domain %s", domain_name)
+        return
+
     adapter = get_adapter()
 
     try:
@@ -298,6 +306,13 @@ def deprovision_mailbox_task(self, address: str):
     """Remove a mailbox from the Mail Engine. Idempotent, as above."""
     from .factory import get_adapter
 
+    from apps.domains.models import MailDomainOwnerKind
+    from apps.domains.ownership_registry import ownership_for
+
+    claim = ownership_for(address.rpartition("@")[2])
+    if claim is not None and claim.owner_kind == MailDomainOwnerKind.PLATFORM:
+        logger.error("Refusing tenant deprovisioning of protected platform mailbox %s", address)
+        return
     try:
         get_adapter().delete_mailbox(address)
     except EngineUnavailable as exc:

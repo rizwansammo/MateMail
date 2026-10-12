@@ -96,7 +96,7 @@ def make_domain(tenant, domain="acme-test.example", status=DomainStatus.ACTIVE, 
     Tests that exercise the ownership gate itself pass verified=False, or use
     make_unverified_domain() for clarity.
     """
-    return Domain.objects.create(
+    instance = Domain.objects.create(
         tenant=tenant,
         domain=domain,
         status=status,
@@ -106,6 +106,10 @@ def make_domain(tenant, domain="acme-test.example", status=DomainStatus.ACTIVE, 
         ownership_verified_at=timezone.now() if verified else None,
         verification_token=generate_verification_token(),
     )
+    if verified:
+        from apps.domains.ownership_registry import claim_verified_domain
+        claim_verified_domain(instance)
+    return instance
 
 
 def make_unverified_domain(tenant, domain="unverified.example", status=DomainStatus.PENDING):
