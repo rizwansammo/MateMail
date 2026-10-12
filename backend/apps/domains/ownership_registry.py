@@ -9,6 +9,8 @@ from django.db import transaction
 
 from .models import MailDomainOwnership, MailDomainOwnerKind
 
+PLATFORM_RESERVED_DOMAIN_NAMES = frozenset(("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"))
+
 
 class DomainRegistryConflict(ValueError):
     customer_message = (

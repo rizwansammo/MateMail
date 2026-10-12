@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS platform_reserved_domain (
     CONSTRAINT platform_reserved_domain_normalized CHECK (name = lower(name))
 );
 INSERT INTO platform_reserved_domain (name)
-VALUES ('mail.matemail.pro'), ('system.matemail.pro')
+VALUES ('mail.matemail.pro'), ('system.matemail.pro'), ('mx.matemail.pro'), ('platform.matemail.pro'), ('portal.matemail.pro'), ('postbox.matemail.pro'), ('custom.matemail.pro'), ('autodiscover.matemail.pro'), ('admin.matemail.pro'), ('www.matemail.pro')
 ON CONFLICT (name) DO NOTHING;
 
 -- Database enforcement, even if a future API handler forgets to call its

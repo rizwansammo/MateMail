@@ -26,7 +26,7 @@ class PlatformDomainRegistryTests(TestCase):
         self.tenant = make_tenant(self.owner, name="Registry", slug="registry")
 
     def test_legacy_and_future_platform_identity_are_reserved_without_engine_mutation(self):
-        for name in ("mail.matemail.pro", "system.matemail.pro"):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
             claim = ownership_for(name)
             self.assertIsNotNone(claim)
             self.assertEqual(claim.owner_kind, MailDomainOwnerKind.PLATFORM)
@@ -34,7 +34,7 @@ class PlatformDomainRegistryTests(TestCase):
             self.assertFalse(Domain.objects.filter(domain=name).exists())
 
     def test_hub_cannot_claim_a_platform_domain(self):
-        for name in ("mail.matemail.pro", "system.matemail.pro"):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
             serializer = DomainCreateSerializer(data={"domain": name})
             self.assertFalse(serializer.is_valid())
             self.assertIn("domain", serializer.errors)

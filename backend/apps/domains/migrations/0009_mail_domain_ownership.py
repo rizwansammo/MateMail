@@ -12,7 +12,7 @@ def backfill_ownership(apps, schema_editor):
     Domain = apps.get_model("domains", "Domain")
     Registry = apps.get_model("domains", "MailDomainOwnership")
     alias = schema_editor.connection.alias
-    protected = ("mail.matemail.pro", "system.matemail.pro")
+    protected = ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro")
     if Domain.objects.using(alias).filter(
         domain__in=protected, ownership_status="verified",
     ).exists():

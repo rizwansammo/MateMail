@@ -2162,14 +2162,14 @@ class PlatformDomainGuardTest(EngineDatabaseTestCase):
     """Reserved Platform mail cannot be reconciled through tenant Native API."""
 
     def test_legacy_and_new_platform_names_are_reserved(self):
-        for name in ("mail.matemail.pro", "system.matemail.pro"):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
             self.assertEqual(
                 self.row("SELECT name FROM platform_reserved_domain WHERE name = %s", (name,)),
                 (name,),
             )
 
     def test_native_ensure_domain_refuses_platform_resource(self):
-        for name in ("mail.matemail.pro", "system.matemail.pro"):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
             with self.subTest(name=name):
                 with self.assertRaises(ValidationError):
                     provisioning.ensure_domain(self.conn, {"name": name})
@@ -2178,7 +2178,7 @@ class PlatformDomainGuardTest(EngineDatabaseTestCase):
                 )
 
     def test_native_domain_trigger_refuses_bypass(self):
-        for name in ("mail.matemail.pro", "system.matemail.pro"):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
             with self.subTest(name=name):
                 with self.assertRaises(psycopg.errors.InsufficientPrivilege):
                     with self.conn.cursor() as cur:
@@ -2193,7 +2193,7 @@ class PlatformDomainGuardTest(EngineDatabaseTestCase):
             provisioning.delete_dkim_key(self.conn, "mail.matemail.pro")
 
     def test_native_mailbox_and_alias_provision_refuse_platform(self):
-        for name in ("mail.matemail.pro", "system.matemail.pro"):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
             with self.subTest(name=name):
                 with self.assertRaises(ValidationError):
                     provisioning.ensure_mailbox(

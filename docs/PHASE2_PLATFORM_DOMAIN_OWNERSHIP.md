@@ -55,3 +55,11 @@ Domain existence into the Celery task because a fast worker could see the still
 present record and incorrectly skip essential DKIM cleanup. A source ownership
 token bound to queued cleanup plus durable pending-deletion state must be
 implemented and regression-tested before enabling automated claim release.
+
+## Protected infrastructure hostnames
+
+The global namespace also reserves known MateMail service hosts:
+`mx`, `platform`, `portal`, `postbox`, `custom`,
+`autodiscover`, `admin` and `www` under `matemail.pro`.
+These are reservations only, not mail-provisioned domains. Do not
+reserve the `matemail.pro` apex: it remains a verified organization domain.
