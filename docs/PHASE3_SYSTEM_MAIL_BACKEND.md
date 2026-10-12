@@ -35,3 +35,11 @@ Phase 2 + Phase 3 are reviewed and deployed together only after independent
 CI, current backups, reverse migrations and explicit approval. All new
 behaviour must be regression tested against the existing tenant APIs and
 production-shaped Postfix/Dovecot.
+
+## Additional Integrity Guarantees
+
+The revision table is append-only at the PostgreSQL layer. Any UPDATE or
+DELETE is rejected by a database trigger, not merely by the API view.
+Reverting the Phase 3 migration removes the trigger before dropping the table.
+Audit failure aborts the configuration transaction. Nonobject JSON input and
+undeclared fields are rejected with HTTP 400.

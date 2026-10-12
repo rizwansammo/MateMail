@@ -43,4 +43,24 @@ class Migration(migrations.Migration):
             model_name="platformsystemmailpointer",
             constraint=models.CheckConstraint(condition=models.Q(id=1), name="system_mail_pointer_singleton"),
         ),
+
+        migrations.RunSQL(
+            sql="""
+                CREATE FUNCTION protect_system_mail_revision()
+                RETURNS trigger LANGUAGE plpgsql AS $
+                BEGIN
+                    RAISE EXCEPTION 'System mail configuration revisions are immutable'
+                        USING ERRCODE = '42501';
+                END;
+                $;
+                CREATE TRIGGER platform_system_mail_revision_immutable
+                    BEFORE UPDATE OR DELETE ON platform_system_mail_revision
+                    FOR EACH ROW EXECUTE FUNCTION protect_system_mail_revision();
+            """,
+            reverse_sql="""
+                DROP TRIGGER IF EXISTS platform_system_mail_revision_immutable
+                    ON platform_system_mail_revision;
+                DROP FUNCTION IF EXISTS protect_system_mail_revision();
+            """,
+        ),
     ]

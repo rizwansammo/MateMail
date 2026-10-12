@@ -6,6 +6,8 @@ environment values until a separately tested Phase 5 activation path exists.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from django.conf import settings
 from django.db import transaction
 from rest_framework import serializers
@@ -45,6 +47,8 @@ class SystemMailProposalSerializer(serializers.Serializer):
     tlsrpt_address = serializers.EmailField(max_length=254)
 
     def to_internal_value(self, data):
+        if not isinstance(data, Mapping):
+            raise serializers.ValidationError("A JSON configuration object is required.")
         unexpected = set(data) - set(self.fields)
         if unexpected:
             raise serializers.ValidationError({key: "Not a supported configuration field." for key in unexpected})

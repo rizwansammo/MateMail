@@ -1,4 +1,6 @@
 """Phase 3 Platform system mail configuration security and immutability."""
+from django.db import DatabaseError, transaction
+from unittest import mock
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -95,3 +97,30 @@ class SystemMailConfigurationTests(TestCase):
     def test_sender_name_rejects_header_injection(self):
         response = self.admin_client.post(URL, dict(self.proposal, sender_name="MateMail\nBcc: nobody@example.org"), format="json")
         self.assertEqual(response.status_code, 400)
+
+    def test_saved_revision_cannot_be_mutated_or_deleted_in_database(self):
+        response = self.admin_client.post(URL, self.proposal, format="json")
+        self.assertEqual(response.status_code, 201)
+        row = PlatformSystemMailRevision.objects.get(revision=1)
+        with self.assertRaises(DatabaseError):
+            with transaction.atomic():
+                PlatformSystemMailRevision.objects.filter(pk=row.pk).update(sender_name="Forged")
+        with self.assertRaises(DatabaseError):
+            with transaction.atomic():
+                PlatformSystemMailRevision.objects.filter(pk=row.pk).delete()
+        self.assertEqual(PlatformSystemMailRevision.objects.get(pk=row.pk).sender_name, "MateMail")
+
+    def test_audit_write_failure_cannot_commit_a_draft(self):
+        with mock.patch(
+            "apps.platform_admin.system_mail.record_platform_action",
+            side_effect=RuntimeError("test-only audit write failure"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.admin_client.post(URL, self.proposal, format="json")
+        self.assertFalse(PlatformSystemMailRevision.objects.exists())
+        self.assertFalse(PlatformSystemMailPointer.objects.exists())
+
+    def test_payload_must_be_a_json_object(self):
+        response = self.admin_client.post(URL, [self.proposal], format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(PlatformSystemMailRevision.objects.exists())
