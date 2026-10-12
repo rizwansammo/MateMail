@@ -42,7 +42,7 @@ class PlatformDomainRegistryTests(TestCase):
     def test_verified_customer_domains_have_a_matching_registry_entry(self):
         customer = make_domain(self.tenant, "registry-client.example")
         claim = assert_registry_authorizes_domain(customer)
-        self.assertEqual(claim.source_domain_id, source_uuid)
+        self.assertEqual(claim.source_domain_id, customer.pk)
         self.assertEqual(claim.tenant_id, self.tenant.pk)
         assert_provisionable(customer)
 
@@ -89,4 +89,4 @@ class PlatformDomainRegistryTests(TestCase):
         customer.delete()
         claim = ownership_for("cleanup-pending.example")
         self.assertIsNotNone(claim)
-        self.assertEqual(claim.source_domain_id, customer.pk)
+        self.assertEqual(claim.source_domain_id, source_uuid)
