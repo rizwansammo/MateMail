@@ -7,6 +7,7 @@ from .system_mail_views import (
     PlatformSystemMailReadinessView,
     PlatformSystemMailHistoryView,
     PlatformSystemMailStageView,
+    PlatformSystemMailDkimPrepareView,
     PlatformSystemMailDnsReadinessView,
 )
 
@@ -116,6 +117,7 @@ urlpatterns = [
     path("system-mail/dns-readiness/", PlatformSystemMailDnsReadinessView.as_view(), name="platform-system-mail-dns-readiness"),
     path("system-mail/history/", PlatformSystemMailHistoryView.as_view(), name="platform-system-mail-history"),
     path("system-mail/stage/", PlatformSystemMailStageView.as_view(), name="platform-system-mail-stage"),
+    path("system-mail/prepare-dkim/", PlatformSystemMailDkimPrepareView.as_view(), name="platform-system-mail-prepare-dkim"),
 
     # ── Oversight actions ───────────────────────────────────────────────────
     # POST disables / releases, DELETE reverses it.

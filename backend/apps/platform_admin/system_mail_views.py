@@ -78,6 +78,30 @@ class PlatformSystemMailDnsReadinessView(APIView):
         return Response(inspect_system_mail_dns())
 
 
+class PlatformSystemMailDkimPrepareView(APIView):
+    """Generate only target DKIM public DNS material via dedicated engine role."""
+
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def post(self, request):
+        from .system_mail_dkim import (
+            PrepareSystemDkimSerializer, prepare_system_dkim,
+        )
+        from .system_mail_stage import StageConflict, StageUnavailable
+        serializer = PrepareSystemDkimSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            data = prepare_system_dkim(
+                actor=request.user, request=request,
+                expected_revision=serializer.validated_data["expected_revision"],
+            )
+        except StageConflict as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except StageUnavailable as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(data)
+
+
 class PlatformSystemMailStageView(APIView):
     """Explicit, audited inactive staging; disabled unless separately configured."""
 

@@ -389,6 +389,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as exc:             # noqa: BLE001
                 self._fail(exc)
             return
+        if route == "/v1/platform/system/prepare-dkim":
+            if not platform_security.authorized(self):
+                self._send(403, {"error": "unauthorized"})
+                return
+            try:
+                result = platform_security.prepare_inactive_system_dkim(self._body())
+                self._send(200, result)
+            except (ValidationError, PermissionError) as exc:
+                self._send(400 if isinstance(exc, ValidationError) else 503,
+                           {"error": "invalid DKIM request" if isinstance(exc, ValidationError)
+                            else "system DKIM preparation disabled"})
+            except Exception as exc:
+                self._fail(exc)
+            return
         if route == "/v1/platform/system/stage":
             if not platform_security.authorized(self):
                 self._send(403, {"error": "unauthorized"})

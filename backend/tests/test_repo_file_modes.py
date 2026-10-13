@@ -66,6 +66,8 @@ MUST_BE_EXECUTABLE = {
 
 # These are invoked in a way that supplies the mode, or never executed at all.
 MUST_NOT_BE_EXECUTABLE = {
+    "engine/native_api/tests/test_system_dkim_sql.sh":
+        "disposable PostgreSQL integration helper invoked explicitly via bash in Native API CI",
     "engine/native_api/tests/run_platform_ownership_sql.sh":
         "isolated SQL regression helper invoked explicitly with bash from the Phase 2 runbook",
     "deploy/mta-sts/install.sh":

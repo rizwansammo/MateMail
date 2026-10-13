@@ -382,6 +382,7 @@ NATIVE_ENGINE_API_URL = env("NATIVE_ENGINE_API_URL", default="")
 NATIVE_ENGINE_API_SECRET = env("NATIVE_ENGINE_API_SECRET", default="")
 # Phase 3 offline system mail staging: disabled unless explicitly configured.
 SYSTEM_MAIL_STAGING_ENABLED = env.bool("SYSTEM_MAIL_STAGING_ENABLED", default=False)
+SYSTEM_MAIL_DKIM_PREPARE_ENABLED = env.bool("SYSTEM_MAIL_DKIM_PREPARE_ENABLED", default=False)
 NATIVE_ENGINE_PLATFORM_SECRET = env("NATIVE_ENGINE_PLATFORM_SECRET", default="")
 
 # MateMail platform settings
