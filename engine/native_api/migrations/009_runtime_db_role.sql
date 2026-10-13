@@ -12,7 +12,11 @@ $$;
 ALTER ROLE engine_api_runtime
     NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 
-GRANT CONNECT ON DATABASE matemail_engine TO engine_api_runtime;
+DO $
+BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO engine_api_runtime', current_database());
+END
+$;
 GRANT USAGE ON SCHEMA public TO engine_api_runtime;
 REVOKE CREATE ON SCHEMA public FROM engine_api_runtime;
 
