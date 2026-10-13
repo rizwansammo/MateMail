@@ -21,6 +21,7 @@ type Config = {
   activation_supported: boolean;
   mailboxes_provisioned: boolean;
   staging_request_enabled: boolean;
+  dkim_preparation_request_enabled: boolean;
 };
 type Readiness = {
   checked_at: string;
@@ -68,6 +69,8 @@ export default function SystemMailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [staging, setStaging] = useState(false);
+  const [preparingDkim, setPreparingDkim] = useState(false);
+  const [preparedDkim, setPreparedDkim] = useState<{ dns_record_name: string; dns_record_value: string } | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -156,6 +159,44 @@ export default function SystemMailPage() {
     }
   }
 
+  async function prepareInactiveDkim() {
+    if (!config?.draft || !config.dkim_preparation_request_enabled || preparingDkim || saving) return;
+    if (readiness?.engine.target_domain !== "inactive" ||
+        Object.values(readiness.engine.target_roles).some(state => state !== "inactive")) return;
+    if (!window.confirm(
+      "Prepare the system.matemail.pro DKIM key for DNS publication? " +
+      "No mail will be activated and the current mail.matemail.pro DKIM key will remain untouched."
+    )) return;
+    setPreparingDkim(true);
+    setPreparedDkim(null);
+    setError("");
+    setNotice("");
+    try {
+      const result = await api.post<{
+        dns_record_name: string; dns_record_value: string;
+        state: string; mail_delivery_activated: boolean; credentials_created: boolean;
+      }>(`${PREFIX}/prepare-dkim/`, {
+        expected_revision: config.revision,
+        confirmation: "prepare_dkim_inactive",
+      });
+      if (result.state !== "inactive" || result.mail_delivery_activated ||
+          result.credentials_created || !result.dns_record_name ||
+          !result.dns_record_value) {
+        setError("DKIM preparation result was not confirmed. Review the Native Engine before retrying.");
+        return;
+      }
+      setPreparedDkim({
+        dns_record_name: result.dns_record_name,
+        dns_record_value: result.dns_record_value,
+      });
+      setNotice("System DKIM public record is ready. Publish the exact TXT value before any sender change.");
+    } catch (err) {
+      setError("DKIM preparation is unconfirmed. Inspect the engine before retrying. " + formatError(err));
+    } finally {
+      setPreparingDkim(false);
+    }
+  }
+
   const unchanged = Boolean(config && form && FIELDS.every(({ key }) => form[key] === (config.draft ?? config.defaults)[key]));
 
   return (
@@ -199,6 +240,22 @@ export default function SystemMailPage() {
               {staging ? "Staging inactive identities…" : "Stage inactive identities"}
             </button>
             {!config.draft && <p className="text-xs pf-muted">Save a configuration draft first.</p>}
+          </section>}
+          {config.dkim_preparation_request_enabled && <section className="pf-card p-5 space-y-3" aria-label="Inactive system DKIM preparation">
+            <h2 className="font-semibold" style={{ color: "var(--pf-text)" }}>Prepare system DKIM public record</h2>
+            <p className="text-sm pf-muted">Prepare a signing key for the inactive system domain only. The current DKIM key, mail delivery and sender configuration remain unchanged.</p>
+            <button className="pf-btn" disabled={!config.draft || !unchanged || preparingDkim || staging ||
+              readiness?.engine.target_domain !== "inactive" ||
+              Object.values(readiness?.engine.target_roles ?? {}).some(state => state !== "inactive")}
+              onClick={() => void prepareInactiveDkim()}>
+              {preparingDkim ? "Preparing DKIM…" : "Prepare DKIM TXT"}
+            </button>
+            {preparedDkim && <div className="space-y-2 text-xs">
+              <p className="pf-muted">Publish this exact record in Spaceship DNS. Never paste a private key.</p>
+              <p>TXT host: <code className="break-all">{preparedDkim.dns_record_name}</code></p>
+              <p>TXT value:</p>
+              <textarea className="pf-input w-full" value={preparedDkim.dns_record_value} readOnly rows={4} aria-label="System DKIM public TXT value" />
+            </div>}
           </section>}
           <section className="pf-card p-5 space-y-3">
             <h2 className="font-semibold" style={{ color: "var(--pf-text)" }}>Current operational configuration</h2>
