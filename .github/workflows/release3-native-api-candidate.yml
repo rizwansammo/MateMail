@@ -1,0 +1,102 @@
+name: Release 3 Native API candidate publication and staging
+
+# The first merge of this scoped workflow to main publishes a one-off candidate.
+# The existing Native Engine remains digest pinned and is NEVER restarted here.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release3-native-api-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release3-native-api-candidate
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish one Native API candidate
+    if: github.repository == 'rizwansammo/MateMail' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in using ephemeral GHCR token
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build Native API only, never update ne1
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/native-engine/images/api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/rizwansammo/matemail-native-api:release3-${{ github.sha }}
+          cache-from: type=gha,scope=native-api-release3
+          cache-to: type=gha,mode=max,scope=native-api-release3
+      - name: Report digest
+        run: |
+          echo "Release 3 Native API image: ghcr.io/rizwansammo/matemail-native-api@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "No production containers or environment files have been modified." >> "$GITHUB_STEP_SUMMARY"
+
+  stage:
+    name: Pull candidate only onto MateServer
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_REF: ghcr.io/rizwansammo/matemail-native-api@${{ needs.publish.outputs.digest }}
+    steps:
+      - name: Verify candidate digest is present
+        run: |
+          test -n "${{ needs.publish.outputs.digest }}"
+          test "${{ needs.publish.outputs.digest }}" != "null"
+      - name: Stage verified image without deployment
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_REF: ${{ env.IMAGE_REF }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: IMAGE_REF,GHCR_TOKEN,GHCR_USER
+          timeout: 60s
+          command_timeout: 6m
+          script: |
+            set -Eeuo pipefail
+            DOCKER_CONFIG="$(mktemp -d)"
+            export DOCKER_CONFIG
+            cleanup() {
+              docker logout ghcr.io >/dev/null 2>&1 || true
+              rm -rf "$DOCKER_CONFIG"
+            }
+            trap cleanup EXIT
+            test -n "$IMAGE_REF"
+            case "$IMAGE_REF" in
+              ghcr.io/rizwansammo/matemail-native-api@sha256:*) ;;
+              *) echo 'Unexpected image digest ref'; exit 1 ;;
+            esac
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+            unset GHCR_TOKEN
+            docker pull "$IMAGE_REF" >/dev/null
+            docker image inspect "$IMAGE_REF" --format 'STAGED_RELEASE3_IMAGE {{.Id}}'
+            echo 'NO CONTAINERS RESTARTED; NO DATABASE MIGRATIONS; NO ENV MUTATION'
