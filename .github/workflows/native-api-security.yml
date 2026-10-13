@@ -62,6 +62,17 @@ jobs:
           print("Native API RSA and Fernet smoke checks passed")
           '
 
+      - name: System DKIM restricted operator unit tests
+        run: |
+          docker run --rm --entrypoint sh \
+            matemail-native-api-security-test:ci -ec '
+              cd /opt/matemail/native_api
+              python -m unittest discover -s tests -p "test_platform_system_dkim.py" -v
+            '
+
+      - name: Isolated PostgreSQL 16 system DKIM authorization tests
+        run: bash engine/native_api/tests/test_system_dkim_sql.sh
+
       - name: Vulnerability audit of full resolved candidate image
         run: |
           # Only this throwaway container installs the scanning tool.
