@@ -229,14 +229,14 @@ jobs:
       # Release 2 only: synthetic Platform Admin visual and interaction review.
       # Runs in the existing frontend job, against a local production preview.
       - name: Install temporary Playwright for Platform Console QA
-        if: github.event_name == 'pull_request' && (github.head_ref == 'phase4-platform-console-ui' || github.head_ref == 'feature/platform-console-footer-branding' || github.head_ref == 'fix/platform-console-hemihead-production-font')
+        if: github.event_name == 'pull_request' && (github.head_ref == 'phase4-platform-console-ui' || github.head_ref == 'feature/platform-console-footer-branding' || github.head_ref == 'fix/platform-console-hemihead-production-font' || github.head_ref == 'feature/release3-system-domain-safety')
         working-directory: frontend
         run: |
           npm install --no-save --package-lock=false playwright@1.56.1
           npx playwright install --with-deps chromium
 
       - name: Platform Console isolated visual and interaction tests
-        if: github.event_name == 'pull_request' && (github.head_ref == 'phase4-platform-console-ui' || github.head_ref == 'feature/platform-console-footer-branding' || github.head_ref == 'fix/platform-console-hemihead-production-font')
+        if: github.event_name == 'pull_request' && (github.head_ref == 'phase4-platform-console-ui' || github.head_ref == 'feature/platform-console-footer-branding' || github.head_ref == 'fix/platform-console-hemihead-production-font' || github.head_ref == 'feature/release3-system-domain-safety')
         working-directory: frontend
         env:
           PLATFORM_QA_URL: http://127.0.0.1:3102
@@ -254,7 +254,7 @@ jobs:
           node scripts/platform-console-browser-qa.mjs
 
       - name: Upload Platform Console visual evidence
-        if: always() && github.event_name == 'pull_request' && (github.head_ref == 'phase4-platform-console-ui' || github.head_ref == 'feature/platform-console-footer-branding' || github.head_ref == 'fix/platform-console-hemihead-production-font')
+        if: always() && github.event_name == 'pull_request' && (github.head_ref == 'phase4-platform-console-ui' || github.head_ref == 'feature/platform-console-footer-branding' || github.head_ref == 'fix/platform-console-hemihead-production-font' || github.head_ref == 'feature/release3-system-domain-safety')
         uses: actions/upload-artifact@v4
         with:
           name: matemail-platform-release2-visual-review
