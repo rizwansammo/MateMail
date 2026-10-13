@@ -201,6 +201,11 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
             </div>
           ))}
         </nav>
+        <div className="shrink-0 border-t px-4 py-3" style={{ borderColor: "var(--pf-border)" }}>
+          <span className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--pf-text-muted)" }}>
+            Platform Console
+          </span>
+        </div>
       </aside>
 
       <div className="md:pl-60">
@@ -221,7 +226,6 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
             <Menu className="h-4 w-4" aria-hidden="true" />
           </button>
 
-          <span className="hidden shrink-0 text-xs font-semibold uppercase tracking-[0.12em] sm:block" style={{ color: "var(--pf-text-muted)" }}>Platform Console</span>
           <GlobalSearch />
 
           <div ref={profileRef} className="relative ml-auto shrink-0">
