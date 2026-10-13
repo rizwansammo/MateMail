@@ -74,10 +74,10 @@ DATABASES["default"]["CONN_MAX_AGE"] = 3600  # noqa: F821
 # ── Email ─────────────────────────────────────────────────────────────────────
 # ── Transactional email ───────────────────────────────────────────────────
 #
-# Account verification, password resets, invitations and security notices go
-# out through an EXTERNAL provider over SMTP. They must never route through
-# MateMail's own Mail Engine: a platform whose password reset stops working
-# when its mail system is down is a platform nobody can recover an account on.
+# Transactional account verification, password resets, invitations and security
+# notices use an independently authenticated system identity through the
+# Native Mail Engine (DEC-013). This shares infrastructure with customer mail,
+# so account recovery availability depends on engine health and monitoring.
 #
 # EMAIL_HOST has no default on purpose. It previously defaulted to "localhost",
 # where nothing listens — a deployment that forgot the variable discarded every
@@ -86,8 +86,8 @@ DATABASES["default"]["CONN_MAX_AGE"] = 3600  # noqa: F821
 # apps.accounts.mailer.transactional_email_configured() and logged loudly
 # instead of pretending to deliver.
 #
-# Credentials come from the environment. Nothing provider-specific is compiled
-# in, so switching provider is a change of environment variables.
+# Credentials come from the environment, never from source code. Production
+# EMAIL_HOST points at mx.matemail.pro with STARTTLS and a system mailbox login.
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = env("EMAIL_HOST", default="")
 EMAIL_PORT = env.int("EMAIL_PORT", default=587)

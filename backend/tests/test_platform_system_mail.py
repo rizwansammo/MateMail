@@ -34,10 +34,32 @@ class SystemMailConfigurationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.data["activation_supported"])
         self.assertFalse(response.data["mailboxes_provisioned"])
+        self.assertFalse(response.data["staging_request_enabled"])
         self.assertFalse(response.data["operational"]["draft_applied"])
         self.assertEqual(response.data["operational"]["source"], "environment")
         self.assertEqual(response.data["revision"], 0)
         self.assertIsNone(response.data["draft"])
+
+    @override_settings(
+        SYSTEM_MAIL_STAGING_ENABLED=True,
+        NATIVE_ENGINE_PLATFORM_SECRET="distinct-platform-secret-at-least-32-characters",
+        NATIVE_ENGINE_API_SECRET="different-regular-engine-secret",
+    )
+    def test_staging_gate_only_reports_configuration_and_not_activation(self):
+        response = self.admin_client.get(URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["staging_request_enabled"])
+        self.assertFalse(response.data["activation_supported"])
+        self.assertFalse(response.data["mailboxes_provisioned"])
+
+    @override_settings(
+        SYSTEM_MAIL_STAGING_ENABLED=True,
+        NATIVE_ENGINE_PLATFORM_SECRET="same",
+        NATIVE_ENGINE_API_SECRET="same",
+    )
+    def test_shared_or_weak_platform_secret_hides_staging(self):
+        response = self.admin_client.get(URL)
+        self.assertFalse(response.data["staging_request_enabled"])
 
     def test_non_admin_and_anonymous_cannot_read_or_change(self):
         for client in (self.tenant_client, APIClient()):

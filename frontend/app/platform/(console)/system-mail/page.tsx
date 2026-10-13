@@ -20,6 +20,7 @@ type Config = {
   operational: { sender: string; dmarc_receiver: string; tlsrpt_receiver: string; source: string; draft_applied: boolean };
   activation_supported: boolean;
   mailboxes_provisioned: boolean;
+  staging_request_enabled: boolean;
 };
 type Readiness = {
   checked_at: string;
@@ -66,6 +67,7 @@ export default function SystemMailPage() {
   const [dnsReadiness, setDnsReadiness] = useState<DNSReadiness | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [staging, setStaging] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -122,6 +124,38 @@ export default function SystemMailPage() {
     }
   }
 
+  async function stageInactive() {
+    if (!config?.draft || !config.staging_request_enabled || staging || saving) return;
+    if (!window.confirm(
+      "Stage five inactive, passwordless system mailbox placeholders? " +
+      "No passwords, DKIM keys, or live mail routing will be activated."
+    )) return;
+    setStaging(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await api.post<{
+        state: string; roles: number; delivery_activated: boolean; dkim_modified: boolean;
+      }>(`${PREFIX}/stage/`, {
+        expected_revision: config.revision,
+        confirmation: "stage_inactive",
+      });
+      if (result.state !== "inactive" || result.roles !== 5 ||
+          result.delivery_activated || result.dkim_modified) {
+        setError("Staging outcome requires review. Do not retry until Native Engine state is checked.");
+        return;
+      }
+      setNotice("Five inactive system identities staged. Sending, passwords and DKIM remain unchanged.");
+      // Refresh only readiness. Keep the confirmation notice visible.
+      const latest = await api.get<Readiness>(`${PREFIX}/readiness/`);
+      setReadiness(latest);
+    } catch (err) {
+      setError("Staging could not be confirmed. Inspect the Native Engine and audit log before retrying. " + formatError(err));
+    } finally {
+      setStaging(false);
+    }
+  }
+
   const unchanged = Boolean(config && form && FIELDS.every(({ key }) => form[key] === (config.draft ?? config.defaults)[key]));
 
   return (
@@ -158,6 +192,14 @@ export default function SystemMailPage() {
               <button className="pf-btn pf-btn-primary" disabled={saving || unchanged || !form.sender_name.trim()} onClick={() => void save()}>{saving ? "Saving…" : "Save draft"}</button>
             </div>
           </section>
+          {config.staging_request_enabled && <section className="pf-card p-5 space-y-3" aria-label="Inactive system mailbox staging">
+            <h2 className="font-semibold" style={{ color: "var(--pf-text)" }}>Inactive mailbox staging</h2>
+            <p className="text-sm pf-muted">Prepare five disabled system identities only. This cannot activate delivery, generate mailbox passwords, switch senders or create a DKIM key. Native Engine may still refuse staging if its own independent gate is closed.</p>
+            <button className="pf-btn" disabled={!config.draft || !unchanged || staging || saving} onClick={() => void stageInactive()}>
+              {staging ? "Staging inactive identities…" : "Stage inactive identities"}
+            </button>
+            {!config.draft && <p className="text-xs pf-muted">Save a configuration draft first.</p>}
+          </section>}
           <section className="pf-card p-5 space-y-3">
             <h2 className="font-semibold" style={{ color: "var(--pf-text)" }}>Current operational configuration</h2>
             <div className="grid gap-3 text-sm md:grid-cols-3">
