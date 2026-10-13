@@ -382,6 +382,9 @@ services:
       NATIVE_DB_NAME: ${NATIVE_DB_NAME:-matemail_engine}
       NATIVE_DB_USER: ${NATIVE_DB_USER:-engine}
       NATIVE_DB_PASSWORD: ${NATIVE_DB_PASSWORD:?required}
+      # Request handlers use a limited database principal when enabled.
+      NATIVE_RUNTIME_DB_ENABLED: ${NATIVE_RUNTIME_DB_ENABLED:-False}
+      NATIVE_RUNTIME_DB_PASSWORD: ${NATIVE_RUNTIME_DB_PASSWORD:-}
       NATIVE_API_PORT: "8451"
       NATIVE_DKIM_DIR: /var/lib/rspamd/dkim
     volumes:

@@ -237,7 +237,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         happen. Still non-mutating: it reports the version, it does not migrate.
         """
         try:
-            with db.connect() as conn:
+            with db.connect_runtime() as conn:
                 version = db.current_version(conn)
         except Exception as exc:                 # noqa: BLE001 - reported, not raised
             self._send(503, {
@@ -296,7 +296,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
             return
         try:
-            with db.connect() as conn:
+            with db.connect_runtime() as conn:
                 result = handler(conn, self._query())
             if result is None:
                 self._send(404, {"error": "not found"})
@@ -339,7 +339,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not username or body.get("success") is not True:
             self._send(200, {"recorded": False})
             return
-        with db.connect() as conn:
+        with db.connect_runtime() as conn:
             recorded = provisioning.record_login(conn, username)
         self._send(200, {"recorded": recorded})
 
@@ -410,7 +410,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             body = self._body()
-            with db.connect() as conn:
+            with db.connect_runtime() as conn:
                 result = handler(conn, body)
             self._send(200, result if result is not None else {"ok": True})
         except operations.InvalidIdentifier as exc:
@@ -723,6 +723,7 @@ def main():
             # must not be. Runs every start so `.env` stays the single source of
             # truth for a credential rotation.
             db.sync_reader_credentials(conn)
+            db.sync_runtime_credentials(conn)
             db.sync_platform_credentials(conn)
             # Repair anything a crash left behind BEFORE serving a request.
             # Idempotent, and it never generates a key — minting one here would
