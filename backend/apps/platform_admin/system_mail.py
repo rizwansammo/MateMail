@@ -107,6 +107,11 @@ def proposed_configuration():
         "operational": operational_configuration(),
         "activation_supported": False,
         "mailboxes_provisioned": False,
+        "dkim_preparation_request_enabled": bool(
+            getattr(settings, "SYSTEM_MAIL_DKIM_PREPARE_ENABLED", False)
+            and getattr(settings, "SYSTEM_MAIL_STAGING_ENABLED", False)
+            and len(getattr(settings, "NATIVE_ENGINE_PLATFORM_SECRET", "") or "") >= 32
+        ),
         "staging_request_enabled": bool(
             getattr(settings, "SYSTEM_MAIL_STAGING_ENABLED", False)
             and len(getattr(settings, "NATIVE_ENGINE_PLATFORM_SECRET", "") or "") >= 32
