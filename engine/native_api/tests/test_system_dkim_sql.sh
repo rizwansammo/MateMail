@@ -8,16 +8,16 @@ echo 'Starting disposable PostgreSQL 16 container'
 docker run -d --name "$name" -e POSTGRES_PASSWORD=ci-only-not-a-real-secret \
     -e POSTGRES_DB=matemail_engine postgres:16-alpine >/dev/null
 for _ in $(seq 1 45); do
-    if docker exec "$name" pg_isready -U postgres -d matemail_engine >/dev/null 2>&1; then break; fi
+    if docker exec "$name" pg_isready -h 127.0.0.1 -U postgres -d matemail_engine >/dev/null 2>&1; then break; fi
     sleep 1
 done
-docker exec "$name" pg_isready -U postgres -d matemail_engine || { docker logs "$name" | tail -20; exit 1; }
+docker exec "$name" pg_isready -h 127.0.0.1 -U postgres -d matemail_engine || { docker logs "$name" | tail -20; exit 1; }
 echo 'Disposable database is accepting connections'
 for migration in engine/native_api/migrations/[0-9][0-9][0-9]_*.sql; do
     echo "Applying $migration"
-    docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -U postgres -d matemail_engine < "$migration" >/dev/null
+    docker exec -i "$name" psql -h 127.0.0.1 -X -v ON_ERROR_STOP=1 -U postgres -d matemail_engine < "$migration" >/dev/null
 done
-docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -U postgres -d matemail_engine <<'SQL'
+docker exec -i "$name" psql -h 127.0.0.1 -X -v ON_ERROR_STOP=1 -U postgres -d matemail_engine <<'SQL'
 -- A platform role may only call the explicit SECURITY DEFINER functions.
 SELECT (NOT has_table_privilege('engine_platform_operator', 'public.dkim_key', 'INSERT')) AS no_table_write;
 SELECT (NOT has_function_privilege('engine_api_runtime',
