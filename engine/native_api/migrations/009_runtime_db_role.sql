@@ -12,11 +12,11 @@ $$;
 ALTER ROLE engine_api_runtime
     NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
 
-DO $
+DO $runtime_grant$
 BEGIN
     EXECUTE format('GRANT CONNECT ON DATABASE %I TO engine_api_runtime', current_database());
 END
-$;
+$runtime_grant$;
 GRANT USAGE ON SCHEMA public TO engine_api_runtime;
 REVOKE CREATE ON SCHEMA public FROM engine_api_runtime;
 
