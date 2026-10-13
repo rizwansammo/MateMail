@@ -23,6 +23,8 @@ import {
   Inbox,
   Layers,
   LogOut,
+  ChevronDown,
+  UserRound,
   Mail,
   Menu,
   Search,
@@ -101,6 +103,8 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!isLoading && !user) router.replace("/platform/login");
@@ -111,6 +115,21 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
   // an effect body — flagged by react-hooks, and a roundabout way of
   // expressing "this button closes the menu".
   const closeNav = useCallback(() => setNavOpen(false), []);
+
+  useEffect(() => {
+    const closeOnOutside = (event: MouseEvent) => {
+      if (!profileRef.current?.contains(event.target as Node)) setProfileOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
 
   if (isLoading) {
     return (
@@ -147,31 +166,11 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
           borderColor: "var(--pf-border)",
         }}
       >
-        <div
-          className="flex h-14 items-center gap-2.5 border-b px-4"
-          style={{ borderColor: "var(--pf-border)" }}
-        >
-          <BrandMark size={30} preload />
-          <div className="min-w-0">
-            <p
-              className="truncate text-sm font-bold leading-tight"
-              style={{ color: "var(--pf-text)" }}
-            >
-              MateMail
-            </p>
-            <p className="pf-label" style={{ letterSpacing: "0.08em" }}>
-              Platform Console
-            </p>
-          </div>
-          <button
-            type="button"
-            className="pf-btn pf-btn-ghost ml-auto md:hidden"
-            style={{ padding: "0.2rem 0.35rem" }}
-            aria-label="Close navigation"
-            onClick={() => setNavOpen(false)}
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </button>
+        <div className="flex h-14 items-center gap-3 border-b px-4" style={{ borderColor: "var(--pf-border)" }}>
+          <BrandMark size={36} preload />
+          <span className="truncate text-[23px] leading-none" style={{ fontFamily: "HemiHead, sans-serif", color: "var(--pf-text)" }}>
+            MateMail
+          </span>
         </div>
 
         <nav className="flex-1 overflow-y-auto p-2.5" aria-label="Platform Console">
@@ -199,26 +198,7 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        <div
-          className="border-t p-2.5 text-xs"
-          style={{ borderColor: "var(--pf-border)" }}
-        >
-          <p className="truncate font-medium" style={{ color: "var(--pf-text)" }}>
-            {user.full_name || user.email}
-          </p>
-          <p className="truncate pf-faint">{user.email}</p>
-          <button
-            type="button"
-            className="pf-btn pf-btn-ghost mt-2 w-full"
-            onClick={async () => {
-              await signOut();
-              router.replace("/platform/login");
-            }}
-          >
-            <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
-            Sign out
-          </button>
-        </div>
+
       </aside>
 
       <div className="md:pl-60">
@@ -239,10 +219,24 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
             <Menu className="h-4 w-4" aria-hidden="true" />
           </button>
 
+          <span className="hidden shrink-0 text-xs font-semibold uppercase tracking-[0.12em] sm:block" style={{ color: "var(--pf-text-muted)" }}>Platform Console</span>
           <GlobalSearch />
 
-          <div className="ml-auto flex items-center gap-2">
-            <ThemeToggle />
+          <div ref={profileRef} className="relative ml-auto shrink-0">
+            <button type="button" className="pf-btn pf-btn-ghost flex items-center gap-2" aria-haspopup="menu" aria-expanded={profileOpen} aria-label="Open account menu" onClick={() => setProfileOpen((value) => !value)}>
+              <span className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold" style={{ background: "var(--pf-surface-3)", color: "var(--pf-text)" }}>{(user.full_name || user.email).trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</span>
+              <ChevronDown className="h-4 w-4" aria-hidden="true" />
+            </button>
+            {profileOpen && (
+              <div role="menu" aria-label="Account menu" className="pf-card absolute right-0 top-full z-50 mt-2 w-72 p-3 shadow-lg" style={{ background: "var(--pf-surface)", borderColor: "var(--pf-border)" }}>
+                <div className="flex items-start gap-3 border-b pb-3" style={{ borderColor: "var(--pf-border)" }}>
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" style={{ background: "var(--pf-surface-3)", color: "var(--pf-text)" }}><UserRound className="h-5 w-5" /></span>
+                  <div className="min-w-0"><p className="truncate text-sm font-semibold" style={{ color: "var(--pf-text)" }}>{user.full_name || "Platform Administrator"}</p><p className="break-all text-xs pf-muted">{user.email}</p></div>
+                </div>
+                <div className="py-3"><p className="pf-label mb-2">Appearance</p><ThemeToggle /></div>
+                <button type="button" role="menuitem" className="pf-btn pf-btn-ghost flex w-full items-center justify-start gap-2 border-t pt-3" style={{ borderColor: "var(--pf-border)" }} onClick={async () => { setProfileOpen(false); await signOut(); router.replace("/platform/login"); }}><LogOut className="h-4 w-4" aria-hidden="true" />Sign out</button>
+              </div>
+            )}
           </div>
         </header>
 
