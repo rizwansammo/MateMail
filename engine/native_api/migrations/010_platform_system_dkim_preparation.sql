@@ -18,6 +18,23 @@ BEGIN
         RAISE EXCEPTION 'platform operation requires dedicated operator'
             USING ERRCODE='42501';
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.domain
+         WHERE name = 'system.matemail.pro' AND active = false
+    ) THEN
+        RAISE EXCEPTION 'system domain must remain inactive' USING ERRCODE='42501';
+    END IF;
+    IF (
+        SELECT COUNT(*) FROM public.mailbox m
+        JOIN public.domain d ON d.id = m.domain_id
+        WHERE d.name = 'system.matemail.pro'
+          AND m.local_part IN ('noreply','security','operations','dmarc','tlsrpt')
+          AND m.address = m.local_part || '@system.matemail.pro'
+          AND m.active = false AND m.login_enabled = false
+          AND m.password_hash IS NULL
+    ) <> 5 THEN
+        RAISE EXCEPTION 'five inactive system identities required' USING ERRCODE='42501';
+    END IF;
     SELECT selector, public_key, private_key_path, active
       INTO entry
       FROM public.dkim_key
