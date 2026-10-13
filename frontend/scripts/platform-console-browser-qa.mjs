@@ -118,14 +118,15 @@ try {
         asideWidth: asideRect?.width, wordmarkFamily: word && getComputedStyle(word).fontFamily,
         headerLabel: label?.textContent.includes("Platform Console"),
         sidebarLabel: aside?.textContent.includes("Platform Console"),
-        sidebarFooter: aside?.textContent.includes("Sign out"),
+        sidebarFooter: !!aside?.querySelector(":scope > div:last-child")?.textContent.includes("Platform Console"),
+        sidebarHasSignOut: aside?.textContent.includes("Sign out"),
         viewportOverflow: document.documentElement.scrollWidth > window.innerWidth
       };
     });
     check("Sidebar remains 240px and wordmark uses HemiHead", geometry.asideWidth === 240 && /HemiHead/.test(geometry.wordmarkFamily), geometry);
     check("Desktop mobile menu button is hidden", await page.getByRole("button", { name: "Open navigation", includeHidden: true }).isHidden());
-    check("Platform Console label moved to header only", geometry.headerLabel && !geometry.sidebarLabel, geometry);
-    check("Account footer removed and no page overflow", !geometry.sidebarFooter && !geometry.viewportOverflow, geometry);
+    check("Platform Console label is in sidebar footer, not header", !geometry.headerLabel && geometry.sidebarLabel && geometry.sidebarFooter, geometry);
+    check("Account controls live in avatar menu and no page overflow", !geometry.sidebarHasSignOut && !geometry.viewportOverflow, geometry);
     check("Console keeps core navigation", await page.getByRole("link", { name: "All Organizations" }).count() === 1 &&
       await page.getByRole("link", { name: "Mailboxes" }).count() === 1);
     check("No live staging or activation button", await page.getByRole("button", { name: /Activate|Stage.*mail|Cutover/i }).count() === 0);
