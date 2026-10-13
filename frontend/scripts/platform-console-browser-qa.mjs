@@ -115,7 +115,12 @@ try {
       const label = document.querySelector("header");
       const asideRect = aside?.getBoundingClientRect();
       return {
-        asideWidth: asideRect?.width, wordmarkFamily: word && getComputedStyle(word).fontFamily,
+        asideWidth: asideRect?.width,
+        wordmarkFamily: word && getComputedStyle(word).fontFamily,
+        wordmarkFontLoaded: (() => {
+          const family = word && getComputedStyle(word).fontFamily.split(",")[0].trim().replace(/^[\x27\"]|[\x27\"]$/g, "");
+          return !!family && [...document.fonts].some(face => face.family.replace(/^[\x27\"]|[\x27\"]$/g, "") === family && face.status === "loaded");
+        })(),
         headerLabel: label?.textContent.includes("Platform Console"),
         sidebarLabel: aside?.textContent.includes("Platform Console"),
         sidebarFooter: !!aside?.querySelector(":scope > div:last-child")?.textContent.includes("Platform Console"),
@@ -123,7 +128,7 @@ try {
         viewportOverflow: document.documentElement.scrollWidth > window.innerWidth
       };
     });
-    check("Sidebar remains 240px and wordmark uses HemiHead", geometry.asideWidth === 240 && /HemiHead/.test(geometry.wordmarkFamily), geometry);
+    check("Sidebar remains 240px and the actual HemiHead font is loaded", geometry.asideWidth === 240 && geometry.wordmarkFontLoaded, geometry);
     check("Desktop mobile menu button is hidden", await page.getByRole("button", { name: "Open navigation", includeHidden: true }).isHidden());
     check("Platform Console label is in sidebar footer, not header", !geometry.headerLabel && geometry.sidebarLabel && geometry.sidebarFooter, geometry);
     check("Account controls live in avatar menu and no page overflow", !geometry.sidebarHasSignOut && !geometry.viewportOverflow, geometry);

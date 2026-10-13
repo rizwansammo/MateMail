@@ -172,7 +172,7 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
       >
         <div className="flex h-14 items-center gap-3 border-b px-4" style={{ borderColor: "var(--pf-border)" }}>
           <BrandMark size={36} preload />
-          <span className="truncate text-[23px] leading-none" style={{ fontFamily: "HemiHead, sans-serif", color: "var(--pf-text)" }}>
+          <span className="truncate text-[23px] leading-none" style={{ fontFamily: "var(--font-matemail-hub), sans-serif", color: "var(--pf-text)" }}>
             MateMail
           </span>
         </div>
