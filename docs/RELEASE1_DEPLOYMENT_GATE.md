@@ -42,3 +42,21 @@ A separate high-assurance startup migrator is a future defense-in-depth step.
 ## Status
 
 **NOT DEPLOY READY (2026-10-13)**. This file documents gates, not approval.
+
+## Final October 13 QA gate update
+
+Latest evidence: `docs/RELEASE1_FINAL_QA_20261013.md`.
+
+- The isolated real Django to Native API staging flow has passed.
+- Native request privilege tests passed 14/14.
+- The CI-parity full suite uncovered stale repository test assumptions. They
+  were corrected and the affected tests passed 51/51; the **entire final
+  branch still requires CI**.
+- Opening a PR against main triggers CI and Native Security checks. Main CI
+  skips GHCR publishing for pull_request events.
+- Do not enable system operations or DNS cutover in Release 1.
+- Retain Native schema 8/9 with protection triggers during application rollback;
+  they are forward migrations, so rollback means restoring older application
+  images (verified schema version >= minimum), NOT dropping the schema.
+- The deployment window must have an exact approved image digest list,
+  new backup and a human who can verify mail send/receive immediately.
