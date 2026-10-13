@@ -21,7 +21,7 @@ The five planned target identities are `noreply`, `security`, `operations`, `dma
 - `SYSTEM_MAIL_STAGING_ENABLED=False`.
 - Platform staging and runtime secrets are not provisioned.
 - Transactional SMTP connects to `mx.matemail.pro:587` and authenticates using the existing `mail.matemail.pro` identity. The actual mailer owns this design (DEC-013); a stale settings comment claiming an external provider is incorrect.
-- DNS for target A, MX, SPF, DKIM and DMARC has not been published.
+- Target MX, SPF and monitoring DMARC were published in Spaceship DNS and verified against both 1.1.1.1 and 8.8.8.8 on 13 October 2026 UTC. Target DKIM is still unpublished; an A record is not required by the MX design.
 
 ## Required records for the target
 
@@ -54,6 +54,35 @@ An A record for `system.matemail.pro` is not inherently required for SMTP receiv
 The platform-only `GET /api/platform/system-mail/dns-readiness/` endpoint exposes **observational** DNS state using bounded public DNS lookups. Errors and duplicate SPF fail closed. DKIM publication remains `published_key_unmatched`; it never asserts private-key match or mail delivery. Every response has `cutover_ready:false`.
 
 No engine staging, DNS mutation, mailbox activation, sender change, or cutover is caused by this feature. Production legacy configuration remains authoritative.
+
+## Release 3 preparation after PR #120
+
+Native schema 010 and the Platform Admin `prepare-dkim` action add a
+**separately gated** mechanism for creating exactly one DKIM key for the
+inactive `system.matemail.pro`. The private key stays inside the engine.
+The UI returns only the public TXT record.
+
+The operator must complete these steps in order:
+
+1. Verify fresh backups and rollback images.
+2. Deploy the audited Native API image that includes schema 010.
+3. Configure independent Native platform API and database credentials. Keep
+   the ordinary tenant provisioner credentials separate.
+4. Enable `NATIVE_PLATFORM_OPERATIONS_ENABLED` and
+   `SYSTEM_MAIL_STAGING_ENABLED` only for controlled staging.
+5. Save a platform system mail configuration draft.
+6. Stage the five inactive passwordless mailbox placeholders through the
+   authenticated, audited Platform Console operation.
+7. Enable both `NATIVE_PLATFORM_DKIM_PREPARE_ENABLED` and
+   `SYSTEM_MAIL_DKIM_PREPARE_ENABLED` for DKIM preparation and obtain the exact
+   public TXT record. Verify that no customer/legacy DKIM metadata changed.
+8. Publish that TXT record in Spaceship DNS and verify the public key matches
+   the Native Engine signing key. Do not activate or switch senders yet.
+9. Disable preparation and staging flags when no longer needed. Prepare a
+   separately reviewed activation/credential and rollback release.
+
+Both DKIM preparation feature gates default OFF. This work does not implement
+active mailbox passwords, domain activation, sender cutover or report rerouting.
 
 ## Current production blocker
 
