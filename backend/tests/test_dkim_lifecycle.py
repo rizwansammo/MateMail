@@ -57,7 +57,10 @@ class DeprovisionRemovesDkimTest(SimpleTestCase):
     def _run(self, adapter, name="lifecycle.example", expect=None):
         from apps.mail_engine.tasks import deprovision_domain_task
 
-        with mock.patch("apps.mail_engine.factory.get_adapter", return_value=adapter):
+        with (
+            mock.patch("apps.domains.ownership_registry.ownership_for", return_value=None),
+            mock.patch("apps.mail_engine.factory.get_adapter", return_value=adapter),
+        ):
             if expect is not None:
                 with self.assertRaises(expect):
                     deprovision_domain_task(name)
@@ -228,8 +231,9 @@ class StaleKeyIsNotInheritedTest(SimpleTestCase):
     def _deprovision(self, name):
         from apps.mail_engine.tasks import deprovision_domain_task
 
-        with mock.patch(
-            "apps.mail_engine.factory.get_adapter", return_value=self.adapter
+        with (
+            mock.patch("apps.domains.ownership_registry.ownership_for", return_value=None),
+            mock.patch("apps.mail_engine.factory.get_adapter", return_value=self.adapter),
         ):
             deprovision_domain_task(name)
 
@@ -484,3 +488,20 @@ class DomainSpecCarriesDkimSettingsTest(TestCase):
         domain.save(update_fields=["dkim_selector"])
 
         self.assertEqual(DomainSpec.from_model(domain).dkim_selector, "perdomain")
+
+
+class PlatformDeprovisionGuardTest(SimpleTestCase):
+    """The new platform claim must never reach tenant DKIM deletion."""
+
+    def test_platform_reserved_domain_is_not_deprovisioned(self):
+        from types import SimpleNamespace
+        from apps.domains.models import MailDomainOwnerKind
+        from apps.mail_engine.tasks import deprovision_domain_task
+
+        claim = SimpleNamespace(owner_kind=MailDomainOwnerKind.PLATFORM)
+        with (
+            mock.patch("apps.domains.ownership_registry.ownership_for", return_value=claim),
+            mock.patch("apps.mail_engine.factory.get_adapter") as factory,
+        ):
+            deprovision_domain_task("mail.matemail.pro")
+        factory.assert_not_called()
