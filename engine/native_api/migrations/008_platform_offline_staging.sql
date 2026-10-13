@@ -28,12 +28,12 @@ BEGIN
         RETURN NEW;
     END IF;
     IF TG_OP IN ('UPDATE', 'DELETE') THEN
-        IF EXISTS (SELECT 1 FROM platform_reserved_domain WHERE name = OLD.name) THEN
+        IF EXISTS (SELECT 1 FROM public.platform_reserved_domain WHERE name = OLD.name) THEN
             RAISE EXCEPTION 'protected platform domain cannot be modified' USING ERRCODE = '42501';
         END IF;
     END IF;
     IF TG_OP IN ('INSERT', 'UPDATE') THEN
-        IF EXISTS (SELECT 1 FROM platform_reserved_domain WHERE name = NEW.name) THEN
+        IF EXISTS (SELECT 1 FROM public.platform_reserved_domain WHERE name = NEW.name) THEN
             RAISE EXCEPTION 'protected platform domain cannot be modified' USING ERRCODE = '42501';
         END IF;
     END IF;
@@ -49,8 +49,8 @@ DECLARE
     new_domain text;
 BEGIN
     IF TG_OP IN ('UPDATE', 'DELETE') THEN
-        SELECT name INTO old_domain FROM domain WHERE id = OLD.domain_id;
-        IF EXISTS (SELECT 1 FROM platform_reserved_domain WHERE name = old_domain) THEN
+        SELECT name INTO old_domain FROM public.domain WHERE id = OLD.domain_id;
+        IF EXISTS (SELECT 1 FROM public.platform_reserved_domain WHERE name = old_domain) THEN
             IF TG_OP = 'UPDATE' THEN
                 IF (to_jsonb(NEW) - 'last_login_at') IS NOT DISTINCT FROM
                    (to_jsonb(OLD) - 'last_login_at') THEN
@@ -61,7 +61,7 @@ BEGIN
         END IF;
     END IF;
     IF TG_OP IN ('INSERT', 'UPDATE') THEN
-        SELECT name INTO new_domain FROM domain WHERE id = NEW.domain_id;
+        SELECT name INTO new_domain FROM public.domain WHERE id = NEW.domain_id;
         IF TG_OP = 'INSERT'
            AND new_domain = 'system.matemail.pro'
            AND NEW.active IS FALSE
@@ -74,7 +74,7 @@ BEGIN
         THEN
             RETURN NEW;
         END IF;
-        IF EXISTS (SELECT 1 FROM platform_reserved_domain WHERE name = new_domain) THEN
+        IF EXISTS (SELECT 1 FROM public.platform_reserved_domain WHERE name = new_domain) THEN
             RAISE EXCEPTION 'protected platform mailbox cannot be modified' USING ERRCODE = '42501';
         END IF;
     END IF;
