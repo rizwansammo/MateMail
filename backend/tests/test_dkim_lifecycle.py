@@ -54,6 +54,12 @@ class DeprovisionRemovesDkimTest(SimpleTestCase):
     `StaleKeyIsNotInheritedTest` below.
     """
 
+    def setUp(self):
+        super().setUp()
+        ownership = mock.patch("apps.domains.ownership_registry.ownership_for", return_value=None)
+        ownership.start()
+        self.addCleanup(ownership.stop)
+
     def _run(self, adapter, name="lifecycle.example", expect=None):
         from apps.mail_engine.tasks import deprovision_domain_task
 
