@@ -30,6 +30,19 @@ type Readiness = {
   cutover_ready: boolean;
 };
 type History = { results: Array<{ revision: number; created_at: string; state: string }> };
+type DNSReadiness = {
+  domain: string;
+  expected_mx: string;
+  mx: string;
+  spf: string;
+  dmarc: string;
+  dkim_publication: string;
+  dkim_engine_key_verified: boolean;
+  inbound_delivery_verified: boolean;
+  outbound_delivery_verified: boolean;
+  cutover_ready: boolean;
+  note: string;
+};
 const PREFIX = "/api/platform/system-mail";
 const FIELDS: Array<{ key: keyof Proposal; title: string }> = [
   { key: "domain", title: "Reserved system domain" },
@@ -50,6 +63,7 @@ export default function SystemMailPage() {
   const [form, setForm] = useState<Proposal | null>(null);
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [history, setHistory] = useState<History | null>(null);
+  const [dnsReadiness, setDnsReadiness] = useState<DNSReadiness | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -68,6 +82,10 @@ export default function SystemMailPage() {
       setForm(next.draft ?? next.defaults);
       setReadiness(status);
       setHistory(revisions);
+      // Public DNS may time out. It must not block the existing admin configuration UI.
+      void api.get<DNSReadiness>(`${PREFIX}/dns-readiness/`)
+        .then(setDnsReadiness)
+        .catch(() => setDnsReadiness(null));
     } catch (err) {
       setError(formatError(err));
     } finally {
@@ -160,6 +178,17 @@ export default function SystemMailPage() {
             </div>
             <div><h3 className="mb-2 text-sm font-semibold">Target mailbox inventory</h3><div className="grid gap-2 sm:grid-cols-2">{Object.entries(readiness.engine.target_roles).map(([name, state]) => <p key={name} className="text-sm pf-muted">{name.replaceAll("_", " ")}: <strong>{state}</strong></p>)}</div></div>
             <div><h3 className="mb-2 text-sm font-semibold">Migration checks still required</h3><div className="grid gap-2 sm:grid-cols-2">{Object.entries(readiness.outstanding_gates).map(([name, state]) => <p key={name} className="text-sm pf-muted">{name.replaceAll("_", " ")}: <strong>{state.replaceAll("_", " ")}</strong></p>)}</div></div>
+          </section>}
+          {dnsReadiness && <section className="pf-card p-5 space-y-3" aria-label="System domain DNS observations">
+            <h2 className="font-semibold" style={{ color: "var(--pf-text)" }}>Release 3 DNS observations</h2>
+            <p className="text-sm pf-muted">Read only checks for {dnsReadiness.domain}. DNS records do not approve mailbox activation or the sender cutover.</p>
+            <div className="grid gap-2 text-sm sm:grid-cols-2">
+              {(["mx", "spf", "dmarc", "dkim_publication"] as const).map(key =>
+                <p key={key} className="pf-muted">{key.replaceAll("_", " ").toUpperCase()}: <strong>{dnsReadiness[key].replaceAll("_", " ")}</strong></p>
+              )}
+            </div>
+            <p className="text-xs pf-muted">Expected MX: {dnsReadiness.expected_mx}. Actual Native Engine DKIM key match: not verified. Live delivery: not tested.</p>
+            <p className="text-xs pf-muted">{dnsReadiness.note}</p>
           </section>}
           <section className="pf-card p-5 space-y-2">
             <h2 className="font-semibold" style={{ color: "var(--pf-text)" }}>Draft history</h2>

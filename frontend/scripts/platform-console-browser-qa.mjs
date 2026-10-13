@@ -71,6 +71,14 @@ async function setup({ width = 1440, height = 900, theme = "light" } = {}) {
           activation_supported: false, mailboxes_provisioned: false };
       }
     } else if (endpoint === "/api/platform/system-mail/readiness/") data = readiness;
+    else if (endpoint === "/api/platform/system-mail/dns-readiness/") data = {
+      domain: "system.matemail.pro", expected_mx: "10 mx.matemail.pro",
+      mx: "missing_or_mismatched", spf: "missing_or_mismatched",
+      dmarc: "missing_or_mismatched", dkim_publication: "missing_or_mismatched",
+      dkim_engine_key_verified: false, inbound_delivery_verified: false,
+      outbound_delivery_verified: false, cutover_ready: false,
+      note: "Synthetic DNS evidence, no activation permitted.",
+    };
     else if (endpoint === "/api/platform/system-mail/history/") data = {
       results: state.draft ? [{ revision: state.revision, created_at: state.draft.created_at, state: "draft" }] : []
     };
@@ -135,6 +143,7 @@ try {
     check("Console keeps core navigation", await page.getByRole("link", { name: "All Organizations" }).count() === 1 &&
       await page.getByRole("link", { name: "Mailboxes" }).count() === 1);
     check("No live staging or activation button", await page.getByRole("button", { name: /Activate|Stage.*mail|Cutover/i }).count() === 0);
+    check("DNS readiness remains observational and blocked", await page.getByRole("region", { name: "System domain DNS observations" }).getByText(/missing or mismatched/i).count() > 0 && !readiness.cutover_ready);
     check("Reserved addresses are read only", await page.getByLabel("Security notifications").isDisabled() &&
       await page.getByLabel("DMARC reports").isDisabled());
     check("Unmodified draft cannot be saved", await page.getByRole("button", { name: "Save draft" }).isDisabled());
