@@ -83,3 +83,25 @@ Phase 3 does not add an authorized system mailbox mutation or dynamic sender
 activation endpoint. That authorization and its controlled cutover must be
 explicitly designed and verified before Phase 5. The current sender and
 receivers remain entirely driven by deployment environment configuration.
+
+## Secure inactive Native resource staging (default OFF)
+
+An explicitly confirmed platform-only staging command exists in the feature
+branch. This is NOT part of normal tenant provisioning and is not an automatic
+side effect of saving a configuration draft.
+
+- Django: `SYSTEM_MAIL_STAGING_ENABLED=False` and
+  `NATIVE_ENGINE_PLATFORM_SECRET` (empty by default).
+- Native Engine: `NATIVE_PLATFORM_OPERATIONS_ENABLED=False`,
+  `NATIVE_PLATFORM_SECRET` and `NATIVE_PLATFORM_DB_PASSWORD` (empty by
+  default). Platform and ordinary API/DB secrets must be independent.
+- Native migration 008 provisions the dedicated
+  `engine_platform_operator` PostgreSQL principal in NOLOGIN state.
+- When explicitly gated and authenticated, the database function inserts
+  only an inactive system domain and five disabled/passwordless system mailbox
+  placeholders. It does not create credentials or a DKIM key.
+- An audit record precedes the outbound command and another reports either
+  confirmed or unknown outcome. Never infer "no mutation" from a timeout.
+
+See `docs/PHASE3_NATIVE_STAGING_QA_20261013.md`. Native DB superuser
+hardening and full end-to-end integration are still open release gates.
