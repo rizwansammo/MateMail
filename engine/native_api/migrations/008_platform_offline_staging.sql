@@ -88,7 +88,7 @@ $$;
 -- existing rows, rotate credentials, activate delivery, or touch DKIM.
 CREATE OR REPLACE FUNCTION platform_stage_system_mail()
 RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
 DECLARE
     target_id bigint;
     target_active boolean;
