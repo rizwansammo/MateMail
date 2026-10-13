@@ -46,7 +46,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog
 AS $$
 DECLARE
-    domain_id bigint;
+    target_domain_id bigint;
     staged boolean;
     existing record;
 BEGIN
@@ -61,10 +61,10 @@ BEGIN
         RAISE EXCEPTION 'missing system domain reservation' USING ERRCODE='42501';
     END IF;
 
-    SELECT id INTO domain_id FROM public.domain
+    SELECT id INTO target_domain_id FROM public.domain
       WHERE name = 'system.matemail.pro' AND active = false
       FOR UPDATE;
-    IF domain_id IS NULL THEN
+    IF target_domain_id IS NULL THEN
         RAISE EXCEPTION 'system domain must be staged and inactive'
             USING ERRCODE='42501';
     END IF;
@@ -79,7 +79,7 @@ BEGIN
     ) INTO staged
       FROM public.mailbox AS m
       JOIN public.domain AS d ON d.id = m.domain_id
-     WHERE d.name = 'system.matemail.pro' AND d.id = domain_id;
+     WHERE d.name = 'system.matemail.pro' AND d.id = target_domain_id;
 
     IF staged IS DISTINCT FROM true THEN
         RAISE EXCEPTION 'five exact inactive system roles are required'
