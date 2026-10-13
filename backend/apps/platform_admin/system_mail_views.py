@@ -65,6 +65,19 @@ class PlatformSystemMailHistoryView(APIView):
         })
 
 
+class PlatformSystemMailDnsReadinessView(APIView):
+    """Public DNS observations, available to Platform Admins only.
+
+    This deliberately never activates or stages any mail resource.
+    """
+
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def get(self, request):
+        from .system_mail_dns import inspect_system_mail_dns
+        return Response(inspect_system_mail_dns())
+
+
 class PlatformSystemMailStageView(APIView):
     """Explicit, audited inactive staging; disabled unless separately configured."""
 
