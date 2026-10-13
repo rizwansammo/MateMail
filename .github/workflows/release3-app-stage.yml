@@ -1,0 +1,60 @@
+name: Release 3 application images staging only
+
+# Run once when this workflow is merged, then only on manual dispatch.
+# No production Compose files, containers or environment variables are touched.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release3-app-stage.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: release3-app-image-stage
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    if: github.repository == 'rizwansammo/MateMail' && github.ref == 'refs/heads/main'
+    name: Pull release images without restarting services
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_SHA: c61b6e4b6a2ba2e3ea8ffdfc277db53c44aa7f04
+    steps:
+      - name: Stage exact application images on MateServer
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          RELEASE_SHA: ${{ env.RELEASE_SHA }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: RELEASE_SHA,GHCR_TOKEN,GHCR_USER
+          timeout: 60s
+          command_timeout: 6m
+          script: |
+            set -Eeuo pipefail
+            test "$RELEASE_SHA" = 'c61b6e4b6a2ba2e3ea8ffdfc277db53c44aa7f04'
+            DOCKER_CONFIG="$(mktemp -d)"
+            export DOCKER_CONFIG
+            cleanup() {
+              docker logout ghcr.io >/dev/null 2>&1 || true
+              rm -rf "$DOCKER_CONFIG"
+            }
+            trap cleanup EXIT
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+            unset GHCR_TOKEN
+            for component in backend frontend; do
+              image="ghcr.io/rizwansammo/matemail-$component:$RELEASE_SHA"
+              docker pull "$image" >/dev/null
+              docker image inspect "$image" --format 'STAGED_APP_IMAGE {{.Id}}'
+            done
+            echo 'BOTH_APP_IMAGES_STAGED_NO_PRODUCTION_CHANGES'
