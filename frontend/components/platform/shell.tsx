@@ -31,7 +31,6 @@ import {
   Settings2,
   Send,
   ShieldAlert,
-  X,
 } from "lucide-react";
 
 import { BrandMark } from "@/components/brand-mark";
@@ -147,6 +146,9 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
     return <div className="pf min-h-screen" />;
   }
 
+  const displayName = user.full_name?.trim() && user.full_name.trim().toLowerCase() !== user.email.toLowerCase()
+    ? user.full_name.trim() : "Platform Administrator";
+
   return (
     <div className="pf min-h-screen">
       {/* Mobile drawer backdrop */}
@@ -199,8 +201,6 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
             </div>
           ))}
         </nav>
-
-
       </aside>
 
       <div className="md:pl-60">
@@ -226,14 +226,14 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
 
           <div ref={profileRef} className="relative ml-auto shrink-0">
             <button type="button" className="pf-btn pf-btn-ghost flex items-center gap-2" aria-haspopup="menu" aria-expanded={profileOpen} aria-label="Open account menu" onClick={() => setProfileOpen((value) => !value)}>
-              <span className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold" style={{ background: "var(--pf-surface-3)", color: "var(--pf-text)" }}>{(user.full_name || user.email).trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold" style={{ background: "var(--pf-surface-3)", color: "var(--pf-text)" }}>{displayName.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</span>
               <ChevronDown className="h-4 w-4" aria-hidden="true" />
             </button>
             {profileOpen && (
               <div role="menu" aria-label="Account menu" className="pf-card absolute right-0 top-full z-50 mt-2 w-72 p-3 shadow-lg" style={{ background: "var(--pf-surface)", borderColor: "var(--pf-border)" }}>
                 <div className="flex items-start gap-3 border-b pb-3" style={{ borderColor: "var(--pf-border)" }}>
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" style={{ background: "var(--pf-surface-3)", color: "var(--pf-text)" }}><UserRound className="h-5 w-5" /></span>
-                  <div className="min-w-0"><p className="truncate text-sm font-semibold" style={{ color: "var(--pf-text)" }}>{user.full_name || "Platform Administrator"}</p><p className="break-all text-xs pf-muted">{user.email}</p></div>
+                  <div className="min-w-0"><p className="truncate text-sm font-semibold" style={{ color: "var(--pf-text)" }}>{displayName}</p><p className="break-all text-xs pf-muted">{user.email}</p></div>
                 </div>
                 <div className="py-3"><p className="pf-label mb-2">Appearance</p><ThemeToggle /></div>
                 <button type="button" role="menuitem" className="pf-btn pf-btn-ghost flex w-full items-center justify-start gap-2 border-t pt-3" style={{ borderColor: "var(--pf-border)" }} onClick={async () => { setProfileOpen(false); await signOut(); router.replace("/platform/login"); }}><LogOut className="h-4 w-4" aria-hidden="true" />Sign out</button>

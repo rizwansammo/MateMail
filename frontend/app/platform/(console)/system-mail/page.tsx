@@ -75,7 +75,10 @@ export default function SystemMailPage() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  // Defer the initial load so state updates are not performed synchronously inside an effect.
+  useEffect(() => {
+    void Promise.resolve().then(refresh);
+  }, [refresh]);
 
   async function save() {
     if (!config || !form || saving) return;
@@ -90,14 +93,18 @@ export default function SystemMailPage() {
       setConfig(next);
       setForm(next.draft ?? next.defaults);
       setNotice("Configuration draft saved. Live mail delivery and DNS are unchanged.");
-      const revisions = await api.get<History>(`${PREFIX}/history/`);
-      setHistory(revisions);
+      // History is secondary. A temporary read error must not report a successful save as failed.
+      void api.get<History>(`${PREFIX}/history/`).then(setHistory).catch(() => {
+        setNotice("Draft saved. Revision history could not be refreshed yet.");
+      });
     } catch (err) {
       setError(formatError(err));
     } finally {
       setSaving(false);
     }
   }
+
+  const unchanged = Boolean(config && form && FIELDS.every(({ key }) => form[key] === (config.draft ?? config.defaults)[key]));
 
   return (
     <div className="space-y-5">
@@ -130,7 +137,7 @@ export default function SystemMailPage() {
             </div>
             <div className="flex items-center justify-end gap-3">
               <span className="text-xs pf-muted">This saves a proposal only.</span>
-              <button className="pf-btn pf-btn-primary" disabled={saving || !form.sender_name.trim()} onClick={() => void save()}>{saving ? "Saving…" : "Save draft"}</button>
+              <button className="pf-btn pf-btn-primary" disabled={saving || unchanged || !form.sender_name.trim()} onClick={() => void save()}>{saving ? "Saving…" : "Save draft"}</button>
             </div>
           </section>
           <section className="pf-card p-5 space-y-3">
