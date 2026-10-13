@@ -7,6 +7,7 @@ from .system_mail_views import (
     PlatformSystemMailReadinessView,
     PlatformSystemMailHistoryView,
     PlatformSystemMailStageView,
+    PlatformSystemMailDnsReadinessView,
 )
 
 from .auth_views import (
@@ -112,6 +113,7 @@ urlpatterns = [
     path("backups/", PlatformBackupStatusView.as_view(), name="platform-backups"),
     path("system-mail/configuration/", PlatformSystemMailConfigurationView.as_view(), name="platform-system-mail-configuration"),
     path("system-mail/readiness/", PlatformSystemMailReadinessView.as_view(), name="platform-system-mail-readiness"),
+    path("system-mail/dns-readiness/", PlatformSystemMailDnsReadinessView.as_view(), name="platform-system-mail-dns-readiness"),
     path("system-mail/history/", PlatformSystemMailHistoryView.as_view(), name="platform-system-mail-history"),
     path("system-mail/stage/", PlatformSystemMailStageView.as_view(), name="platform-system-mail-stage"),
 
