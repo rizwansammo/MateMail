@@ -6450,3 +6450,8 @@ body {
   :root:not([data-pf-theme="light"]):not([data-pf-theme="dark"]) .pf .mm-official-brand img.mm-official-brand-default {display:none}
   :root:not([data-pf-theme="light"]):not([data-pf-theme="dark"]) .pf .mm-official-brand img.mm-official-brand-inverse {display:block}
 }
+
+/* Platform Console: keep the mobile drawer trigger out of desktop navigation. */
+@media (min-width: 768px) {
+  .pf .pf-mobile-menu-trigger { display: none; }
+}

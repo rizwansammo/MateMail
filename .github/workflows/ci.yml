@@ -226,6 +226,42 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      # Release 2 only: synthetic Platform Admin visual and interaction review.
+      # Runs in the existing frontend job, against a local production preview.
+      - name: Install temporary Playwright for Platform Console QA
+        if: github.event_name == 'pull_request' && github.head_ref == 'phase4-platform-console-ui'
+        working-directory: frontend
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+
+      - name: Platform Console isolated visual and interaction tests
+        if: github.event_name == 'pull_request' && github.head_ref == 'phase4-platform-console-ui'
+        working-directory: frontend
+        env:
+          PLATFORM_QA_URL: http://127.0.0.1:3102
+          PLATFORM_QA_OUTPUT: platform-qa-artifacts
+        run: |
+          nohup npm run start -- -p 3102 > "$RUNNER_TEMP/platform-console-preview.log" 2>&1 &
+          for try in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:3102/platform/login" -o /dev/null; then break; fi
+            sleep 2
+          done
+          if ! curl -fsS "http://127.0.0.1:3102/platform/login" -o /dev/null; then
+            cat "$RUNNER_TEMP/platform-console-preview.log"
+            exit 1
+          fi
+          node scripts/platform-console-browser-qa.mjs
+
+      - name: Upload Platform Console visual evidence
+        if: always() && github.event_name == 'pull_request' && github.head_ref == 'phase4-platform-console-ui'
+        uses: actions/upload-artifact@v4
+        with:
+          name: matemail-platform-release2-visual-review
+          path: frontend/platform-qa-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
       # PostBox B6 only: screenshots and interaction checks against an isolated
       # Next.js preview, with synthetic browser-intercepted APIs. Never hits
       # production and adds zero overhead to main branch CI.
