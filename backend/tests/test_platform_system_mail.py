@@ -233,3 +233,93 @@ class SystemMailReadinessTests(TestCase):
         self.assertEqual([x["revision"] for x in history.data["results"]], [2, 1])
         self.assertFalse(history.data["has_more"])
         self.assertNotIn("password", str(history.data).lower())
+
+
+
+@override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS)
+class SystemMailRuntimePreviewTests(TestCase):
+    def setUp(self):
+        disable_throttling(self)
+        self.admin = make_user("preview-admin@platform.test", is_platform_admin=True)
+        self.client = auth_client(self.admin)
+
+    @override_settings(
+        DEFAULT_FROM_EMAIL="MateMail <noreply@mail.matemail.pro>",
+        DMARC_REPORT_ADDRESS="dmarc@mail.matemail.pro",
+        TLS_RPT_REPORT_ADDRESS="tlsrpt@mail.matemail.pro",
+        MAIL_ENGINE_ADAPTER="stub",
+    )
+    def test_legacy_runtime_aligned_when_no_draft(self):
+        response = self.client.get("/api/platform/system-mail/readiness/")
+        self.assertEqual(response.status_code, 200)
+        state = response.data["runtime_alignment"]
+        self.assertEqual(state["roles"], {
+            "sender": "legacy",
+            "dmarc_receiver": "legacy",
+            "tlsrpt_receiver": "legacy",
+        })
+        self.assertTrue(state["legacy_configuration_intact"])
+        self.assertFalse(state["migration_started"])
+        self.assertEqual(response.data["provisioning_preview"]["domain"], "unknown")
+        self.assertFalse(response.data["provisioning_preview"]["changes_applied"])
+
+    @override_settings(
+        DEFAULT_FROM_EMAIL="MateMail <noreply@system.matemail.pro>",
+        DMARC_REPORT_ADDRESS="dmarc@mail.matemail.pro",
+        TLS_RPT_REPORT_ADDRESS="tlsrpt@another.example",
+        MAIL_ENGINE_ADAPTER="stub",
+    )
+    def test_unplanned_runtime_address_drift_is_explicit(self):
+        response = self.client.get("/api/platform/system-mail/readiness/")
+        state = response.data["runtime_alignment"]
+        self.assertEqual(state["roles"], {
+            "sender": "target",
+            "dmarc_receiver": "legacy",
+            "tlsrpt_receiver": "other",
+        })
+        self.assertFalse(state["legacy_configuration_intact"])
+        self.assertTrue(state["migration_started"])
+        self.assertFalse(response.data["cutover_ready"])
+        self.assertFalse(response.data["activation_supported"])
+
+    @override_settings(MAIL_ENGINE_ADAPTER="native")
+    def test_engine_inventory_creates_only_a_preview(self):
+        from apps.mail_engine.dto import EngineDomain, EngineMailbox
+        adapter = mock.Mock()
+        adapter.list_domains.return_value = [
+            EngineDomain("mail.matemail.pro", active=True),
+            EngineDomain("system.matemail.pro", active=True),
+        ]
+        adapter.list_mailboxes.side_effect = [
+            [EngineMailbox("noreply@mail.matemail.pro", active=True)],
+            [EngineMailbox("noreply@system.matemail.pro", active=True),
+             EngineMailbox("security@system.matemail.pro", active=False)],
+        ]
+        with mock.patch(
+            "apps.platform_admin.system_mail_readiness.get_adapter", return_value=adapter
+        ):
+            response = self.client.get("/api/platform/system-mail/readiness/")
+        self.assertEqual(response.status_code, 200)
+        preview = response.data["provisioning_preview"]
+        self.assertEqual(preview["domain"], "present")
+        self.assertEqual(preview["mailboxes"]["noreply_address"], "present")
+        self.assertEqual(preview["mailboxes"]["security_address"], "would_need_activation")
+        self.assertEqual(preview["mailboxes"]["dmarc_address"], "would_need_provisioning")
+        self.assertFalse(preview["changes_applied"])
+        self.assertFalse(response.data["cutover_ready"])
+        for operation in ("ensure_domain", "ensure_mailbox", "delete_domain", "set_mailbox_password"):
+            getattr(adapter, operation).assert_not_called()
+
+    @override_settings(MAIL_ENGINE_ADAPTER="native")
+    def test_engine_unavailable_never_claims_provisioning_complete(self):
+        adapter = mock.Mock()
+        adapter.list_domains.side_effect = TimeoutError("API bearer secret should not leak")
+        with mock.patch(
+            "apps.platform_admin.system_mail_readiness.get_adapter", return_value=adapter
+        ):
+            response = self.client.get("/api/platform/system-mail/readiness/")
+        self.assertEqual(response.status_code, 200)
+        preview = response.data["provisioning_preview"]
+        self.assertEqual(preview["domain"], "unknown")
+        self.assertTrue(all(x == "unknown" for x in preview["mailboxes"].values()))
+        self.assertNotIn("bearer secret", str(response.data))

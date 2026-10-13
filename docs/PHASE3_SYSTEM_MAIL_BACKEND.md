@@ -65,3 +65,21 @@ an active system domain in a read-only inventory never authorises cutover.
 
 The history endpoint returns at most twenty immutable proposed revisions,
 without credentials or secrets. Tenant/API key access remains prohibited.
+
+## Operational alignment and provisioning preview
+
+The read-only readiness response now classifies the *actual configured*
+transactional sender, DMARC receiver and TLS receiver as `legacy`, `target`,
+`other` or `unset`. A submitted draft never affects this classification.
+
+The `provisioning_preview` derives future actions from native read-only
+inventory: `present`, `would_need_activation`,
+`would_need_provisioning` or `unknown`. It **never** invokes
+`ensure_domain`, `ensure_mailbox` or any other Native Engine mutation.
+Neither the preview nor the inventory can assert DNS, authentication or live
+message delivery readiness.
+
+Phase 3 does not add an authorized system mailbox mutation or dynamic sender
+activation endpoint. That authorization and its controlled cutover must be
+explicitly designed and verified before Phase 5. The current sender and
+receivers remain entirely driven by deployment environment configuration.

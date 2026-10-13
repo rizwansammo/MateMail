@@ -79,11 +79,64 @@ def inspect_engine(*, adapter=None):
     }
 
 
+
+def _runtime_role(address: str, local: str) -> str:
+    """Classify configured identity, not live delivery or authentication."""
+    from email.utils import parseaddr
+
+    parsed = parseaddr(address or "")[1].strip().lower()
+    if not parsed:
+        return "unset"
+    if parsed == f"{local}@{LEGACY_DOMAIN}":
+        return "legacy"
+    if parsed == f"{local}@{SYSTEM_MAIL_DOMAIN}":
+        return "target"
+    return "other"
+
+
+def runtime_alignment(operational: dict) -> dict:
+    """Compare operational environment with the plan, independently of drafts."""
+    roles = {
+        "sender": _runtime_role(operational["sender"], "noreply"),
+        "dmarc_receiver": _runtime_role(operational["dmarc_receiver"], "dmarc"),
+        "tlsrpt_receiver": _runtime_role(operational["tlsrpt_receiver"], "tlsrpt"),
+    }
+    return {
+        "roles": roles,
+        "legacy_configuration_intact": all(value == "legacy" for value in roles.values()),
+        "migration_started": any(value == "target" for value in roles.values()),
+        "note": "Configuration identity only; delivery, DNS and ingestion have not been verified.",
+    }
+
+
+def planned_engine_operations(engine: dict) -> dict:
+    """Explain work needed later; never call any mutation API."""
+    if engine["status"] != "observed":
+        return {
+            "domain": "unknown",
+            "mailboxes": {role: "unknown" for role in ROLE_LOCAL_PARTS},
+            "changes_applied": False,
+        }
+    status_action = {
+        "active": "present",
+        "inactive": "would_need_activation",
+        "absent": "would_need_provisioning",
+    }
+    return {
+        "domain": status_action[engine["target_domain"]],
+        "mailboxes": {
+            role: status_action[status] for role, status in engine["target_roles"].items()
+        },
+        "changes_applied": False,
+    }
+
+
 def system_mail_readiness(*, adapter=None):
     pointer = PlatformSystemMailPointer.objects.select_related("draft").filter(pk=1).first()
     claim_ok = _platform_claim(SYSTEM_MAIL_DOMAIN)
     legacy_claim_ok = _platform_claim(LEGACY_DOMAIN)
     engine = inspect_engine(adapter=adapter)
+    operational = operational_configuration()
     return {
         "checked_at": timezone.now().isoformat(),
         "domain": SYSTEM_MAIL_DOMAIN,
@@ -94,7 +147,9 @@ def system_mail_readiness(*, adapter=None):
             "legacy": "verified" if legacy_claim_ok else "blocked",
         },
         "engine": engine,
-        "operational": operational_configuration(),
+        "operational": operational,
+        "runtime_alignment": runtime_alignment(operational),
+        "provisioning_preview": planned_engine_operations(engine),
         "outstanding_gates": {
             "dns": "not_verified",
             "dkim_signing": "not_verified",
