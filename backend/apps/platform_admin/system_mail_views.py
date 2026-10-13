@@ -63,3 +63,27 @@ class PlatformSystemMailHistoryView(APIView):
             "results": [serialize_revision(row) for row in rows[:20]],
             "has_more": len(rows) > 20,
         })
+
+
+class PlatformSystemMailStageView(APIView):
+    """Explicit, audited inactive staging; disabled unless separately configured."""
+
+    permission_classes = [IsAuthenticated, IsPlatformAdmin]
+
+    def post(self, request):
+        from .system_mail_stage import (
+            StageConflict, StageUnavailable, SystemMailStageSerializer,
+            stage_system_mail,
+        )
+        serializer = SystemMailStageSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            result = stage_system_mail(
+                actor=request.user, request=request,
+                expected_revision=serializer.validated_data["expected_revision"],
+            )
+        except StageConflict as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except StageUnavailable as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response(result, status=status.HTTP_200_OK)

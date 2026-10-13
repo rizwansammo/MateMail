@@ -6,6 +6,7 @@ from .system_mail_views import (
     PlatformSystemMailConfigurationView,
     PlatformSystemMailReadinessView,
     PlatformSystemMailHistoryView,
+    PlatformSystemMailStageView,
 )
 
 from .auth_views import (
@@ -112,6 +113,7 @@ urlpatterns = [
     path("system-mail/configuration/", PlatformSystemMailConfigurationView.as_view(), name="platform-system-mail-configuration"),
     path("system-mail/readiness/", PlatformSystemMailReadinessView.as_view(), name="platform-system-mail-readiness"),
     path("system-mail/history/", PlatformSystemMailHistoryView.as_view(), name="platform-system-mail-history"),
+    path("system-mail/stage/", PlatformSystemMailStageView.as_view(), name="platform-system-mail-stage"),
 
     # ── Oversight actions ───────────────────────────────────────────────────
     # POST disables / releases, DELETE reverses it.
