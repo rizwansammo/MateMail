@@ -111,8 +111,13 @@ class RolePermissionMatrixTest(TestCase):
         self.assert_roles(WRITE_ROLES, create, label="POST /api/domains/")
 
     def test_domain_delete_requires_admin(self):
+        # Deleted domains retain ownership reservations, so an object count
+        # must never be reused as a supposedly new DNS domain identifier.
+        next_id = {"value": 0}
+
         def delete(client):
-            target = make_domain(self.tenant, f"del-{Domain.objects.count()}.example")
+            next_id["value"] += 1
+            target = make_domain(self.tenant, f"del-{next_id['value']}.example")
             return client.delete(f"/api/domains/{target.id}/")
 
         self.assert_roles(WRITE_ROLES, delete, label="DELETE /api/domains/{id}/")

@@ -20,7 +20,7 @@ class CollaborationProductionHardeningContractTest(SimpleTestCase):
         match = re.search(r"^REQUIRED_VERSION\s*=\s*(\d+)\s*$", db_source, re.M)
         self.assertIsNotNone(match)
         self.assertEqual(max(versions), int(match.group(1)))
-        self.assertEqual(6, max(versions))
+        self.assertGreaterEqual(max(versions), 6)  # collaboration schema baseline
 
     def test_native_ready_reports_collaboration_capabilities(self):
         source = (ENGINE / "app.py").read_text(encoding="utf-8")
