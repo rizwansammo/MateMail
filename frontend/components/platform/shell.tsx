@@ -28,6 +28,7 @@ import {
   Mail,
   Menu,
   Search,
+  Settings2,
   Send,
   ShieldAlert,
   X,
@@ -89,6 +90,7 @@ const NAV: NavSection[] = [
       { href: "/platform/audit", label: "Audit Logs", icon: ClipboardList },
       { href: "/platform/health", label: "System Health", icon: HeartPulse },
       { href: "/platform/backups", label: "Backups", icon: Database },
+      { href: "/platform/system-mail", label: "System Mail", icon: Settings2 },
     ],
   },
 ];
