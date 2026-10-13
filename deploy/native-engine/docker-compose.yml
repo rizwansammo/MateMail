@@ -357,6 +357,7 @@ services:
       NATIVE_API_SECRET: ${NATIVE_API_SECRET:?required}
       # Phase 3: default OFF; separate scoped platform API and DB credentials.
       NATIVE_PLATFORM_OPERATIONS_ENABLED: ${NATIVE_PLATFORM_OPERATIONS_ENABLED:-False}
+      NATIVE_PLATFORM_DKIM_PREPARE_ENABLED: ${NATIVE_PLATFORM_DKIM_PREPARE_ENABLED:-False}
       NATIVE_PLATFORM_SECRET: ${NATIVE_PLATFORM_SECRET:-}
       NATIVE_PLATFORM_DB_PASSWORD: ${NATIVE_PLATFORM_DB_PASSWORD:-}
       # The API sets these two roles' passwords at every start, so the
