@@ -271,3 +271,43 @@ def dkim_lifecycle_lock(conn):
                 "could not release the DKIM lifecycle lock (%s); PostgreSQL will "
                 "drop it when this connection closes", type(exc).__name__,
             )
+
+
+def connect_platform() -> psycopg.Connection:
+    """Separate PostgreSQL identity, not the ordinary superuser writer."""
+    password = os.environ.get("NATIVE_PLATFORM_DB_PASSWORD", "")
+    if not password:
+        raise RuntimeError("platform DB credential not configured")
+    return psycopg.connect(
+        host=os.environ.get("NATIVE_DB_HOST", "db"),
+        port=os.environ.get("NATIVE_DB_PORT", "5432"),
+        dbname=os.environ.get("NATIVE_DB_NAME", "matemail_engine"),
+        user="engine_platform_operator",
+        password=password,
+        connect_timeout=5,
+    )
+
+
+def sync_platform_credentials(conn) -> None:
+    """Fail closed: operator NOLOGIN unless explicitly enabled and distinct.
+
+    Called only after migration 008; never grants any table privileges.
+    """
+    import platform_security
+
+    if current_version(conn) < 8:
+        return
+    enabled = platform_security.enabled()
+    if enabled and not platform_security.credentials_distinct():
+        raise RuntimeError("platform credentials are missing or not independent")
+    with conn.cursor() as cur:
+        if enabled:
+            secret = os.environ["NATIVE_PLATFORM_DB_PASSWORD"]
+            cur.execute(
+                psycopg.sql.SQL("ALTER ROLE engine_platform_operator WITH LOGIN PASSWORD {}").format(
+                    psycopg.sql.Literal(secret),
+                )
+            )
+        else:
+            cur.execute("ALTER ROLE engine_platform_operator NOLOGIN")
+    conn.commit()

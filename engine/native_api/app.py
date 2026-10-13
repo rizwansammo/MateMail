@@ -54,6 +54,7 @@ import db
 import dkim as dkim_lib
 import operations
 import provisioning
+import platform_security
 import push
 import validation
 from validation import ValidationError
@@ -388,6 +389,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as exc:             # noqa: BLE001
                 self._fail(exc)
             return
+        if route == "/v1/platform/system/stage":
+            if not platform_security.authorized(self):
+                self._send(403, {"error": "unauthorized"})
+                return
+            try:
+                result = platform_security.stage_inactive_system_mail(self._body())
+                self._send(200, result)
+            except ValidationError as exc:
+                self._send(400, {"error": exc.message})
+            except Exception as exc:
+                self._fail(exc)
+            return
         if not authorized(self):
             self._send(403, {"error": "unauthorized"})
             return
@@ -710,6 +723,7 @@ def main():
             # must not be. Runs every start so `.env` stays the single source of
             # truth for a credential rotation.
             db.sync_reader_credentials(conn)
+            db.sync_platform_credentials(conn)
             # Repair anything a crash left behind BEFORE serving a request.
             # Idempotent, and it never generates a key — minting one here would
             # publish material no DNS record names.

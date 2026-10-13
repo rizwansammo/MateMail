@@ -95,7 +95,6 @@ DECLARE
     role_name text;
     matched_address text;
     already_active boolean;
-    count_new int := 0;
 BEGIN
     IF session_user <> 'engine_platform_operator' THEN
         RAISE EXCEPTION 'platform operation requires the dedicated database principal'
@@ -126,7 +125,6 @@ BEGIN
             (domain_id,address,local_part,display_name,password_hash,quota_mb,active,login_enabled)
         VALUES (target_id, matched_address, role_name, '', null, 1024, false, false)
         ON CONFLICT (address) DO NOTHING;
-        GET DIAGNOSTICS count_new = ROW_COUNT;
     END LOOP;
     RETURN jsonb_build_object(
         'domain', 'system.matemail.pro',
