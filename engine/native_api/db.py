@@ -145,7 +145,7 @@ def apply_migrations(conn) -> int:
 #: The schema version this build of the API requires. Readiness reports a
 #: mismatch rather than serving requests against a schema it was not written
 #: for — a newer API against an older database is how half-written rows happen.
-REQUIRED_VERSION = 6
+REQUIRED_VERSION = 9
 
 
 #: The reader roles NE3 gives a password to. Postfix and Dovecot authenticate
@@ -271,3 +271,102 @@ def dkim_lifecycle_lock(conn):
                 "could not release the DKIM lifecycle lock (%s); PostgreSQL will "
                 "drop it when this connection closes", type(exc).__name__,
             )
+
+
+def connect_platform() -> psycopg.Connection:
+    """Separate PostgreSQL identity, not the ordinary superuser writer."""
+    password = os.environ.get("NATIVE_PLATFORM_DB_PASSWORD", "")
+    if not password:
+        raise RuntimeError("platform DB credential not configured")
+    return psycopg.connect(
+        host=os.environ.get("NATIVE_DB_HOST", "db"),
+        port=os.environ.get("NATIVE_DB_PORT", "5432"),
+        dbname=os.environ.get("NATIVE_DB_NAME", "matemail_engine"),
+        user="engine_platform_operator",
+        password=password,
+        connect_timeout=5,
+    )
+
+
+def sync_platform_credentials(conn) -> None:
+    """Fail closed: operator NOLOGIN unless explicitly enabled and distinct.
+
+    Called only after migration 008; never grants any table privileges.
+    """
+    import platform_security
+
+    if current_version(conn) < 8:
+        return
+    enabled = platform_security.enabled()
+    if enabled and not platform_security.credentials_distinct():
+        raise RuntimeError("platform credentials are missing or not independent")
+    with conn.cursor() as cur:
+        if enabled:
+            secret = os.environ["NATIVE_PLATFORM_DB_PASSWORD"]
+            cur.execute(
+                psycopg.sql.SQL("ALTER ROLE engine_platform_operator WITH LOGIN PASSWORD {}").format(
+                    psycopg.sql.Literal(secret),
+                )
+            )
+        else:
+            cur.execute("ALTER ROLE engine_platform_operator NOLOGIN")
+    conn.commit()
+
+
+def runtime_credentials_distinct() -> bool:
+    password = os.environ.get("NATIVE_RUNTIME_DB_PASSWORD", "")
+    baseline = (
+        os.environ.get("NATIVE_DB_PASSWORD", ""),
+        os.environ.get("NATIVE_API_SECRET", ""),
+        os.environ.get("NATIVE_DOVECOT_POLICY_SECRET", ""),
+        os.environ.get("NATIVE_PLATFORM_SECRET", ""),
+        os.environ.get("NATIVE_PLATFORM_DB_PASSWORD", ""),
+    )
+    # Optional platform secrets can be empty: never reject them simply
+    # because staging remains disabled, but never reuse a nonempty one.
+    return (
+        len(password) >= 32
+        and bool(baseline[0])
+        and all(not secret or password != secret for secret in baseline)
+    )
+
+
+def runtime_enabled() -> bool:
+    return os.environ.get("NATIVE_RUNTIME_DB_ENABLED", "False").lower() == "true"
+
+
+def connect_runtime() -> psycopg.Connection:
+    """General API requests: least-privilege database role when enabled.
+
+    This must NEVER fall back to the migration superuser on a failed login.
+    """
+    if not runtime_enabled():
+        return connect()  # Legacy deployments only; must harden before release.
+    if not runtime_credentials_distinct():
+        raise RuntimeError("runtime database role credential is not configured")
+    return psycopg.connect(
+        host=os.environ.get("NATIVE_DB_HOST", "db"),
+        port=os.environ.get("NATIVE_DB_PORT", "5432"),
+        dbname=os.environ.get("NATIVE_DB_NAME", "matemail_engine"),
+        user="engine_api_runtime",
+        password=os.environ["NATIVE_RUNTIME_DB_PASSWORD"],
+        connect_timeout=5,
+    )
+
+
+def sync_runtime_credentials(conn) -> None:
+    """Use bootstrap authority only at startup; never on tenant HTTP paths."""
+    if current_version(conn) < 9:
+        return
+    if runtime_enabled() and not runtime_credentials_distinct():
+        raise RuntimeError("runtime DB credentials are not independent")
+    with conn.cursor() as cur:
+        if runtime_enabled():
+            cur.execute(
+                psycopg.sql.SQL("ALTER ROLE engine_api_runtime WITH LOGIN PASSWORD {}").format(
+                    psycopg.sql.Literal(os.environ["NATIVE_RUNTIME_DB_PASSWORD"])
+                )
+            )
+        else:
+            cur.execute("ALTER ROLE engine_api_runtime NOLOGIN")
+    conn.commit()

@@ -41,6 +41,21 @@ class NotFound(LookupError):
 # ── Domains ──────────────────────────────────────────────────────────────────
 
 
+def _refuse_platform_domain(conn, domain: str) -> None:
+    """Native authority guard; tenant API callers cannot reconcile reserved names.
+
+    This freezes platform resources until the separately authenticated system
+    management API is implemented. No implicit adoption or credential rotation.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM platform_reserved_domain WHERE name = %s",
+            (domain.strip().lower(),),
+        )
+        if cur.fetchone():
+            raise ValidationError("protected platform domain cannot be changed", "domain")
+
+
 def ensure_domain(conn, spec: dict) -> dict:
     """
     Create or reconcile a domain, and make sure it has a DKIM key.
@@ -51,6 +66,7 @@ def ensure_domain(conn, spec: dict) -> dict:
     see `_ensure_dkim_for`.
     """
     name = validation.domain_name(spec["name"])
+    _refuse_platform_domain(conn, name)
     selector = validation.selector(spec.get("dkim_selector") or "mm1")
     default_mb = validation.quota_mb(spec.get("default_quota_mb", 1024), "default_quota_mb")
     max_mb = validation.quota_mb(spec.get("max_quota_mb", 1024), "max_quota_mb")
@@ -104,6 +120,7 @@ def ensure_domain(conn, spec: dict) -> dict:
 
 def set_domain_active(conn, name: str, active: bool) -> None:
     name = validation.domain_name(name)
+    _refuse_platform_domain(conn, name)
     active = validation.boolean(active, "active")
     with conn.cursor() as cur:
         cur.execute(
@@ -127,6 +144,7 @@ def delete_domain(conn, name: str) -> None:
     the previous owner's signing key.
     """
     name = validation.domain_name(name)
+    _refuse_platform_domain(conn, name)
     with conn.cursor() as cur:
         # Mailboxes, aliases, their destinations and forwarding all cascade from
         # the domain row. DKIM does not reference it, so it survives.
@@ -164,6 +182,7 @@ def ensure_mailbox(conn, spec: dict, password: str = "") -> dict:
     """
     address = validation.email_address(spec["address"])
     local_part, _, domain = address.rpartition("@")
+    _refuse_platform_domain(conn, domain)
     quota = validation.quota_mb(spec.get("quota_mb", 1024))
     active = validation.boolean(spec.get("active", True), "active")
     display_name = spec.get("display_name", "") or ""
@@ -308,6 +327,7 @@ def record_login(conn, address: str) -> bool:
 
 def set_mailbox_active(conn, address: str, active: bool) -> None:
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     active = validation.boolean(active, "active")
     with conn.cursor() as cur:
         cur.execute(
@@ -327,6 +347,7 @@ def set_mailbox_password(conn, address: str, password: str) -> None:
     than stored — the adapter contract raises `Rejected` for it.
     """
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     plaintext = validation.password(password)
     with conn.cursor() as cur:
         cur.execute(
@@ -354,6 +375,7 @@ def set_mailbox_password(conn, address: str, password: str) -> None:
 
 def set_mailbox_quota(conn, address: str, quota: int) -> None:
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     quota = validation.quota_mb(quota)
     with conn.cursor() as cur:
         cur.execute(
@@ -381,6 +403,7 @@ def delete_mailbox(conn, address: str) -> None:
     old directory outright.
     """
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     with conn.cursor() as cur:
         # Recorded BEFORE the delete, while the row still exists to be read.
         cur.execute(
@@ -437,6 +460,7 @@ def set_mailbox_rate_limit(conn, address: str, messages: int, window: str) -> di
     first should survive a later review of who changed what.
     """
     name = validation.email_address(address)
+    _refuse_platform_domain(conn, name.rpartition("@")[2])
     if not isinstance(messages, int) or isinstance(messages, bool) or messages < 0:
         raise ValidationError("messages must be a whole number of zero or more",
                               field="messages")
@@ -488,6 +512,7 @@ def clear_mailbox_rate_limit(conn, address: str) -> None:
     unlimited. That is deliberately distinguishable from `messages = 0`.
     """
     name = validation.email_address(address)
+    _refuse_platform_domain(conn, name.rpartition("@")[2])
     with conn.cursor() as cur:
         cur.execute(
             "DELETE FROM mailbox_rate_limit WHERE mailbox_id IN "
@@ -577,6 +602,7 @@ def ensure_alias(conn, spec: dict) -> dict:
     the alias.
     """
     address = validation.email_address(spec["address"])
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     targets = validation.destinations(spec.get("destinations", []))
     if not targets:
         raise ValidationError("an alias requires at least one destination", "destinations")
@@ -618,6 +644,7 @@ def ensure_alias(conn, spec: dict) -> dict:
 
 def delete_alias(conn, address: str) -> None:
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     with conn.cursor() as cur:
         cur.execute("DELETE FROM alias WHERE address = %s", (address,))
 
@@ -681,6 +708,7 @@ _FORWARD_GROUP_POLICIES = {"anyone", "organization", "members", "selected"}
 
 def ensure_forward_group(conn, spec: dict) -> dict:
     address = validation.email_address(spec["address"])
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     destinations = validation.destinations(spec.get("destinations", []))
     allowed_senders = validation.destinations(spec.get("allowed_senders", []))
     sender_policy = str(spec.get("sender_policy") or "anyone").strip().lower()
@@ -749,6 +777,7 @@ def ensure_forward_group(conn, spec: dict) -> dict:
 
 def delete_forward_group(conn, address: str) -> None:
     address = validation.email_address(address)
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     with conn.cursor() as cur:
         cur.execute("DELETE FROM forward_group WHERE address = %s", (address,))
 
@@ -797,6 +826,7 @@ def ensure_forwarding(conn, spec: dict) -> dict:
     grants that address nothing at all.
     """
     address = validation.email_address(spec["mailbox_address"], "mailbox_address")
+    _refuse_platform_domain(conn, address.rpartition("@")[2])
     targets = validation.destinations(spec.get("destinations", []))
 
     with conn.cursor() as cur:
@@ -1351,6 +1381,7 @@ def _ensure_dkim_for(conn, domain: str, selector: str) -> None:
 
 
 def rotate_dkim_key(conn, domain: str, selector: str = "") -> dict:
+    _refuse_platform_domain(conn, validation.domain_name(domain))
     with db.dkim_lifecycle_lock(conn):
         result = _rotate_dkim_key_unlocked(conn, domain, selector)
         _publish_selector_map(conn)
@@ -1358,6 +1389,7 @@ def rotate_dkim_key(conn, domain: str, selector: str = "") -> dict:
 
 
 def delete_dkim_key(conn, domain: str) -> None:
+    _refuse_platform_domain(conn, validation.domain_name(domain))
     with db.dkim_lifecycle_lock(conn):
         result = _delete_dkim_key_unlocked(conn, domain)
         _publish_selector_map(conn)

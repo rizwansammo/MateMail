@@ -80,6 +80,9 @@ x-backend-env: &backend_env
   # (mail_engine.E011/E012) before any customer action could.
   NATIVE_ENGINE_API_URL: ${NATIVE_ENGINE_API_URL:-}
   NATIVE_ENGINE_API_SECRET: ${NATIVE_ENGINE_API_SECRET:-}
+  # Inactive system mail staging is OFF for ordinary production deployments.
+  SYSTEM_MAIL_STAGING_ENABLED: ${SYSTEM_MAIL_STAGING_ENABLED:-False}
+  NATIVE_ENGINE_PLATFORM_SECRET: ${NATIVE_ENGINE_PLATFORM_SECRET:-}
   MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.pro}
   DMARC_REPORT_ADDRESS: ${DMARC_REPORT_ADDRESS:-dmarc@mail.matemail.pro}
   # P4-B: controlled opt-in on the worker only; default false preserves

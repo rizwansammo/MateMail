@@ -2155,3 +2155,75 @@ class NativeAdapterCapabilityTest(EngineDatabaseTestCase):
         )
         with self.assertRaises(Rejected):
             self.adapter.set_mailbox_password(ADDRESS, "")
+
+
+
+class PlatformDomainGuardTest(EngineDatabaseTestCase):
+    """Reserved Platform mail cannot be reconciled through tenant Native API."""
+
+    def test_legacy_and_new_platform_names_are_reserved(self):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
+            self.assertEqual(
+                self.row("SELECT name FROM platform_reserved_domain WHERE name = %s", (name,)),
+                (name,),
+            )
+
+    def test_native_ensure_domain_refuses_platform_resource(self):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValidationError):
+                    provisioning.ensure_domain(self.conn, {"name": name})
+                self.assertIsNone(
+                    self.row("SELECT name FROM domain WHERE name = %s", (name,))
+                )
+
+    def test_native_domain_trigger_refuses_bypass(self):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
+            with self.subTest(name=name):
+                with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                    with self.conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO domain (name) VALUES (%s)", (name,)
+                        )
+
+    def test_native_dkim_key_rotation_and_deletion_refuse_reserved_domain(self):
+        with self.assertRaises(ValidationError):
+            provisioning.rotate_dkim_key(self.conn, "mail.matemail.pro")
+        with self.assertRaises(ValidationError):
+            provisioning.delete_dkim_key(self.conn, "mail.matemail.pro")
+
+    def test_native_mailbox_and_alias_provision_refuse_platform(self):
+        for name in ("mail.matemail.pro", "system.matemail.pro", "mx.matemail.pro", "platform.matemail.pro", "portal.matemail.pro", "postbox.matemail.pro", "custom.matemail.pro", "autodiscover.matemail.pro", "admin.matemail.pro", "www.matemail.pro"):
+            with self.subTest(name=name):
+                with self.assertRaises(ValidationError):
+                    provisioning.ensure_mailbox(
+                        self.conn, {"address": "noreply@" + name},
+                        "do-not-store",
+                    )
+                with self.assertRaises(ValidationError):
+                    provisioning.ensure_alias(
+                        self.conn, {"address": "alias@" + name, "destinations": ["external@example.invalid"]},
+                    )
+
+
+class PlatformNativeOperationGuardTest(EngineDatabaseTestCase):
+    """Protected platform resources are refused before any side effects."""
+
+    def test_mutation_apis_fail_before_touching_legacy_system_mailboxes(self):
+        address = "noreply@mail.matemail.pro"
+        operations = (
+            lambda: provisioning.set_mailbox_active(self.conn, address, False),
+            lambda: provisioning.set_mailbox_password(self.conn, address, "test-only-password"),
+            lambda: provisioning.set_mailbox_quota(self.conn, address, 2048),
+            lambda: provisioning.delete_mailbox(self.conn, address),
+            lambda: provisioning.clear_mailbox_rate_limit(self.conn, address),
+            lambda: provisioning.set_mailbox_rate_limit(self.conn, address, 2, "1h"),
+        )
+        for action in operations:
+            with self.subTest(action=action):
+                with self.assertRaises(ValidationError):
+                    action()
+        self.assertEqual(
+            self.row("SELECT COUNT(*) FROM retired_mailbox_storage")[0], 0,
+            "A rejected protected mailbox deletion must not retire its data",
+        )

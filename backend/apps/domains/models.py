@@ -195,3 +195,41 @@ class Domain(models.Model):
     def verification_record_value(self) -> str:
         """The exact TXT value expected at that host."""
         return self.verification_token
+
+class MailDomainOwnerKind(models.TextChoices):
+    PLATFORM = "platform", "Platform"
+    ORGANIZATION = "organization", "Organization"
+
+
+class MailDomainOwnership(models.Model):
+    """Global name owner, independent of tenant pending DNS claims.
+
+    The source Domain UUID is stored even after deletion. This prevents a
+    delayed engine deprovision job from silently transferring a live address
+    or its signing key. Only an audited post-cleanup release may remove it.
+    """
+
+    domain = models.CharField(max_length=255, unique=True)
+    owner_kind = models.CharField(max_length=16, choices=MailDomainOwnerKind.choices)
+    tenant = models.ForeignKey(
+        "tenants.Tenant", null=True, blank=True,
+        on_delete=models.PROTECT, related_name="mail_domain_ownerships",
+    )
+    source_domain_id = models.UUIDField(null=True, blank=True)
+    registered_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "domains_mail_domain_ownership"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(owner_kind="platform", tenant__isnull=True, source_domain_id__isnull=True)
+                    | Q(owner_kind="organization", tenant__isnull=False, source_domain_id__isnull=False)
+                ),
+                name="mail_domain_owner_scope_valid",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.domain = (self.domain or "").strip().rstrip(".").lower()
+        return super().save(*args, **kwargs)

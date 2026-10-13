@@ -79,3 +79,49 @@ class PlatformAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.actor_email or 'system'} {self.action} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class PlatformSystemMailRevision(models.Model):
+    """Immutable platform-owned system mail *proposal*, never live settings.
+
+    Phase 3 intentionally contains no activation or native provisioning API.
+    Every change writes a new row and an audited pointer update atomically.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    revision = models.PositiveIntegerField(unique=True)
+    domain = models.CharField(max_length=255)
+    sender_name = models.CharField(max_length=80, default="MateMail")
+    noreply_address = models.EmailField(max_length=254)
+    security_address = models.EmailField(max_length=254)
+    operations_address = models.EmailField(max_length=254)
+    dmarc_address = models.EmailField(max_length=254)
+    tlsrpt_address = models.EmailField(max_length=254)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+        related_name="system_mail_config_revisions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "platform_system_mail_revision"
+        ordering = ["-revision"]
+
+
+class PlatformSystemMailPointer(models.Model):
+    """Single locked row serialises edits; no active pointer in Phase 3."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    draft = models.ForeignKey(
+        PlatformSystemMailRevision, null=True, blank=True,
+        on_delete=models.PROTECT, related_name="+",
+    )
+    revision = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "platform_system_mail_pointer"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(id=1), name="system_mail_pointer_singleton",
+            ),
+        ]

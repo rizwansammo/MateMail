@@ -3,6 +3,7 @@ import re
 from rest_framework import serializers
 
 from .models import Domain
+from .ownership_registry import DomainRegistryConflict, assert_available_for_organization
 
 
 class DomainSerializer(serializers.ModelSerializer):
@@ -70,11 +71,22 @@ class DomainCreateSerializer(serializers.Serializer):
         # removeprefix() is the correct operation, applied scheme-first.
         for prefix in ("https://", "http://"):
             value = value.removeprefix(prefix)
-        value = value.removeprefix("www.")
         value = value.rstrip(".").strip("/")
+        # Reserve infrastructure hostnames BEFORE the convenience "www."
+        # canonicalisation. A platform www host must not be remapped to the
+        # organisation-owned apex when checking platform ownership.
+        try:
+            assert_available_for_organization(value)
+        except DomainRegistryConflict as exc:
+            raise serializers.ValidationError(exc.customer_message) from exc
+        value = value.removeprefix("www.")
 
         if not _HOSTNAME_RE.match(value):
             raise serializers.ValidationError("Enter a valid domain name (e.g. example.com).")
+        try:
+            assert_available_for_organization(value)
+        except DomainRegistryConflict as exc:
+            raise serializers.ValidationError(exc.customer_message) from exc
         if Domain.objects.filter(domain=value).exists():
             raise serializers.ValidationError("This domain is already registered.")
         return value

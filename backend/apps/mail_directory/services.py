@@ -54,6 +54,16 @@ def reserve_address(*, tenant, domain, address: str, kind: str) -> AddressClaim:
 
     if domain.tenant_id != tenant.id:
         raise AddressConflict("The email domain is not in this organization.")
+    from apps.domains.ownership_registry import ownership_for
+    from apps.domains.models import MailDomainOwnerKind
+
+    claimed = ownership_for(domain.domain)
+    if claimed is not None and (
+        claimed.owner_kind != MailDomainOwnerKind.ORGANIZATION
+        or claimed.tenant_id != tenant.id
+        or claimed.source_domain_id != domain.pk
+    ):
+        raise AddressConflict("This email domain is reserved for another owner.")
 
     _, _, host = normalized.rpartition("@")
     if host != domain.domain.strip().lower():
