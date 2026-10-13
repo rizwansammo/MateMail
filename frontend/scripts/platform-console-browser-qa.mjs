@@ -143,7 +143,7 @@ try {
     check("Console keeps core navigation", await page.getByRole("link", { name: "All Organizations" }).count() === 1 &&
       await page.getByRole("link", { name: "Mailboxes" }).count() === 1);
     check("No live staging or activation button", await page.getByRole("button", { name: /Activate|Stage.*mail|Cutover/i }).count() === 0);
-    check("DNS readiness remains observational and blocked", await page.getByRole("region", { name: "System domain DNS observations" }).getByText("MISSING OR MISMATCHED").count() > 0 && !readiness.cutover_ready);
+    check("DNS readiness remains observational and blocked", await page.getByRole("region", { name: "System domain DNS observations" }).getByText(/missing or mismatched/i).count() > 0 && !readiness.cutover_ready);
     check("Reserved addresses are read only", await page.getByLabel("Security notifications").isDisabled() &&
       await page.getByLabel("DMARC reports").isDisabled());
     check("Unmodified draft cannot be saved", await page.getByRole("button", { name: "Save draft" }).isDisabled());
