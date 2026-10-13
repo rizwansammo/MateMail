@@ -213,7 +213,7 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
         >
           <button
             type="button"
-            className="pf-btn pf-btn-ghost md:hidden"
+            className="pf-btn pf-btn-ghost pf-mobile-menu-trigger"
             style={{ padding: "0.3rem 0.4rem" }}
             aria-label="Open navigation"
             onClick={() => setNavOpen(true)}

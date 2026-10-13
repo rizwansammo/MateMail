@@ -123,6 +123,7 @@ try {
       };
     });
     check("Sidebar remains 240px and wordmark uses HemiHead", geometry.asideWidth === 240 && /HemiHead/.test(geometry.wordmarkFamily), geometry);
+    check("Desktop mobile menu button is hidden", await page.getByRole("button", { name: "Open navigation", includeHidden: true }).isHidden());
     check("Platform Console label moved to header only", geometry.headerLabel && !geometry.sidebarLabel, geometry);
     check("Account footer removed and no page overflow", !geometry.sidebarFooter && !geometry.viewportOverflow, geometry);
     check("Console keeps core navigation", await page.getByRole("link", { name: "All Organizations" }).count() === 1 &&
@@ -151,6 +152,7 @@ try {
   await run("Mobile navigation", { width: 390, height: 844 }, async ({ page }) => {
     await visit(page);
     await shot(page, "04-platform-mobile-closed");
+    check("Mobile navigation button is shown", await page.getByRole("button", { name: "Open navigation" }).isVisible());
     await page.getByRole("button", { name: "Open navigation" }).click();
     check("Mobile sidebar is visible after menu click", await page.getByRole("link", { name: "System Mail" }).isVisible());
     await shot(page, "05-platform-mobile-sidebar");
