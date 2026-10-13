@@ -86,4 +86,4 @@ active mailbox passwords, domain activation, sender cutover or report rerouting.
 
 ## Current production blocker
 
-A working release requires new target DNS records and a separately tested Native Engine authorization/credential/DKIM/activation mechanism that does not yet exist. Until those gates and a real mail flow test pass, describing Phase 5 as migrated would be unsafe and inaccurate.
+The three initial target DNS records are published. Native inactive staging and DKIM preparation code is now implemented behind disabled feature gates, but neither is active in production. The DKIM TXT record is still pending. A separately tested mechanism for activating dedicated mailbox credentials, report ingestion and a controlled sender cutover remains to be implemented. Until the key matches public DNS and real mail flow and rollback tests pass, Phase 5 cannot be called migrated.
