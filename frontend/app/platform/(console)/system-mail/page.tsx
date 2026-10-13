@@ -73,17 +73,19 @@ export default function SystemMailPage() {
     setLoading(true);
     setError("");
     try {
-      const [next, status, revisions, observedDns] = await Promise.all([
+      const [next, status, revisions] = await Promise.all([
         api.get<Config>(`${PREFIX}/configuration/`),
         api.get<Readiness>(`${PREFIX}/readiness/`),
         api.get<History>(`${PREFIX}/history/`),
-        api.get<DNSReadiness>(`${PREFIX}/dns-readiness/`),
       ]);
       setConfig(next);
       setForm(next.draft ?? next.defaults);
       setReadiness(status);
       setHistory(revisions);
-      setDnsReadiness(observedDns);
+      // Public DNS may time out. It must not block the existing admin configuration UI.
+      void api.get<DNSReadiness>(`${PREFIX}/dns-readiness/`)
+        .then(setDnsReadiness)
+        .catch(() => setDnsReadiness(null));
     } catch (err) {
       setError(formatError(err));
     } finally {
