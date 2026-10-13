@@ -94,7 +94,11 @@ DECLARE
     target_active boolean;
     role_name text;
     matched_address text;
-    already_active boolean;
+    existing_domain_id bigint;
+    existing_active boolean;
+    existing_login_enabled boolean;
+    existing_password_hash text;
+    existing_local_part text;
 BEGIN
     IF session_user <> 'engine_platform_operator' THEN
         RAISE EXCEPTION 'platform operation requires the dedicated database principal'
@@ -115,16 +119,26 @@ BEGIN
     END IF;
     FOREACH role_name IN ARRAY ARRAY['noreply','security','operations','dmarc','tlsrpt'] LOOP
         matched_address := role_name || '@system.matemail.pro';
-        SELECT active INTO already_active
-          FROM public.mailbox WHERE address=matched_address FOR UPDATE;
-        IF already_active IS TRUE THEN
-            RAISE EXCEPTION 'system mailbox is not in inactive staging state'
-                USING ERRCODE = '42501';
-        END IF;
         INSERT INTO public.mailbox
             (domain_id,address,local_part,display_name,password_hash,quota_mb,active,login_enabled)
         VALUES (target_id, matched_address, role_name, '', null, 1024, false, false)
         ON CONFLICT (address) DO NOTHING;
+        -- Re-read under lock AFTER the insert. An existing address must match
+        -- every invariant, including its domain, ownership and credentials.
+        -- Never silently adopt a mailbox from an unexpected existing row.
+        SELECT domain_id, active, login_enabled, password_hash, local_part
+          INTO existing_domain_id, existing_active, existing_login_enabled,
+               existing_password_hash, existing_local_part
+          FROM public.mailbox WHERE address=matched_address FOR UPDATE;
+        IF NOT FOUND OR existing_domain_id IS DISTINCT FROM target_id
+           OR existing_active IS DISTINCT FROM false
+           OR existing_login_enabled IS DISTINCT FROM false
+           OR existing_password_hash IS NOT NULL
+           OR existing_local_part IS DISTINCT FROM role_name
+        THEN
+            RAISE EXCEPTION 'existing system mailbox state must be reviewed'
+                USING ERRCODE = '42501';
+        END IF;
     END LOOP;
     RETURN jsonb_build_object(
         'domain', 'system.matemail.pro',
