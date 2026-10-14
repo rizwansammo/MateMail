@@ -24,6 +24,22 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGE_BYTES = 6 * 1024 * 1024
 MAX_MESSAGES_PER_RUN = 60
 
+# Independent fixed allowlist. Mailboxes from arbitrary customer domains must
+# never be accepted by an operator-provided address or task argument.
+LEGACY_RECEIVER = "dmarc@mail.matemail.pro"
+SYSTEM_RECEIVER = "dmarc@system.matemail.pro"
+
+
+def configured_receiver_addresses() -> tuple[str, ...]:
+    """Old receiver first to drain the legacy cursor before the new one."""
+    address = (getattr(settings, "DMARC_REPORT_ADDRESS", LEGACY_RECEIVER) or "").lower().strip()
+    if address not in (LEGACY_RECEIVER, SYSTEM_RECEIVER):
+        raise ValueError("DMARC receiver is not a reserved platform mailbox")
+    if getattr(settings, "DMARC_REPORT_DUAL_RECEIVER_ENABLED", False):
+        return (LEGACY_RECEIVER, SYSTEM_RECEIVER)
+    return (address,)
+
+
 
 def ingest_raw_message(raw: bytes) -> dict[str, int]:
     """Accept only small RFC822 attachments, never message text or HTML."""
