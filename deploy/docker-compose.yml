@@ -82,6 +82,8 @@ x-backend-env: &backend_env
   NATIVE_ENGINE_API_SECRET: ${NATIVE_ENGINE_API_SECRET:-}
   # Inactive system mail staging is OFF for ordinary production deployments.
   SYSTEM_MAIL_STAGING_ENABLED: ${SYSTEM_MAIL_STAGING_ENABLED:-False}
+  # Phase 6A: no platform mailbox content API without operator enablement.
+  PLATFORM_MAIL_CENTER_ENABLED: ${PLATFORM_MAIL_CENTER_ENABLED:-False}
   SYSTEM_MAIL_DKIM_PREPARE_ENABLED: ${SYSTEM_MAIL_DKIM_PREPARE_ENABLED:-False}
   NATIVE_ENGINE_PLATFORM_SECRET: ${NATIVE_ENGINE_PLATFORM_SECRET:-}
   MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.pro}
