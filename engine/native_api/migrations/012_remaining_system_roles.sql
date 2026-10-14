@@ -1,4 +1,4 @@
--- Release 3 fixed and reversible system mailbox role activation.
+-- Fixed platform domain remaining roles only.
 CREATE OR REPLACE FUNCTION public.protect_platform_mailbox_row()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
@@ -32,6 +32,7 @@ BEGIN
                 THEN
                     RETURN NEW;
                 END IF;
+            END IF;
                 IF old_domain='system.matemail.pro'
                    AND OLD.local_part IN ('noreply','security','dmarc','tlsrpt')
                    AND OLD.address=OLD.local_part || '@system.matemail.pro'
@@ -44,39 +45,12 @@ BEGIN
                    AND (
                        (OLD.active=false AND OLD.login_enabled=false AND OLD.password_hash IS NULL
                         AND NEW.active=true AND NEW.login_enabled=true
-                        AND NEW.password_hash ~ '^\{BLF-CRYPT\}\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}
-        END IF;
-    END IF;
-    IF TG_OP IN ('INSERT', 'UPDATE') THEN
-        SELECT name INTO new_domain FROM public.domain WHERE id = NEW.domain_id;
-        IF TG_OP = 'INSERT'
-           AND new_domain = 'system.matemail.pro'
-           AND NEW.active IS FALSE
-           AND NEW.login_enabled IS FALSE
-           AND NEW.password_hash IS NULL
-           AND NEW.local_part IN ('noreply','security','operations','dmarc','tlsrpt')
-           AND NEW.address = NEW.local_part || '@system.matemail.pro'
-           AND session_user = 'engine_platform_operator'
-           AND current_setting('matemail.platform_stage', true) = '1'
-        THEN
-            RETURN NEW;
-        END IF;
-        IF EXISTS (SELECT 1 FROM public.platform_reserved_domain WHERE name = new_domain) THEN
-            RAISE EXCEPTION 'protected platform mailbox cannot be modified' USING ERRCODE='42501';
-        END IF;
-    END IF;
-    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
-    RETURN NEW;
-END
-$$;
-
-)
+                        AND NEW.password_hash ~ '^\{BLF-CRYPT\}\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$')
                        OR
                        (OLD.active=true AND OLD.login_enabled=true AND OLD.password_hash IS NOT NULL
                         AND NEW.active=false AND NEW.login_enabled=false AND NEW.password_hash IS NULL)
                    )
                 THEN RETURN NEW; END IF;
-            END IF;
             RAISE EXCEPTION 'protected platform mailbox cannot be modified' USING ERRCODE='42501';
         END IF;
     END IF;
