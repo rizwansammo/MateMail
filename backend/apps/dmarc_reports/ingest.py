@@ -80,9 +80,10 @@ def ingest_mailbox_once(*, address: str | None = None) -> dict[str, int]:
     """
     if not getattr(settings, "DMARC_REPORT_INGEST_ENABLED", False):
         return {"disabled": 1}
-    address = getattr(settings, "DMARC_REPORT_ADDRESS", "").lower().strip()
-    if not address or address != "dmarc@mail.matemail.pro":
-        raise ValueError("P4-B is restricted to its dedicated verified intake mailbox")
+    allowed = configured_receiver_addresses()
+    address = address or allowed[0]
+    if address not in allowed:
+        raise ValueError("DMARC ingestion is restricted to enabled platform receivers")
 
     cursor, _ = IngestCursor.objects.get_or_create(address=address)
     counters = {"stored": 0, "duplicate": 0, "unmanaged": 0, "rejected": 0, "processed": 0}
