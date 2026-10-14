@@ -125,3 +125,43 @@ class PlatformSystemMailPointer(models.Model):
                 condition=models.Q(id=1), name="system_mail_pointer_singleton",
             ),
         ]
+
+
+
+class PlatformSystemMailboxGrant(models.Model):
+    """Explicit expiring read entitlement for sensitive platform system inboxes.
+
+    There is no interactive Send permission, and no generic user-selected
+    mailbox address. Each role is a literal hardcoded system identity.
+    """
+
+    class Role(models.TextChoices):
+        SECURITY = "security", "Security"
+        NOREPLY = "noreply", "Noreply"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    grantee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="platform_system_mailbox_grants",
+    )
+    role = models.CharField(max_length=16, choices=Role.choices)
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, related_name="approved_system_mailbox_grants",
+    )
+    expires_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "platform_system_mailbox_grant"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("grantee", "role"),
+                name="unique_platform_sensitive_mail_grant",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(role__in=["security", "noreply"]),
+                name="platform_sensitive_mail_role_allowlist",
+            ),
+        ]

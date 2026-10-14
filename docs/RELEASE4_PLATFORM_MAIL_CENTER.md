@@ -13,7 +13,7 @@ Phase 5 (Release 3) has already migrated the sender and report receiver identiti
 | 6A | Fixed Operations mailbox read-only folders and message headers, platform authorization, auditing, feature flag | Default OFF, no production activation |
 | 6B | Operator-selected Operations message details, safe HTML/text rendering and bounded attachment downloads | Strict UIDVALIDITY, MIME bounds, no inline rendering, security tests; code gated OFF |
 | 6C | Operations plain text Compose, Reply, Sent filing and IMAP Draft save, replace and delete | Two independent feature gates OFF, CI + live canary required |
-| 6D | Purpose-specific mailbox permissions: Security and Noreply; no unrestricted switching | Role grants and second-factor policy approved before enablement |
+| 6D | Explicit expiring Security/Noreply read grants, OTP proof, auditable approval/revocation and bounded read-only APIs | Default OFF, no implicit switching or interactive sending |
 | 6E | Aggregate DMARC/TLS operational dashboards using existing parsed data, no raw report exposure to tenants | Tenant and platform data separation tests |
 | 6F | Console UI, complete UX, end-to-end tests, controlled rollout and acceptance | Production health and rollback evidence |
 

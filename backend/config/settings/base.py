@@ -388,6 +388,8 @@ SYSTEM_MAIL_DKIM_PREPARE_ENABLED = env.bool("SYSTEM_MAIL_DKIM_PREPARE_ENABLED", 
 PLATFORM_MAIL_CENTER_ENABLED = env.bool("PLATFORM_MAIL_CENTER_ENABLED", default=False)
 # Phase 6C: independent outgoing and draft mutation gate, OFF until controlled rollout.
 PLATFORM_MAIL_CENTER_SEND_ENABLED = env.bool("PLATFORM_MAIL_CENTER_SEND_ENABLED", default=False)
+# Phase 6D: sensitive-purpose mailbox access requires OTP proof and explicit grants.
+PLATFORM_MAIL_CENTER_PURPOSE_READ_ENABLED = env.bool("PLATFORM_MAIL_CENTER_PURPOSE_READ_ENABLED", default=False)
 NATIVE_ENGINE_PLATFORM_SECRET = env("NATIVE_ENGINE_PLATFORM_SECRET", default="")
 
 # MateMail platform settings

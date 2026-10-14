@@ -5,9 +5,14 @@ import string
 from rest_framework_simplejwt.tokens import RefreshToken
 
 
-def make_tokens(user, tenant_id=None):
-    """Issue access + refresh JWT pair. Embeds tenant_id into both tokens."""
+def make_tokens(user, tenant_id=None, *, platform_verified=False):
+    """Issue JWTs. Platform OTP proof is set only after successful verification."""
     refresh = RefreshToken.for_user(user)
+    if platform_verified:
+        from django.utils import timezone
+        if not getattr(user, "is_platform_admin", False):
+            raise ValueError("Platform verification requires a platform administrator")
+        refresh["platform_otp_verified_at"] = int(timezone.now().timestamp())
     resolved = str(tenant_id) if tenant_id else _first_tenant_id(user)
     if resolved:
         refresh["tenant_id"] = resolved
