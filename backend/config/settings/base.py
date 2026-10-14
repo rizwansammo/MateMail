@@ -390,6 +390,8 @@ PLATFORM_MAIL_CENTER_ENABLED = env.bool("PLATFORM_MAIL_CENTER_ENABLED", default=
 PLATFORM_MAIL_CENTER_SEND_ENABLED = env.bool("PLATFORM_MAIL_CENTER_SEND_ENABLED", default=False)
 # Phase 6D: sensitive-purpose mailbox access requires OTP proof and explicit grants.
 PLATFORM_MAIL_CENTER_PURPOSE_READ_ENABLED = env.bool("PLATFORM_MAIL_CENTER_PURPOSE_READ_ENABLED", default=False)
+# Phase 6E: platform-only operational reporting dashboard; default disabled.
+PLATFORM_MAIL_CENTER_REPORTS_ENABLED = env.bool("PLATFORM_MAIL_CENTER_REPORTS_ENABLED", default=False)
 NATIVE_ENGINE_PLATFORM_SECRET = env("NATIVE_ENGINE_PLATFORM_SECRET", default="")
 
 # MateMail platform settings
