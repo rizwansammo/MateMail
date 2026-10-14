@@ -113,7 +113,13 @@ def describe_transport_security(domain, config=None) -> dict:
     if (enabled and domain.is_ownership_verified and records and getattr(settings, "TLS_RPT_INGEST_ENABLED", False)
             and getattr(settings, "TLS_RPT_DNS_PUBLICATION_ENABLED", False)
             and getattr(settings, "TLS_RPT_RECEIVER_VERIFIED", False)
-            and report_address.strip().lower() == "tlsrpt@mail.matemail.pro"):
+            and (
+                report_address.strip().lower() == "tlsrpt@mail.matemail.pro"
+                or (
+                    report_address.strip().lower() == "tlsrpt@system.matemail.pro"
+                    and getattr(settings, "TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED", False)
+                )
+            )):
         records[2]["publish_ready"] = True
         records[2]["requirement"] = "Verified central TLS report intake; publish this TXT when approved."
     # STS TXT must remain withheld until the worker has actually served and
