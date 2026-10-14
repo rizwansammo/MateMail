@@ -390,6 +390,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as exc:             # noqa: BLE001
                 self._fail(exc)
             return
+        if route in (
+            "/v1/platform/system/activate-operations-canary",
+            "/v1/platform/system/deactivate-operations-canary",
+        ):
+            if not platform_security.authorized(self):
+                self._send(403, {"error": "unauthorized"})
+                return
+            try:
+                body = self._body()
+                if route.endswith("/activate-operations-canary"):
+                    result = platform_canary.activate_operations_canary(body)
+                else:
+                    result = platform_canary.deactivate_operations_canary(body)
+                self._send(200, result)
+            except ValidationError:
+                self._send(400, {"error": "invalid canary request"})
+            except PermissionError:
+                self._send(503, {"error": "canary operation disabled or unavailable"})
+            except Exception as exc:
+                self._fail(exc)
+            return
         if route == "/v1/platform/system/prepare-dkim":
             if not platform_security.authorized(self):
                 self._send(403, {"error": "unauthorized"})
