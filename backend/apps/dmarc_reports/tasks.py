@@ -5,7 +5,7 @@ from celery import shared_task
 from django.conf import settings
 from django.core.cache import cache
 
-from .ingest import ingest_mailbox_once
+from .ingest import ingest_mailbox_once, configured_receiver_addresses
 from .services import prune_old_reports
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,18 @@ def poll_mailbox():
     if not cache.add(key, "1", timeout=540):
         return {"already_running": 1}
     try:
-        return ingest_mailbox_once()
+        addresses = configured_receiver_addresses()
+        if len(addresses) == 1:
+            return ingest_mailbox_once()
+        totals: dict[str, int] = {}
+        # A single existing Redis lock covers BOTH independent UID cursors.
+        # Retry after failure resumes each cursor separately; content hashes
+        # suppress duplicate reports arriving through both addresses.
+        for address in addresses:
+            result = ingest_mailbox_once(address=address)
+            for key, count in result.items():
+                totals[key] = totals.get(key, 0) + count
+        return totals
     except Exception:
         # Avoid logging raw RFC822, XML, mail headers, credentials or payloads.
         logger.error("DMARC mailbox ingestion failed; cursor remains retryable")
