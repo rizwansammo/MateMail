@@ -66,9 +66,10 @@ def ingest_raw_message(raw):
 def ingest_mailbox_once(*, address: str | None = None):
     if not getattr(settings, "TLS_RPT_INGEST_ENABLED", False):
         return {"disabled": 1}
-    address = getattr(settings, "TLS_RPT_REPORT_ADDRESS", "").lower().strip()
-    if address != ADDRESS:
-        raise ValueError("Wrong TLS-RPT receiver mailbox")
+    allowed = configured_receiver_addresses()
+    address = address or allowed[0]
+    if address not in allowed:
+        raise ValueError("TLS-RPT ingestion is restricted to enabled platform receivers")
     cursor, _ = TlsIngestCursor.objects.get_or_create(address=address)
     totals = {"stored": 0, "duplicate": 0, "unmanaged": 0, "rejected": 0, "processed": 0}
     with open_mailbox(address) as mailbox:
