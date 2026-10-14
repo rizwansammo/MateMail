@@ -78,6 +78,14 @@ jobs:
               python -m unittest discover -s tests -p "test_platform_canary.py" -v
             '
 
+      - name: Remaining system roles isolated unit tests
+        run: |
+          docker run --rm --entrypoint sh \
+            matemail-native-api-security-test:ci -ec '
+              cd /opt/matemail/native_api
+              python -m unittest discover -s tests -p "test_platform_remaining_roles.py" -v
+            '
+
       - name: Isolated PostgreSQL 16 system DKIM authorization tests
         run: bash engine/native_api/tests/test_system_dkim_sql.sh
 
