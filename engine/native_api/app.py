@@ -56,6 +56,7 @@ import operations
 import provisioning
 import platform_security
 import platform_canary
+import platform_roles
 import push
 import validation
 from validation import ValidationError
@@ -388,6 +389,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 self._handle_auth_policy_report()
             except Exception as exc:             # noqa: BLE001
+                self._fail(exc)
+            return
+        if route in (
+            "/v1/platform/system/activate-remaining-roles",
+            "/v1/platform/system/deactivate-remaining-roles",
+        ):
+            if not platform_security.authorized(self):
+                self._send(403, {"error": "unauthorized"})
+                return
+            try:
+                body = self._body()
+                if route.endswith("/activate-remaining-roles"):
+                    result = platform_roles.activate_remaining(body)
+                else:
+                    result = platform_roles.deactivate_remaining(body)
+                self._send(200, result)
+            except ValidationError:
+                self._send(400, {"error": "invalid platform role request"})
+            except PermissionError:
+                self._send(503, {"error": "platform role operation disabled"})
+            except Exception as exc:
                 self._fail(exc)
             return
         if route in (
