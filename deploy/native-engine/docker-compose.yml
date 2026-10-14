@@ -405,6 +405,9 @@ services:
       # It now mounts a dedicated DKIM volume at the same path Rspamd expects,
       # and Rspamd mounts the same volume READ-ONLY.
       - native_dkim:/var/lib/rspamd/dkim
+      # The canary credential is provisioned into this private volume only on
+      # the server. Never expose it to Postfix, Dovecot, or customer apps.
+      - native_system_canary_secrets:/run/secrets:ro
     networks: [engine, matemail_engine_link]
     depends_on:
       db: {condition: service_healthy}
@@ -571,6 +574,7 @@ volumes:
   # store without owning Rspamd's state, and so a fresh volume inherits
   # 11333:11333 mode 0700 from the API image rather than landing as root.
   native_dkim:          {name: matemail_native_dkim}
+  native_system_canary_secrets: {name: matemail_native_system_canary_secrets}
   native_clamav_db:     {name: matemail_native_clamav_db}
   native_unbound:       {name: matemail_native_unbound}
   native_tls:           {name: matemail_native_tls}
