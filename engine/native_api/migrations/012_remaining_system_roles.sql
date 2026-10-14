@@ -1,5 +1,4 @@
--- Add a fixed platform role transition without relaxing tenant provisioning.
--- Only the dedicated DB principal and short lived feature gates may invoke it.
+-- Release 3 fixed and reversible system mailbox role activation.
 CREATE OR REPLACE FUNCTION public.protect_platform_mailbox_row()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
@@ -33,8 +32,7 @@ BEGIN
                 THEN
                     RETURN NEW;
                 END IF;
-            END IF;
-                IF TG_OP='UPDATE' AND old_domain='system.matemail.pro'
+                IF old_domain='system.matemail.pro'
                    AND OLD.local_part IN ('noreply','security','dmarc','tlsrpt')
                    AND OLD.address=OLD.local_part || '@system.matemail.pro'
                    AND NEW.address=OLD.address
@@ -77,9 +75,8 @@ $$;
                        (OLD.active=true AND OLD.login_enabled=true AND OLD.password_hash IS NOT NULL
                         AND NEW.active=false AND NEW.login_enabled=false AND NEW.password_hash IS NULL)
                    )
-                THEN
-                    RETURN NEW;
-                END IF;
+                THEN RETURN NEW; END IF;
+            END IF;
             RAISE EXCEPTION 'protected platform mailbox cannot be modified' USING ERRCODE='42501';
         END IF;
     END IF;
@@ -105,7 +102,6 @@ $$;
     RETURN NEW;
 END
 $$;
-
 
 CREATE OR REPLACE FUNCTION public.platform_activate_remaining_system_roles(
   noreply_hash text, security_hash text, dmarc_hash text, tlsrpt_hash text
