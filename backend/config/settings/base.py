@@ -397,6 +397,10 @@ DMARC_AGGREGATE_REPORTING_ENABLED = env.bool("DMARC_AGGREGATE_REPORTING_ENABLED"
 # Separate gate: reading a dedicated IMAP mailbox does not enable DNS RUA
 # publication. Keep both OFF until controlled rollout and validation.
 DMARC_REPORT_INGEST_ENABLED = env.bool("DMARC_REPORT_INGEST_ENABLED", default=False)
+# Release 3: independently gated parallel read of the fixed old and new
+# report inboxes. Never changes DNS RUA or external report publication.
+DMARC_REPORT_DUAL_RECEIVER_ENABLED = env.bool("DMARC_REPORT_DUAL_RECEIVER_ENABLED", default=False)
+TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED = env.bool("TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED", default=False)
 DMARC_REPORT_PLATFORM_DOMAIN = env("DMARC_REPORT_PLATFORM_DOMAIN", default="mail.matemail.pro")
 DMARC_REPORT_RETENTION_DAYS = env.int("DMARC_REPORT_RETENTION_DAYS", default=90)
 # P4-C.E: independent TLS-RPT read-only ingestion, off until P4-C.F.
