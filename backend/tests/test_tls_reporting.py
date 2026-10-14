@@ -336,6 +336,32 @@ class TenantTlsReportingTest(TestCase):
         lost = describe_transport_security(self.domain_a, config)
         self.assertFalse(lost["dns_records"][2]["publish_ready"])
 
+    @override_settings(
+        TLS_RPT_INGEST_ENABLED=True,
+        TLS_RPT_DNS_PUBLICATION_ENABLED=True,
+        TLS_RPT_RECEIVER_VERIFIED=True,
+        TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED=True,
+        TLS_RPT_REPORT_ADDRESS="tlsrpt@system.matemail.pro",
+    )
+    def test_system_report_receiver_publication_requires_verified_dual_mode(self):
+        from apps.transport_security.serializers import describe_transport_security
+        config = DomainTransportSecurity.objects.get(domain=self.domain_a)
+        active = describe_transport_security(self.domain_a, config)
+        self.assertTrue(active["dns_records"][2]["publish_ready"])
+        self.assertEqual(
+            active["dns_records"][2]["value"],
+            "v=TLSRPTv1; rua=mailto:tlsrpt@system.matemail.pro",
+        )
+        with override_settings(TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED=False):
+            disabled = describe_transport_security(self.domain_a, config)
+            self.assertFalse(disabled["dns_records"][2]["publish_ready"])
+        with override_settings(TLS_RPT_RECEIVER_VERIFIED=False):
+            unverified = describe_transport_security(self.domain_a, config)
+            self.assertFalse(unverified["dns_records"][2]["publish_ready"])
+        with override_settings(TLS_RPT_REPORT_ADDRESS="tlsrpt@customer.example"):
+            wrong = describe_transport_security(self.domain_a, config)
+            self.assertFalse(wrong["dns_records"][2]["publish_ready"])
+
     @override_settings(TLS_RPT_INGEST_ENABLED=False)
     def test_platform_health_is_disabled_by_default(self):
         # Do not incorrectly claim a working report receiver when disabled.
