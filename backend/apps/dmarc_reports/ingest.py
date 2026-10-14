@@ -70,7 +70,7 @@ def ingest_raw_message(raw: bytes) -> dict[str, int]:
     return counters
 
 
-def ingest_mailbox_once() -> dict[str, int]:
+def ingest_mailbox_once(*, address: str | None = None) -> dict[str, int]:
     """Bounded, idempotent IMAP polling; never mark messages read or delete.
 
     The Celery task takes a cross-worker Redis cache lock. UIDVALIDITY
