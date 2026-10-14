@@ -56,7 +56,8 @@ export interface MailDetail {
   from: { name: string; address: string };
   to: string[];
   cc: string[];
-  reply_to: string[];
+  bcc: string[];
+  reply_to: string;
   date: string | null;
   message_id: string;
   text: string;

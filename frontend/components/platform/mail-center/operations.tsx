@@ -91,13 +91,13 @@ export function MailReader({ role, sending = false }: { role: MailRole; sending?
 
   function newCompose(source?: MailDetail, mode?: "reply" | "reply_all") {
     if (!sending || role !== "operations") return;
-    const isDraft = source && folder.toLowerCase().includes("draft");
+    const isDraft = source && folders.some((item) => item.name === folder && item.role === "drafts");
     const replied = source && mode ? {
       uid: source.uid, uid_validity: source.uid_validity, folder: source.folder, mode,
     } satisfies MailReplyRef : null;
     const draft = isDraft ? { uid: source.uid, uid_validity: source.uid_validity } : null;
     const value = source && isDraft
-      ? { to: source.to ?? [], cc: source.cc ?? [], bcc: [],
+      ? { to: source.to ?? [], cc: source.cc ?? [], bcc: source.bcc ?? [],
           subject: source.subject, text: source.text }
       : source && replied
         ? { ...INITIAL, subject: source.subject.toLowerCase().startsWith("re:")
@@ -383,9 +383,11 @@ export function MailReader({ role, sending = false }: { role: MailRole; sending?
                   onClick={() => setShowHtml(true)}>Safe HTML</button>}
                 {sending && role === "operations" && (
                   <>
-                    <button type="button" className="pf-btn pf-btn-ghost" onClick={() => newCompose(detail, "reply")}>Reply</button>
-                    <button type="button" className="pf-btn pf-btn-ghost" onClick={() => newCompose(detail, "reply_all")}>Reply all</button>
-                    {folder.toLowerCase().includes("draft") && (
+                    {!folders.some((item) => item.name === folder && item.role === "drafts") && <>
+                      <button type="button" className="pf-btn pf-btn-ghost" onClick={() => newCompose(detail, "reply")}>Reply</button>
+                      <button type="button" className="pf-btn pf-btn-ghost" onClick={() => newCompose(detail, "reply_all")}>Reply all</button>
+                    </>}
+                    {folders.some((item) => item.name === folder && item.role === "drafts") && (
                       <button type="button" className="pf-btn pf-btn-ghost" onClick={() => newCompose(detail)}>Edit draft</button>
                     )}
                   </>

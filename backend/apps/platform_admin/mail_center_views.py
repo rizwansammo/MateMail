@@ -238,6 +238,9 @@ class PlatformMailCenterMessageDetailView(PlatformMailCenterBase):
             "subject": parsed.subject,
             "from": {"name": parsed.from_name, "address": parsed.from_address},
             "to": parsed.to, "cc": parsed.cc,
+            # Preserve Bcc only for a native Operations draft stored with the
+            # draft marker. Never return it from Inbox, Sent, or other roles.
+            "bcc": parsed.bcc if chosen.role == "drafts" and parsed.draft_state else [],
             "reply_to": parsed.reply_to,
             "date": parsed.date,
             "message_id": parsed.message_id,
