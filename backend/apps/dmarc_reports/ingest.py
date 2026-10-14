@@ -24,6 +24,22 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGE_BYTES = 6 * 1024 * 1024
 MAX_MESSAGES_PER_RUN = 60
 
+# Independent fixed allowlist. Mailboxes from arbitrary customer domains must
+# never be accepted by an operator-provided address or task argument.
+LEGACY_RECEIVER = "dmarc@mail.matemail.pro"
+SYSTEM_RECEIVER = "dmarc@system.matemail.pro"
+
+
+def configured_receiver_addresses() -> tuple[str, ...]:
+    """Old receiver first to drain the legacy cursor before the new one."""
+    address = (getattr(settings, "DMARC_REPORT_ADDRESS", LEGACY_RECEIVER) or "").lower().strip()
+    if address not in (LEGACY_RECEIVER, SYSTEM_RECEIVER):
+        raise ValueError("DMARC receiver is not a reserved platform mailbox")
+    if getattr(settings, "DMARC_REPORT_DUAL_RECEIVER_ENABLED", False):
+        return (LEGACY_RECEIVER, SYSTEM_RECEIVER)
+    return (address,)
+
+
 
 def ingest_raw_message(raw: bytes) -> dict[str, int]:
     """Accept only small RFC822 attachments, never message text or HTML."""
@@ -54,7 +70,7 @@ def ingest_raw_message(raw: bytes) -> dict[str, int]:
     return counters
 
 
-def ingest_mailbox_once() -> dict[str, int]:
+def ingest_mailbox_once(*, address: str | None = None) -> dict[str, int]:
     """Bounded, idempotent IMAP polling; never mark messages read or delete.
 
     The Celery task takes a cross-worker Redis cache lock. UIDVALIDITY
@@ -64,9 +80,10 @@ def ingest_mailbox_once() -> dict[str, int]:
     """
     if not getattr(settings, "DMARC_REPORT_INGEST_ENABLED", False):
         return {"disabled": 1}
-    address = getattr(settings, "DMARC_REPORT_ADDRESS", "").lower().strip()
-    if not address or address != "dmarc@mail.matemail.pro":
-        raise ValueError("P4-B is restricted to its dedicated verified intake mailbox")
+    allowed = configured_receiver_addresses()
+    address = address or allowed[0]
+    if address not in allowed:
+        raise ValueError("DMARC ingestion is restricted to enabled platform receivers")
 
     cursor, _ = IngestCursor.objects.get_or_create(address=address)
     counters = {"stored": 0, "duplicate": 0, "unmanaged": 0, "rejected": 0, "processed": 0}

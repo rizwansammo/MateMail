@@ -16,6 +16,18 @@ from .services import store_policy
 
 logger = logging.getLogger(__name__)
 ADDRESS = "tlsrpt@mail.matemail.pro"
+SYSTEM_RECEIVER = "tlsrpt@system.matemail.pro"
+
+
+def configured_receiver_addresses() -> tuple[str, ...]:
+    """The migration does not change any published TLS-RPT record."""
+    address = (getattr(settings, "TLS_RPT_REPORT_ADDRESS", ADDRESS) or "").lower().strip()
+    if address not in (ADDRESS, SYSTEM_RECEIVER):
+        raise ValueError("TLS-RPT receiver must be a reserved platform mailbox")
+    if getattr(settings, "TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED", False):
+        return (ADDRESS, SYSTEM_RECEIVER)
+    return (address,)
+
 MAX_MESSAGE_BYTES = 6 * 1024 * 1024
 MAX_MESSAGES_PER_RUN = 40
 
@@ -51,12 +63,13 @@ def ingest_raw_message(raw):
     return totals
 
 
-def ingest_mailbox_once():
+def ingest_mailbox_once(*, address: str | None = None):
     if not getattr(settings, "TLS_RPT_INGEST_ENABLED", False):
         return {"disabled": 1}
-    address = getattr(settings, "TLS_RPT_REPORT_ADDRESS", "").lower().strip()
-    if address != ADDRESS:
-        raise ValueError("Wrong TLS-RPT receiver mailbox")
+    allowed = configured_receiver_addresses()
+    address = address or allowed[0]
+    if address not in allowed:
+        raise ValueError("TLS-RPT ingestion is restricted to enabled platform receivers")
     cursor, _ = TlsIngestCursor.objects.get_or_create(address=address)
     totals = {"stored": 0, "duplicate": 0, "unmanaged": 0, "rejected": 0, "processed": 0}
     with open_mailbox(address) as mailbox:
