@@ -265,6 +265,28 @@ class PlatformMailCenterDetailTests(TestCase):
         self.assertNotIn("Operations urgent request", str(PlatformAuditLog.objects.first().metadata))
         self.assertIn("no-store", response["Cache-Control"])
 
+    def test_bcc_survives_draft_reopen_but_never_leaks_from_inbox(self):
+        from apps.postbox import mime
+        draft = mime.build_message(
+            from_address="operations@system.matemail.pro",
+            to=["recipient@example.test"], cc=[], bcc=["hidden@example.test"],
+            subject="Draft privacy", text="Sensitive Bcc must survive edit",
+            keep_bcc=True,
+        )
+        self.raw = draft.as_bytes()
+        inbox = self.client.get(self.details_url, self.valid_query)
+        self.assertEqual(inbox.status_code, 200, inbox.data)
+        self.assertEqual(inbox.data["bcc"], [])
+        self.connection.folders.append(
+            SimpleNamespace(name="Drafts", role="drafts", selectable=True),
+        )
+        stored = self.client.get(self.details_url, {"folder": "Drafts", "uid_validity": "42"})
+        self.assertEqual(stored.status_code, 200, stored.data)
+        self.assertEqual(stored.data["bcc"], ["hidden@example.test"])
+        self.assertNotIn("hidden@example.test", str(
+            PlatformAuditLog.objects.values_list("metadata", flat=True)
+        ))
+
     def test_download_is_bounded_and_forced_attachment(self):
         detail = self.client.get(self.details_url, self.valid_query)
         part_id = detail.data["attachments"][0]["part_id"]

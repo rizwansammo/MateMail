@@ -80,6 +80,7 @@ const NAV: NavSection[] = [
       { href: "/platform/queue", label: "Queue", icon: Inbox },
       { href: "/platform/quarantine", label: "Quarantine", icon: ShieldAlert },
       { href: "/platform/logs", label: "Mail Logs", icon: FileText },
+      { href: "/platform/mail-center", label: "Mail Center", icon: Mail },
     ],
   },
   {
