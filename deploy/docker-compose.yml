@@ -86,6 +86,8 @@ x-backend-env: &backend_env
   NATIVE_ENGINE_PLATFORM_SECRET: ${NATIVE_ENGINE_PLATFORM_SECRET:-}
   MAIL_DOMAIN: ${MAIL_DOMAIN:-matemail.pro}
   DMARC_REPORT_ADDRESS: ${DMARC_REPORT_ADDRESS:-dmarc@mail.matemail.pro}
+  DMARC_REPORT_DUAL_RECEIVER_ENABLED: ${DMARC_REPORT_DUAL_RECEIVER_ENABLED:-False}
+  TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED: ${TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED:-False}
   # P4-B: controlled opt-in on the worker only; default false preserves
   # inactive read-only IMAP polling for all existing deployments.
   DMARC_REPORT_INGEST_ENABLED: ${DMARC_REPORT_INGEST_ENABLED:-False}
