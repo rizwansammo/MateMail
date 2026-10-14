@@ -52,7 +52,7 @@ class FakeConnection:
                 date="2026-10-14T10:00:00Z", seen=False,
                 has_attachments=False, size=128
             )
-            for uid in uids
+            for uid in uids if uid in (9, 8, 7)
         ]
 
     def fetch_raw(self, *args):
