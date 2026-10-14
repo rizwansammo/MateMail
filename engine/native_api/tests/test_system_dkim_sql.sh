@@ -102,3 +102,56 @@ BEGIN
 END $$;
 SQL
 echo 'System operations canary activation and rollback SQL checks passed'
+
+echo 'Validating four fixed system identities and rollback'
+docker exec -i "$name" psql -h 127.0.0.1 -X -v ON_ERROR_STOP=1 -U postgres -d matemail_engine <<'SQL'
+SET SESSION AUTHORIZATION engine_platform_operator;
+SELECT public.platform_activate_system_canary(
+    '{BLF-CRYPT}$2b$10$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+);
+SELECT public.platform_activate_remaining_system_roles(
+    '{BLF-CRYPT}$2b$10$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    '{BLF-CRYPT}$2b$10$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    '{BLF-CRYPT}$2b$10$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    '{BLF-CRYPT}$2b$10$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+);
+RESET SESSION AUTHORIZATION;
+DO $$
+BEGIN
+    IF (SELECT count(*) FROM public.postfix_virtual_mailbox
+        WHERE domain='system.matemail.pro')<>5 THEN
+        RAISE EXCEPTION 'not all five reserved recipient routes active';
+    END IF;
+    IF (SELECT count(*) FROM public.dovecot_auth
+        WHERE address LIKE '%@system.matemail.pro')<>5 THEN
+        RAISE EXCEPTION 'not all five reserved identities authenticatable';
+    END IF;
+    IF (SELECT count(*) FROM public.postfix_sender_login
+        WHERE address LIKE '%@system.matemail.pro')<>5 THEN
+        RAISE EXCEPTION 'sender identity view count changed';
+    END IF;
+    IF (SELECT count(*) FROM public.domain
+        WHERE name='customer-canary.example' AND active=true)<>1 THEN
+        RAISE EXCEPTION 'customer state changed';
+    END IF;
+END $$;
+SET SESSION AUTHORIZATION engine_platform_operator;
+SELECT public.platform_deactivate_remaining_system_roles();
+RESET SESSION AUTHORIZATION;
+DO $$
+BEGIN
+    IF (SELECT count(*) FROM public.postfix_virtual_mailbox
+        WHERE domain='system.matemail.pro')<>1 THEN
+        RAISE EXCEPTION 'remaining role rollback did not preserve only operations';
+    END IF;
+    IF (SELECT count(*) FROM public.mailbox m JOIN public.domain d ON d.id=m.domain_id
+        WHERE d.name='system.matemail.pro' AND m.local_part<>'operations'
+        AND (m.active OR m.login_enabled OR m.password_hash IS NOT NULL))<>0 THEN
+        RAISE EXCEPTION 'inactive system role credentials remain after rollback';
+    END IF;
+END $$;
+SET SESSION AUTHORIZATION engine_platform_operator;
+SELECT public.platform_deactivate_system_canary();
+RESET SESSION AUTHORIZATION;
+SQL
+echo 'Five-role activation and independent rollback SQL verified'
