@@ -85,7 +85,16 @@ class PlatformDmarcReportsView(APIView):
         platform_domain = getattr(
             settings, "DMARC_REPORT_PLATFORM_DOMAIN", "mail.matemail.pro"
         ).lower().rstrip(".")
+        # Release 3 keeps both reserved platform sender domains visible.
+        # Preserve the legacy `domain` field for existing Console clients,
+        # and never include customer reports in this platform-only response.
+        platform_domains = ("mail.matemail.pro", "system.matemail.pro")
         qs = AggregateReport.objects.filter(
-            tenant__isnull=True, domain__isnull=True, policy_domain=platform_domain
+            tenant__isnull=True, domain__isnull=True,
+            policy_domain__in=platform_domains,
         )
-        return Response({"domain": platform_domain, **_summarize(qs, days)})
+        return Response({
+            "domain": platform_domain,
+            "domains": list(platform_domains),
+            **_summarize(qs, days),
+        })

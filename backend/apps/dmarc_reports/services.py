@@ -28,11 +28,12 @@ def store_report(parsed: ParsedReport) -> ImportResult:
     The platform's own isolated sender subdomain is separately operator-only.
     """
     name = parsed.policy_domain
-    platform_sender = getattr(
-        settings, "DMARC_REPORT_PLATFORM_DOMAIN", "mail.matemail.pro"
-    ).lower().rstrip(".")
+    # Keep BOTH reserved platform sender domains operator-only during and
+    # after Release 3 cutover. Never treat an arbitrary configured domain as
+    # platform-owned: tenant domains still require verified ownership.
+    platform_senders = frozenset(("mail.matemail.pro", "system.matemail.pro"))
     tenant = domain = None
-    if name != platform_sender:
+    if name not in platform_senders:
         domain = (
             Domain.objects.select_related("tenant")
             .filter(domain__iexact=name, ownership_status=DomainOwnership.VERIFIED)

@@ -167,3 +167,73 @@ class ReportReceiverMigrationTests(TestCase):
             self.assertEqual(poll_tls(), {"disabled": 1})
             dmarc.assert_not_called()
             tls.assert_not_called()
+
+    @override_settings(DMARC_REPORT_PLATFORM_DOMAIN="mail.matemail.pro")
+    def test_reserved_platform_sender_reports_survive_domain_migration(self):
+        """Both old and new sender telemetry stays operator-only and deduplicated."""
+        import hashlib
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.dmarc_reports.models import AggregateReport
+        from apps.dmarc_reports.parser import ParsedReport, ParsedRow
+        from apps.dmarc_reports.services import store_report
+
+        now = timezone.now()
+        for sender in ("mail.matemail.pro", "system.matemail.pro"):
+            report = ParsedReport(
+                digest=hashlib.sha256(sender.encode("ascii")).hexdigest(),
+                policy_domain=sender,
+                reporter="migration-test.example",
+                report_identifier="release3-platform-domain",
+                period_start=now - timedelta(days=1),
+                period_end=now,
+                rows=(ParsedRow("192.0.2.20", 1, "none", "pass", "pass"),),
+                count=1, spf_pass=1, dkim_pass=1, dmarc_pass=1,
+            )
+            self.assertEqual(store_report(report).status, "stored")
+            self.assertEqual(store_report(report).status, "duplicate")
+            stored = AggregateReport.objects.get(xml_sha256=report.digest)
+            self.assertIsNone(stored.tenant_id)
+            self.assertIsNone(stored.domain_id)
+        self.assertEqual(AggregateReport.objects.count(), 2)
+        # The platform admin report API must include both reserved domains
+        # without changing the pre-existing response's domain field.
+        from types import SimpleNamespace
+        from apps.dmarc_reports.views import PlatformDmarcReportsView
+
+        summary = PlatformDmarcReportsView().get(
+            SimpleNamespace(query_params={"days": "30"})
+        ).data
+        self.assertEqual(summary["report_count"], 2)
+        self.assertEqual(summary["domain"], "mail.matemail.pro")
+        self.assertEqual(
+            summary["domains"], ["mail.matemail.pro", "system.matemail.pro"]
+        )
+
+    @override_settings(DMARC_REPORT_PLATFORM_DOMAIN="unverified.example")
+    def test_unverified_domain_is_never_classified_as_platform_owned(self):
+        """A misconfigured setting must not bypass tenant verification."""
+        import hashlib
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.dmarc_reports.models import AggregateReport
+        from apps.dmarc_reports.parser import ParsedReport, ParsedRow
+        from apps.dmarc_reports.services import store_report
+
+        now = timezone.now()
+        report = ParsedReport(
+            digest=hashlib.sha256(b"unverified.example").hexdigest(),
+            policy_domain="unverified.example",
+            reporter="migration-test.example",
+            report_identifier="release3-unverified-domain",
+            period_start=now - timedelta(days=1),
+            period_end=now,
+            rows=(ParsedRow("192.0.2.20", 1, "none", "pass", "pass"),),
+            count=1, spf_pass=1, dkim_pass=1, dmarc_pass=1,
+        )
+        self.assertEqual(store_report(report).status, "unmanaged")
+        self.assertFalse(AggregateReport.objects.exists())
