@@ -16,6 +16,18 @@ from .services import store_policy
 
 logger = logging.getLogger(__name__)
 ADDRESS = "tlsrpt@mail.matemail.pro"
+SYSTEM_RECEIVER = "tlsrpt@system.matemail.pro"
+
+
+def configured_receiver_addresses() -> tuple[str, ...]:
+    """The migration does not change any published TLS-RPT record."""
+    address = (getattr(settings, "TLS_RPT_REPORT_ADDRESS", ADDRESS) or "").lower().strip()
+    if address not in (ADDRESS, SYSTEM_RECEIVER):
+        raise ValueError("TLS-RPT receiver must be a reserved platform mailbox")
+    if getattr(settings, "TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED", False):
+        return (ADDRESS, SYSTEM_RECEIVER)
+    return (address,)
+
 MAX_MESSAGE_BYTES = 6 * 1024 * 1024
 MAX_MESSAGES_PER_RUN = 40
 
