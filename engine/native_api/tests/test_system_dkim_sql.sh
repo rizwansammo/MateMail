@@ -57,3 +57,48 @@ BEGIN
 END $$;
 SQL
 echo 'Release 3 platform DKIM SQL isolation and inactive staging passed'
+
+echo 'Testing restricted operations canary activation and rollback'
+docker exec -i "$name" psql -h 127.0.0.1 -X -v ON_ERROR_STOP=1 -U postgres -d matemail_engine <<'SQL'
+SET SESSION AUTHORIZATION engine_platform_operator;
+SELECT public.platform_activate_system_canary(
+    '{BLF-CRYPT}$2b$10$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+);
+RESET SESSION AUTHORIZATION;
+DO $$
+BEGIN
+    IF (SELECT active FROM public.domain WHERE name='system.matemail.pro') IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'canary domain did not activate';
+    END IF;
+    IF (SELECT count(*) FROM public.postfix_virtual_mailbox WHERE domain='system.matemail.pro') <> 1 THEN
+        RAISE EXCEPTION 'exactly one system recipient should be routable';
+    END IF;
+    IF (SELECT count(*) FROM public.dovecot_auth WHERE address='operations@system.matemail.pro') <> 1 THEN
+        RAISE EXCEPTION 'canary should authenticate';
+    END IF;
+    IF (SELECT count(*) FROM public.mailbox m JOIN public.domain d ON d.id=m.domain_id
+        WHERE d.name='system.matemail.pro' AND m.active=true) <> 1 THEN
+        RAISE EXCEPTION 'extra platform mailbox activated';
+    END IF;
+    IF (SELECT count(*) FROM public.domain WHERE name='customer-canary.example' AND active=true) <> 1 THEN
+        RAISE EXCEPTION 'customer domain was touched';
+    END IF;
+END $$;
+SET SESSION AUTHORIZATION engine_platform_operator;
+SELECT public.platform_deactivate_system_canary();
+RESET SESSION AUTHORIZATION;
+DO $$
+BEGIN
+    IF (SELECT active FROM public.domain WHERE name='system.matemail.pro') IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'rollback left domain active';
+    END IF;
+    IF (SELECT count(*) FROM public.mailbox m JOIN public.domain d ON d.id=m.domain_id
+        WHERE d.name='system.matemail.pro' AND (m.active OR m.login_enabled OR m.password_hash IS NOT NULL)) <> 0 THEN
+        RAISE EXCEPTION 'rollback left a usable mailbox';
+    END IF;
+    IF (SELECT count(*) FROM public.dkim_key WHERE domain_name='system.matemail.pro') <> 1 THEN
+        RAISE EXCEPTION 'rollback must preserve DKIM';
+    END IF;
+END $$;
+SQL
+echo 'System operations canary activation and rollback SQL checks passed'

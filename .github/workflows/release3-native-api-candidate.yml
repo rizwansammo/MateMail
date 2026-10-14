@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/release3-native-api-candidate.yml'
+      - 'engine/native_api/migrations/011_system_canary_activation.sql'
   workflow_dispatch:
 
 permissions:
