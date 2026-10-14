@@ -30,8 +30,8 @@ def poll_mailbox():
         # suppress duplicate reports arriving through both addresses.
         for address in addresses:
             result = ingest_mailbox_once(address=address)
-            for key, count in result.items():
-                totals[key] = totals.get(key, 0) + count
+            for counter_name, count in result.items():
+                totals[counter_name] = totals.get(counter_name, 0) + count
         return totals
     except Exception:
         # Avoid logging raw RFC822, XML, mail headers, credentials or payloads.

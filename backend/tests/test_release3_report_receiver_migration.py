@@ -150,7 +150,11 @@ class ReportReceiverMigrationTests(TestCase):
                      mock.patch(module + ".ingest_mailbox_once", return_value={"processed": 1, "stored": 1}) as read:
                     self.assertEqual(task(), {"processed": 2, "stored": 2})
                     self.assertEqual([c.kwargs["address"] for c in read.call_args_list], list(expected))
-                    released.assert_called_once()
+                    released.assert_called_once_with(
+                        "dmarc:mailbox-ingest-lock"
+                        if module == "apps.dmarc_reports.tasks"
+                        else "tls-rpt:mailbox-poll-lock"
+                    )
 
     @override_settings(
         DMARC_REPORT_INGEST_ENABLED=False,
