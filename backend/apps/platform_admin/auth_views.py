@@ -217,7 +217,7 @@ class PlatformVerifyView(APIView):
         # is not scoped to an organization, and stamping one in would make the
         # token look like a member of whichever workspace they happened to
         # belong to.
-        tokens = make_tokens(user, tenant_id=None)
+        tokens = make_tokens(user, tenant_id=None, platform_verified=True)
         from apps.accounts.serializers import UserProfileSerializer
 
         return authenticated_response(tokens, {

@@ -13,7 +13,7 @@ Phase 5 (Release 3) has already migrated the sender and report receiver identiti
 | 6A | Fixed Operations mailbox read-only folders and message headers, platform authorization, auditing, feature flag | Default OFF, no production activation |
 | 6B | Operator-selected Operations message details, safe HTML/text rendering and bounded attachment downloads | Strict UIDVALIDITY, MIME bounds, no inline rendering, security tests; code gated OFF |
 | 6C | Operations plain text Compose, Reply, Sent filing and IMAP Draft save, replace and delete | Two independent feature gates OFF, CI + live canary required |
-| 6D | Purpose-specific mailbox permissions: Security and Noreply; no unrestricted switching | Role grants and second-factor policy approved before enablement |
+| 6D | Explicit expiring Security/Noreply read grants, OTP proof, auditable approval/revocation and bounded read-only APIs | Default OFF, no implicit switching or interactive sending |
 | 6E | Aggregate DMARC/TLS operational dashboards using existing parsed data, no raw report exposure to tenants | Tenant and platform data separation tests |
 | 6F | Console UI, complete UX, end-to-end tests, controlled rollout and acceptance | Production health and rollback evidence |
 
@@ -88,3 +88,55 @@ Draft Save writes a real MIME message to the Operations IMAP Drafts folder with 
 Every outbound or draft action writes a platform audit attempt before the side effect; only non-sensitive counts and result flags may appear in audit metadata. No recipient address, subject, text, filename or content is written to the audit log.
 
 No Phase 6C production activation, deployment, Engine updates, DNS changes, migrations or customer mailbox modifications are included. Enable flags only after later controlled canary and Phase 6F acceptance.
+
+
+## Phase 6D: Security and Noreply mailbox access
+
+Security and Noreply mailboxes are **not** interchangeable with the Operations
+mailbox. A fixed server allowlist maps the role 'security' exclusively to
+security@system.matemail.pro and 'noreply' exclusively to
+noreply@system.matemail.pro. No arbitrary user supplied mailbox ID or address
+can select a tenant mailbox, reporting mailbox or another platform identity.
+
+A sensitive mailbox read is authorized only when all of these hold:
+
+1. The caller is an active Platform Admin, authenticated without an API key.
+2. The current access JWT contains a valid platform_otp_verified_at timestamp
+   issued by the Platform Console after successful email OTP challenge
+   verification. It is valid for a maximum of 15 minutes. Normal tenant tokens
+   and unverified administrator tokens do not carry this claim.
+3. PLATFORM_MAIL_CENTER_ENABLED and the independent
+   PLATFORM_MAIL_CENTER_PURPOSE_READ_ENABLED are both True. The latter is
+   disabled by default, including in production Compose.
+4. A grant exists for this administrator and exact role that has not expired
+   or been revoked. The new grant table starts empty; even a superuser does
+   not receive implicit access.
+
+Approval: an OTP verified platform superuser can grant **only another** active
+platform administrator temporary read permission for one role (1..168 hours).
+Self-grants, tenant users, unlisted roles and indefinite permissions fail
+closed. Approval and revocation must be atomically audited. No recipient,
+subject, body or credential is stored in platform audit metadata.
+
+### Sensitive mailbox endpoints
+
+- GET /api/platform/mail-center/system-access/ returns only the requesting
+  administrator's unexpired role grants.
+- POST /api/platform/mail-center/system-access/grants/ approves one temporary
+  role with grantee_id, role and duration_hours (platform superuser only).
+- DELETE /api/platform/mail-center/system-access/grants/{uuid}/ revokes it.
+- GET /api/platform/mail-center/purpose/{role}/folders/
+- GET /api/platform/mail-center/purpose/{role}/messages/
+- GET /api/platform/mail-center/purpose/{role}/messages/{uid}/
+- GET /api/platform/mail-center/purpose/{role}/messages/{uid}/attachments/{part_id}/
+
+Every mail read uses read-only IMAP, strict UIDVALIDITY on full reads,
+bounded bodies and attachments, sanitized HTML and blocked remote images.
+Attachments are download only, application/octet-stream, sandbox and
+nosniff. All message actions other than GET are rejected. **No interactive
+sending as security or noreply** is added; the Phase 6C outgoing route still
+uses only operations@system.matemail.pro.
+
+The new database migration creates an empty grant table. The new feature
+flag stays disabled for development and production until controlled approval
+during 6F; no customer mailbox, DNS, SMTP or Native Engine setting is changed.

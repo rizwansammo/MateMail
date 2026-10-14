@@ -2,6 +2,12 @@ from django.urls import path
 from apps.dmarc_reports.views import PlatformDmarcReportsView
 from apps.tls_reports.views import PlatformTlsReceiverHealthView
 
+from .mail_center_purpose import (
+    PlatformPurposeGrantListView, PlatformPurposeGrantCreateView,
+    PlatformPurposeGrantRevokeView, PlatformPurposeFoldersView,
+    PlatformPurposeMessagesView, PlatformPurposeMessageDetailView,
+    PlatformPurposeAttachmentView,
+)
 from .mail_center_actions import (
     PlatformOperationsSendView, PlatformOperationsDraftSaveView,
     PlatformOperationsDraftDeleteView,
@@ -121,6 +127,13 @@ urlpatterns = [
     path("search/", PlatformSearchView.as_view(), name="platform-search"),
     path("health/", PlatformHealthView.as_view(), name="platform-health"),
     path("backups/", PlatformBackupStatusView.as_view(), name="platform-backups"),
+    path("mail-center/system-access/", PlatformPurposeGrantListView.as_view(), name="platform-mail-center-system-access"),
+    path("mail-center/system-access/grants/", PlatformPurposeGrantCreateView.as_view(), name="platform-mail-center-grant-create"),
+    path("mail-center/system-access/grants/<uuid:grant_id>/", PlatformPurposeGrantRevokeView.as_view(), name="platform-mail-center-grant-revoke"),
+    path("mail-center/purpose/<str:role>/folders/", PlatformPurposeFoldersView.as_view(), name="platform-mail-center-purpose-folders"),
+    path("mail-center/purpose/<str:role>/messages/", PlatformPurposeMessagesView.as_view(), name="platform-mail-center-purpose-messages"),
+    path("mail-center/purpose/<str:role>/messages/<int:uid>/", PlatformPurposeMessageDetailView.as_view(), name="platform-mail-center-purpose-detail"),
+    path("mail-center/purpose/<str:role>/messages/<int:uid>/attachments/<int:part_id>/", PlatformPurposeAttachmentView.as_view(), name="platform-mail-center-purpose-attachment"),
     path("mail-center/send/", PlatformOperationsSendView.as_view(), name="platform-mail-center-send"),
     path("mail-center/drafts/", PlatformOperationsDraftSaveView.as_view(), name="platform-mail-center-drafts"),
     path("mail-center/drafts/<int:uid>/", PlatformOperationsDraftDeleteView.as_view(), name="platform-mail-center-draft-delete"),
