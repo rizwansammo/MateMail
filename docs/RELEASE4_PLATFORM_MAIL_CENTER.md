@@ -197,3 +197,77 @@ existing tenant-scoped DMARC and TLS endpoints with this platform overview.
 new schema, ingestion pipeline, polling job, mail routing change, DNS change
 or production activation. The visual dashboard belongs to Phase 6F, along
 with controlled rollout and final acceptance.
+
+
+## Phase 6F: Platform Console integration and controlled acceptance
+
+The Platform Console route is \`/platform/mail-center\`. It has separate
+Operations, Reporting and Sensitive Access tabs, each rendered only when the
+backend returns an allowed coarse capability boolean from
+\`GET /api/platform/mail-center/capabilities/\`. The capability response
+contains **only** enabled booleans and does not grant permissions. Every
+subsequent request is authenticated and authorized independently.
+
+Operations includes folder and message lists, safe detail reader, bounded
+attachment downloads, plain text Compose, Reply, Reply All, save and delete
+draft, and Sent filing notifications. SMTP submission always requires a
+second visible confirmation and a per-submission idempotency key. No HTML
+compose, attachment send, user chosen sender or system identity switching is
+allowed. The backend retains rate limits and sender login protections.
+
+Email HTML is displayed only as an opt-in view inside a sandboxed iframe with
+a restrictive CSP; plain text is the default. Attachments are fetched through
+the authenticated API and downloaded as blobs, never displayed inline on the
+privileged console origin. Remote images are blocked by the server sanitizer
+and the frame CSP.
+
+Reporting provides platform sender DMARC totals, aggregated TLS counters,
+bounded daily trends, and legacy/system receiver operational state. Empty
+states are explicit and absence of reports is **not** described as proof of
+healthy delivery. The API cannot be filtered to a tenant or report ID.
+
+Sensitive Access lists each administrator's own active grants. Grant
+management inventory is a separate audit logged route available only to a
+recently OTP verified platform superuser, including revocable grant UUIDs.
+Self approval remains prohibited. Security and Noreply readers are strictly
+read-only and cannot send or mutate messages.
+
+### Rollout gates and acceptance sequence
+
+The following flags remain default False and **must not all be enabled as one
+operation**:
+
+- \`PLATFORM_MAIL_CENTER_ENABLED\`: Operations reader base gate.
+- \`PLATFORM_MAIL_CENTER_REPORTS_ENABLED\`: reporting gate.
+- \`PLATFORM_MAIL_CENTER_SEND_ENABLED\`: irreversible SMTP/draft operations.
+- \`PLATFORM_MAIL_CENTER_PURPOSE_READ_ENABLED\`: privileged sensitive readers
+  and grants.
+
+1. Complete branch CI with Django full tests, TypeScript build, Compose
+   validation and security regression coverage. No customer mailbox edits.
+2. Deploy images with **all flags OFF**, backed up app settings, rollback-ready
+   image digest pins and a healthy Native Engine.
+3. Smoke test console login, menu, status endpoint, 503 default-denial paths,
+   existing Hub and PostBox, queue and worker health. Verify the new grant
+   table starts empty. Stop and roll back on any regression.
+4. In a later controlled acceptance window, enable **Operations read only**
+   after verifying the existing IMAP master identity. Inspect the exact
+   operations mailbox, read-only flags, UIDVALIDITY and sanitization; turn
+   it OFF on an unexpected response.
+5. Enable Reporting separately, verify it returns platform-only DMARC, fully
+   aggregated TLS counters and dual receiver states. Keep all reporting
+   ingestion and legacy cursor polling on unchanged.
+6. **Do not activate sensitive grants or sending just because UI is deployed.**
+   Approve the independent high privilege workflow, recent OTP proof,
+   operator training, outbound sending safeguards and real canary
+   recipient before these flags can be enabled. Confirm who approves
+   Security mailbox access and who monitors the audit log.
+7. Roll back application images and .env from root-only backups if a health or
+   privacy check fails; rollback must never stop incoming SMTP/IMAP mail
+   services or delete system/legacy mailboxes.
+8. Do not label Phase 6 production accepted until evidenced end-to-end tests
+   succeed in the controlled deployment. Green CI by itself is a **development
+   completion**, not a full production acceptance.
+
+No new DNS, sender, native engine routing, tenant mailbox model or report
+ingestion job is introduced by this UI stage.
