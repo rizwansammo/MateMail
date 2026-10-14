@@ -198,6 +198,19 @@ class ReportReceiverMigrationTests(TestCase):
             self.assertIsNone(stored.tenant_id)
             self.assertIsNone(stored.domain_id)
         self.assertEqual(AggregateReport.objects.count(), 2)
+        # The platform admin report API must include both reserved domains
+        # without changing the pre-existing response's domain field.
+        from types import SimpleNamespace
+        from apps.dmarc_reports.views import PlatformDmarcReportsView
+
+        summary = PlatformDmarcReportsView().get(
+            SimpleNamespace(query_params={"days": "30"})
+        ).data
+        self.assertEqual(summary["report_count"], 2)
+        self.assertEqual(summary["domain"], "mail.matemail.pro")
+        self.assertEqual(
+            summary["domains"], ["mail.matemail.pro", "system.matemail.pro"]
+        )
 
     @override_settings(DMARC_REPORT_PLATFORM_DOMAIN="unverified.example")
     def test_unverified_domain_is_never_classified_as_platform_owned(self):

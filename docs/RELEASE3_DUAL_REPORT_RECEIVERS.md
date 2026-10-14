@@ -52,3 +52,12 @@ TLS_RPT_REPORT_DUAL_RECEIVER_ENABLED=False
 Current Release 3 transactional sender migration is independent of this
 receiver migration. Preserve legacy report recipient acceptance until its
 published DNS and historical report overlap is independently verified.
+
+## Release 3 platform sender DMARC acceptance
+The report importer and the operator-only reporting API accept and display
+**both** fixed sending domains: `mail.matemail.pro` and
+`system.matemail.pro`. The existing `DMARC_REPORT_PLATFORM_DOMAIN`
+legacy response label remains unchanged for older Console clients; API
+responses also contain the `domains` list. No customer domain is ever
+implicitly classified as platform-owned, and tenant report visibility stays
+strictly tenant-bound. These code changes do not change any public DNS.
