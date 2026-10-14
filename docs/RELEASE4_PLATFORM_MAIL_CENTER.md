@@ -12,7 +12,7 @@ Phase 5 (Release 3) has already migrated the sender and report receiver identiti
 | --- | --- | --- |
 | 6A | Fixed Operations mailbox read-only folders and message headers, platform authorization, auditing, feature flag | Default OFF, no production activation |
 | 6B | Operator-selected Operations message details, safe HTML/text rendering and bounded attachment downloads | Strict UIDVALIDITY, MIME bounds, no inline rendering, security tests; code gated OFF |
-| 6C | Operations Compose, Reply, Sent, Drafts with explicit sender authorization, quotas and outbound safeguards | Separate review and live canary |
+| 6C | Operations plain text Compose, Reply, Sent filing and IMAP Draft save, replace and delete | Two independent feature gates OFF, CI + live canary required |
 | 6D | Purpose-specific mailbox permissions: Security and Noreply; no unrestricted switching | Role grants and second-factor policy approved before enablement |
 | 6E | Aggregate DMARC/TLS operational dashboards using existing parsed data, no raw report exposure to tenants | Tenant and platform data separation tests |
 | 6F | Console UI, complete UX, end-to-end tests, controlled rollout and acceptance | Production health and rollback evidence |
@@ -62,3 +62,29 @@ The existing \`PLATFORM_MAIL_CENTER_ENABLED\` remains disabled by default.
 
 6C will add controlled Operations outbound sending and draft management behind
 a separately reviewed gate; no other system mailbox can be selected implicitly.
+
+## Phase 6C: Secure Operations sending and drafts
+
+New routes:
+
+- POST /api/platform/mail-center/send/
+- POST /api/platform/mail-center/drafts/
+- DELETE /api/platform/mail-center/drafts/{uid}/?uid_validity={positive integer}
+
+Both PLATFORM_MAIL_CENTER_ENABLED and PLATFORM_MAIL_CENTER_SEND_ENABLED must be true. Both default OFF, including production Compose. The read-only Phase 6A and 6B endpoints do not need the new outbound gate.
+
+Sender is always operations@system.matemail.pro, authenticated using the existing PostBox master-identity SMTP STARTTLS path and the Native Engine sender-login policy. No customer mailbox, role or credentials are selected from request input. Sending reuses the PostBox MIME builder and SMTP submission service.
+
+Only plain text messages are accepted in the initial phase. Client-provided sender identities, HTML, attachment uploads, scheduled sends and arbitrary threading headers are rejected. At most 10 distinct envelope recipients per message; subject max 300 chars; text max 50000 chars.
+
+Every Send request requires a 16 to 80 character opaque idempotency_key. Atomic Redis claim prevents duplicate submission by the same administrator for 24 hours, including after a transient or ambiguous failure. Rate caps: 10 attempted sends per platform admin and 30 per Operations mailbox per hour. The Native Engine still applies its own caps.
+
+SMTP submission precedes IMAP Sent append. Failure to append a copy must not falsely report the mail failed or encourage sending again. Bcc recipients exist only in SMTP envelope and never in a sent message header.
+
+Reply recipients, In-Reply-To and References come only from an authorized, UIDVALIDITY-verified original message in the fixed Operations mailbox. Reply-All cannot name any arbitrary platform identity. Source selection uses read-only IMAP.
+
+Draft Save writes a real MIME message to the Operations IMAP Drafts folder with Draft and Seen flags and retains Bcc only in the local draft MIME copy. Replacement checks original UIDVALIDITY and draft flag, then APPENDs the new message before deleting the old one; an interrupted replacement must not lose the original. Draft delete requires the matching current UIDVALIDITY and explicit DELETE.
+
+Every outbound or draft action writes a platform audit attempt before the side effect; only non-sensitive counts and result flags may appear in audit metadata. No recipient address, subject, text, filename or content is written to the audit log.
+
+No Phase 6C production activation, deployment, Engine updates, DNS changes, migrations or customer mailbox modifications are included. Enable flags only after later controlled canary and Phase 6F acceptance.

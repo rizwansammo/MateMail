@@ -2,6 +2,10 @@ from django.urls import path
 from apps.dmarc_reports.views import PlatformDmarcReportsView
 from apps.tls_reports.views import PlatformTlsReceiverHealthView
 
+from .mail_center_actions import (
+    PlatformOperationsSendView, PlatformOperationsDraftSaveView,
+    PlatformOperationsDraftDeleteView,
+)
 from .mail_center_views import (
     PlatformMailCenterFoldersView, PlatformMailCenterMessagesView,
     PlatformMailCenterMessageDetailView, PlatformMailCenterAttachmentView,
@@ -117,6 +121,9 @@ urlpatterns = [
     path("search/", PlatformSearchView.as_view(), name="platform-search"),
     path("health/", PlatformHealthView.as_view(), name="platform-health"),
     path("backups/", PlatformBackupStatusView.as_view(), name="platform-backups"),
+    path("mail-center/send/", PlatformOperationsSendView.as_view(), name="platform-mail-center-send"),
+    path("mail-center/drafts/", PlatformOperationsDraftSaveView.as_view(), name="platform-mail-center-drafts"),
+    path("mail-center/drafts/<int:uid>/", PlatformOperationsDraftDeleteView.as_view(), name="platform-mail-center-draft-delete"),
     path("mail-center/folders/", PlatformMailCenterFoldersView.as_view(), name="platform-mail-center-folders"),
     path("mail-center/messages/<int:uid>/attachments/<int:part_id>/", PlatformMailCenterAttachmentView.as_view(), name="platform-mail-center-attachment"),
     path("mail-center/messages/<int:uid>/", PlatformMailCenterMessageDetailView.as_view(), name="platform-mail-center-message-detail"),
