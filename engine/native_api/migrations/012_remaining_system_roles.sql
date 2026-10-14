@@ -33,7 +33,7 @@ BEGIN
                     RETURN NEW;
                 END IF;
             END IF;
-                IF old_domain='system.matemail.pro'
+                IF TG_OP='UPDATE' AND old_domain='system.matemail.pro'
                    AND OLD.local_part IN ('noreply','security','dmarc','tlsrpt')
                    AND OLD.address=OLD.local_part || '@system.matemail.pro'
                    AND NEW.address=OLD.address
