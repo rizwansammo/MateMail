@@ -63,7 +63,7 @@ def ingest_raw_message(raw):
     return totals
 
 
-def ingest_mailbox_once():
+def ingest_mailbox_once(*, address: str | None = None):
     if not getattr(settings, "TLS_RPT_INGEST_ENABLED", False):
         return {"disabled": 1}
     address = getattr(settings, "TLS_RPT_REPORT_ADDRESS", "").lower().strip()
