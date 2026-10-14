@@ -168,3 +168,165 @@ class PlatformMailCenterTests(TestCase):
             self.assertEqual(self.admin_client.post(endpoint, {}, format="json").status_code, 405)
             self.assertEqual(self.admin_client.delete(endpoint).status_code, 405)
         self.assertEqual(self.opened_addresses, [])
+
+
+@override_settings(
+    PASSWORD_HASHERS=FAST_PASSWORD_HASHERS,
+    PLATFORM_MAIL_CENTER_ENABLED=True,
+    POSTBOX_MASTER_PASSWORD="only-for-tests",
+)
+class PlatformMailCenterDetailTests(TestCase):
+    def setUp(self):
+        from email.message import EmailMessage
+        disable_throttling(self)
+        self.admin = make_user("detail-admin@platform.test", is_platform_admin=True)
+        self.customer = make_user("detail-customer@platform.test")
+        tenant = make_tenant(self.customer, slug="mail-center-detail-tenant")
+        self.client = auth_client(self.admin)
+        self.customer_client = auth_client(self.customer, tenant)
+        self.connection = FakeConnection()
+        message = EmailMessage()
+        message["From"] = "Tester <sender@example.test>"
+        message["To"] = "operations@system.matemail.pro"
+        message["Subject"] = "Operations urgent request"
+        message.set_content("Please review this request.")
+        message.add_alternative(
+            '<p>Hello <strong>Operations</strong> '
+            '<img src="https://tracking.example/pixel"></p>'
+            '<script>alert("xss")</script><a href="javascript:alert(1)">bad</a>',
+            subtype="html",
+        )
+        message.add_attachment(b"safe payload", maintype="text", subtype="plain",
+                               filename="report.txt")
+        self.raw = message.as_bytes()
+        self.connection.fetch_raw = mock.Mock(side_effect=self._fetch_raw)
+        self.seen_accounts = []
+
+        @contextmanager
+        def opened(address):
+            self.seen_accounts.append(address)
+            yield self.connection
+
+        p = mock.patch("apps.platform_admin.mail_center_views.imap.open_mailbox", side_effect=opened)
+        p.start()
+        self.addCleanup(p.stop)
+        self.details_url = "/api/platform/mail-center/messages/9/"
+        self.attachment_url = "/api/platform/mail-center/messages/9/attachments/3/"
+        self.valid_query = {"folder": "INBOX", "uid_validity": "42"}
+
+    def _fetch_raw(self, uid):
+        self.connection.calls.append(("raw", uid))
+        return self.raw
+
+    def test_refuses_tenant_anonymous_and_cross_mailbox_selector(self):
+        for url in (self.details_url, self.attachment_url):
+            self.assertIn(self.customer_client.get(url, self.valid_query).status_code, (401, 403))
+            self.assertIn(APIClient().get(url, self.valid_query).status_code, (401, 403))
+            params = dict(self.valid_query, mailbox="security@system.matemail.pro")
+            self.assertEqual(self.client.get(url, params).status_code, 400)
+        self.assertEqual(self.seen_accounts, [])
+
+    def test_disabled_feature_fails_closed_before_opening_imap(self):
+        with override_settings(PLATFORM_MAIL_CENTER_ENABLED=False):
+            self.assertEqual(self.client.get(self.details_url, self.valid_query).status_code, 503)
+            self.assertEqual(self.client.get(self.attachment_url, self.valid_query).status_code, 503)
+        self.assertEqual(self.seen_accounts, [])
+
+    def test_requires_valid_uidvalidity_and_validates_before_fetch_raw(self):
+        for url in (self.details_url, self.attachment_url):
+            for query, status in (
+                ({"folder": "INBOX"}, 400),
+                ({"uid_validity": "broken"}, 400),
+                ({"uid_validity": "41"}, 409),
+                ({"uid_validity": "42", "folder": "Hidden"}, 404),
+                ({"uid_validity": "42", "folder": "customer@evil.test"}, 404),
+            ):
+                self.connection.calls.clear()
+                self.assertEqual(self.client.get(url, query).status_code, status)
+                self.assertNotIn(("raw", 9), self.connection.calls)
+        self.assertEqual(PlatformAuditLog.objects.count(), 0)
+
+    def test_detail_sanitizes_html_blocks_remote_and_never_mutates(self):
+        response = self.client.get(self.details_url, self.valid_query)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["uid_validity"], 42)
+        self.assertEqual(response.data["text"], "Please review this request.")
+        self.assertNotIn("<script", response.data["html"])
+        self.assertNotIn("javascript:", response.data["html"])
+        self.assertNotIn("tracking.example", response.data["html"])
+        self.assertTrue(response.data["remote_images_blocked"])
+        self.assertEqual(response.data["from"]["address"], "sender@example.test")
+        self.assertEqual(len(response.data["attachments"]), 1)
+        self.assertTrue(response.data["attachments"][0]["downloadable"])
+        self.assertEqual(self.seen_accounts, ["operations@system.matemail.pro"])
+        self.assertIn(("select_readonly", "INBOX"), self.connection.calls)
+        self.assertEqual(PlatformAuditLog.objects.get(action="mail_center.message_read").metadata,
+                         {"folder_role": "inbox"})
+        self.assertNotIn("Operations urgent request", str(PlatformAuditLog.objects.first().metadata))
+        self.assertIn("no-store", response["Cache-Control"])
+
+    def test_download_is_bounded_and_forced_attachment(self):
+        detail = self.client.get(self.details_url, self.valid_query)
+        part_id = detail.data["attachments"][0]["part_id"]
+        response = self.client.get(
+            f"/api/platform/mail-center/messages/9/attachments/{part_id}/",
+            self.valid_query,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"safe payload")
+        self.assertEqual(response["Content-Type"], "application/octet-stream")
+        self.assertIn("attachment;", response["Content-Disposition"])
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+        self.assertIn("sandbox", response["Content-Security-Policy"])
+        self.assertIn("no-store", response["Cache-Control"])
+        audit = PlatformAuditLog.objects.get(action="mail_center.attachment_download")
+        self.assertEqual(audit.metadata, {"folder_role": "inbox", "bytes": 12})
+        self.assertNotIn("report.txt", str(audit.metadata))
+
+    def test_non_attachment_part_and_unknown_uid_rejected(self):
+        self.assertEqual(
+            self.client.get("/api/platform/mail-center/messages/9/attachments/0/",
+                            self.valid_query).status_code, 404,
+        )
+        self.assertEqual(
+            self.client.get("/api/platform/mail-center/messages/9/attachments/900/",
+                            self.valid_query).status_code, 400,
+        )
+        self.assertEqual(
+            self.client.get("/api/platform/mail-center/messages/10/", self.valid_query).status_code,
+            404,
+        )
+
+    def test_oversize_message_rejected_before_imap_fetch(self):
+        with mock.patch(
+            "apps.platform_admin.mail_center_views.MAX_RAW_MESSAGE_BYTES", 16,
+        ):
+            response = self.client.get(self.details_url, self.valid_query)
+        self.assertEqual(response.status_code, 413)
+        self.assertNotIn(("raw", 9), self.connection.calls)
+        self.assertFalse(PlatformAuditLog.objects.exists())
+
+    def test_oversize_attachment_rejected_without_content(self):
+        detail = self.client.get(self.details_url, self.valid_query)
+        part_id = detail.data["attachments"][0]["part_id"]
+        with mock.patch("apps.platform_admin.mail_center_views.MAX_ATTACHMENT_BYTES", 3):
+            response = self.client.get(
+                f"/api/platform/mail-center/messages/9/attachments/{part_id}/",
+                self.valid_query,
+            )
+        self.assertEqual(response.status_code, 413)
+        self.assertFalse(PlatformAuditLog.objects.filter(action="mail_center.attachment_download").exists())
+
+    def test_mail_layer_exception_never_reveals_secrets(self):
+        self.connection.fetch_raw.side_effect = RuntimeError("IMAP PASS secret-forbidden")
+        response = self.client.get(self.details_url, self.valid_query)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("secret-forbidden", str(response.data))
+        self.assertEqual(self.seen_accounts, ["operations@system.matemail.pro"])
+        self.assertFalse(PlatformAuditLog.objects.exists())
+
+    def test_no_mutating_methods(self):
+        for url in (self.details_url, self.attachment_url):
+            self.assertEqual(self.client.post(url, self.valid_query, format="json").status_code, 405)
+            self.assertEqual(self.client.delete(url).status_code, 405)
+        self.assertFalse(self.seen_accounts)
