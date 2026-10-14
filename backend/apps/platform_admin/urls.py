@@ -2,6 +2,7 @@ from django.urls import path
 from apps.dmarc_reports.views import PlatformDmarcReportsView
 from apps.tls_reports.views import PlatformTlsReceiverHealthView
 
+from .mail_center_reporting import PlatformMailCenterReportOverviewView
 from .mail_center_purpose import (
     PlatformPurposeGrantListView, PlatformPurposeGrantCreateView,
     PlatformPurposeGrantRevokeView, PlatformPurposeFoldersView,
@@ -127,6 +128,7 @@ urlpatterns = [
     path("search/", PlatformSearchView.as_view(), name="platform-search"),
     path("health/", PlatformHealthView.as_view(), name="platform-health"),
     path("backups/", PlatformBackupStatusView.as_view(), name="platform-backups"),
+    path("mail-center/reports/overview/", PlatformMailCenterReportOverviewView.as_view(), name="platform-mail-center-report-overview"),
     path("mail-center/system-access/", PlatformPurposeGrantListView.as_view(), name="platform-mail-center-system-access"),
     path("mail-center/system-access/grants/", PlatformPurposeGrantCreateView.as_view(), name="platform-mail-center-grant-create"),
     path("mail-center/system-access/grants/<uuid:grant_id>/", PlatformPurposeGrantRevokeView.as_view(), name="platform-mail-center-grant-revoke"),

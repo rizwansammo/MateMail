@@ -14,7 +14,7 @@ Phase 5 (Release 3) has already migrated the sender and report receiver identiti
 | 6B | Operator-selected Operations message details, safe HTML/text rendering and bounded attachment downloads | Strict UIDVALIDITY, MIME bounds, no inline rendering, security tests; code gated OFF |
 | 6C | Operations plain text Compose, Reply, Sent filing and IMAP Draft save, replace and delete | Two independent feature gates OFF, CI + live canary required |
 | 6D | Explicit expiring Security/Noreply read grants, OTP proof, auditable approval/revocation and bounded read-only APIs | Default OFF, no implicit switching or interactive sending |
-| 6E | Aggregate DMARC/TLS operational dashboards using existing parsed data, no raw report exposure to tenants | Tenant and platform data separation tests |
+| 6E | Aggregated Platform DMARC and TLS operational dashboard data API, UTC daily trends and safe Receiver Health | Platform-only, default OFF, tenant isolation tests, no new ingestion |
 | 6F | Console UI, complete UX, end-to-end tests, controlled rollout and acceptance | Production health and rollback evidence |
 
 ## 6A: Developer acceptance
@@ -140,3 +140,60 @@ uses only operations@system.matemail.pro.
 The new database migration creates an empty grant table. The new feature
 flag stays disabled for development and production until controlled approval
 during 6F; no customer mailbox, DNS, SMTP or Native Engine setting is changed.
+
+
+## Phase 6E: Reporting overview API
+
+### Scope and security
+
+The Phase 6E endpoint is
+\`GET /api/platform/mail-center/reports/overview/?days=30\`.
+
+Access requires an authenticated Platform Admin session and **both**
+\`PLATFORM_MAIL_CENTER_ENABLED=True\` and the independent
+\`PLATFORM_MAIL_CENTER_REPORTS_ENABLED=True\`. Both flags default False,
+including in production Compose. No mailbox master password, IMAP
+connection, SMTP submission, ingestion task or report receiver
+configuration is needed to view the already-persisted aggregates.
+
+\`days\` accepts one integer from 1 through 90, default 30. Any extra
+parameter, repeated days key, customer tenant, domain or report selector is
+rejected. Responses are uncached (\`Cache-Control: no-store\`) and read-only.
+Each successful read creates a Platform Audit Log containing only the chosen
+number of days, never report, tenant, source IP or receiver details.
+
+DMARC totals and daily counts come **only** from
+\`AggregateReport(tenant=NULL, domain=NULL)\` for the two literal platform
+sender domains \`mail.matemail.pro\` and \`system.matemail.pro\`. A report
+for a customer sender domain is excluded even if the displayed policy domain
+was spoofed to resemble a reserved system domain.
+
+TLS totals and daily counts come from \`TlsAggregateReport\` rows already
+bound to a real tenant and domain, but return **only combined counts across
+the platform**, never a tenant/domain breakdown. There is no report list,
+reporter, policy domain, report ID, failure detail bucket, source IP, raw
+JSON/XML, original message or customer mailbox content in the response.
+
+The timeline uses a bounded, fixed daily UTC calendar and totals for
+reports, DMARC messages and authentication passes, and TLS successful/failed
+sessions. Empty days are zero-filled. Periods use the report's \`period_end\`
+time, not arrival time.
+
+Receiver monitoring is based solely on existing IMAP cursor snapshots.
+The response shows legacy/system role, active state, last checked/success
+times and coarse operational/waiting/stale/inactive/disabled/misconfigured
+status. It does **not** expose cursor UIDs, UIDVALIDITY, raw last_error,
+individual rejection counts, arbitrary configured email destinations or
+secrets. Both legacy and system receiver statuses remain available during
+the dual-receiver migration overlap.
+
+Report counts are telemetry supplied by external providers, not guaranteed
+inbox delivery or a security enforcement verdict. Do not replace the
+existing tenant-scoped DMARC and TLS endpoints with this platform overview.
+
+### Delivery rule
+
+6E introduces only the gated Backend API and test coverage. There is no
+new schema, ingestion pipeline, polling job, mail routing change, DNS change
+or production activation. The visual dashboard belongs to Phase 6F, along
+with controlled rollout and final acceptance.
