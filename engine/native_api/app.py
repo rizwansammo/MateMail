@@ -55,6 +55,7 @@ import dkim as dkim_lib
 import operations
 import provisioning
 import platform_security
+import platform_canary
 import push
 import validation
 from validation import ValidationError
