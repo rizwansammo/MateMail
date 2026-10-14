@@ -56,6 +56,7 @@ import operations
 import provisioning
 import platform_security
 import platform_canary
+import platform_roles
 import push
 import validation
 from validation import ValidationError
