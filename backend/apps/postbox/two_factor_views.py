@@ -281,12 +281,22 @@ class PostBoxClientCredentialView(APIView):
         refused = _gate()
         if refused:
             return refused
+        mailbox = request.postbox_session.mailbox
         try:
-            return Response(get_adapter().list_client_credentials(
-                request.postbox_session.mailbox.email,
-            ))
+            payload = get_adapter().list_client_credentials(mailbox.email)
         except Exception:
             return Response({"detail": "Client credentials unavailable."}, status=503)
+        enrolled = MailboxTwoFactorSetup.objects.filter(
+            mailbox=mailbox, enabled_at__isnull=False
+        ).exists()
+        # A dedicated-password requirement in the Native Engine is not
+        # proof of an enrolled web authenticator (e.g. during recovery).
+        return Response({
+            **payload,
+            "mailbox_address": mailbox.email,
+            "two_factor_enabled": enrolled,
+            "organization_policy": effective_two_factor_policy(mailbox.tenant),
+        })
 
     def post(self, request):
         refused = _gate()

@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Check, KeyRound, Loader2, ShieldCheck, ShieldOff } from "lucide-react";
-import { describePostBoxError } from "@/contexts/postbox-context";
-import { postbox, type MailSecurityState, type MailSecurityOneTimeSecret } from "@/lib/postbox-api";
+import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
+import { postbox, PostBoxError, type MailSecurityState, type MailSecurityOneTimeSecret } from "@/lib/postbox-api";
 
 type Action = "create" | "revoke" | "access";
 
 export function MailClientSecuritySettings() {
+  const { refresh: refreshMailboxSession } = usePostBox();
+  const [loadFailure, setLoadFailure] = useState("");
   const [state, setState] = useState<MailSecurityState | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -30,10 +32,12 @@ export function MailClientSecuritySettings() {
       const current = await postbox.clientSecurity();
       setState(current);
       setUnavailable(false);
+      setLoadFailure("");
     } catch (caught) {
-      setUnavailable(true);
-      setState(null);
-      setError(describePostBoxError(caught, "SMTP/IMAP Security is not available yet."));
+      setUnavailable(caught instanceof PostBoxError && caught.status === 503);
+      // Never hide a newly issued one-time credential or backup codes if the
+      // follow-up list request fails; retain last known state.
+      setLoadFailure(describePostBoxError(caught, "Could not load mailbox security."));
     } finally {
       setLoading(false);
     }
@@ -46,7 +50,7 @@ export function MailClientSecuritySettings() {
 
   async function modify(action: Action, extra: { label?: string; credential_id?: string; enabled?: boolean }) {
     if (!state || !password) return;
-    if (state.dedicated_required && code.length !== 6) {
+    if (state.two_factor_enabled && code.length !== 6) {
       setError("Enter the current six-digit authenticator code.");
       return;
     }
@@ -56,7 +60,7 @@ export function MailClientSecuritySettings() {
     try {
       const result = await postbox.manageClientSecurity({
         action, current_password: password,
-        ...(state.dedicated_required ? { code } : {}), ...extra,
+        ...(state.two_factor_enabled ? { code } : {}), ...extra,
       });
       if (action === "create") {
         setSecret(result as MailSecurityOneTimeSecret);
@@ -67,7 +71,8 @@ export function MailClientSecuritySettings() {
       }
       setPassword("");
       setCode("");
-      await refresh();
+      if (action !== "create") await refresh(); // One-time password stays visible.
+
     } catch (caught) {
       setError(describePostBoxError(caught, "Security operation could not be completed."));
     } finally { setBusy(false); }
@@ -99,6 +104,7 @@ export function MailClientSecuritySettings() {
       setEnrollment(null);
       setEnrollmentCode("");
       setNotice("Mailbox two-factor authentication enabled. Save all one-time recovery credentials before leaving this page.");
+      refreshMailboxSession();
       await refresh();
     } catch (caught) { setError(describePostBoxError(caught, "Authenticator verification failed.")); }
     finally { setBusy(false); }
@@ -122,12 +128,15 @@ export function MailClientSecuritySettings() {
   }
 
   if (loading) return <div className="pb-info-box"><Loader2 className="h-4 w-4 animate-spin" /> Loading SMTP/IMAP Security…</div>;
-  if (unavailable) return (
-    <div className="pb-info-box">
+  if (!state) return (
+    <div className="pb-info-box" role="status">
       <ShieldOff className="h-5 w-5" />
       <div>
-        <strong>Advanced mail-client security is not active yet</strong>
-        <p>The controlled rollout has not enabled dedicated SMTP/IMAP Password Management. Existing mail access is unchanged.</p>
+        <strong>{unavailable ? "Advanced mail-client security is unavailable" : "Could not load mailbox security"}</strong>
+        <p>{unavailable
+          ? "This control may be disabled until the security rollout. Existing mail access remains unchanged."
+          : loadFailure || "Please try again or sign in to your mailbox again."}</p>
+        <button type="button" className="pb-settings-secondary" onClick={() => { setLoading(true); void refresh(); }}>Retry</button>
       </div>
     </div>
   );
@@ -136,6 +145,13 @@ export function MailClientSecuritySettings() {
     <div className="pb-mail-client-security">
       <section className="pb-setting-card">
         <header><h2>SMTP/IMAP Passwords</h2><p>Use a separate, revocable password for each external mail client. These passwords cannot sign in to PostBox.</p></header>
+        <div className="pb-setting-row">
+          <div>
+            <strong>Authenticated mailbox</strong>
+            <p>These settings apply to {state.mailbox_address}, not necessarily the team mailbox you are viewing.</p>
+          </div>
+          <span className="pb-settings-pill neutral">{state.two_factor_enabled ? "2FA on" : "2FA off"}</span>
+        </div>
         <div className="pb-setting-row">
           <div>
             <strong>External mail-client access</strong>
@@ -159,7 +175,7 @@ export function MailClientSecuritySettings() {
                   <strong>{item.label}</strong>
                   <small>Created {new Date(item.created_at).toLocaleDateString()} · {item.revoked_at ? "Revoked" : "Active"}</small>
                 </div>
-                {!item.revoked_at && <button type="button" className="pb-settings-secondary" disabled={busy || !password || (state.dedicated_required && code.length !== 6)} onClick={() => {
+                {!item.revoked_at && <button type="button" className="pb-settings-secondary" disabled={busy || !password || (state.two_factor_enabled && code.length !== 6)} onClick={() => {
                   if (window.confirm(`Revoke the SMTP/IMAP Password for ${item.label}? Connected mail clients may need a new password.`)) {
                     void modify("revoke", { credential_id: item.id });
                   }
@@ -175,15 +191,15 @@ export function MailClientSecuritySettings() {
           <label className="pb-premium-field">Current mailbox password
             <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </label>
-          {state?.dedicated_required && <label className="pb-premium-field">Current authenticator code
+          {state.two_factor_enabled && <label className="pb-premium-field">Current authenticator code
             <input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
           </label>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="pb-settings-primary" disabled={busy || !password || !label.trim() || (Boolean(state?.dedicated_required) && code.length !== 6)} onClick={() => void modify("create", { label: label.trim() })}>
+          <button type="button" className="pb-settings-primary" disabled={busy || !password || !label.trim() || (state.two_factor_enabled && code.length !== 6)} onClick={() => void modify("create", { label: label.trim() })}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />} Create SMTP/IMAP Password
           </button>
-          <button type="button" className="pb-settings-secondary" disabled={busy || !password || (Boolean(state?.dedicated_required) && code.length !== 6)} onClick={() => {
+          <button type="button" className="pb-settings-secondary" disabled={busy || !password || (state.two_factor_enabled && code.length !== 6)} onClick={() => {
             if (window.confirm(state?.enabled ? "Disable SMTP/IMAP login for this mailbox? Existing sessions will be disconnected." : "Enable external SMTP/IMAP login?")) {
               void modify("access", { enabled: !state?.enabled });
             }
@@ -191,7 +207,7 @@ export function MailClientSecuritySettings() {
         </div>
       </section>
 
-      {state && !state.dedicated_required && (
+      {!state.two_factor_enabled && (
         <section className="pb-setting-card">
           <header><h2>Authenticator protection</h2><p>Require a six-digit authenticator code to sign in to PostBox. Your normal password will no longer work for external mail clients.</p></header>
           {!enrollment ? (
@@ -216,7 +232,7 @@ export function MailClientSecuritySettings() {
         </section>
       )}
 
-      {state?.dedicated_required && (
+      {state.two_factor_enabled && (
         <section className="pb-setting-card">
           <header>
             <h2>Two-factor authentication</h2>
@@ -230,9 +246,13 @@ export function MailClientSecuritySettings() {
               <input autoComplete="one-time-code" inputMode="numeric" maxLength={6} value={disableCode} onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
             </label>
           </div>
-          <button type="button" className="pb-settings-secondary" disabled={busy || !disablePassword || disableCode.length !== 6} onClick={() => void disableMailbox2fa()}>
-            Disable voluntary mailbox 2FA
-          </button>
+          {state.organization_policy === "require" ? (
+            <p className="pb-subtle">Your organization requires mailbox 2FA; it cannot be disabled here.</p>
+          ) : (
+            <button type="button" className="pb-settings-secondary" disabled={busy || !disablePassword || disableCode.length !== 6} onClick={() => void disableMailbox2fa()}>
+              Disable voluntary mailbox 2FA
+            </button>
+          )}
         </section>
       )}
 
@@ -240,7 +260,7 @@ export function MailClientSecuritySettings() {
         <header><h2>Save your new SMTP/IMAP Password</h2><p>This secret is shown once. Store it in your password manager before closing.</p></header>
         <code className="block break-all">{secret.one_time_credential}</code>
         <button type="button" className="pb-settings-secondary" onClick={() => void navigator.clipboard.writeText(secret.one_time_credential)}>Copy password</button>
-        <button type="button" className="pb-settings-secondary" onClick={() => setSecret(null)}><Check className="h-4 w-4" /> I&apos;ve saved it</button>
+        <button type="button" className="pb-settings-secondary" onClick={() => { setSecret(null); void refresh(); }}><Check className="h-4 w-4" /> I&apos;ve saved it</button>
       </section>}
       {backupCodes.length > 0 && <section className="pb-setting-card">
         <header><h2>Save backup codes</h2><p>Each code works only once. They will not be displayed again.</p></header>
@@ -249,6 +269,7 @@ export function MailClientSecuritySettings() {
         <button type="button" className="pb-settings-secondary" onClick={() => setBackupCodes([])}><Check className="h-4 w-4" /> I&apos;ve stored my codes</button>
       </section>}
       {notice && <p className="pb-settings-success">{notice}</p>}
+      {loadFailure && <p className="pb-settings-error" role="status">{loadFailure}</p>}
       {error && <p className="pb-settings-error" role="alert">{error}</p>}
     </div>
   );

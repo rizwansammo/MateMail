@@ -140,6 +140,9 @@ export interface MailSecurityClientPassword {
 export interface MailSecurityState {
   enabled: boolean;
   dedicated_required: boolean;
+  mailbox_address: string;
+  two_factor_enabled: boolean;
+  organization_policy: "off" | "encourage" | "require";
   credentials: MailSecurityClientPassword[];
 }
 

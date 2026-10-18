@@ -28,3 +28,37 @@ Status: **Initial integrated UI implementation**. Feature branch only; no produc
 
 ## Later Stage 7C
 Production key mounting, public TLS SMTP 587 and IMAPS 993, controlled canary rollout, existing mail client and organization/tenant compatibility, and production acceptance. No 7B UI can bypass default-OFF backend security flags or activate Organization Require by itself.
+
+
+## Integration hardening and validation — 2026-10-18
+
+- Resolved important security-state ambiguity: the Native Engine's
+  \`dedicated_required\` is **not** evidence that mailbox TOTP is enrolled.
+  \`GET /api/postbox/security/smtp-imap/\` now returns \`two_factor_enabled\`,
+  \`organization_policy\`, and authenticated \`mailbox_address\` explicitly.
+  A team-box switch does not change which principal's credentials are managed.
+- Credentials require a fresh authenticator code according to actual mailbox
+  enrollment status, not inferred from protocol policy. Organization-required
+  mailbox TOTP disable remains blocked by the backend.
+- Temporary errors retrieving the credential list no longer destroy
+  a newly issued one-time credential or backup-code display. UI explicitly
+  identifies unavailable controls and permits retry instead of inventing state.
+- Added \`backend/tests/test_phase7b_security_status.py\`: GET principal,
+  separate policy/enrollment state, and default-OFF feature gate. Together
+  with Phase 7A PostBox security suite **11/11 tests passed** against isolated
+  disposable PostgreSQL with locmem cache.
+- Frontend \`tsc --noEmit\` **passed**, modified security client component
+  ESLint **passed** and \`git diff --check\` **passed**.
+- Full **Next.js 16.3.8 Turbopack production build PASSED** in a resource-capped
+  separate Docker container (1.5 GiB, 1 vCPU, no published ports). Includes
+  all Hub, Platform and PostBox routes. An optional \`--webpack\` mode build
+  encountered a static prerender AuthProvider failure; normal configured
+  Turbopack build succeeded. Existing middleware-to-proxy deprecation warning
+  remains independent of these UI changes.
+- Only synthetic test mailboxes and disposable cache/db were used. The
+  production frontend image and main branch were untouched.
+
+**Not yet fully UI-accepted:** Browser-driven responsive/light/dark review,
+keyboard/a11y and complete HTTP+cookie 2FA challenge interaction on the new
+frontend against an isolated backend with feature flags ON. Do not label
+Stage 7B closed until verified; all production feature flags remain OFF.
