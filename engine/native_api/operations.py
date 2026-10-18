@@ -198,7 +198,9 @@ def kick_mailbox_sessions(address: str) -> int:
     normalized = email_address(address, "address")
     if "*" in normalized or "?" in normalized:
         raise InvalidIdentifier("wildcards prohibited")
-    result = _doveadm("kick", {"mask": normalized, "force": True})
+    # Dovecot 2.4.5 HTTP schema requires mask as an array and lacks the
+    # old force field. Verified on a real isolated IMAP session.
+    result = _doveadm("kick", {"mask": [normalized]})
     if not isinstance(result, list) or len(result) != 1:
         raise OperationUnavailable("doveadm kick returned unexpected response")
     response = result[0]

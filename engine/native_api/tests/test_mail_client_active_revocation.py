@@ -16,7 +16,7 @@ class DovecotSessionKickTest(unittest.TestCase):
                 operations.kick_mailbox_sessions("alice@example.test"), 1
             )
             transport.assert_called_once_with(
-                "kick", {"mask": "alice@example.test", "force": True},
+                "kick", {"mask": ["alice@example.test"]},
             )
 
     def test_broad_mask_forbidden(self):

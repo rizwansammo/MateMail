@@ -36,6 +36,20 @@ class ExistingHubAuthenticatorMigrationTest(TransactionTestCase):
             self.assertTrue(migrated.totp_secret.startswith("enc:v1:"))
             self.assertNotIn(OTP, migrated.totp_secret)
             self.assertEqual(decrypt_secret(migrated.totp_secret), OTP)
+            executor = MigrationExecutor(connection)
+            executor.migrate([LEGACY])
+            rolled_back_apps = executor.loader.project_state([LEGACY]).apps
+            restored = rolled_back_apps.get_model(
+                "accounts", "TwoFactorSetup"
+            ).objects.get(user_id=user.id)
+            self.assertEqual(restored.totp_secret, OTP)
+            executor = MigrationExecutor(connection)
+            executor.migrate([CURRENT])
+            final_apps = executor.loader.project_state([CURRENT]).apps
+            reencrypted = final_apps.get_model(
+                "accounts", "TwoFactorSetup"
+            ).objects.get(user_id=user.id)
+            self.assertEqual(decrypt_secret(reencrypted.totp_secret), OTP)
         finally:
             executor = MigrationExecutor(connection)
             executor.migrate([CURRENT])

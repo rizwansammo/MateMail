@@ -136,3 +136,19 @@ Verified (not deployed):
 4. Controlled migration/saga failure recovery across Django and Native databases, full regression and release evidence.
 
 All Stage 7A feature flags and Native credential handlers must remain OFF in production until those gates pass. Real production activation belongs to Stage 7C. No workarounds weakening 2FA to claim completion.
+
+
+## 2026-10-18 — Stage 7A isolated runtime acceptance
+
+Isolated acceptance in /opt/TestLab/MateMail-Stage7A completed without touching production. See TestLab/results/PHASE7A_ACCEPTANCE_2026-10-18.md for detailed test evidence.
+
+- Real Dovecot IMAP password acceptance/rejection: 13/13; Native bcrypt $2b$ compatibility: 3/3 additional IMAP cases.
+- Real Postfix 587 SMTP AUTH against Dovecot socket: 9/9; Native bcrypt $2b$ compatibility: 3/3 additional SMTP cases.
+- PostBox master identity authentication/isolation: 4/4.
+- Adversarial IMAP/SMTP authentication inputs: 8/8.
+- Real doveadm CLI and HTTP admin API kicked only the intended active IMAP session; another user session survived.
+- Critical HTTP API compatibility bug fixed: Dovecot 2.4.5 requires an **array** in kick.mask, and rejects the unsupported force argument. The corrected call returned doveadmResponse count=1.
+- Encrypted Hub TOTP reversible migration now decrypts only during an explicitly requested rollback, before reverting the database field length. Legacy->encrypted->legacy->encrypted roundtrip preserved OTP exactly (1/1).
+- Combined Django regression 93/93, Native credential/revocation unit tests 14/14, Native SQL fixture PASS; Django migrations consistency PASS.
+
+**Stage 7A development and isolated acceptance: verified.** The branch must remain isolated with feature gates OFF. Stage 7B will provide Hub/PostBox controls; Stage 7C must verify public STARTTLS/IMAPS, production-key provisioning, canary compatibility and rollback, and receive explicit production deployment approval. No merge or production deployment is part of this isolated acceptance.
