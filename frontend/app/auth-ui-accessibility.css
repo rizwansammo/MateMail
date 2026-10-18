@@ -1,0 +1,10 @@
+/* Stage 7B: WCAG AA for authentication surfaces; no layout modifications. */
+.pb-premium-login {
+  --pb-muted: #59666b;
+  --pb-subtle: #5e6a71;
+}
+
+/* Specificity preserves this contrast when the premium auth stylesheet loads later. */
+html .auth-premium .auth-story-footer {
+  color: #8baed6;
+}
