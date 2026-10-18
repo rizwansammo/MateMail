@@ -36,3 +36,28 @@ E. Safe legacy-client migration, feature flag rollout, rollback and independent 
 
 ## Release
 No merge, CI runs or production deployment before code review and explicit approval. This document and initial policy API are only the first Stage 7A checkpoint.
+
+
+## 18 October 2026 — local development verification
+
+Implemented in this continuation:
+- Native Engine additive schema v013 stores per-mailbox remote access policy and separately hashed, labeled, individually revocable client credentials.
+- Both native password tables are denied direct SELECT privileges for Postfix and Dovecot database readers. **No change to the existing public authentication view** and no customer self-service route yet.
+- PostBox mailbox-bound 2FA model, encrypted authenticator secret and one-time high-entropy recovery codes. Uses a separately configured Fernet encryption key; missing or rotated keys fail closed.
+- PostBox TOTP replay protection via one-time claim. Enrollment remains deliberately **unavailable** until public SMTP/IMAP enforcement and trusted web authentication are ready.
+- All new schema changes are additive; no Production migration or public policy cutover.
+
+Verification:
+- 11 organization-policy/mail-client-schema Django tests passed in an isolated throwaway PostgreSQL database.
+- 7 additional PostBox MFA cryptography/recovery tests passed against the same isolated test facility.
+- Native SQL migrations 001 through 013 applied successfully on a standalone temporary PostgreSQL instance.
+- Native credential tables deny SELECT to engine_ro_dovecot and engine_ro_postfix; legacy dovecot_auth remains unchanged.
+
+Explicitly NOT completed:
+- Dovecot public multi-password verifier and normal-password lockout for 2FA users.
+- Trusted PostBox primary password verification to separate webmail authentication from public IMAP authentication.
+- End-to-end organization Require 2FA enforcement, recovery, active sessions and Hub enrollment.
+- User-facing SMTP/IMAP Password create/list/revoke, PostBox 2FA enrollment and production rollout.
+- Production CI and real mail client acceptance tests.
+
+**Do not set feature flags to ON or deploy the database-only foundation as a working SMTP/IMAP security feature.**

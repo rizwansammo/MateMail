@@ -8,7 +8,13 @@ from tests.factories import (
 )
 
 
-@override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS)
+@override_settings(
+    PASSWORD_HASHERS=FAST_PASSWORD_HASHERS,
+    CACHES={"default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "phase7a-organization-policy-tests",
+    }},
+)
 class OrganizationTwoFactorPolicyTest(TestCase):
     def setUp(self):
         self.owner = make_user("owner-a@example.test")

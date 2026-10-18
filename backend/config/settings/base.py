@@ -399,6 +399,10 @@ NATIVE_ENGINE_PLATFORM_SECRET = env("NATIVE_ENGINE_PLATFORM_SECRET", default="")
 ORGANIZATION_2FA_POLICY_ENABLED = env.bool("ORGANIZATION_2FA_POLICY_ENABLED", default=False)
 ORGANIZATION_2FA_ENFORCEMENT_READY = env.bool("ORGANIZATION_2FA_ENFORCEMENT_READY", default=False)
 SMTP_IMAP_SECURITY_ENABLED = env.bool("SMTP_IMAP_SECURITY_ENABLED", default=False)
+# Dedicated at-rest encryption key, never derived from the mail password.
+# No mailbox 2FA service may initialize without this independently generated key.
+POSTBOX_2FA_FERNET_KEY = env("POSTBOX_2FA_FERNET_KEY", default="")
+POSTBOX_2FA_ENABLED = env.bool("POSTBOX_2FA_ENABLED", default=False)
 
 # MateMail platform settings
 MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.pro")
