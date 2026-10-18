@@ -109,6 +109,17 @@ class TenantMiddleware:
         if bound_slug and request.tenant and request.tenant.slug != bound_slug:
             return JsonResponse({"detail": "This tenant is not available on this host."}, status=403)
 
+        # A pre-policy JWT must NOT outlive newly enforced organization MFA.
+        # Checks the live tenant setting on every request, not a stale claim.
+        if request.tenant is not None:
+            from .security_policy import effective_two_factor_policy
+            from .models import OrganizationTwoFactorMode
+            if effective_two_factor_policy(request.tenant) == OrganizationTwoFactorMode.REQUIRE:
+                if not user.two_factor_enabled or not token.get("mfa_verified_at"):
+                    return JsonResponse(
+                        {"detail": "Sign in with 2FA to continue."}, status=403
+                    )
+
         return self.get_response(request)
 
     def _try_api_key_auth(self, request):

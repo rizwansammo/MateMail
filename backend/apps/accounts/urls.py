@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .required_enrollment import RequiredTwoFactorEnrollmentView
 from .views import (
     ForgotPasswordView,
     LoginView,
@@ -26,6 +27,7 @@ urlpatterns = [
     path("resend-verification/", ResendVerificationView.as_view(), name="auth-resend-verification"),
     path("2fa/setup/", TwoFactorSetupView.as_view(), name="auth-2fa-setup"),
     path("2fa/verify/", TwoFactorVerifyView.as_view(), name="auth-2fa-verify"),
+    path("2fa/enroll-required/", RequiredTwoFactorEnrollmentView.as_view(), name="auth-2fa-enroll-required"),
     path("2fa/disable/", TwoFactorDisableView.as_view(), name="auth-2fa-disable"),
     path("me/", MeView.as_view(), name="auth-me"),
 ]

@@ -10,6 +10,11 @@ contain a slash — `Projects/2026` is one folder, not two path segments.
 """
 from django.urls import path
 
+from .two_factor_views import (
+    PostBoxTwoFactorVerifyView, PostBoxTwoFactorEnrollView,
+    PostBoxTwoFactorStartView, PostBoxClientCredentialView,
+    PostBoxTwoFactorDisableView,
+)
 from .views_auth import (
     PostBoxAccountListView,
     PostBoxAccountSwitchView,
@@ -70,6 +75,11 @@ from .views_settings import (
 urlpatterns = [
     # ── authentication ──────────────────────────────────────────────────────
     path("auth/login/", PostBoxLoginView.as_view(), name="postbox-login"),
+    path("auth/2fa/verify/", PostBoxTwoFactorVerifyView.as_view(), name="postbox-2fa-verify"),
+    path("auth/2fa/enroll/", PostBoxTwoFactorEnrollView.as_view(), name="postbox-2fa-enroll"),
+    path("auth/2fa/start/", PostBoxTwoFactorStartView.as_view(), name="postbox-2fa-start"),
+    path("auth/2fa/disable/", PostBoxTwoFactorDisableView.as_view(), name="postbox-2fa-disable"),
+    path("security/smtp-imap/", PostBoxClientCredentialView.as_view(), name="postbox-smtp-imap"),
     path("auth/accounts/", PostBoxAccountListView.as_view(), name="postbox-accounts"),
     path("auth/switch/", PostBoxAccountSwitchView.as_view(), name="postbox-switch-account"),
     path("auth/mailbox-switch/", PostBoxMailboxSwitchView.as_view(), name="postbox-switch-mailbox"),

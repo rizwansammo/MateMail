@@ -251,6 +251,38 @@ class NativeMailEngineAdapter(MailEngineAdapter):
                       json={"address": address, "password": password},
                       operation="set_mailbox_password")
 
+    # Stage 7A: private control-plane authentication. NEVER use SMTP/IMAP
+    # credentials for PostBox primary-password verification.
+    def verify_primary_password(self, address: str, password: str) -> bool:
+        if not password:
+            return False
+        result = self._request(
+            "POST", "/v1/mailboxes/verify-primary",
+            json={"address": address, "password": password},
+            operation="verify_primary_password",
+        )
+        return result.get("valid") is True
+
+    def list_client_credentials(self, address: str) -> dict:
+        return self._request("POST", "/v1/mailboxes/client/list",
+                             json={"address": address}, operation="list_client_credentials")
+
+    def issue_client_credential(self, address: str, label: str) -> dict:
+        return self._request("POST", "/v1/mailboxes/client/issue",
+                             json={"address": address, "label": label},
+                             operation="issue_client_credential")
+
+    def revoke_client_credential(self, address: str, credential_id: str) -> dict:
+        return self._request("POST", "/v1/mailboxes/client/revoke",
+                             json={"address": address, "id": credential_id},
+                             operation="revoke_client_credential")
+
+    def set_client_policy(self, address: str, enabled: bool, dedicated_required: bool) -> dict:
+        return self._request("POST", "/v1/mailboxes/client/policy",
+                             json={"address": address, "enabled": enabled,
+                                   "dedicated_required": dedicated_required},
+                             operation="set_client_policy")
+
     def set_mailbox_quota(self, address: str, quota_mb: int) -> None:
         self._request("POST", "/v1/mailboxes/set-quota",
                       json={"address": address, "quota_mb": quota_mb},

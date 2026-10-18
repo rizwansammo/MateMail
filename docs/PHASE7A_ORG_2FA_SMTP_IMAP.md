@@ -61,3 +61,30 @@ Explicitly NOT completed:
 - Production CI and real mail client acceptance tests.
 
 **Do not set feature flags to ON or deploy the database-only foundation as a working SMTP/IMAP security feature.**
+
+
+## 2026-10-18 — Stage 7A authentication integration checkpoint
+
+### Implemented (on feature branch, NOT deployed)
+- Native Engine SQL migration 014: password-dependent, server-side Dovecot verifier; independently hashed per-device credentials; legacy-password denial when dedicated access required; disabled-protocol denial; revoked-secret denial; protected least-privilege DB grants.
+- Dovecot passdb candidate now uses only the verifier function. Must verify with pinned Dovecot 2.4 in a full isolated authentication integration test before deployment.
+- Native internal API: trusted primary-password verification, dedicated password issue/list/revoke and remote-access policy; separate OFF-by-default feature gates. New passwords are returned only once; server retains a bcrypt hash.
+- Hub: second-factor-proven JWT claim, enforcement checks on live tenant access and refresh, enrollment-only challenge path and protection against disabling MFA while Require is effective.
+- PostBox: separate trusted primary-password authentication from public IMAP, mailbox-bound OTP challenge and authenticated sessions, MFA enrollment/verify, initial client-password issuance after OTP proof, client password management, OTP-protected disabling and live-session proof checks.
+
+### Verified in isolated environments
+- Native migrations 001–014 applied successfully to a disposable PostgreSQL instance.
+- Native SQL verification for 2FA-required legacy password denial, dedicated password success and revocation, disabled external clients, no credential-table access for Dovecot/Postfix.
+- Native Client Credential Service: 7/7 tests passing.
+- Hub and PostBox selected regression suites: 71/71 tests passing, including authentication security and tenant isolation.
+
+### Outstanding security gates — DO NOT ACTIVATE
+1. Hub TOTP is still stored in plaintext in the legacy 2FA table. Add encryption and tested data migration without locking out existing TOTP users.
+2. Verified recovery email and independent Email OTP; missing account recovery anti-lockout guarantees. Organization Require cannot be considered production ready.
+3. New dedicated client password revocation must terminate or invalidate already authenticated IMAP sessions where feasible. Only subsequent password auth rejection is currently tested.
+4. Dovecot 2.4 real SMTP AUTH/IMAP authentication test with malformed credentials, master-user isolation, sender authorization and existing client compatibility.
+5. Recover and coordinate partial failures between Native policy updates and Django 2FA activation (cross-database saga).
+6. Migration/feature-flag sequencing on Native API, Dovecot and PostBox, and explicit production rollback rehearsal.
+7. PostBox/Hub UI is intentionally Stage 7B; rollout/production acceptance Stage 7C.
+
+**Status: Stage 7A IN PROGRESS — not safe to merge or deploy as a completed MFA release.**

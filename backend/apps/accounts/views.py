@@ -420,6 +420,15 @@ class LoginView(APIView):
 
         tenant_id = membership.tenant_id if membership else None
 
+        from apps.tenants.security_policy import effective_two_factor_policy
+        from apps.tenants.models import OrganizationTwoFactorMode
+        if (membership is not None and
+                effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE and
+                not user.two_factor_enabled):
+            partial = create_challenge(user, tenant_id)
+            return Response({"requires_2fa": True, "requires_enrollment": True,
+                             "partial_token": partial})
+
         if user.two_factor_enabled:
             # Opaque server-side challenge — deliberately NOT a JWT, so it cannot
             # be replayed as an API access token. See apps.accounts.challenge.
@@ -470,11 +479,21 @@ class RefreshView(APIView):
                     return clear_refresh_cookie(
                         Response({"detail": "Session is not valid on this host."}, status=403)
                     )
+            from apps.tenants.security_policy import effective_two_factor_policy
+            from apps.tenants.models import OrganizationTwoFactorMode
+            if tenant_id and effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+                account = _user_for(token)
+                if not account.two_factor_enabled or not token.get("mfa_verified_at"):
+                    return clear_refresh_cookie(
+                        Response({"detail": "Sign in with 2FA to continue."}, status=403)
+                    )
             access = str(token.access_token)
             # BLACKLIST_AFTER_ROTATION is on: blacklisting must happen before a
             # replacement is issued, so a stolen token cannot be exchanged twice.
             token.blacklist()
             new_refresh = RefreshToken.for_user(_user_for(token))
+            if token.get("mfa_verified_at"):
+                new_refresh["mfa_verified_at"] = token["mfa_verified_at"]
             if token.get("tenant_id"):
                 new_refresh["tenant_id"] = token["tenant_id"]
                 access = str(new_refresh.access_token)
@@ -842,7 +861,7 @@ class TwoFactorVerifyView(APIView):
         if bound_tenant_slug(request) and membership is None:
             return Response({"detail": "This account cannot use this host."}, status=403)
 
-        tokens = make_tokens(user, tenant_id=tenant_id)
+        tokens = make_tokens(user, tenant_id=tenant_id, mfa_verified=True)
 
         return authenticated_response(
             tokens,
@@ -884,6 +903,13 @@ class TwoFactorDisableView(APIView):
             TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
             window=TWO_FACTOR_MANAGE_PER_USER.window,
         )
+
+        from apps.tenants.security_policy import effective_two_factor_policy
+        from apps.tenants.models import OrganizationTwoFactorMode
+        if any(effective_two_factor_policy(m.tenant) == OrganizationTwoFactorMode.REQUIRE
+               for m in TenantMembership.objects.select_related("tenant").filter(
+                   user=user, status=MemberStatus.ACTIVE)):
+            return Response({"detail": "Your organization requires 2FA."}, status=409)
 
         TwoFactorBackupCode.objects.filter(user=user).delete()
         TwoFactorSetup.objects.filter(user=user).delete()

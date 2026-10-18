@@ -106,14 +106,46 @@ def _available_mailboxes(identity):
     return rows
 
 
+def complete_postbox_login(request, raw, session):
+    """Shared login completion after primary-only or second-factor proof."""
+    mailbox = session.mailbox
+
+    # The folders a mailbox needs are created on first sign-in and are
+    # idempotent afterwards, so a brand-new mailbox opens with Sent,
+    # Drafts, Trash, Junk, Archive and Scheduled rather than only INBOX.
+    # A failure here must not block sign-in — the mailbox still works.
+    try:
+        from . import imap
+
+        with imap.open_mailbox(mailbox.email) as connection:
+            created = connection.ensure_standard_folders()
+        if created:
+            logger.info("PostBox created folders %s for %s", created, mailbox.pk)
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.warning("PostBox folder provisioning failed for %s: %r", mailbox.pk, exc)
+
+    PostBoxPreference.objects.get_or_create(mailbox=mailbox)
+
+    response = Response({
+        "mailbox": MailboxProfileSerializer(mailbox).data,
+        "session": {
+            "id": str(session.id),
+            "expires_at": session.expires_at.isoformat(),
+            "remembered": session.remembered,
+        },
+    })
+    postbox_auth.set_session_cookie(response, raw, session)
+    postbox_auth.remember_session_on_device(response, request, raw, session)
+    return response
+
+
 class PostBoxLoginView(APIView):
     """
-    Stage one and only. A correct mailbox password opens a session.
+    Primary-password verification begins PostBox authentication.
 
-    Unlike the Platform Console there is no second factor here: this is a
-    mailbox, and requiring an emailed code to read email is circular. The
-    controls that apply instead are the rate limits, the generic failure
-    message and the session model.
+    Legacy feature flags OFF preserve the prior login behavior. After staged
+    MFA activation, enrolled mailboxes receive a short-lived challenge instead
+    of a browser session; no SMTP/IMAP credential can act as a web password.
     """
 
     permission_classes = [AllowAny]
@@ -133,38 +165,22 @@ class PostBoxLoginView(APIView):
                 request=request,
                 remember=data["remember"],
             )
+        except postbox_auth.MailboxSecondFactorRequired as required:
+            from .two_factor_challenge import create_challenge
+            from .models import MailboxTwoFactorSetup
+            partial = create_challenge(required.mailbox, remember=required.remember)
+            enrolled = MailboxTwoFactorSetup.objects.filter(
+                mailbox=required.mailbox, enabled_at__isnull=False,
+            ).exists()
+            return Response({
+                "requires_2fa": True,
+                "requires_enrollment": not enrolled,
+                "partial_token": partial,
+            })
         except postbox_auth.MailboxUnavailable as exc:
             return Response({"detail": exc.message}, status=401)
 
-        mailbox = session.mailbox
-
-        # The folders a mailbox needs are created on first sign-in and are
-        # idempotent afterwards, so a brand-new mailbox opens with Sent,
-        # Drafts, Trash, Junk, Archive and Scheduled rather than only INBOX.
-        # A failure here must not block sign-in — the mailbox still works.
-        try:
-            from . import imap
-
-            with imap.open_mailbox(mailbox.email) as connection:
-                created = connection.ensure_standard_folders()
-            if created:
-                logger.info("PostBox created folders %s for %s", created, mailbox.pk)
-        except Exception as exc:  # noqa: BLE001 - reported, never fatal
-            logger.warning("PostBox folder provisioning failed for %s: %r", mailbox.pk, exc)
-
-        PostBoxPreference.objects.get_or_create(mailbox=mailbox)
-
-        response = Response({
-            "mailbox": MailboxProfileSerializer(mailbox).data,
-            "session": {
-                "id": str(session.id),
-                "expires_at": session.expires_at.isoformat(),
-                "remembered": session.remembered,
-            },
-        })
-        postbox_auth.set_session_cookie(response, raw, session)
-        postbox_auth.remember_session_on_device(response, request, raw, session)
-        return response
+        return complete_postbox_login(request, raw, session)
 
 
 class PostBoxMailboxSwitchView(APIView):

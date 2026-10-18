@@ -51,6 +51,7 @@ import sys
 import urllib.parse
 
 import db
+import client_credentials
 import dkim as dkim_lib
 import operations
 import provisioning
@@ -473,6 +474,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, result if result is not None else {"ok": True})
         except operations.InvalidIdentifier as exc:
             self._send(400, {"error": str(exc)})
+        except PermissionError:
+            self._send(503, {"error": "Client credential service not enabled"})
         except ValidationError as exc:
             self._send(400, {"error": exc.message, "field": exc.field})
         except provisioning.NotFound as exc:
@@ -547,6 +550,33 @@ def _mailboxes_set_password(conn, body):
     # Deliberately returns nothing about the credential — not the hash, not its
     # length, not a prefix.
     return {"ok": True}
+
+
+def _client_verify_primary(conn, body):
+    validation.payload(body, allowed={"address", "password"}, required={"address", "password"})
+    return client_credentials.verify_primary(conn, body["address"], body["password"])
+
+
+def _client_list(conn, body):
+    validation.payload(body, allowed={"address"}, required={"address"})
+    return client_credentials.list_credentials(conn, body["address"])
+
+
+def _client_issue(conn, body):
+    validation.payload(body, allowed={"address", "label"}, required={"address", "label"})
+    return client_credentials.issue_credential(conn, body["address"], body["label"])
+
+
+def _client_revoke(conn, body):
+    validation.payload(body, allowed={"address", "id"}, required={"address", "id"})
+    return client_credentials.revoke_credential(conn, body["address"], body["id"])
+
+
+def _client_policy(conn, body):
+    validation.payload(body, allowed={"address", "enabled", "dedicated_required"},
+                       required={"address", "enabled", "dedicated_required"})
+    return client_credentials.set_policy(conn, body["address"],
+                                         body["enabled"], body["dedicated_required"])
 
 
 def _mailboxes_set_quota(conn, body):
@@ -749,6 +779,11 @@ _WRITE_ROUTES = {
     "/v1/mailboxes/ensure":        _mailboxes_ensure,
     "/v1/mailboxes/set-active":    _mailboxes_set_active,
     "/v1/mailboxes/set-password":  _mailboxes_set_password,
+    "/v1/mailboxes/verify-primary": _client_verify_primary,
+    "/v1/mailboxes/client/list":    _client_list,
+    "/v1/mailboxes/client/issue":   _client_issue,
+    "/v1/mailboxes/client/revoke":  _client_revoke,
+    "/v1/mailboxes/client/policy":  _client_policy,
     "/v1/mailboxes/set-quota":     _mailboxes_set_quota,
     "/v1/mailboxes/delete":        _mailboxes_delete,
     "/v1/aliases/ensure":          _aliases_ensure,

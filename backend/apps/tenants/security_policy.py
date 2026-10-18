@@ -13,15 +13,15 @@ from .models import OrganizationTwoFactorMode
 def effective_two_factor_policy(tenant):
     if not getattr(settings, "ORGANIZATION_2FA_POLICY_ENABLED", False):
         return OrganizationTwoFactorMode.OFF
-    if tenant.two_factor_policy == OrganizationTwoFactorMode.REQUIRE:
-        # Stage 7A foundation has no runtime enforcement yet. Even a manually
-        # seeded value or mis-set environment flag must not claim enforcement.
+    if (tenant.two_factor_policy == OrganizationTwoFactorMode.REQUIRE
+            and not getattr(settings, "ORGANIZATION_2FA_ENFORCEMENT_READY", False)):
         return OrganizationTwoFactorMode.OFF
     return tenant.two_factor_policy
 
 
 def can_activate_require():
-    # Deliberate fail-closed stub: enabling feature flags must NEVER expose an
-    # unenforced Require policy. Stage 7A's later auth integration must replace
-    # this only after Hub JWT, invitations, PostBox and recovery are all gated.
+    # Deliberate fail-closed release gate. Require policy cannot be activated
+    # until encrypted Hub OTP migration, independent recovery, and Native client
+    # session revocation are verified in the *complete* Stage 7A review.
+    # Enabling only environment switches must not activate partial security.
     return False

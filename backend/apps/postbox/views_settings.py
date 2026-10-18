@@ -665,7 +665,9 @@ class PasswordChangeView(PostBoxView):
 
             raise Throttled(wait=decision.retry_after, detail="Too many attempts.")
 
-        if not imap.authenticate(request.identity_mailbox.email, data["current_password"]):
+        from .auth import trusted_primary_authenticate
+        if not trusted_primary_authenticate(request.identity_mailbox.email,
+                                            data["current_password"]):
             return Response(
                 {"current_password": ["That is not your current password."]}, status=400
             )

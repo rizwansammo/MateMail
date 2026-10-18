@@ -138,6 +138,7 @@ class PostBoxSession(models.Model):
     last_seen_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     revoked_at = models.DateTimeField(null=True, blank=True)
+    mfa_verified_at = models.DateTimeField(null=True, blank=True)
 
     #: Recorded so an operator can recognise their own sessions in the security
     #: page. Truncated on write; a full user-agent string is a fingerprint and
@@ -176,7 +177,8 @@ class PostBoxSession(models.Model):
         return hashlib.sha256(raw.encode()).hexdigest()
 
     @classmethod
-    def issue(cls, mailbox, *, remembered=False, user_agent="", ip_address=None):
+    def issue(cls, mailbox, *, remembered=False, user_agent="", ip_address=None,
+              mfa_verified=False):
         """Create a session and return (raw_token, row). The raw token is never stored."""
         raw = secrets.token_urlsafe(48)
         ttl = cls.REMEMBERED_TTL if remembered else cls.SESSION_TTL
@@ -187,6 +189,7 @@ class PostBoxSession(models.Model):
             user_agent=(user_agent or "")[:200],
             ip_address=ip_address,
             remembered=remembered,
+            mfa_verified_at=timezone.now() if mfa_verified else None,
         )
         return raw, row
 
