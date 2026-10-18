@@ -1037,7 +1037,7 @@ function Mailbox() {
                 } else {
                   setSelected(event.target.checked ? new Set(rows.map((row) => row.uid)) : new Set());
                 }
-              }
+              }}
             />
           )}
           {canManageMailbox && !isCrossFolderView && (
