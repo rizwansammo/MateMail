@@ -904,11 +904,8 @@ class TwoFactorDisableView(APIView):
             )
             return Response({"detail": "Incorrect password."}, status=400)
 
-        ratelimit.reset(
-            TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
-            window=TWO_FACTOR_MANAGE_PER_USER.window,
-        )
-
+        # Do not reset the rate-limit after password verification alone:
+        # otherwise someone who knows the password can brute force the OTP.
         from apps.tenants.security_policy import effective_two_factor_policy
         from apps.tenants.models import OrganizationTwoFactorMode
         if any(effective_two_factor_policy(m.tenant) == OrganizationTwoFactorMode.REQUIRE
@@ -948,6 +945,10 @@ class TwoFactorDisableView(APIView):
                 )
                 return Response({"detail": "Current 2FA verification failed."}, status=403)
 
+        ratelimit.reset(
+            TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+            window=TWO_FACTOR_MANAGE_PER_USER.window,
+        )
         TwoFactorBackupCode.objects.filter(user=user).delete()
         TwoFactorSetup.objects.filter(user=user).delete()
         user.two_factor_enabled = False

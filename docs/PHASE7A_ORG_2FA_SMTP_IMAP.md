@@ -111,3 +111,28 @@ Remaining release blockers:
 4. Comprehensive integration CI / external mail-client regression and production security acceptance in subsequent 7C. Complete production activation MUST stay OFF.
 
 **Stage 7A has meaningful implementation and passing tests but is NOT closed until the first three blockers have verified evidence. Do not merge or deploy as a finished feature.**
+
+## Stage 7A closing gate review — 2026-10-18
+
+Additional implementation:
+- Native credential revoke / SMTP-IMAP access policy mutation commits the database restriction *before* asking Dovecot's admin API to kick current IMAP sessions. New auth is therefore blocked even when doveadm is unavailable. A failed kick returns 503 with an explicit reconciliation warning, never a false success.
+- Doveadm command is scoped to an exact validated mailbox address with wildcard rejection. A call to the documented `kick` HTTP API requests `force=true` and checks its acknowledgement.
+- Hub 2FA disable requires the existing second factor and no longer resets the brute-force counter merely because the primary password was right. Existing authenticator secret cannot be extracted through the setup route.
+- Added Native session-revocation ordering/outage regression tests, and a targeted legacy TOTP encryption migration rehearsal test.
+
+Verified (not deployed):
+- Pinned Dovecot **2.4.5** parses the isolated new SQL password-dependent passdb configuration with `%{user}` and `%{password}` successfully, via `doveconf -c ... -n`. This checks syntax, **not** a real IMAP/SMTP login.
+- Native Dovecot kick unit suite: **7/7 passing**, including per-mailbox mask validation, commit-before-kick and outage response path.
+- Previous full Hub/PostBox authentication regression: **72/72 passing**.
+- Previous independent recovery email suite: **3/3 passing**.
+- Previous native SQL credentials and least-privilege tests passing; v001–014 migrations applied in disposable Postgres.
+- The migration-rehearsal test is authored but has **not executed**, because the execution tool blocked the isolated test run; do not claim the migration rehearsed.
+- Branch code saved without touching main or deploying. No production client or tenant changes.
+
+**Stage 7A is NOT yet formally closed.** These are final release blockers, and none can be implied from the unit tests above:
+1. Real Dovecot IMAP/SMTP AUTH end-to-end with isolated, synthetic mailboxes, plus PostBox master login isolation and reconnect tests. Prior attempted credential-bearing isolated Dovecot launch was denied by tooling; DO NOT use live customer mailboxes as workaround.
+2. Actual active IMAP session revocation under `doveadm kick`, including admin API failure and retry, and SMTP AUTH session handling. The implementation and mocks alone do not establish a runtime guarantee.
+3. Safely replay older plaintext Hub TOTP records through encryption migration and rollback with protected cryptographic key continuity; the rehearsal test has not run.
+4. Controlled migration/saga failure recovery across Django and Native databases, full regression and release evidence.
+
+All Stage 7A feature flags and Native credential handlers must remain OFF in production until those gates pass. Real production activation belongs to Stage 7C. No workarounds weakening 2FA to claim completion.
