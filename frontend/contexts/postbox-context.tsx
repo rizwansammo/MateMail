@@ -53,7 +53,8 @@ interface PostBoxValue {
   permissions: MailboxPermissions;
   preferences: Preferences;
   isLoading: boolean;
-  signIn: (email: string, password: string, remember: boolean) => Promise<void>;
+  signIn: (email: string, password: string, remember: boolean) => Promise<import("@/lib/postbox-api").PostBoxMfaChallenge | null>;
+  finalizeSecondFactor: () => Promise<void>;
   signOut: () => Promise<void>;
   switchMailbox: (mailboxId: string | null) => Promise<void>;
   updatePreferences: (patch: Partial<Preferences>) => Promise<void>;
@@ -121,11 +122,19 @@ export function PostBoxProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(
     async (email: string, password: string, remember: boolean) => {
-      await postbox.login(email, password, remember);
+      const result = await postbox.login(email, password, remember);
+      if ("requires_2fa" in result && result.requires_2fa) {
+        return result;
+      }
       applyMe(await postbox.me());
+      return null;
     },
     [applyMe],
   );
+
+  const finalizeSecondFactor = useCallback(async () => {
+    applyMe(await postbox.me());
+  }, [applyMe]);
 
   const signOut = useCallback(async () => {
     try {
@@ -178,6 +187,7 @@ export function PostBoxProvider({ children }: { children: React.ReactNode }) {
       preferences,
       isLoading,
       signIn,
+      finalizeSecondFactor,
       signOut,
       switchMailbox,
       updatePreferences,
@@ -191,6 +201,7 @@ export function PostBoxProvider({ children }: { children: React.ReactNode }) {
       preferences,
       isLoading,
       signIn,
+      finalizeSecondFactor,
       signOut,
       switchMailbox,
       updatePreferences,

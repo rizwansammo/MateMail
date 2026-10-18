@@ -36,7 +36,7 @@ interface AuthContextValue {
   login: (
     email: string,
     password: string
-  ) => Promise<{ requires_2fa: boolean; partial_token?: string }>;
+  ) => Promise<{ requires_2fa: boolean; requires_enrollment?: boolean; partial_token?: string }>;
   signup: (
     email: string,
     password: string,
@@ -137,6 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (email: string, password: string) => {
       const data = await api.post<{
         requires_2fa?: boolean;
+        requires_enrollment?: boolean;
         partial_token?: string;
         access?: string;
         user?: AuthUser;
@@ -144,7 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }>("/api/auth/login/", { email, password });
 
       if (data.requires_2fa) {
-        return { requires_2fa: true, partial_token: data.partial_token };
+        return { requires_2fa: true, requires_enrollment: data.requires_enrollment, partial_token: data.partial_token };
       }
 
       setAccessToken(data.access!);
@@ -216,7 +217,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!tenant?.id) return;
     const workspace = await api.get<AuthTenant>(`/api/workspaces/${tenant.id}/`);
     setTenant(withWorkspaceRole(workspace));
-  }, [tenant?.id]);
+  }, [tenant]);
 
   return (
     <AuthContext.Provider

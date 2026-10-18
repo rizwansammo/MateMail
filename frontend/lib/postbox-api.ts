@@ -130,6 +130,38 @@ export interface SavedPostBoxAccount {
   current: boolean;
 }
 
+export interface MailSecurityClientPassword {
+  id: string;
+  label: string;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+export interface MailSecurityState {
+  enabled: boolean;
+  dedicated_required: boolean;
+  credentials: MailSecurityClientPassword[];
+}
+
+export interface MailSecurityOneTimeSecret {
+  id: string;
+  one_time_credential: string;
+}
+
+export interface PostBoxMfaChallenge {
+  requires_2fa: true;
+  requires_enrollment: boolean;
+  partial_token: string;
+}
+
+export interface PostBoxMfaEnrollmentResult {
+  mailbox: MailboxProfile;
+  session: { expires_at: string };
+  backup_codes: string[];
+  smtp_imap_password?: string;
+  smtp_imap_password_id?: string;
+}
+
 /** Mail-client settings, served by the backend so there is one source. */
 export interface MailClientSettings {
   username: string;
@@ -455,7 +487,7 @@ export type MessageAction =
 export const postbox = {
   // auth
   login: (email: string, password: string, remember: boolean) =>
-    request<{ mailbox: MailboxProfile; session: { expires_at: string } }>(
+    request<{ mailbox: MailboxProfile; session: { expires_at: string } } | PostBoxMfaChallenge>(
       "/auth/login/",
       { method: "POST", body: JSON.stringify({ email, password, remember }) },
     ),
@@ -734,6 +766,39 @@ export const postbox = {
   vacation: () => request<Vacation>("/vacation/"),
   saveVacation: (body: Partial<Vacation>) =>
     request<Vacation>("/vacation/", { method: "PATCH", body: JSON.stringify(body) }),
+
+  // Stage 7B security: never accept a Hub access token for these cookie-scoped routes.
+  clientSecurity: () => request<MailSecurityState>("/security/smtp-imap/"),
+  manageClientSecurity: (body: {
+    action: "create" | "revoke" | "access";
+    current_password: string;
+    code?: string;
+    label?: string;
+    credential_id?: string;
+    enabled?: boolean;
+  }) => request<MailSecurityOneTimeSecret | { revoked: boolean } | { enabled: boolean; dedicated_required: boolean }>(
+    "/security/smtp-imap/", { method: "POST", body: JSON.stringify(body) },
+  ),
+  startMailbox2fa: (current_password: string) =>
+    request<PostBoxMfaChallenge>("/auth/2fa/start/", {
+      method: "POST", body: JSON.stringify({ current_password }),
+    }),
+  beginMailbox2fa: (partial_token: string) =>
+    request<{ secret: string; uri: string }>("/auth/2fa/enroll/", {
+      method: "POST", body: JSON.stringify({ partial_token, action: "begin" }),
+    }),
+  confirmMailbox2fa: (partial_token: string, code: string) =>
+    request<PostBoxMfaEnrollmentResult>("/auth/2fa/enroll/", {
+      method: "POST", body: JSON.stringify({ partial_token, action: "confirm", code }),
+    }),
+  verifyMailbox2fa: (partial_token: string, code: string) =>
+    request<{ mailbox: MailboxProfile; session: { expires_at: string } }>(
+      "/auth/2fa/verify/", { method: "POST", body: JSON.stringify({ partial_token, code }) },
+    ),
+  disableMailbox2fa: (current_password: string, code: string) =>
+    request<{ detail: string }>("/auth/2fa/disable/", {
+      method: "POST", body: JSON.stringify({ current_password, code }),
+    }),
 
   // security
   changePassword: (currentPassword: string, newPassword: string) =>

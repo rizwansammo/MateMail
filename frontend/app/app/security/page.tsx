@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
+import { IndependentRecoveryEmail } from "@/components/workspace/independent-recovery-email";
 import {
   PortalButton,
   PortalCard,
@@ -53,6 +54,7 @@ export default function SecurityPage() {
 
   const [disableOpen, setDisableOpen] = useState(false);
   const [disablePassword, setDisablePassword] = useState("");
+  const [disableCode, setDisableCode] = useState("");
   const [disableBusy, setDisableBusy] = useState(false);
   const [disableError, setDisableError] = useState("");
 
@@ -184,19 +186,20 @@ export default function SecurityPage() {
 
   async function disableTwoFactor(event: React.FormEvent) {
     event.preventDefault();
-    if (!disablePassword) return;
+    if (!disablePassword || !disableCode.trim()) return;
     setDisableBusy(true);
     setDisableError("");
     setMessage("");
     try {
       const response = await apiRequest("/api/auth/2fa/disable/", {
         method: "POST",
-        body: JSON.stringify({ password: disablePassword }),
+        body: JSON.stringify({ password: disablePassword, code: disableCode.trim() }),
       });
       const data = await response.json().catch(() => null);
       if (response.ok) {
         setProfile((current) => current ? { ...current, two_factor_enabled: false } : current);
         setDisablePassword("");
+        setDisableCode("");
         setDisableOpen(false);
         setSetupOpen(false);
         setSetup(null);
@@ -358,6 +361,8 @@ export default function SecurityPage() {
             </PortalCard>
           )}
 
+          <IndependentRecoveryEmail primaryEmail={profile.email} twoFactorEnabled={profile.two_factor_enabled} />
+
           {backupCodes.length > 0 && (
             <PortalCard className="mt-5 portal-secret-card" title="Save your backup codes" subtitle="Each code can be used once if your authenticator is unavailable. MateMail stores only hashes and cannot show these codes again.">
               <div className="portal-backup-code-grid">
@@ -377,7 +382,7 @@ export default function SecurityPage() {
           )}
 
           {disableOpen && profile.two_factor_enabled && (
-            <PortalCard className="mt-5" title="Disable two-factor authentication" subtitle="Your account password is required before the backend will remove the second factor.">
+            <PortalCard className="mt-5" title="Disable two-factor authentication" subtitle="Enter your current password AND a current authenticator or unused backup code. Organization-required 2FA cannot be disabled.">
               <form onSubmit={disableTwoFactor}>
                 {disableError && <div className="mb-4"><PortalNotice tone="danger">{disableError}</PortalNotice></div>}
                 <div className="portal-field">
@@ -390,13 +395,18 @@ export default function SecurityPage() {
                     onChange={(event) => setDisablePassword(event.target.value)}
                   />
                 </div>
+                <div className="portal-field mt-3">
+                  <label htmlFor="disable-factor-code">Current authenticator or backup code</label>
+                  <input id="disable-factor-code" autoComplete="one-time-code" value={disableCode} onChange={(event) => setDisableCode(event.target.value.trim().toUpperCase())} required maxLength={64} />
+                </div>
                 <div className="portal-detail-actions">
-                  <PortalButton type="submit" variant="danger" disabled={disableBusy || !disablePassword}>
+                  <PortalButton type="submit" variant="danger" disabled={disableBusy || !disablePassword || !disableCode.trim()}>
                     {disableBusy ? "Disabling…" : "Disable 2FA"}
                   </PortalButton>
                   <PortalButton type="button" variant="secondary" disabled={disableBusy} onClick={() => {
                     setDisableOpen(false);
                     setDisablePassword("");
+                    setDisableCode("");
                     setDisableError("");
                   }}>Cancel</PortalButton>
                 </div>
