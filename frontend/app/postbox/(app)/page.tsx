@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 
 import { Compose, type ComposeInitial } from "@/components/postbox/compose";
+import { planConversationActions, type ConversationActionPlan } from "@/lib/postbox-conversation-bulk";
 import { ConversationReader } from "@/components/postbox/conversation-reader";
 import { MessageHeaders } from "@/components/postbox/message-headers";
 import { LinkifiedPlainText } from "@/components/postbox/linkified-plain-text";
@@ -175,6 +176,17 @@ function Mailbox() {
     (uids: Set<number>) => setSelectionState({ key: listKey, uids }),
     [listKey],
   );
+  // The conversation IDs are scoped to the current list and page. They never
+  // overlap numeric message UIDs or survive a view or page change.
+  const conversationSelectionKey = listKey + "|" + pageNumber;
+  const [conversationSelectionState, setConversationSelectionState] = useState<{
+    key: string;
+    ids: Set<string>;
+  }>({ key: conversationSelectionKey, ids: new Set() });
+  const selectedConversationIds = conversationSelectionState.key === conversationSelectionKey
+    ? conversationSelectionState.ids : new Set<string>();
+  const setSelectedConversations = (ids: Set<string>) =>
+    setConversationSelectionState({ key: conversationSelectionKey, ids });
   const [detail, setDetail] = useState<MessageDetail | null>(null);
   const [thread, setThread] = useState<ConversationDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -224,6 +236,21 @@ function Mailbox() {
   const [successVisible, setSuccessVisible] = useState(false);
   const successToastRef = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingConversationTrash, setPendingConversationTrash] = useState<{
+    key: string;
+    plan: ConversationActionPlan;
+  } | null>(null);
+  const trashCancelRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!pendingConversationTrash) return;
+    trashCancelRef.current?.focus();
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) setPendingConversationTrash(null);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [pendingConversationTrash, busy]);
 
   // Debounce the search box so typing does not run an IMAP SEARCH per keystroke.
   useEffect(() => {
@@ -361,6 +388,13 @@ function Mailbox() {
     [canReadMailbox, conversationMode, pageNumber, preferences.messages_per_page],
     "Conversation view is unavailable. Switch to Messages.",
   );
+
+  const visibleConversations = conversations.data?.results ?? [];
+  const selectedConversationRows = visibleConversations.filter(
+    (conversation) => selectedConversationIds.has(conversation.id),
+  );
+  const allConversationsSelected = visibleConversations.length > 0 &&
+    selectedConversationRows.length === visibleConversations.length;
 
   const scheduledData = useAsyncData(
     () => canReadMailbox
@@ -606,6 +640,120 @@ function Mailbox() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selected, folder, detail, loadList, unreadOnly, filteredStarredOnly],
   );
+
+  // Fetch authoritative members for every selected thread: a single list
+  // row is not equivalent to the full conversation or all its IMAP copies.
+  const resolveConversationSelection = async () => {
+    const snapshots = [...selectedConversationRows];
+    if (!snapshots.length) throw new Error("Select a conversation first.");
+    const details: ConversationDetail[] = [];
+    for (const conversation of snapshots) {
+      details.push(await postbox.conversationForMessage(
+        conversation.latest.folder,
+        conversation.latest.uid,
+        conversation.latest.uid_validity,
+      ));
+    }
+    return planConversationActions(snapshots, details, sentFolderNames);
+  };
+
+  const conversationPlanSignature = (plan: ConversationActionPlan) => JSON.stringify(
+    plan.groups.map((group) => [
+      group.folder, group.uidValidity, group.sentOrigin,
+      [...group.uids].sort((a, b) => a - b),
+    ]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+  );
+
+  const executeConversationPlan = async (
+    plan: ConversationActionPlan,
+    action: "read" | "unread" | "star" | "archive" | "spam" | "trash" | "label",
+    labelToApply?: string,
+  ) => {
+    // Sent-origin messages cannot be marked read, archived or spammed.
+    // Those copies stay untouched for operations forbidden by the backend.
+    const skipSent = new Set(["read", "unread", "archive", "spam"]);
+    const groups = plan.groups.filter((group) => !skipSent.has(action) || !group.sentOrigin);
+    if (!groups.length) throw new Error("There are no eligible messages for this action.");
+    let completed = 0;
+    try {
+      for (const group of groups) {
+        for (let start = 0; start < group.uids.length; start += 500) {
+          const uids = group.uids.slice(start, start + 500);
+          if (action === "label") {
+            if (!labelToApply) throw new Error("Choose a label first.");
+            await postbox.assignLabel({ label_id: labelToApply, folder: group.folder,
+              uids, uid_validity: group.uidValidity });
+          } else {
+            await postbox.act(action, group.folder, uids,
+              { uid_validity: group.uidValidity });
+          }
+          completed += uids.length;
+        }
+      }
+      setNotice(null);
+      setSuccessNotice(plan.conversationCount + " conversation" +
+        (plan.conversationCount === 1 ? "" : "s") + " updated.");
+      setSuccessVisible(true);
+    } catch (error) {
+      setNotice(completed > 0
+        ? "Only part of the selection was updated. Refresh and check the conversations before retrying."
+        : describePostBoxError(error, "Could not update the selected conversations."));
+    } finally {
+      if (completed) {
+        setSelectedConversations(new Set());
+        setDetail(null);
+        setThread(null);
+        await Promise.allSettled([loadList(), conversations.reload()]);
+      }
+    }
+  };
+
+  const actOnConversations = async (
+    action: "read" | "unread" | "star" | "archive" | "spam" | "trash" | "label",
+    labelToApply?: string,
+  ) => {
+    if (busy || !canManageMailbox || !conversationMode) return;
+    setBusy(true);
+    try {
+      const plan = await resolveConversationSelection();
+      if (action === "trash") {
+        setPendingConversationTrash({ key: conversationSelectionKey, plan });
+      } else {
+        await executeConversationPlan(plan, action, labelToApply);
+      }
+    } catch (error) {
+      setNotice(describePostBoxError(error, "Could not load the selected conversations."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmConversationTrash = async () => {
+    const pending = pendingConversationTrash;
+    if (!pending || busy || !canManageMailbox) return;
+    if (pending.key !== conversationSelectionKey) {
+      setPendingConversationTrash(null);
+      setNotice("Your message list changed. Select the conversations again.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const fresh = await resolveConversationSelection();
+      if (fresh.conversationCount !== pending.plan.conversationCount ||
+          fresh.messageCount !== pending.plan.messageCount ||
+          fresh.copyCount !== pending.plan.copyCount ||
+          conversationPlanSignature(fresh) !== conversationPlanSignature(pending.plan)) {
+        throw new Error("A conversation changed while the confirmation was open. Nothing was deleted. Refresh and try again.");
+      }
+      setPendingConversationTrash(null);
+      await executeConversationPlan(fresh, "trash");
+    } catch (error) {
+      setPendingConversationTrash(null);
+      setNotice(describePostBoxError(error, "No conversations were moved to Trash."));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const trustRemoteSender = useCallback(async () => {
     if (!detail) return;
@@ -874,24 +1022,54 @@ function Mailbox() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {!detail && <div className="pb-premium-mail-toolbar">
-          {canManageMailbox && !isCrossFolderView && !conversationMode && (
+          {canManageMailbox && !isCrossFolderView && (
             <input
               className="pb-premium-select-all"
               type="checkbox"
-              aria-label="Select all visible messages"
-              checked={allSelected}
-              onChange={(event) =>
-                setSelected(
-                  event.target.checked ? new Set(rows.map((row) => row.uid)) : new Set(),
-                )
+              aria-label={conversationMode ? "Select all visible conversations" : "Select all visible messages"}
+              checked={conversationMode ? allConversationsSelected : allSelected}
+              disabled={busy}
+              onChange={(event) => {
+                if (conversationMode) {
+                  setSelectedConversations(event.target.checked
+                    ? new Set(visibleConversations.map((conversation) => conversation.id))
+                    : new Set());
+                } else {
+                  setSelected(event.target.checked ? new Set(rows.map((row) => row.uid)) : new Set());
+                }
               }
             />
           )}
-          {canManageMailbox && !isCrossFolderView && !conversationMode && (
+          {canManageMailbox && !isCrossFolderView && (
             <ChevronDown className="pb-astra-select-chevron" size={12} aria-hidden="true" />
           )}
 
-          {selected.size > 0 ? (
+          {(conversationMode ? selectedConversationRows.length : selected.size) > 0 ? (
+            conversationMode ? (
+              <div className="pb-premium-selection-actions">
+                <span>{selectedConversationRows.length} conversation{selectedConversationRows.length === 1 ? "" : "s"} selected</span>
+                <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
+                  onClick={() => void actOnConversations("read")} />
+                <ToolbarButton label="Mark unread" icon={Mail} busy={busy}
+                  onClick={() => void actOnConversations("unread")} />
+                <ToolbarButton label="Star" icon={Star} busy={busy}
+                  onClick={() => void actOnConversations("star")} />
+                <ToolbarButton label="Archive" icon={Archive} busy={busy}
+                  onClick={() => void actOnConversations("archive")} />
+                <LabelMenu labels={mailLabels} disabled={busy}
+                  onApply={(id) => void actOnConversations("label", id)} />
+                <ToolbarButton label="Spam" icon={ShieldAlert} busy={busy}
+                  onClick={() => void actOnConversations("spam")} />
+                <ToolbarButton label="Trash" icon={Trash2} busy={busy}
+                  onClick={() => void actOnConversations("trash")} />
+                <button type="button" className="pb-premium-icon-button"
+                  aria-label="Clear conversation selection" title="Clear selection"
+                  disabled={busy}
+                  onClick={() => setSelectedConversations(new Set())}>
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+            ) : (
             <div className="pb-premium-selection-actions">
               <span>{selected.size} selected</span>
               {!selectionHasSentMessage && (
@@ -941,6 +1119,7 @@ function Mailbox() {
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
+            )
           ) : (
             <div className="pb-premium-mail-tabs" role="tablist" aria-label="Mailbox filter">
               {(folderIsSent
@@ -1016,13 +1195,16 @@ function Mailbox() {
       >
         <input
           type="checkbox"
-          aria-label="Select all messages"
-          checked={allSelected}
-          disabled={!canManageMailbox}
-          onChange={(event) =>
-            setSelected(
-              event.target.checked ? new Set(rows.map((r) => r.uid)) : new Set(),
-            )
+          aria-label={conversationMode ? "Select all conversations" : "Select all messages"}
+          checked={conversationMode ? allConversationsSelected : allSelected}
+          disabled={!canManageMailbox || busy}
+          onChange={(event) => {
+            if (conversationMode) {
+              setSelectedConversations(event.target.checked
+                ? new Set(visibleConversations.map((conversation) => conversation.id)) : new Set());
+            } else {
+              setSelected(event.target.checked ? new Set(rows.map((r) => r.uid)) : new Set());
+            }
           }
         />
 
@@ -1038,7 +1220,7 @@ function Mailbox() {
           <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
 
-        {selected.size > 0 && (
+        {!conversationMode && selected.size > 0 && (
           <div className="flex flex-wrap items-center gap-1">
             {!selectionHasSentMessage && (
               <ToolbarButton label="Mark read" icon={MailOpen} busy={busy}
@@ -1123,6 +1305,44 @@ function Mailbox() {
         </div>
       )}
 
+      {pendingConversationTrash && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4">
+          <div role="alertdialog" aria-modal="true" aria-labelledby="pb-conversation-trash-title"
+            aria-describedby="pb-conversation-trash-detail"
+            className="w-full max-w-lg rounded-xl border p-5 shadow-2xl"
+            style={{ background: "var(--pb-bg)", color: "var(--pb-fg)", borderColor: "var(--pb-border)" }}>
+            <div className="mb-3 flex items-center gap-2">
+              <ShieldAlert size={20} style={{ color: "var(--pb-warn)" }} aria-hidden="true" />
+              <h2 id="pb-conversation-trash-title" className="text-base font-semibold">
+                Move selected conversations to Trash?
+              </h2>
+            </div>
+            <p id="pb-conversation-trash-detail" className="mb-3 text-sm">
+              {pendingConversationTrash.plan.conversationCount} conversation{pendingConversationTrash.plan.conversationCount === 1 ? "" : "s"}
+              {" contain "}{pendingConversationTrash.plan.messageCount} message{pendingConversationTrash.plan.messageCount === 1 ? "" : "s"}.
+              {" All "}{pendingConversationTrash.plan.copyCount} stored mail cop{pendingConversationTrash.plan.copyCount === 1 ? "y" : "ies"}
+              {" will be moved to Trash, including copies in Sent when present. You can restore them from Trash."}
+            </p>
+            <ul className="mb-4 max-h-44 list-disc space-y-1 overflow-y-auto pl-5 text-sm">
+              {pendingConversationTrash.plan.conversations.map((conversation) => (
+                <li key={conversation.id}>
+                  <span className="break-words font-medium">{conversation.subject}</span>
+                  {" · "}{conversation.messageCount} message{conversation.messageCount === 1 ? "" : "s"}
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-2">
+              <button ref={trashCancelRef} type="button" className="pb-btn pb-btn-ghost" disabled={busy}
+                onClick={() => setPendingConversationTrash(null)}>Cancel</button>
+              <button type="button" className="pb-btn pb-btn-primary"
+                disabled={busy} onClick={() => void confirmConversationTrash()}>
+                {busy ? "Checking messages..." : "Move to Trash"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── list + reader ──────────────────────────────────────────────── */}
       {/*
         The list/reader split. `overflow-hidden` so neither pane can force this
@@ -1169,8 +1389,17 @@ function Mailbox() {
                   <div className="pb-row pb-astra-conversation-row"
                     key={conversation.id}
                     data-unread={conversation.unread_count > 0}
-                    data-selected={thread?.id === conversation.id}>
-                    <input type="checkbox" disabled aria-label={"Conversation: " + (conversation.subject || "(no subject)")} />
+                    data-selected={thread?.id === conversation.id || selectedConversationIds.has(conversation.id)}>
+                    <input type="checkbox"
+                      aria-label={"Select conversation: " + (conversation.subject || "(no subject)")}
+                      checked={selectedConversationIds.has(conversation.id)}
+                      disabled={!canManageMailbox || busy}
+                      onChange={(event) => {
+                        const next = new Set(selectedConversationIds);
+                        if (event.target.checked) next.add(conversation.id);
+                        else next.delete(conversation.id);
+                        setSelectedConversations(next);
+                      }} />
                     <span className="pb-astra-conversation-star">
                       <Star size={15}
                         style={{ color: conversation.flagged ? "var(--pb-warn)" : "var(--pb-subtle)" }}
