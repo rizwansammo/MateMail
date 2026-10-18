@@ -39,6 +39,12 @@ MAIL_ENABLED_STATUSES = frozenset({
 })
 
 
+class OrganizationTwoFactorMode(models.TextChoices):
+    OFF = "off", "Off"
+    ENCOURAGE = "encourage", "Encourage 2FA"
+    REQUIRE = "require", "Require 2FA"
+
+
 class TenantManager(models.Manager):
     pass
 
@@ -54,6 +60,12 @@ class Tenant(models.Model):
         default=TenantStatus.PENDING_APPROVAL,
     )
     plan = models.CharField(max_length=50, default="starter")
+    # Phase 7A: configured policy. Enforcement remains independently gated.
+    two_factor_policy = models.CharField(
+        max_length=12,
+        choices=OrganizationTwoFactorMode.choices,
+        default=OrganizationTwoFactorMode.OFF,
+    )
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

@@ -394,6 +394,12 @@ PLATFORM_MAIL_CENTER_PURPOSE_READ_ENABLED = env.bool("PLATFORM_MAIL_CENTER_PURPO
 PLATFORM_MAIL_CENTER_REPORTS_ENABLED = env.bool("PLATFORM_MAIL_CENTER_REPORTS_ENABLED", default=False)
 NATIVE_ENGINE_PLATFORM_SECRET = env("NATIVE_ENGINE_PLATFORM_SECRET", default="")
 
+# Phase 7A foundation. Both OFF by default; requiring MFA is blocked
+# until the Hub, PostBox and Native Engine enforcement paths are ready.
+ORGANIZATION_2FA_POLICY_ENABLED = env.bool("ORGANIZATION_2FA_POLICY_ENABLED", default=False)
+ORGANIZATION_2FA_ENFORCEMENT_READY = env.bool("ORGANIZATION_2FA_ENFORCEMENT_READY", default=False)
+SMTP_IMAP_SECURITY_ENABLED = env.bool("SMTP_IMAP_SECURITY_ENABLED", default=False)
+
 # MateMail platform settings
 MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.pro")
 # Aggregate reports use the already-MX-enabled Native Engine sender subdomain.
