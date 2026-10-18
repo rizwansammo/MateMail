@@ -133,6 +133,64 @@ class PostBoxMfaBoundaryTest(TestCase):
         setup = MailboxTwoFactorSetup.objects.get(mailbox=self.mailbox)
         self.assertIsNotNone(setup.enabled_at)
 
+    def test_disable_orders_native_revocation_before_policy_relaxation(self):
+        self._enroll_directly()
+        raw, session = PostBoxSession.issue(self.mailbox, mfa_verified=True)
+        self.client.cookies[postbox_auth.SESSION_COOKIE_NAME] = raw
+        calls = []
+        adapter = mock.Mock()
+        adapter.list_client_credentials.return_value = {
+            "enabled": True, "credentials": [
+                {"id": "123e4567-e89b-12d3-a456-426614174000",
+                 "revoked_at": None},
+            ],
+        }
+        adapter.revoke_client_credential.side_effect = (
+            lambda *args: calls.append("revoke")
+        )
+        adapter.set_client_policy.side_effect = (
+            lambda *args, **kwargs: calls.append("relax")
+        )
+        with mock.patch.object(postbox_auth, "trusted_primary_authenticate",
+                               return_value=True), \
+             mock.patch("apps.postbox.two_factor_views.verify_totp",
+                        return_value=True), \
+             mock.patch("apps.postbox.two_factor_views.get_adapter",
+                        return_value=adapter):
+            result = self.client.post("/api/postbox/auth/2fa/disable/", {
+                "current_password": "test-mailbox-pass", "code": "123456",
+            }, format="json")
+        self.assertEqual(result.status_code, 200, result.data)
+        self.assertEqual(calls, ["revoke", "relax"])
+        self.assertFalse(MailboxTwoFactorSetup.objects.filter(
+            mailbox=self.mailbox).exists())
+
+    def test_disable_never_relaxes_policy_if_revocation_fails(self):
+        self._enroll_directly()
+        raw, session = PostBoxSession.issue(self.mailbox, mfa_verified=True)
+        self.client.cookies[postbox_auth.SESSION_COOKIE_NAME] = raw
+        adapter = mock.Mock()
+        adapter.list_client_credentials.return_value = {
+            "enabled": True, "credentials": [
+                {"id": "123e4567-e89b-12d3-a456-426614174000",
+                 "revoked_at": None},
+            ],
+        }
+        adapter.revoke_client_credential.side_effect = RuntimeError("unavailable")
+        with mock.patch.object(postbox_auth, "trusted_primary_authenticate",
+                               return_value=True), \
+             mock.patch("apps.postbox.two_factor_views.verify_totp",
+                        return_value=True), \
+             mock.patch("apps.postbox.two_factor_views.get_adapter",
+                        return_value=adapter):
+            result = self.client.post("/api/postbox/auth/2fa/disable/", {
+                "current_password": "test-mailbox-pass", "code": "123456",
+            }, format="json")
+        self.assertEqual(result.status_code, 503)
+        self.assertTrue(MailboxTwoFactorSetup.objects.filter(
+            mailbox=self.mailbox).exists())
+        adapter.set_client_policy.assert_not_called()
+
     def test_enrollment_aborts_if_native_enforcement_unavailable(self):
         self._login()
         with mock.patch.object(postbox_auth, "trusted_primary_authenticate", return_value=True):

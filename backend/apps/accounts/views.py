@@ -18,6 +18,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.tenants.models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
 from apps.tenants.host_binding import bound_tenant_slug, scope_memberships, tenant_matches_request
+from .totp_crypto import encrypt_secret, decrypt_secret
 from .models import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -697,12 +698,16 @@ class TwoFactorSetupView(APIView):
 
     def get(self, request):
         user = request.user
+        if user.two_factor_enabled:
+            # An active bearer token is not authority to export an already
+            # enrolled authenticator's reusable seed.
+            return Response({"detail": "2FA is already enabled."}, status=409)
         try:
             setup = user.two_factor_setup
-            secret = setup.totp_secret
+            secret = decrypt_secret(setup.totp_secret)
         except TwoFactorSetup.DoesNotExist:
             secret = pyotp.random_base32()
-            TwoFactorSetup.objects.create(user=user, totp_secret=secret)
+            TwoFactorSetup.objects.create(user=user, totp_secret=encrypt_secret(secret))
 
         uri = pyotp.totp.TOTP(secret).provisioning_uri(
             name=user.email,
@@ -733,7 +738,7 @@ class TwoFactorSetupView(APIView):
             _TOO_MANY_ATTEMPTS,
         )
 
-        totp = pyotp.TOTP(setup.totp_secret)
+        totp = pyotp.TOTP(decrypt_secret(setup.totp_secret))
         if not totp.verify(code, valid_window=1):
             ratelimit.hit(
                 TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
@@ -812,7 +817,7 @@ class TwoFactorVerifyView(APIView):
                 limit=TWO_FACTOR_PER_USER.limit, window=TWO_FACTOR_PER_USER.window,
             )
 
-        totp = pyotp.TOTP(setup.totp_secret)
+        totp = pyotp.TOTP(decrypt_secret(setup.totp_secret))
         backup = None
         if totp.verify(code, valid_window=1):
             # A TOTP code stays valid for its whole timestep — with
@@ -910,6 +915,38 @@ class TwoFactorDisableView(APIView):
                for m in TenantMembership.objects.select_related("tenant").filter(
                    user=user, status=MemberStatus.ACTIVE)):
             return Response({"detail": "Your organization requires 2FA."}, status=409)
+
+        # A mailbox password alone is NOT permission to remove an enrolled
+        # authenticator. Require fresh proof of the existing second factor.
+        # Legacy response codes remain unchanged for incorrect passwords.
+        if user.two_factor_enabled:
+            code = serializer.validated_data.get("code", "").strip()
+            setup = TwoFactorSetup.objects.filter(user=user).first()
+            if not code or setup is None:
+                return Response({"detail": "Current 2FA verification is required."}, status=403)
+            valid_totp = False
+            if len(code) == 6 and code.isascii() and code.isdecimal():
+                valid_totp = pyotp.TOTP(decrypt_secret(setup.totp_secret)).verify(
+                    code, valid_window=1,
+                )
+            valid_backup = False
+            backup = None
+            if valid_totp:
+                valid_totp = ratelimit.claim_once(
+                    "2fa:totp", f"{user.pk}:{code}", ttl=TOTP_REPLAY_TTL,
+                )
+            if not valid_totp:
+                backup = TwoFactorBackupCode.objects.filter(
+                    user=user, code_hash=hash_token(code), is_used=False,
+                ).first()
+                valid_backup = backup is not None
+            if not (valid_totp or valid_backup):
+                ratelimit.hit(
+                    TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+                    limit=TWO_FACTOR_MANAGE_PER_USER.limit,
+                    window=TWO_FACTOR_MANAGE_PER_USER.window,
+                )
+                return Response({"detail": "Current 2FA verification failed."}, status=403)
 
         TwoFactorBackupCode.objects.filter(user=user).delete()
         TwoFactorSetup.objects.filter(user=user).delete()

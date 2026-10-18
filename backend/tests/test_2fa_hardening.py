@@ -224,9 +224,20 @@ class TwoFactorManagementTest(TestCase):
             429,
         )
 
-    def test_disable_still_works_with_the_right_password(self):
+    def test_enrolled_authenticator_secret_cannot_be_exported_by_setup_get(self):
         enable_2fa(self.user)
-        res = self.api.post("/api/auth/2fa/disable/", {"password": TEST_PASSWORD})
+        response = self.api.get("/api/auth/2fa/setup/")
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn("secret", response.data)
+        self.assertNotIn("uri", response.data)
+
+    def test_disable_requires_password_and_current_factor(self):
+        secret = enable_2fa(self.user)
+        missing = self.api.post("/api/auth/2fa/disable/", {"password": TEST_PASSWORD})
+        self.assertEqual(missing.status_code, 403)
+        res = self.api.post("/api/auth/2fa/disable/", {
+            "password": TEST_PASSWORD, "code": pyotp.TOTP(secret).now(),
+        })
         self.assertEqual(res.status_code, 200)
         self.user.refresh_from_db()
         self.assertFalse(self.user.two_factor_enabled)

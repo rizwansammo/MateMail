@@ -1,6 +1,7 @@
 import pyotp
 from django.core.exceptions import ValidationError
 
+from apps.accounts.totp_crypto import decrypt_secret
 from apps.accounts.models import TwoFactorBackupCode, TwoFactorSetup
 from apps.accounts.tokens import hash_token
 from apps.security import ratelimit
@@ -46,7 +47,7 @@ def verify_fresh_authorization(
                 {"two_factor_code": "Enter your authentication code."}
             )
 
-        totp = pyotp.TOTP(setup.totp_secret)
+        totp = pyotp.TOTP(decrypt_secret(setup.totp_secret))
         backup = None
         if totp.verify(code, valid_window=1):
             if not ratelimit.claim_once(

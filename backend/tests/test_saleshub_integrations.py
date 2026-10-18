@@ -101,7 +101,7 @@ class ConnectedAppIntegrationTests(TestCase):
 
         setup = TwoFactorSetup.objects.create(
             user=self.user,
-            totp_secret=pyotp.random_base32(),
+            totp_secret=__import__("apps.accounts.totp_crypto", fromlist=["encrypt_secret"]).encrypt_secret(pyotp.random_base32()),
         )
         self.user.two_factor_enabled = True
         self.user.save(update_fields=["two_factor_enabled"])
@@ -125,7 +125,7 @@ class ConnectedAppIntegrationTests(TestCase):
             f"/api/integrations/authorize/?request={request_token}",
             {
                 "password": "Strong-password-123!",
-                "two_factor_code": pyotp.TOTP(setup.totp_secret).now(),
+                "two_factor_code": pyotp.TOTP(__import__("apps.accounts.totp_crypto", fromlist=["decrypt_secret"]).decrypt_secret(setup.totp_secret)).now(),
             },
             format="json",
         )

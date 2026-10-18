@@ -1,5 +1,9 @@
 from django.urls import path
 
+from .recovery_views import (
+    RecoveryEmailSetupView, RecoveryEmailConfirmView,
+    RecoveryLoginStartView, RecoveryLoginFinishView,
+)
 from .required_enrollment import RequiredTwoFactorEnrollmentView
 from .views import (
     ForgotPasswordView,
@@ -28,6 +32,10 @@ urlpatterns = [
     path("2fa/setup/", TwoFactorSetupView.as_view(), name="auth-2fa-setup"),
     path("2fa/verify/", TwoFactorVerifyView.as_view(), name="auth-2fa-verify"),
     path("2fa/enroll-required/", RequiredTwoFactorEnrollmentView.as_view(), name="auth-2fa-enroll-required"),
+    path("recovery-email/", RecoveryEmailSetupView.as_view(), name="auth-recovery-email"),
+    path("recovery-email/confirm/", RecoveryEmailConfirmView.as_view(), name="auth-recovery-confirm"),
+    path("2fa/recovery/start/", RecoveryLoginStartView.as_view(), name="auth-2fa-recovery-start"),
+    path("2fa/recovery/finish/", RecoveryLoginFinishView.as_view(), name="auth-2fa-recovery-finish"),
     path("2fa/disable/", TwoFactorDisableView.as_view(), name="auth-2fa-disable"),
     path("me/", MeView.as_view(), name="auth-me"),
 ]

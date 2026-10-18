@@ -88,3 +88,26 @@ Explicitly NOT completed:
 7. PostBox/Hub UI is intentionally Stage 7B; rollout/production acceptance Stage 7C.
 
 **Status: Stage 7A IN PROGRESS — not safe to merge or deploy as a completed MFA release.**
+
+## 2026-10-18 — PostBox and Hub hardening continuation
+
+New additions:
+- Hub TOTP encryption: `accounts.0004_encrypt_existing_totp_secrets` encrypts existing plaintext Hub TOTP seeds in a transactional data migration. `HUB_2FA_FERNET_KEY` is independent of SMTP/IMAP secrets; missing or wrong key fails closed. `accounts.0005_verified_recovery_email` adds verified independent recovery email and one-time recovery login challenge state.
+- Hub 2FA disable requires current password AND a valid, non-replayed TOTP or unused backup code. Existing TOTP provisioning seed is no longer returned by an authenticated GET after enrollment.
+- Recovery email verification requires recent primary reauthentication and existing TOTP where already enabled; recovery OTP is tied to an independently verified external address, password-proven partial challenge, and one-time consumption. Live tenant membership is checked *before* second-factor consumption.
+- PostBox MFA disable now revokes dedicated credentials first, modifies Django MFA state second, and relaxes Native client policy last, preventing a partial failure from re-enabling the normal mailbox password while PostBox still considers MFA active.
+- Native v014 and encrypted Hub migrations remain **NOT deployed**. Newly introduced keys must be provisioned only at later controlled activation and retained by existing Azure Disaster Recovery configuration.
+
+Evidence recorded:
+- Existing Hub 2FA + account hardening + JWT refresh + Connected Apps + new PostBox MFA: 72 / 72 isolated Django tests passing (2026-10-18).
+- Recovery email verification / OTP / single-use: 3 / 3 isolated tests passing (2026-10-18).
+- Native Client Credential API unit tests: 7 / 7 passed on pinned Native API container (earlier development checkpoint).
+- Native SQL migrations 001–014 and SQL auth/permissions tests passed using disposable PostgreSQL. An additional Dovecot 2.4 runtime acceptance harness was attempted but tool safety restrictions prevented starting its credential-bearing test container.
+
+Remaining release blockers:
+1. **Real Dovecot authentication acceptance** using the exact pinned Dovecot 2.4 runtime, checking its `%{password}` SQL passdb expansion and public IMAP/SMTP parity, master-user separation and old client handling.
+2. **Revoked credential active-session invalidation** (e.g. verified `doveadm kick`) and fail-closed behavior during administrative API outages. Only new authentications are proven to reject revoked credentials.
+3. **Cross-database transition/recovery and rollback rehearsal**, especially Native DB and Django DB partial failure, OTP encryption key continuity and pre-existing mailboxes.
+4. Comprehensive integration CI / external mail-client regression and production security acceptance in subsequent 7C. Complete production activation MUST stay OFF.
+
+**Stage 7A has meaningful implementation and passing tests but is NOT closed until the first three blockers have verified evidence. Do not merge or deploy as a finished feature.**

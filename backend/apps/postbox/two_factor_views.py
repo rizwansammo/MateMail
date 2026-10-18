@@ -349,24 +349,33 @@ class PostBoxTwoFactorDisableView(APIView):
         code = request.data.get("code", "")
         if not _require_recent_primary_and_factor(request, password, code):
             return Response({"detail": "Security verification failed."}, status=403)
+        # There are two separate databases. NEVER make the Native password
+        # policy more permissive while Django still considers MFA active:
+        # a failed Django transaction would otherwise leave a real bypass.
         try:
             adapter = get_adapter()
             current = adapter.list_client_credentials(mailbox.email)
-            # Authentication policy must remain consistent across both services.
-            adapter.set_client_policy(
-                mailbox.email,
-                enabled=current["enabled"],
-                dedicated_required=False,
-            )
             for item in current["credentials"]:
                 if item["revoked_at"] is None:
                     adapter.revoke_client_credential(mailbox.email, item["id"])
         except Exception:
-            return Response({"detail": "Could not update mail-client security."}, status=503)
+            return Response({"detail": "Could not revoke external clients."}, status=503)
         with transaction.atomic():
             MailboxTwoFactorBackupCode.objects.filter(mailbox=mailbox).delete()
             MailboxTwoFactorSetup.objects.filter(mailbox=mailbox).delete()
             PostBoxSession.objects.filter(mailbox=mailbox, revoked_at__isnull=True).update(
                 revoked_at=timezone.now(),
             )
+        try:
+            adapter.set_client_policy(
+                mailbox.email,
+                enabled=current["enabled"],
+                dedicated_required=False,
+            )
+        except Exception:
+            # Safe failure: native still requires dedicated credentials, so
+            # the regular mailbox password cannot become a protocol bypass.
+            return Response({
+                "detail": "2FA disabled for PostBox. External mail-client access remains restricted; contact an administrator."
+            }, status=503)
         return Response({"detail": "2FA disabled. Sign in again."})

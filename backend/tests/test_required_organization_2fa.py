@@ -63,7 +63,7 @@ class RequiredOrganizationMfaTest(TestCase):
         }, format="json")
         self.assertEqual(begin.status_code, 200, begin.data)
         setup = TwoFactorSetup.objects.get(user=self.owner)
-        code = pyotp.TOTP(setup.totp_secret).now()
+        code = pyotp.TOTP(__import__("apps.accounts.totp_crypto", fromlist=["decrypt_secret"]).decrypt_secret(setup.totp_secret)).now()
         finish = self.client.post("/api/auth/2fa/enroll-required/", {
             "partial_token": partial, "action": "confirm", "code": code,
         }, format="json")

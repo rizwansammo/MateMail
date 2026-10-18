@@ -19,6 +19,7 @@ from apps.tenants.host_binding import scope_memberships
 from apps.tenants.models import TenantMembership, MemberStatus, OrganizationTwoFactorMode
 from apps.tenants.security_policy import effective_two_factor_policy
 
+from .totp_crypto import encrypt_secret, decrypt_secret
 from .challenge import (
     peek_challenge, challenge_matches_password, consume_challenge,
     register_failed_attempt, discard_challenge,
@@ -74,11 +75,11 @@ class RequiredTwoFactorEnrollmentView(APIView):
 
         if value["action"] == "begin":
             setup, _ = TwoFactorSetup.objects.get_or_create(
-                user=user, defaults={"totp_secret": pyotp.random_base32()},
+                user=user, defaults={"totp_secret": encrypt_secret(pyotp.random_base32())},
             )
             return Response({
-                "secret": setup.totp_secret,
-                "uri": pyotp.TOTP(setup.totp_secret).provisioning_uri(
+                "secret": decrypt_secret(setup.totp_secret),
+                "uri": pyotp.TOTP(decrypt_secret(setup.totp_secret)).provisioning_uri(
                     name=user.email, issuer_name="MateMail",
                 ),
             })
@@ -88,7 +89,7 @@ class RequiredTwoFactorEnrollmentView(APIView):
             setup = user.two_factor_setup
         except TwoFactorSetup.DoesNotExist:
             return Response({"detail": "Start enrollment first."}, status=400)
-        if not pyotp.TOTP(setup.totp_secret).verify(code, valid_window=1):
+        if not pyotp.TOTP(decrypt_secret(setup.totp_secret)).verify(code, valid_window=1):
             register_failed_attempt(raw_token)
             ratelimit.hit(
                 TWO_FACTOR_PER_USER.bucket, user.pk,

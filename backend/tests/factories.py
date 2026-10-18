@@ -126,7 +126,8 @@ def make_mailbox(tenant, domain, local_part="alice", full_name="Alice"):
 def enable_2fa(user):
     """Turn on 2FA for `user` and return the TOTP secret."""
     secret = pyotp.random_base32()
-    TwoFactorSetup.objects.create(user=user, totp_secret=secret)
+    from apps.accounts.totp_crypto import encrypt_secret
+    TwoFactorSetup.objects.create(user=user, totp_secret=encrypt_secret(secret))
     user.two_factor_enabled = True
     user.save(update_fields=["two_factor_enabled"])
     return secret

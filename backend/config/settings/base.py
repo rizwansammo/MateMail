@@ -402,6 +402,7 @@ SMTP_IMAP_SECURITY_ENABLED = env.bool("SMTP_IMAP_SECURITY_ENABLED", default=Fals
 # Dedicated at-rest encryption key, never derived from the mail password.
 # No mailbox 2FA service may initialize without this independently generated key.
 POSTBOX_2FA_FERNET_KEY = env("POSTBOX_2FA_FERNET_KEY", default="")
+HUB_2FA_FERNET_KEY = env("HUB_2FA_FERNET_KEY", default="")
 POSTBOX_2FA_ENABLED = env.bool("POSTBOX_2FA_ENABLED", default=False)
 
 # MateMail platform settings
