@@ -37,6 +37,27 @@ class MailboxScopedQuerySet(models.QuerySet):
         return self.filter(mailbox=mailbox)
 
 
+class MailClientAccessPolicy(models.Model):
+    """Staged SMTP/IMAP access preference for a *mailbox* identity.
+
+    Hub accounts and PostBox mailboxes are deliberately different principals.
+    The absence of a row means legacy access is unchanged. This is metadata
+    ONLY until Native Engine authentication applies it server-side; no UI or
+    user-facing disable operation must imply enforcement before that rollout.
+    """
+
+    mailbox = models.OneToOneField(
+        "mailboxes.Mailbox", on_delete=models.CASCADE,
+        related_name="mail_client_access_policy",
+        primary_key=True,
+    )
+    smtp_imap_enabled = models.BooleanField(default=True)
+    changed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "postbox_mail_client_access_policy"
+
+
 class PostBoxSession(models.Model):
     """
     One signed-in PostBox browser.
