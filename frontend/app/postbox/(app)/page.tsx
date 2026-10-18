@@ -1205,7 +1205,7 @@ function Mailbox() {
             } else {
               setSelected(event.target.checked ? new Set(rows.map((r) => r.uid)) : new Set());
             }
-          }
+          }}
         />
 
         <button
