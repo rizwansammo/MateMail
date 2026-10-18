@@ -672,7 +672,11 @@ class ThreadReadingLayoutRegressionTest(SimpleTestCase):
     def test_mailbox_bulk_toolbar_only_appears_on_list(self):
         page = read("app", "postbox", "(app)", "page.tsx")
         self.assertIn('{!detail && <div className="pb-premium-mail-toolbar">', page)
-        self.assertIn('aria-label="Select all visible messages"', page)
+        self.assertIn(
+            'aria-label={conversationMode ? "Select all visible conversations" : "Select all visible messages"}',
+            page,
+        )
+        self.assertIn('checked={conversationMode ? allConversationsSelected : allSelected}', page)
         self.assertIn('aria-label="Mailbox layout"', page)
 
     def test_single_message_can_return_to_existing_conversation(self):
