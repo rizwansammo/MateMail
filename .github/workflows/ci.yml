@@ -100,6 +100,22 @@ jobs:
         run: |
           python3 -c "import base64, os; print('DKIM_ENCRYPTION_KEY=' + base64.urlsafe_b64encode(os.urandom(32)).decode())" >> "$GITHUB_ENV"
 
+      # Two independent CI-only MFA encryption keys are generated at runtime;
+      # neither is a customer key or committed to this repository.
+      - name: Generate ephemeral Hub and PostBox MFA encryption keys
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import base64, os
+          for key in ('HUB_2FA_FERNET_KEY', 'POSTBOX_2FA_FERNET_KEY'):
+              print(key + '=' + base64.urlsafe_b64encode(os.urandom(32)).decode())
+          PY
+
+      - name: Verify MFA secret continuity across fresh Python processes
+        working-directory: backend
+        run: |
+          python scripts/phase7c_key_continuity.py create "$RUNNER_TEMP/phase7c-key-fixture.json"
+          python scripts/phase7c_key_continuity.py verify "$RUNNER_TEMP/phase7c-key-fixture.json"
+
       - name: manage.py check
         working-directory: backend
         run: python manage.py check --settings=config.settings.dev
@@ -337,6 +353,19 @@ jobs:
           python3 -m unittest discover -s deploy/transport-security -p 'test_*.py' -v
           python3 -m py_compile deploy/transport-security/provisioner.py
           bash -n deploy/transport-security/install.sh
+
+      - name: Validate MFA Compose defaults and key/flag forwarding
+        working-directory: deploy
+        env:
+          MATEMAIL_BACKEND_IMAGE: ghcr.io/rizwansammo/matemail-backend:ci-placeholder
+          MATEMAIL_FRONTEND_IMAGE: ghcr.io/rizwansammo/matemail-frontend:ci-placeholder
+          DJANGO_SECRET_KEY: ci-placeholder
+          POSTGRES_PASSWORD: ci-placeholder
+          INTERNAL_API_SECRET: ci-placeholder
+          POSTBOX_MASTER_PASSWORD: ci-placeholder
+          DKIM_ENCRYPTION_KEY: ci-placeholder
+          EMAIL_HOST: localhost
+        run: python3 phase7c_mfa_compose_check.py
 
       - name: docker compose config
         working-directory: deploy
