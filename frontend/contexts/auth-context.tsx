@@ -166,9 +166,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mailbox_password?: string
     ) => {
       const data = await api.post<{
-        access: string;
+        access?: string;
         user: AuthUser;
         tenant: AuthTenant;
+        requires_login?: boolean;
       }>("/api/auth/signup/", {
         email,
         password,
@@ -178,6 +179,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         ...(mailbox_password ? { mailbox_password } : {}),
       });
 
+      // An invited user joining a Require-MFA workspace must finish a fresh
+      // password + authenticator login. Signup did not issue a session.
+      if (data.requires_login || !data.access) return;
       setAccessToken(data.access);
       setUser(data.user);
       setTenant(data.tenant);

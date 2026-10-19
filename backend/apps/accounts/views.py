@@ -258,6 +258,21 @@ class SignupView(APIView):
             )
 
             _send_verification_email(user)
+            from apps.tenants.security_policy import effective_two_factor_policy
+            from apps.tenants.models import OrganizationTwoFactorMode
+            if effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+                # Signup proves the new password, but it does not establish
+                # an enrolled second factor. Do not mint a refresh cookie or
+                # JWT that cannot legally access this workspace. A fresh Hub
+                # login starts the existing required-MFA enrollment flow.
+                return Response({
+                    "user": UserProfileSerializer(user).data,
+                    "tenant": _tenant_brief(tenant),
+                    "mailbox": mailbox_result,
+                    "requires_login": True,
+                    "requires_2fa": True,
+                    "detail": "Account created. Sign in to complete required 2FA.",
+                }, status=201)
             tokens = make_tokens(user, tenant_id=tenant.id)
             return authenticated_response(
                 tokens,
