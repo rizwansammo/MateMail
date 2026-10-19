@@ -67,6 +67,7 @@ class TwoFactorSetupConfirmSerializer(serializers.Serializer):
 
 class TwoFactorDisableSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
+    code = serializers.CharField(write_only=True, required=False, default="", max_length=64)
 
 
 class WorkspaceSwitchSerializer(serializers.Serializer):

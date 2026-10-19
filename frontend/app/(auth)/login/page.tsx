@@ -48,7 +48,7 @@ function LoginContent() {
       const result = await login(email, password);
       if (result.requires_2fa && result.partial_token) {
         router.push(
-          `/2fa?token=${encodeURIComponent(result.partial_token)}&next=${encodeURIComponent(destination)}`,
+          `/2fa?token=${encodeURIComponent(result.partial_token)}&next=${encodeURIComponent(destination)}${result.requires_enrollment ? "&enroll=1" : ""}`,
         );
         return;
       }

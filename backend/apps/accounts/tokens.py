@@ -5,9 +5,14 @@ import string
 from rest_framework_simplejwt.tokens import RefreshToken
 
 
-def make_tokens(user, tenant_id=None, *, platform_verified=False):
+def make_tokens(user, tenant_id=None, *, platform_verified=False, mfa_verified=False):
     """Issue JWTs. Platform OTP proof is set only after successful verification."""
     refresh = RefreshToken.for_user(user)
+    if mfa_verified:
+        from django.utils import timezone
+        if not getattr(user, "two_factor_enabled", False):
+            raise ValueError("MFA proof requires completed 2FA")
+        refresh["mfa_verified_at"] = int(timezone.now().timestamp())
     if platform_verified:
         from django.utils import timezone
         if not getattr(user, "is_platform_admin", False):

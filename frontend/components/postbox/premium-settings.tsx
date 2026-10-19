@@ -32,6 +32,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { useAsyncData } from "@/components/postbox/use-async";
+import { MailClientSecuritySettings } from "@/components/postbox/mail-client-security-settings";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
 import { usePostBoxAppRail } from "@/lib/postbox-app-rail";
 import {
@@ -73,7 +74,7 @@ const DESCRIPTIONS: Record<Area, string> = {
   vacation: "Send an automatic response while you are away.",
   forwarding: "See where incoming mail is forwarded by your organization.",
   notifications: "Choose the alerts PostBox can genuinely provide.",
-  security: "Change your password and review active sessions.",
+  security: "Protect your mailbox, manage SMTP/IMAP Passwords, and review active sessions.",
   clients: "Use the live IMAP and SMTP settings with another mail app.",
 };
 
@@ -1729,6 +1730,7 @@ function SecuritySection() {
 
   return (
     <>
+      <MailClientSecuritySettings />
       <SettingsCard
         title="Change password"
         description="Changing the mailbox password also revokes every other PostBox session."

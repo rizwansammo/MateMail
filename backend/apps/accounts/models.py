@@ -235,7 +235,7 @@ class TwoFactorSetup(models.Model):
         on_delete=models.CASCADE,
         related_name="two_factor_setup",
     )
-    totp_secret = models.CharField(max_length=64)
+    totp_secret = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -255,3 +255,36 @@ class TwoFactorBackupCode(models.Model):
 
     class Meta:
         db_table = "accounts_two_factor_backup_code"
+
+
+class VerifiedRecoveryEmail(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, primary_key=True,
+        on_delete=models.CASCADE, related_name="recovery_contact",
+    )
+    email = models.EmailField(blank=True, default="")
+    verified_at = models.DateTimeField(null=True, blank=True)
+    pending_email = models.EmailField(blank=True, default="")
+    challenge_hash = models.CharField(max_length=64, blank=True, default="")
+    code_hash = models.CharField(max_length=64, blank=True, default="")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "accounts_verified_recovery_email"
+
+
+class RecoveryLoginChallenge(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="recovery_login_challenges",
+    )
+    challenge_hash = models.CharField(max_length=64, unique=True)
+    code_hash = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "accounts_recovery_login_challenge"

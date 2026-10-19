@@ -18,6 +18,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.tenants.models import MemberRole, MemberStatus, Tenant, TenantMembership, TenantStatus
 from apps.tenants.host_binding import bound_tenant_slug, scope_memberships, tenant_matches_request
+from .totp_crypto import encrypt_secret, decrypt_secret
 from .models import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -257,6 +258,21 @@ class SignupView(APIView):
             )
 
             _send_verification_email(user)
+            from apps.tenants.security_policy import effective_two_factor_policy
+            from apps.tenants.models import OrganizationTwoFactorMode
+            if effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+                # Signup proves the new password, but it does not establish
+                # an enrolled second factor. Do not mint a refresh cookie or
+                # JWT that cannot legally access this workspace. A fresh Hub
+                # login starts the existing required-MFA enrollment flow.
+                return Response({
+                    "user": UserProfileSerializer(user).data,
+                    "tenant": _tenant_brief(tenant),
+                    "mailbox": mailbox_result,
+                    "requires_login": True,
+                    "requires_2fa": True,
+                    "detail": "Account created. Sign in to complete required 2FA.",
+                }, status=201)
             tokens = make_tokens(user, tenant_id=tenant.id)
             return authenticated_response(
                 tokens,
@@ -420,6 +436,15 @@ class LoginView(APIView):
 
         tenant_id = membership.tenant_id if membership else None
 
+        from apps.tenants.security_policy import effective_two_factor_policy
+        from apps.tenants.models import OrganizationTwoFactorMode
+        if (membership is not None and
+                effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE and
+                not user.two_factor_enabled):
+            partial = create_challenge(user, tenant_id)
+            return Response({"requires_2fa": True, "requires_enrollment": True,
+                             "partial_token": partial})
+
         if user.two_factor_enabled:
             # Opaque server-side challenge — deliberately NOT a JWT, so it cannot
             # be replayed as an API access token. See apps.accounts.challenge.
@@ -466,15 +491,38 @@ class RefreshView(APIView):
                 )
             if tenant_id:
                 tenant = Tenant.objects.filter(pk=tenant_id).first()
-                if not tenant_matches_request(request, tenant):
+                # An organization can be deleted while a signed refresh token
+                # is still valid. Never evaluate its policy on None or mint a
+                # new session for an organization that no longer exists.
+                if tenant is None or not tenant_matches_request(request, tenant):
                     return clear_refresh_cookie(
                         Response({"detail": "Session is not valid on this host."}, status=403)
                     )
+            from apps.tenants.security_policy import effective_two_factor_policy
+            from apps.tenants.models import OrganizationTwoFactorMode, TenantMembership, MemberStatus
+            if tenant_id:
+                account = _user_for(token)
+                if not TenantMembership.objects.filter(
+                    tenant=tenant, user=account, status=MemberStatus.ACTIVE,
+                ).exists():
+                    # A removed member cannot keep renewing the old session,
+                    # even if their JWT still carries a valid MFA proof.
+                    token.blacklist()
+                    return clear_refresh_cookie(
+                        Response({"detail": "Organization access revoked."}, status=403)
+                    )
+                if effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+                    if not account.two_factor_enabled or not token.get("mfa_verified_at"):
+                        return clear_refresh_cookie(
+                            Response({"detail": "Sign in with 2FA to continue."}, status=403)
+                        )
             access = str(token.access_token)
             # BLACKLIST_AFTER_ROTATION is on: blacklisting must happen before a
             # replacement is issued, so a stolen token cannot be exchanged twice.
             token.blacklist()
             new_refresh = RefreshToken.for_user(_user_for(token))
+            if token.get("mfa_verified_at"):
+                new_refresh["mfa_verified_at"] = token["mfa_verified_at"]
             if token.get("tenant_id"):
                 new_refresh["tenant_id"] = token["tenant_id"]
                 access = str(new_refresh.access_token)
@@ -678,12 +726,16 @@ class TwoFactorSetupView(APIView):
 
     def get(self, request):
         user = request.user
+        if user.two_factor_enabled:
+            # An active bearer token is not authority to export an already
+            # enrolled authenticator's reusable seed.
+            return Response({"detail": "2FA is already enabled."}, status=409)
         try:
             setup = user.two_factor_setup
-            secret = setup.totp_secret
+            secret = decrypt_secret(setup.totp_secret)
         except TwoFactorSetup.DoesNotExist:
             secret = pyotp.random_base32()
-            TwoFactorSetup.objects.create(user=user, totp_secret=secret)
+            TwoFactorSetup.objects.create(user=user, totp_secret=encrypt_secret(secret))
 
         uri = pyotp.totp.TOTP(secret).provisioning_uri(
             name=user.email,
@@ -714,7 +766,7 @@ class TwoFactorSetupView(APIView):
             _TOO_MANY_ATTEMPTS,
         )
 
-        totp = pyotp.TOTP(setup.totp_secret)
+        totp = pyotp.TOTP(decrypt_secret(setup.totp_secret))
         if not totp.verify(code, valid_window=1):
             ratelimit.hit(
                 TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
@@ -768,6 +820,23 @@ class TwoFactorVerifyView(APIView):
             discard_challenge(raw_challenge)
             return Response({"detail": "Invalid or expired token."}, status=401)
 
+        # A login challenge is bound to the tenant membership that existed at
+        # password verification time. Membership can be removed while the OTP
+        # prompt is open. Reject before accepting TOTP/consuming backup codes
+        # or issuing a new tenant-bound JWT, including on the shared host.
+        tenant_id = payload.get("tenant_id")
+        membership = (
+            scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    tenant_id=tenant_id, user=user, status=MemberStatus.ACTIVE,
+                ),
+            ).first()
+        ) if tenant_id else None
+        if (tenant_id and membership is None) or (bound_tenant_slug(request) and membership is None):
+            discard_challenge(raw_challenge)
+            return Response({"detail": "Organization access revoked or unavailable."}, status=403)
+
         # The per-challenge counter in apps.accounts.challenge caps attempts
         # against one token. It does not stop an attacker who holds the
         # password: after five failures they simply log in again for a fresh
@@ -793,7 +862,7 @@ class TwoFactorVerifyView(APIView):
                 limit=TWO_FACTOR_PER_USER.limit, window=TWO_FACTOR_PER_USER.window,
             )
 
-        totp = pyotp.TOTP(setup.totp_secret)
+        totp = pyotp.TOTP(decrypt_secret(setup.totp_secret))
         backup = None
         if totp.verify(code, valid_window=1):
             # A TOTP code stays valid for its whole timestep — with
@@ -830,19 +899,7 @@ class TwoFactorVerifyView(APIView):
             TWO_FACTOR_PER_USER.bucket, user.pk, window=TWO_FACTOR_PER_USER.window
         )
 
-        tenant_id = payload.get("tenant_id")
-        membership = (
-            scope_memberships(
-                request,
-                TenantMembership.objects.select_related("tenant").filter(
-                    tenant_id=tenant_id, user=user, status="active"
-                ),
-            ).first()
-        ) if tenant_id else None
-        if bound_tenant_slug(request) and membership is None:
-            return Response({"detail": "This account cannot use this host."}, status=403)
-
-        tokens = make_tokens(user, tenant_id=tenant_id)
+        tokens = make_tokens(user, tenant_id=tenant_id, mfa_verified=True)
 
         return authenticated_response(
             tokens,
@@ -880,11 +937,51 @@ class TwoFactorDisableView(APIView):
             )
             return Response({"detail": "Incorrect password."}, status=400)
 
+        # Do not reset the rate-limit after password verification alone:
+        # otherwise someone who knows the password can brute force the OTP.
+        from apps.tenants.security_policy import effective_two_factor_policy
+        from apps.tenants.models import OrganizationTwoFactorMode
+        if any(effective_two_factor_policy(m.tenant) == OrganizationTwoFactorMode.REQUIRE
+               for m in TenantMembership.objects.select_related("tenant").filter(
+                   user=user, status=MemberStatus.ACTIVE)):
+            return Response({"detail": "Your organization requires 2FA."}, status=409)
+
+        # A mailbox password alone is NOT permission to remove an enrolled
+        # authenticator. Require fresh proof of the existing second factor.
+        # Legacy response codes remain unchanged for incorrect passwords.
+        if user.two_factor_enabled:
+            code = serializer.validated_data.get("code", "").strip()
+            setup = TwoFactorSetup.objects.filter(user=user).first()
+            if not code or setup is None:
+                return Response({"detail": "Current 2FA verification is required."}, status=403)
+            valid_totp = False
+            if len(code) == 6 and code.isascii() and code.isdecimal():
+                valid_totp = pyotp.TOTP(decrypt_secret(setup.totp_secret)).verify(
+                    code, valid_window=1,
+                )
+            valid_backup = False
+            backup = None
+            if valid_totp:
+                valid_totp = ratelimit.claim_once(
+                    "2fa:totp", f"{user.pk}:{code}", ttl=TOTP_REPLAY_TTL,
+                )
+            if not valid_totp:
+                backup = TwoFactorBackupCode.objects.filter(
+                    user=user, code_hash=hash_token(code), is_used=False,
+                ).first()
+                valid_backup = backup is not None
+            if not (valid_totp or valid_backup):
+                ratelimit.hit(
+                    TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+                    limit=TWO_FACTOR_MANAGE_PER_USER.limit,
+                    window=TWO_FACTOR_MANAGE_PER_USER.window,
+                )
+                return Response({"detail": "Current 2FA verification failed."}, status=403)
+
         ratelimit.reset(
             TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
             window=TWO_FACTOR_MANAGE_PER_USER.window,
         )
-
         TwoFactorBackupCode.objects.filter(user=user).delete()
         TwoFactorSetup.objects.filter(user=user).delete()
         user.two_factor_enabled = False

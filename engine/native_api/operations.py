@@ -110,10 +110,8 @@ def _doveadm(command: str, parameters: dict) -> list:
     """
     One doveadm command over Dovecot's HTTP API.
 
-    The API takes a list of commands, each `[name, parameters, tag]`, and
-    answers with a list of `[type, payload, tag]`. Only read commands are used
-    from here — this is a reporting path, and nothing in NE4 needs doveadm to
-    change a mailbox.
+    The API may invoke explicitly authorized account-security operations to
+    disconnect existing authenticated mail-client sessions.
     """
     if not DOVEADM_API_KEY:
         raise OperationUnavailable("the doveadm API key is not configured")
@@ -188,3 +186,25 @@ def _as_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def kick_mailbox_sessions(address: str) -> int:
+    """Disconnect authenticated IMAP sessions for exactly one mailbox.
+
+    The caller must first authorize this mailbox. Never permit caller-defined
+    masks or wildcards. An unreachable Dovecot or unexpected reply fails.
+    """
+    from validation import email_address
+    normalized = email_address(address, "address")
+    if "*" in normalized or "?" in normalized:
+        raise InvalidIdentifier("wildcards prohibited")
+    # Dovecot 2.4.5 HTTP schema requires mask as an array and lacks the
+    # old force field. Verified on a real isolated IMAP session.
+    result = _doveadm("kick", {"mask": [normalized]})
+    if not isinstance(result, list) or len(result) != 1:
+        raise OperationUnavailable("doveadm kick returned unexpected response")
+    response = result[0]
+    if (not isinstance(response, list) or len(response) < 2
+            or response[0] != "doveadmResponse"):
+        raise OperationUnavailable("doveadm kick was not acknowledged")
+    return 1

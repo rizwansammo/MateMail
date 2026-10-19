@@ -80,6 +80,15 @@ x-backend-env: &backend_env
   # (mail_engine.E011/E012) before any customer action could.
   NATIVE_ENGINE_API_URL: ${NATIVE_ENGINE_API_URL:-}
   NATIVE_ENGINE_API_SECRET: ${NATIVE_ENGINE_API_SECRET:-}
+  # Phase 7 Hub/PostBox MFA: each distinct Fernet key must persist across
+  # restarts. Missing keys fail closed in the MFA cryptographic code; never
+  # generate a replacement on application startup. All switches default OFF.
+  HUB_2FA_FERNET_KEY: ${HUB_2FA_FERNET_KEY:-}
+  POSTBOX_2FA_FERNET_KEY: ${POSTBOX_2FA_FERNET_KEY:-}
+  ORGANIZATION_2FA_POLICY_ENABLED: ${ORGANIZATION_2FA_POLICY_ENABLED:-False}
+  ORGANIZATION_2FA_ENFORCEMENT_READY: ${ORGANIZATION_2FA_ENFORCEMENT_READY:-False}
+  POSTBOX_2FA_ENABLED: ${POSTBOX_2FA_ENABLED:-False}
+  SMTP_IMAP_SECURITY_ENABLED: ${SMTP_IMAP_SECURITY_ENABLED:-False}
   # Inactive system mail staging is OFF for ordinary production deployments.
   SYSTEM_MAIL_STAGING_ENABLED: ${SYSTEM_MAIL_STAGING_ENABLED:-False}
   # Phase 6A: no platform mailbox content API without operator enablement.

@@ -74,6 +74,21 @@ class EngineUnavailable(MailEngineError):
     )
 
 
+class EngineSessionDisconnectUnverified(MailEngineError):
+    """Credential mutation COMMITTED; old client sessions need a verified kick.
+
+    Different from EngineUnavailable: blindly showing "try again later" may
+    incorrectly imply the credential was not revoked. The customer must know
+    active IMAP connections could remain alive until the disconnect succeeds.
+    """
+
+    customer_message = (
+        "SMTP/IMAP security settings were saved, but existing mail-client "
+        "connections could not be confirmed disconnected. Retry this same "
+        "security action after service is restored."
+    )
+
+
 class AlreadyExists(MailEngineError):
     """
     The engine already holds a conflicting object that is not the one we meant.

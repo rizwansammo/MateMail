@@ -51,6 +51,8 @@ import sys
 import urllib.parse
 
 import db
+import client_credentials
+import kick_recovery
 import dkim as dkim_lib
 import operations
 import provisioning
@@ -466,13 +468,56 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if handler is None:
             self._send(404, {"error": "not found"})
             return
+        committed = False
         try:
             body = self._body()
+            # Security credentials are revoked/disabled in PostgreSQL FIRST.
+            # An unavailable doveadm administrative API must not keep a stolen
+            # password valid for new authentications. After COMMIT, disconnect
+            # existing IMAP sessions. A disconnect failure surfaces as 503
+            # (the mutation is already committed and requires reconciliation).
+            needs_kick = route in {
+                "/v1/mailboxes/client/revoke",
+                "/v1/mailboxes/client/policy",
+            }
+            pending = None
             with db.connect_runtime() as conn:
                 result = handler(conn, body)
+                if needs_kick and kick_recovery.enabled():
+                    # The queue record and the credential/policy change either
+                    # commit together or both roll back. Crash-safe outbox.
+                    pending = kick_recovery.enqueue(conn, body["address"])
+            # Only a successfully exited transaction guarantees commit. Any
+            # database/handler failure before this line must never be called
+            # a saved security change by the HTTP/adapter error contract.
+            committed = True
+            if needs_kick:
+                operations.kick_mailbox_sessions(body["address"])
+                if pending is not None:
+                    try:
+                        with db.connect_runtime() as conn:
+                            kick_recovery.acknowledge(conn, *pending)
+                    except Exception as exc:  # noqa: BLE001
+                        # Queue remains durable; never pretend it was cleared.
+                        logger.warning("IMAP kick acknowledgement failed: %s", type(exc).__name__)
+                        raise operations.OperationUnavailable("disconnect acknowledgement unavailable") from exc
             self._send(200, result if result is not None else {"ok": True})
         except operations.InvalidIdentifier as exc:
             self._send(400, {"error": str(exc)})
+        except operations.OperationUnavailable:
+            # Only the post-commit doveadm failure may assert that the
+            # credential change was saved. Earlier failures may have rolled
+            # back and must retain the ordinary service-unavailable response.
+            if committed and route in ("/v1/mailboxes/client/revoke",
+                                        "/v1/mailboxes/client/policy"):
+                self._send(503, {
+                    "error": "Credential state updated; active session disconnect unverified. Retry security action.",
+                    "code": "mail_client_disconnect_unverified",
+                })
+            else:
+                self._send(503, {"error": "Mail administrative component unavailable"})
+        except PermissionError:
+            self._send(503, {"error": "Client credential service not enabled"})
         except ValidationError as exc:
             self._send(400, {"error": exc.message, "field": exc.field})
         except provisioning.NotFound as exc:
@@ -547,6 +592,33 @@ def _mailboxes_set_password(conn, body):
     # Deliberately returns nothing about the credential — not the hash, not its
     # length, not a prefix.
     return {"ok": True}
+
+
+def _client_verify_primary(conn, body):
+    validation.payload(body, allowed={"address", "password"}, required={"address", "password"})
+    return client_credentials.verify_primary(conn, body["address"], body["password"])
+
+
+def _client_list(conn, body):
+    validation.payload(body, allowed={"address"}, required={"address"})
+    return client_credentials.list_credentials(conn, body["address"])
+
+
+def _client_issue(conn, body):
+    validation.payload(body, allowed={"address", "label"}, required={"address", "label"})
+    return client_credentials.issue_credential(conn, body["address"], body["label"])
+
+
+def _client_revoke(conn, body):
+    validation.payload(body, allowed={"address", "id"}, required={"address", "id"})
+    return client_credentials.revoke_credential(conn, body["address"], body["id"])
+
+
+def _client_policy(conn, body):
+    validation.payload(body, allowed={"address", "enabled", "dedicated_required"},
+                       required={"address", "enabled", "dedicated_required"})
+    return client_credentials.set_policy(conn, body["address"],
+                                         body["enabled"], body["dedicated_required"])
 
 
 def _mailboxes_set_quota(conn, body):
@@ -727,6 +799,9 @@ def _quarantine_release(conn, body):
 
 
 _READ_ROUTES = {
+    # Internal API-secret-only, aggregate-only operational visibility. No
+    # mailbox IDs, addresses or passwords are returned.
+    "/v1/mailboxes/client/recovery/status": lambda conn, _: kick_recovery.recovery_status(conn),
     "/v1/domains":             _read_domains,
     "/v1/mailboxes":           _read_mailboxes,
     "/v1/aliases":             _read_alias,
@@ -749,6 +824,11 @@ _WRITE_ROUTES = {
     "/v1/mailboxes/ensure":        _mailboxes_ensure,
     "/v1/mailboxes/set-active":    _mailboxes_set_active,
     "/v1/mailboxes/set-password":  _mailboxes_set_password,
+    "/v1/mailboxes/verify-primary": _client_verify_primary,
+    "/v1/mailboxes/client/list":    _client_list,
+    "/v1/mailboxes/client/issue":   _client_issue,
+    "/v1/mailboxes/client/revoke":  _client_revoke,
+    "/v1/mailboxes/client/policy":  _client_policy,
     "/v1/mailboxes/set-quota":     _mailboxes_set_quota,
     "/v1/mailboxes/delete":        _mailboxes_delete,
     "/v1/aliases/ensure":          _aliases_ensure,
@@ -772,6 +852,8 @@ class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
 
 
 def main():
+    migrations_ready = False
+    recovery_worker = None
     try:
         with db.connect() as conn:
             version = db.apply_migrations(conn)
@@ -787,6 +869,7 @@ def main():
             # Idempotent, and it never generates a key — minting one here would
             # publish material no DNS record names.
             provisioning.reconcile_dkim(conn)
+            migrations_ready = version >= db.REQUIRED_VERSION
     except Exception as exc:                     # noqa: BLE001
         # Start anyway and report unready. Exiting would make the container
         # restart-loop against a database that may simply be slow to come up,
@@ -794,6 +877,12 @@ def main():
         # not ready.
         logger.error("could not apply engine migrations: %s", type(exc).__name__)
 
+    if kick_recovery.enabled():
+        if migrations_ready and client_credentials.mutation_enabled():
+            recovery_worker = kick_recovery.start_worker(db.connect_runtime)
+            logger.info("durable IMAP session-disconnect recovery enabled")
+        else:
+            logger.error("durable IMAP recovery requested but schema or credential API is not ready")
     server = ThreadedHTTPServer(("0.0.0.0", LISTEN_PORT), Handler)
     logger.info("MateMail Native Engine API (NE2) listening on 0.0.0.0:%s", LISTEN_PORT)
     logger.info("engine database target %s:%s/%s", DB_HOST, DB_PORT, DB_NAME)
@@ -813,6 +902,9 @@ def main():
         logger.info("shutting down")
     finally:
         server.server_close()
+        if recovery_worker is not None:
+            recovery_worker[0].set()
+            recovery_worker[1].join(timeout=2)
 
 
 if __name__ == "__main__":

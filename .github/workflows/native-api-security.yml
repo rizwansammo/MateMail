@@ -78,6 +78,18 @@ jobs:
               python -m unittest discover -s tests -p "test_platform_canary.py" -v
             '
 
+      # Phase 7C: security changes were tested locally but the old workflow
+      # collected only three named test modules. Run the complete Native API
+      # suite from the built candidate image on every affected pull request.
+      - name: Complete Native API regression suite (includes Phase 7 MFA)
+        run: |
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev,size=32m \
+            --entrypoint sh matemail-native-api-security-test:ci -ec '
+              cd /opt/matemail/native_api
+              python -B -m unittest discover -s tests -p "test_*.py" -q
+            '
+
       - name: Remaining system roles isolated unit tests
         run: |
           docker run --rm --entrypoint sh \

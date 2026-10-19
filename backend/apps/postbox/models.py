@@ -37,6 +37,68 @@ class MailboxScopedQuerySet(models.QuerySet):
         return self.filter(mailbox=mailbox)
 
 
+class MailClientAccessPolicy(models.Model):
+    """Staged SMTP/IMAP access preference for a *mailbox* identity.
+
+    Hub accounts and PostBox mailboxes are deliberately different principals.
+    The absence of a row means legacy access is unchanged. This is metadata
+    ONLY until Native Engine authentication applies it server-side; no UI or
+    user-facing disable operation must imply enforcement before that rollout.
+    """
+
+    mailbox = models.OneToOneField(
+        "mailboxes.Mailbox", on_delete=models.CASCADE,
+        related_name="mail_client_access_policy",
+        primary_key=True,
+    )
+    smtp_imap_enabled = models.BooleanField(default=True)
+    changed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "postbox_mail_client_access_policy"
+
+
+class MailboxTwoFactorSetup(models.Model):
+    """Mailbox MFA belongs to a PostBox identity, not a Hub User.
+
+    The secret is Fernet-encrypted with an independent configured key.
+    Null enabled_at means a pending setup and never authorizes 2FA login.
+    """
+
+    mailbox = models.OneToOneField(
+        "mailboxes.Mailbox", on_delete=models.CASCADE,
+        primary_key=True, related_name="two_factor_setup",
+    )
+    totp_secret_encrypted = models.TextField()
+    enabled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "postbox_mailbox_two_factor"
+
+
+class MailboxTwoFactorBackupCode(models.Model):
+    """High-entropy recovery code digest, never the original raw secret."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    mailbox = models.ForeignKey(
+        "mailboxes.Mailbox", on_delete=models.CASCADE,
+        related_name="two_factor_backup_codes",
+    )
+    code_hash = models.CharField(max_length=64)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "postbox_mailbox_two_factor_backup"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("mailbox", "code_hash"),
+                name="unique_postbox_mfa_recovery_digest",
+            )
+        ]
+
+
 class PostBoxSession(models.Model):
     """
     One signed-in PostBox browser.
@@ -76,6 +138,7 @@ class PostBoxSession(models.Model):
     last_seen_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     revoked_at = models.DateTimeField(null=True, blank=True)
+    mfa_verified_at = models.DateTimeField(null=True, blank=True)
 
     #: Recorded so an operator can recognise their own sessions in the security
     #: page. Truncated on write; a full user-agent string is a fingerprint and
@@ -114,7 +177,8 @@ class PostBoxSession(models.Model):
         return hashlib.sha256(raw.encode()).hexdigest()
 
     @classmethod
-    def issue(cls, mailbox, *, remembered=False, user_agent="", ip_address=None):
+    def issue(cls, mailbox, *, remembered=False, user_agent="", ip_address=None,
+              mfa_verified=False):
         """Create a session and return (raw_token, row). The raw token is never stored."""
         raw = secrets.token_urlsafe(48)
         ttl = cls.REMEMBERED_TTL if remembered else cls.SESSION_TTL
@@ -125,6 +189,7 @@ class PostBoxSession(models.Model):
             user_agent=(user_agent or "")[:200],
             ip_address=ip_address,
             remembered=remembered,
+            mfa_verified_at=timezone.now() if mfa_verified else None,
         )
         return raw, row
 

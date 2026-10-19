@@ -18,9 +18,17 @@ from tests.factories import (
 MAIL_PASSWORD = "Separate-Mail-Pass-937"
 
 
-@override_settings(PASSWORD_HASHERS=FAST_PASSWORD_HASHERS)
+@override_settings(
+    PASSWORD_HASHERS=FAST_PASSWORD_HASHERS,
+    CACHES={"default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "phase5-invite-acceptance-isolated",
+    }},
+)
 class InviteMailboxPhase5Tests(TestCase):
     def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
         disable_throttling(self)
         self.owner = make_user("owner@acme.test")
         self.tenant = make_tenant(self.owner, name="Acme", slug="phase5-acme")
@@ -107,6 +115,53 @@ class InviteMailboxPhase5Tests(TestCase):
         )
         self.assertEqual(again.status_code, 400)
         self.assertEqual(Mailbox.objects.filter(email="colleague@acme.test").count(), 1)
+
+    @override_settings(
+        ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ORGANIZATION_2FA_ENFORCEMENT_READY=True,
+    )
+    def test_required_mfa_invite_accept_never_mints_unverified_session(self):
+        invitation = self.invite(email="colleague@acme.test", create_mailbox=False)
+        token = invitation.data["invite_url"].split("token=", 1)[1]
+        self.tenant.two_factor_policy = "require"
+        self.tenant.save(update_fields=["two_factor_policy"])
+        person = make_user("colleague@acme.test")
+        result = auth_client(person).post(
+            "/api/teams/invites/accept/", {"token": token}, format="json",
+        )
+        self.assertEqual(result.status_code, 200, result.data)
+        self.assertTrue(result.data["requires_login"])
+        self.assertNotIn("access", result.data)
+        self.assertNotIn("matemail_refresh", result.cookies)
+        self.assertTrue(TenantMembership.objects.filter(
+            tenant=self.tenant, user=person, status=MemberStatus.ACTIVE,
+        ).exists())
+
+    @override_settings(
+        ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ORGANIZATION_2FA_ENFORCEMENT_READY=True,
+    )
+    def test_required_mfa_invite_signup_requires_fresh_login(self):
+        invitation = self.invite(email="newhire@acme.test", create_mailbox=False)
+        token = invitation.data["invite_url"].split("token=", 1)[1]
+        self.tenant.two_factor_policy = "require"
+        self.tenant.save(update_fields=["two_factor_policy"])
+        with mock.patch("apps.accounts.views._send_verification_email"):
+            result = APIClient().post(
+                "/api/auth/signup/",
+                {
+                    "email": "newhire@acme.test", "password": TEST_PASSWORD,
+                    "full_name": "New Hire", "invite_token": token,
+                }, format="json",
+            )
+        self.assertEqual(result.status_code, 201, result.data)
+        self.assertTrue(result.data["requires_login"])
+        self.assertNotIn("access", result.data)
+        self.assertNotIn("matemail_refresh", result.cookies)
+        self.assertTrue(TenantMembership.objects.filter(
+            tenant=self.tenant, user__email="newhire@acme.test",
+            status=MemberStatus.ACTIVE,
+        ).exists())
 
     def test_missing_password_does_not_accept_or_take_mailbox(self):
         res = self.invite()

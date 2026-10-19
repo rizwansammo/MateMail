@@ -18,6 +18,7 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
 import { CustomHostnamesSettings } from "@/components/workspace/custom-hostnames-settings";
+import { OrganizationTwoFactorPolicy } from "@/components/workspace/organization-two-factor-policy";
 import {
   PortalButton,
   PortalCard,
@@ -76,7 +77,7 @@ export default function SettingsPage() {
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [tenant?.id]);
+  }, [tenant]);
 
   useEffect(() => {
     if (!tenant?.id) return;
@@ -189,6 +190,8 @@ export default function SettingsPage() {
           </PortalNotice>
         </div>
       )}
+
+      <OrganizationTwoFactorPolicy tenantId={workspace.id} canEdit={canEdit} />
 
       <div className="portal-settings-layout">
         <div>

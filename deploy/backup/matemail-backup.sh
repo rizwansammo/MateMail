@@ -138,6 +138,22 @@ for f in $CONFIG_FILES; do
 done
 log "  $CONFIG_COUNT file(s)${CONFIG_MISSING:+, missing:$CONFIG_MISSING}"
 
+# These two env files contain the deployment's persistent security settings,
+# including the (possibly not-yet-enabled) Hub/PostBox MFA key configuration.
+# A successful snapshot MUST NOT omit either file silently. Some other CONFIG_FILES
+# are optional across legacy deployments, so enforce this short, fixed critical
+# set instead of breaking backups for retired nginx virtual hosts.
+REQUIRED_RECOVERY_CONFIG_FILES="/opt/MateMail/app/.env /opt/MateMail/engine/deploy/native-engine/.env"
+for required in $REQUIRED_RECOVERY_CONFIG_FILES; do
+    case " $CONFIG_FILES " in
+        *" $required "*) ;;
+        *) die "required recovery configuration is not listed: $required" ;;
+    esac
+    required_stage="$STAGE/config/$(echo "${required#/}" | tr / _)"
+    [ -s "$required_stage" ] \
+        || die "required recovery configuration is missing or empty: $required"
+done
+
 # ── Mail storage ─────────────────────────────────────────────────────────────
 # Resolved from the NAMED volume rather than assuming where Docker keeps it.
 # Read in place: copying every Maildir into a staging area first would double
@@ -187,6 +203,7 @@ STAGE="$STAGE" VMAIL_SRC="$VMAIL_SRC" STARTED="$STARTED" \
 VMAIL_BYTES="$VMAIL_BYTES" VMAIL_FILES="$VMAIL_FILES" \
 MATEMAIL_COUNTS="$MATEMAIL_COUNTS" NATIVE_COUNTS="$NATIVE_COUNTS" \
 OFFSITE_REPOSITORY="${OFFSITE_REPOSITORY:-}" \
+REQUIRED_RECOVERY_CONFIG_FILES="$REQUIRED_RECOVERY_CONFIG_FILES" \
 python3 - <<'PY'
 import hashlib, json, os, pathlib, socket
 
@@ -221,6 +238,10 @@ manifest = {
         "vmail": os.environ["VMAIL_SRC"],
     },
     "staged_files": files,
+    "required_config": [
+        "config/" + path.lstrip("/").replace("/", "_")
+        for path in os.environ["REQUIRED_RECOVERY_CONFIG_FILES"].split()
+    ],
     "dkim": {
         "volume": os.environ.get("DKIM_VOLUME", ""),
         "keys": int(os.environ["DKIM_KEYS"]),

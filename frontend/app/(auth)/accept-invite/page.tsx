@@ -31,6 +31,7 @@ function AcceptInviteContent() {
 
   const [accepting, setAccepting] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [requiresMfaLogin, setRequiresMfaLogin] = useState(false);
   const [error, setError] = useState("");
   const [mailboxPassword, setMailboxPassword] = useState("");
   const [mailboxWarning, setMailboxWarning] = useState("");
@@ -57,6 +58,7 @@ function AcceptInviteContent() {
       });
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
+        setRequiresMfaLogin(body.requires_login === true);
         if (body.access && body.user && body.tenant) {
           setAuthResult(body);
         }
@@ -126,12 +128,17 @@ function AcceptInviteContent() {
             </p>
           </div>
           {mailboxWarning && <p role="status" className="text-sm text-amber-700">{mailboxWarning}</p>}
+          {requiresMfaLogin && (
+            <p role="status" className="text-sm text-amber-700">
+              This organization requires two-factor authentication. Sign in again
+              to verify your authenticator or complete enrollment before opening the workspace.
+            </p>
+          )}
           <button
-            onClick={() => router.push("/app")}
-
+            onClick={() => router.push(requiresMfaLogin ? "/login" : "/app")}
             className="rounded-md bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-700"
           >
-            Open workspace
+            {requiresMfaLogin ? "Sign in to complete 2FA" : "Open workspace"}
           </button>
         </div>
       </InviteShell>

@@ -390,6 +390,11 @@ services:
       # Request handlers use a limited database principal when enabled.
       NATIVE_RUNTIME_DB_ENABLED: ${NATIVE_RUNTIME_DB_ENABLED:-False}
       NATIVE_RUNTIME_DB_PASSWORD: ${NATIVE_RUNTIME_DB_PASSWORD:-}
+      # Stage 7 MFA feature gates. All remain OFF until approved canary.
+      # Retry outbox requires the credential API and schema v15.
+      NATIVE_CLIENT_CREDENTIAL_API_ENABLED: ${NATIVE_CLIENT_CREDENTIAL_API_ENABLED:-False}
+      NATIVE_TRUSTED_WEB_AUTH_ENABLED: ${NATIVE_TRUSTED_WEB_AUTH_ENABLED:-False}
+      NATIVE_CLIENT_KICK_RECOVERY_ENABLED: ${NATIVE_CLIENT_KICK_RECOVERY_ENABLED:-False}
       NATIVE_API_PORT: "8451"
       NATIVE_DKIM_DIR: /var/lib/rspamd/dkim
     volumes:

@@ -59,6 +59,52 @@ MAX_SAVED_ACCOUNTS = 8
 GENERIC_SIGNIN_FAILURE = "Those details are not correct."
 
 
+class MailboxSecondFactorRequired(Exception):
+    """A password-verified mailbox must complete a second-factor challenge."""
+
+    def __init__(self, mailbox, remember=False):
+        self.mailbox = mailbox
+        self.remember = bool(remember)
+
+
+def mailbox_requires_two_factor(mailbox) -> bool:
+    """Evaluate live mailbox+organization security; never infer Hub user by email."""
+    from django.conf import settings
+    if not getattr(settings, "POSTBOX_2FA_ENABLED", False):
+        return False
+    from apps.tenants.security_policy import effective_two_factor_policy
+    from apps.tenants.models import OrganizationTwoFactorMode
+    from .models import MailboxTwoFactorSetup
+    if effective_two_factor_policy(mailbox.tenant) == OrganizationTwoFactorMode.REQUIRE:
+        return True
+    return MailboxTwoFactorSetup.objects.filter(
+        mailbox=mailbox, enabled_at__isnull=False,
+    ).exists()
+
+
+def trusted_primary_authenticate(address: str, password: str) -> bool:
+    """When client-password security is live, IMAP MUST NOT verify web logins.
+
+    The public Dovecot passdb can only authorize dedicated credentials for a
+    2FA mailbox. A separate Native API bcrypt check verifies the original
+    primary password for PostBox, without exposing it to SMTP/IMAP.
+    """
+    from django.conf import settings
+    mfa = getattr(settings, "POSTBOX_2FA_ENABLED", False)
+    clients = getattr(settings, "SMTP_IMAP_SECURITY_ENABLED", False)
+    if not mfa and not clients:
+        return imap.authenticate(address, password)
+    if not (mfa and clients) or getattr(settings, "MAIL_ENGINE_ADAPTER", "") != "native":
+        return False
+    try:
+        from apps.mail_engine.factory import get_adapter
+        return get_adapter().verify_primary_password(address, password) is True
+    except Exception as exc:
+        # Backend failures never result in falling back to public IMAP auth.
+        logger.warning("Trusted primary-password verification unavailable: %s", type(exc).__name__)
+        return False
+
+
 class MailboxUnavailable(Exception):
     """The mailbox exists but may not be used right now. Carries a safe message."""
 
@@ -128,7 +174,7 @@ def sign_in(address: str, password: str, *, request=None, remember: bool = False
     # The password check runs even for an unknown address, so a request for a
     # non-existent mailbox costs the same time as a real one. Skipping it is a
     # timing oracle that answers "does this address exist".
-    authenticated = imap.authenticate((address or "").strip(), password)
+    authenticated = trusted_primary_authenticate((address or "").strip(), password)
 
     if mailbox is None or not authenticated:
         logger.info(
@@ -143,6 +189,9 @@ def sign_in(address: str, password: str, *, request=None, remember: bool = False
         # Logged with the real reason, answered with the generic one.
         logger.info("PostBox sign-in blocked for %s: %s", _redact(address), exc.message)
         raise MailboxUnavailable(GENERIC_SIGNIN_FAILURE) from exc
+
+    if mailbox_requires_two_factor(mailbox):
+        raise MailboxSecondFactorRequired(mailbox, remember=remember)
 
     raw, session = PostBoxSession.issue(
         mailbox,
@@ -176,6 +225,9 @@ def session_for_token(raw_token: str) -> PostBoxSession | None:
         .first()
     )
     if session is None or not session.is_active:
+        return None
+    if mailbox_requires_two_factor(session.mailbox) and session.mfa_verified_at is None:
+        # Pre-enforcement sessions cannot bypass newly enabled mailbox MFA.
         return None
     return session
 

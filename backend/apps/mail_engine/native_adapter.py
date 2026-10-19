@@ -53,6 +53,7 @@ from .dto import (
 from .errors import (
     EngineCapabilityMissing,
     EngineUnavailable,
+    EngineSessionDisconnectUnverified,
     MailEngineError,
     NotFound,
     QuotaExceeded,
@@ -143,6 +144,23 @@ class NativeMailEngineAdapter(MailEngineAdapter):
         if response.status_code >= 500:
             logger.error("Native engine server error [%s] status=%s", operation,
                          response.status_code)
+            # Only the authenticated engine's exact code and the two
+            # credentials routes authorize "mutation already committed".
+            # Never infer partial commit merely from a generic HTTP 503.
+            if response.status_code == 503 and path in {
+                "/v1/mailboxes/client/revoke",
+                "/v1/mailboxes/client/policy",
+            }:
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = {}
+                if (isinstance(payload, dict) and payload.get("code")
+                        == "mail_client_disconnect_unverified"):
+                    raise EngineSessionDisconnectUnverified(
+                        "status=503 committed, kick unverified",
+                        operation=operation,
+                    )
             raise EngineUnavailable(f"status={response.status_code}", operation=operation)
 
         if response.status_code == 404:
@@ -250,6 +268,38 @@ class NativeMailEngineAdapter(MailEngineAdapter):
         self._request("POST", "/v1/mailboxes/set-password",
                       json={"address": address, "password": password},
                       operation="set_mailbox_password")
+
+    # Stage 7A: private control-plane authentication. NEVER use SMTP/IMAP
+    # credentials for PostBox primary-password verification.
+    def verify_primary_password(self, address: str, password: str) -> bool:
+        if not password:
+            return False
+        result = self._request(
+            "POST", "/v1/mailboxes/verify-primary",
+            json={"address": address, "password": password},
+            operation="verify_primary_password",
+        )
+        return result.get("valid") is True
+
+    def list_client_credentials(self, address: str) -> dict:
+        return self._request("POST", "/v1/mailboxes/client/list",
+                             json={"address": address}, operation="list_client_credentials")
+
+    def issue_client_credential(self, address: str, label: str) -> dict:
+        return self._request("POST", "/v1/mailboxes/client/issue",
+                             json={"address": address, "label": label},
+                             operation="issue_client_credential")
+
+    def revoke_client_credential(self, address: str, credential_id: str) -> dict:
+        return self._request("POST", "/v1/mailboxes/client/revoke",
+                             json={"address": address, "id": credential_id},
+                             operation="revoke_client_credential")
+
+    def set_client_policy(self, address: str, enabled: bool, dedicated_required: bool) -> dict:
+        return self._request("POST", "/v1/mailboxes/client/policy",
+                             json={"address": address, "enabled": enabled,
+                                   "dedicated_required": dedicated_required},
+                             operation="set_client_policy")
 
     def set_mailbox_quota(self, address: str, quota_mb: int) -> None:
         self._request("POST", "/v1/mailboxes/set-quota",

@@ -15,14 +15,14 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, Loader2, Mail } from "lucide-react";
+import { KeyRound, Loader2, Mail, ShieldCheck } from "lucide-react";
 
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
-import { postbox, type SavedPostBoxAccount } from "@/lib/postbox-api";
+import { postbox, type PostBoxMfaChallenge, type SavedPostBoxAccount } from "@/lib/postbox-api";
 
 export default function PostBoxLoginPage() {
   const router = useRouter();
-  const { mailbox, isLoading, signIn } = usePostBox();
+  const { mailbox, isLoading, signIn, finalizeSecondFactor } = usePostBox();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,10 +32,15 @@ export default function PostBoxLoginPage() {
   const [showHelp, setShowHelp] = useState(false);
   const [savedAccounts, setSavedAccounts] = useState<SavedPostBoxAccount[]>([]);
   const [switchingAccount, setSwitchingAccount] = useState<string | null>(null);
+  const [challenge, setChallenge] = useState<PostBoxMfaChallenge | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaSetup, setMfaSetup] = useState<{ secret: string; uri: string } | null>(null);
+  const [oneTimeSecrets, setOneTimeSecrets] = useState<{ codes: string[]; clientPassword?: string } | null>(null);
 
   useEffect(() => {
-    if (!isLoading && mailbox) router.replace("/postbox");
-  }, [isLoading, mailbox, router]);
+    // Do not navigate away before one-time recovery codes are saved.
+    if (!isLoading && mailbox && !oneTimeSecrets) router.replace("/postbox");
+  }, [isLoading, mailbox, router, oneTimeSecrets]);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +63,14 @@ export default function PostBoxLoginPage() {
       setError(null);
       setBusy(true);
       try {
-        await signIn(email.trim(), password, remember);
+        const result = await signIn(email.trim(), password, remember);
+        setPassword("");
+        if (result?.requires_2fa) {
+          setChallenge(result);
+          setMfaCode("");
+          setMfaSetup(null);
+          return;
+        }
         router.replace("/postbox");
       } catch (caught) {
         setError(describePostBoxError(caught, "Those details are not correct."));
@@ -69,6 +81,32 @@ export default function PostBoxLoginPage() {
     },
     [email, password, remember, signIn, router],
   );
+
+  async function completeChallenge(event: React.FormEvent) {
+    event.preventDefault();
+    if (!challenge) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (challenge.requires_enrollment) {
+        if (!mfaSetup) {
+          setMfaSetup(await postbox.beginMailbox2fa(challenge.partial_token));
+          return;
+        }
+        const result = await postbox.confirmMailbox2fa(challenge.partial_token, mfaCode);
+        setOneTimeSecrets({ codes: result.backup_codes, clientPassword: result.smtp_imap_password });
+        await finalizeSecondFactor();
+        setChallenge(null);
+        setMfaCode("");
+      } else {
+        await postbox.verifyMailbox2fa(challenge.partial_token, mfaCode);
+        await finalizeSecondFactor();
+        router.replace("/postbox");
+      }
+    } catch (caught) {
+      setError(describePostBoxError(caught, "Could not verify the authenticator code."));
+    } finally { setBusy(false); }
+  }
 
   return (
     <div className="pb pb-premium-login">
@@ -87,7 +125,59 @@ export default function PostBoxLoginPage() {
           <h1 id="postbox-login-title">Welcome back.</h1>
           <p>Sign in to your PostBox mailbox.</p>
 
-          {savedAccounts.length > 0 && (
+          {oneTimeSecrets ? (
+            <div className="pb-premium-login-form">
+              <div className="pb-info-box">
+                <ShieldCheck className="h-5 w-5" />
+                <div><strong>Save your recovery information now</strong><p>These one-time codes cannot be shown again. Keep them in a secure password manager.</p></div>
+              </div>
+              <div className="grid gap-2">
+                {oneTimeSecrets.codes.map((value) => <code key={value} className="break-all">{value}</code>)}
+                {oneTimeSecrets.clientPassword && (
+                  <div className="pb-premium-field">
+                    <label>Initial SMTP/IMAP Password (shown once)</label>
+                    <code className="break-all">{oneTimeSecrets.clientPassword}</code>
+                  </div>
+                )}
+              </div>
+              <button type="button" className="pb-premium-login-submit" onClick={() => {
+                setOneTimeSecrets(null);
+                router.replace("/postbox");
+              }}>I&apos;ve saved my codes — open PostBox</button>
+            </div>
+          ) : challenge ? (
+            <form onSubmit={completeChallenge} className="pb-premium-login-form">
+              <div className="pb-info-box">
+                <ShieldCheck className="h-5 w-5" />
+                <div><strong>{challenge.requires_enrollment ? "Set up mailbox 2FA" : "Authenticator verification required"}</strong>
+                  <p>{challenge.requires_enrollment ? "Your organization requires an authenticator before continuing." : "Enter your current authenticator code or saved backup code."}</p></div>
+              </div>
+              {challenge.requires_enrollment && !mfaSetup ? (
+                <button type="submit" disabled={busy} className="pb-premium-login-submit">Start authenticator enrollment</button>
+              ) : (
+                <>
+                  {mfaSetup && (
+                    <div className="pb-premium-field">
+                      <label>Authenticator setup secret</label>
+                      <code className="break-all">{mfaSetup.secret}</code>
+                      <button type="button" className="pb-settings-secondary" onClick={() => void navigator.clipboard.writeText(mfaSetup.secret)}>Copy secret</button>
+                    </div>
+                  )}
+                  <div className="pb-premium-field">
+                    <label htmlFor="pb-mfa-code">Authenticator code{challenge.requires_enrollment ? "" : " or backup code"}</label>
+                    <input id="pb-mfa-code" autoComplete="one-time-code" inputMode={challenge.requires_enrollment ? "numeric" : "text"} maxLength={64} value={mfaCode} onChange={(event) => setMfaCode(event.target.value.trim())} required />
+                  </div>
+                  <button type="submit" className="pb-premium-login-submit" disabled={busy || !mfaCode.trim()}>{busy ? "Verifying…" : "Verify and sign in"}</button>
+                </>
+              )}
+              {error && <p className="pb-premium-login-error" role="alert">{error}</p>}
+              <button type="button" className="pb-settings-secondary" onClick={() => {
+                setChallenge(null); setMfaSetup(null); setMfaCode(""); setError(null);
+              }}>Back to password sign-in</button>
+            </form>
+          ) : null}
+
+          {!challenge && !oneTimeSecrets && savedAccounts.length > 0 && (
             <div className="pb-premium-login-saved">
               <span className="pb-premium-login-saved-label">Accounts on this device</span>
               {savedAccounts.map((item) => {
@@ -138,7 +228,7 @@ export default function PostBoxLoginPage() {
             </div>
           )}
 
-          <form onSubmit={submit} className="pb-premium-login-form" noValidate>
+          {!challenge && !oneTimeSecrets && <form onSubmit={submit} className="pb-premium-login-form" noValidate>
             <div className="pb-premium-field">
               <label htmlFor="pb-email">Email address</label>
               <div className="pb-premium-field-wrap">
@@ -190,9 +280,9 @@ export default function PostBoxLoginPage() {
               {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
               {busy ? "Signing in…" : "Sign in"}
             </button>
-          </form>
+          </form>}
 
-          <div className="pb-premium-login-help">
+          {!challenge && !oneTimeSecrets && <div className="pb-premium-login-help">
             <button
               type="button"
               aria-expanded={showHelp}
@@ -206,7 +296,7 @@ export default function PostBoxLoginPage() {
                 administrator. Contact your organization administrator to reset access.
               </p>
             )}
-          </div>
+          </div>}
         </section>
       </main>
 

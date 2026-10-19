@@ -10,13 +10,19 @@ class HasTenantAccess(BasePermission):
     Request must have a resolved tenant (set by TenantMiddleware).
 
     NOTE: this grants access to any active member regardless of role, so it is
-    only appropriate on read-only views. Any view that mutates tenant state must
-    use TenantReadAdminWrite, IsTenantAdmin, or another role-aware class —
-    otherwise a read_only member can mutate.
+    only appropriate on read-only views. Tenant context alone is insufficient:
+    an API key whose creator left the organization must not obtain access.
+    Any view that mutates tenant state must use TenantReadAdminWrite,
+    IsTenantAdmin or another role-aware class.
     """
 
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.tenant)
+        return bool(
+            request.user and request.user.is_authenticated
+            and request.tenant and request.tenant_membership
+            and request.tenant_membership.tenant_id == request.tenant.id
+            and request.tenant_membership.user_id == request.user.id
+        )
 
 
 class TenantReadAdminWrite(BasePermission):

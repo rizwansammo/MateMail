@@ -95,3 +95,34 @@ the archive without restoring databases. **Actual `--restore` is destructive**
 and is permitted only during a separately authorized recovery on a suitable
 blank/isolation host. Root-only local Restic tools are in
 `/opt/MateMail/backup`. See the MateServer DR runbook before full recovery.
+
+
+## Release preflight — critical configuration recovery (2026-10-19)
+
+Before enabling Hub or PostBox MFA, **both** deployment configuration files
+must be recoverable:
+
+- `/opt/MateMail/app/.env`
+- `/opt/MateMail/engine/deploy/native-engine/.env`
+
+The updated `deploy/backup/matemail-backup.sh` refuses to report a successful
+**new** snapshot if either file is missing from its configured source list or
+is absent/empty in the temporary staging directory. Other historical/optional
+Nginx configuration paths can still be reported as warnings, to avoid treating
+retired hostnames as mandatory recovery dependencies.
+
+The new snapshots record those two staged paths in
+`manifest.json.required_config` and their content checksums under
+`staged_files`. `matemail-restore.sh` checks these specific required paths,
+nonzero file size, manifest declaration and checksums before starting its
+disposable restore database. An **older** snapshot without that mandatory
+manifest declaration will fail this **strict acceptance drill**; it is not
+deleted or rendered cryptographically unreadable, and its suitability for
+manual recovery must be evaluated separately with operator approval.
+
+**This check does not verify that valid MFA keys have actually been provisioned
+inside the App .env, that secrets remain stable over server restarts, or that
+the latest production or Azure backup is available.** Those remain explicit
+release preflight gates. Never print key values or silently regenerate them.
+A future production update of the installed backup scripts also requires
+separate operator approval; committing the source fix does not install it.

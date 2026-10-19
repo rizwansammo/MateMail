@@ -214,6 +214,32 @@ class KeyEnforcementTest(TestCase):
         key.save(update_fields=["is_active"])
         self.assertEqual(bearer_client(raw).get("/api/domains/").status_code, 401)
 
+    def test_key_creator_removed_from_tenant_cannot_read_billing(self):
+        from apps.tenants.models import TenantMembership, MemberStatus
+        raw, _ = make_api_key(self.tenant, self.owner, scopes=["read"])
+        self.assertEqual(bearer_client(raw).get("/api/billing/").status_code, 200)
+        TenantMembership.objects.filter(tenant=self.tenant, user=self.owner).update(
+            status=MemberStatus.REMOVED,
+        )
+        response = bearer_client(raw).get("/api/billing/")
+        self.assertIn(response.status_code, (401, 403))
+
+    def test_key_creator_disabled_cannot_read_billing(self):
+        raw, _ = make_api_key(self.tenant, self.owner, scopes=["read"])
+        self.owner.is_active = False
+        self.owner.save(update_fields=["is_active"])
+        self.assertEqual(bearer_client(raw).get("/api/billing/").status_code, 403)
+
+    def test_key_creator_with_only_other_tenant_membership_cannot_read(self):
+        from apps.tenants.models import TenantMembership, MemberStatus
+        other = make_tenant(self.owner, name="Other Owner Workspace", slug="other-owner-workspace")
+        self.assertIsNotNone(other)
+        raw, _ = make_api_key(self.tenant, self.owner, scopes=["read"])
+        TenantMembership.objects.filter(tenant=self.tenant, user=self.owner).update(
+            status=MemberStatus.REMOVED,
+        )
+        self.assertEqual(bearer_client(raw).get("/api/billing/").status_code, 403)
+
     def test_an_expired_key_is_rejected(self):
         from datetime import timedelta
 

@@ -640,3 +640,111 @@ def test_the_sourced_library_stays_non_executable():
             f"{path} is sourced, never executed, and must stay 100644 "
             f"(found {modes.get(path)})"
         )
+
+
+# ─── Phase 7C final release: prove critical recovery configs ─────────────────
+
+import hashlib
+import sys
+
+REQUIRED_ENV_FILES = (
+    "config/opt_MateMail_app_.env",
+    "config/opt_MateMail_engine_deploy_native-engine_.env",
+)
+
+
+def _run_restore_manifest_verifier(stage: Path):
+    """Execute the REAL checksum/config preflight, stopping before Docker."""
+    body = RESTORE.read_text()
+    marker = 'STAGE="$STAGE" python3 - <<\'PY\' || exit 1\n'
+    assert marker in body, "restore preflight code was moved or removed"
+    code = body.split(marker, 1)[1].split("\nPY\n", 1)[0]
+    assert "required recovery configuration" in code
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        env={**os.environ, "STAGE": str(stage)},
+        text=True, capture_output=True, timeout=10,
+    )
+
+
+def _synthetic_backup_config(stage: Path):
+    stage.mkdir(parents=True, exist_ok=True)
+    entries = {}
+    for idx, rel in enumerate(REQUIRED_ENV_FILES):
+        path = stage / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = f"SYNTHETIC_SETTING_{idx}=test-only\n".encode("ascii")
+        path.write_bytes(data)
+        entries[rel] = {
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+        }
+    manifest = {"staged_files": entries, "required_config": list(REQUIRED_ENV_FILES)}
+    (stage / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return manifest
+
+
+def test_backup_refuses_missing_mandatory_deployment_environments():
+    body = BACKUP.read_text()
+    assert "REQUIRED_RECOVERY_CONFIG_FILES=" in body
+    for original in (
+        "/opt/MateMail/app/.env",
+        "/opt/MateMail/engine/deploy/native-engine/.env",
+    ):
+        assert original in body
+    assert 'case " $CONFIG_FILES " in' in body
+    assert 'required recovery configuration is not listed' in body
+    assert '[ -s "$required_stage" ]' in body
+    assert 'die "required recovery configuration is missing or empty:' in body
+    assert '"required_config": [' in body
+
+
+def test_restored_critical_configs_and_checksums_pass_without_docker(tmp_path):
+    _synthetic_backup_config(tmp_path)
+    result = _run_restore_manifest_verifier(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "PASS" in result.stdout
+
+
+@pytest.mark.parametrize("missing", REQUIRED_ENV_FILES)
+def test_restored_critical_config_missing_fails_before_docker(tmp_path, missing):
+    _synthetic_backup_config(tmp_path)
+    (tmp_path / missing).unlink()
+    result = _run_restore_manifest_verifier(tmp_path)
+    assert result.returncode != 0
+    assert "required recovery configuration missing or empty" in result.stderr
+
+
+@pytest.mark.parametrize("empty", REQUIRED_ENV_FILES)
+def test_restored_critical_config_empty_fails_before_docker(tmp_path, empty):
+    _synthetic_backup_config(tmp_path)
+    (tmp_path / empty).write_bytes(b"")
+    result = _run_restore_manifest_verifier(tmp_path)
+    assert result.returncode != 0
+    assert "required recovery configuration missing or empty" in result.stderr
+
+
+def test_restore_rejects_old_manifest_without_required_configs(tmp_path):
+    manifest = _synthetic_backup_config(tmp_path)
+    del manifest["required_config"]
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    result = _run_restore_manifest_verifier(tmp_path)
+    assert result.returncode != 0
+    assert "required recovery configuration manifest is incomplete" in result.stderr
+
+
+def test_restore_rejects_undeclared_required_config_checksum(tmp_path):
+    manifest = _synthetic_backup_config(tmp_path)
+    del manifest["staged_files"][REQUIRED_ENV_FILES[0]]
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    result = _run_restore_manifest_verifier(tmp_path)
+    assert result.returncode != 0
+    assert "missing required checksum manifest entry" in result.stderr
+
+
+def test_restore_rejects_tampered_critical_config(tmp_path):
+    _synthetic_backup_config(tmp_path)
+    (tmp_path / REQUIRED_ENV_FILES[1]).write_text("SYNTHETIC_KEY=changed\n")
+    result = _run_restore_manifest_verifier(tmp_path)
+    assert result.returncode != 0
+    assert "checksum mismatch" in result.stderr

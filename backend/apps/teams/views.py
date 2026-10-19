@@ -24,6 +24,8 @@ from apps.tenants.membership_policy import (
     user_has_other_active_tenant,
 )
 from apps.tenants.permissions import HasTenantAccess, IsTenantAdmin
+from apps.tenants.security_policy import effective_two_factor_policy
+from apps.tenants.models import OrganizationTwoFactorMode
 from .invite_mailbox import (
     InviteMailboxError, complete_invited_mailbox,
     preflight_invited_mailbox, reserve_invited_mailbox,
@@ -174,6 +176,20 @@ class TeamInviteRevokeView(APIView):
         return Response(status=204)
 
 
+def _invite_session_response(user, tenant, payload, *, status=200):
+    """An invite never issues a password-only session into a Require tenant."""
+    if effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+        return Response({
+            **payload,
+            "requires_login": True,
+            "requires_2fa": True,
+            "detail": "Invitation accepted. Sign in to complete required 2FA.",
+        }, status=status)
+    return authenticated_response(
+        make_tokens(user, tenant_id=tenant.id), payload, status=status,
+    )
+
+
 class TeamInviteAcceptView(APIView):
     """Validates an invite token and adds the authenticated user to the workspace."""
     permission_classes = [IsAuthenticated]
@@ -235,9 +251,8 @@ class TeamInviteAcceptView(APIView):
                 if existing and existing.status == MemberStatus.ACTIVE:
                     invite.accepted_at = timezone.now()
                     invite.save(update_fields=["accepted_at"])
-                    tokens = make_tokens(request.user, tenant_id=invite.tenant_id)
-                    return authenticated_response(
-                        tokens,
+                    return _invite_session_response(
+                        request.user, invite.tenant,
                         {
                             "detail": "Already a member.",
                             "user": UserProfileSerializer(request.user).data,
@@ -290,9 +305,8 @@ class TeamInviteAcceptView(APIView):
             user=request.user,
             status=MemberStatus.ACTIVE,
         )
-        tokens = make_tokens(request.user, tenant_id=invite.tenant_id)
-        return authenticated_response(
-            tokens,
+        return _invite_session_response(
+            request.user, invite.tenant,
             {
                 "detail": "Invite accepted.",
                 "mailbox": mailbox_result,
