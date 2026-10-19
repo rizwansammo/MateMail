@@ -820,6 +820,23 @@ class TwoFactorVerifyView(APIView):
             discard_challenge(raw_challenge)
             return Response({"detail": "Invalid or expired token."}, status=401)
 
+        # A login challenge is bound to the tenant membership that existed at
+        # password verification time. Membership can be removed while the OTP
+        # prompt is open. Reject before accepting TOTP/consuming backup codes
+        # or issuing a new tenant-bound JWT, including on the shared host.
+        tenant_id = payload.get("tenant_id")
+        membership = (
+            scope_memberships(
+                request,
+                TenantMembership.objects.select_related("tenant").filter(
+                    tenant_id=tenant_id, user=user, status=MemberStatus.ACTIVE,
+                ),
+            ).first()
+        ) if tenant_id else None
+        if (tenant_id and membership is None) or (bound_tenant_slug(request) and membership is None):
+            discard_challenge(raw_challenge)
+            return Response({"detail": "Organization access revoked or unavailable."}, status=403)
+
         # The per-challenge counter in apps.accounts.challenge caps attempts
         # against one token. It does not stop an attacker who holds the
         # password: after five failures they simply log in again for a fresh
@@ -881,18 +898,6 @@ class TwoFactorVerifyView(APIView):
         ratelimit.reset(
             TWO_FACTOR_PER_USER.bucket, user.pk, window=TWO_FACTOR_PER_USER.window
         )
-
-        tenant_id = payload.get("tenant_id")
-        membership = (
-            scope_memberships(
-                request,
-                TenantMembership.objects.select_related("tenant").filter(
-                    tenant_id=tenant_id, user=user, status="active"
-                ),
-            ).first()
-        ) if tenant_id else None
-        if bound_tenant_slug(request) and membership is None:
-            return Response({"detail": "This account cannot use this host."}, status=403)
 
         tokens = make_tokens(user, tenant_id=tenant_id, mfa_verified=True)
 

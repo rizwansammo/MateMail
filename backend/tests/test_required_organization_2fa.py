@@ -112,6 +112,60 @@ class RequiredOrganizationMfaTest(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {raw}")
         self.assertEqual(self.client.get("/api/workspaces/").status_code, 401)
 
+    def test_2fa_challenge_cannot_mint_session_after_membership_revoked(self):
+        from apps.accounts.challenge import peek_challenge
+        from apps.tenants.models import TenantMembership, MemberStatus
+        from tests.factories import enable_2fa
+
+        secret = enable_2fa(self.owner)
+        login = self.client.post("/api/auth/login/", {
+            "email": self.owner.email, "password": TEST_PASSWORD,
+        }, format="json")
+        self.assertEqual(login.status_code, 200, login.data)
+        token = login.data["partial_token"]
+        self.assertIsNotNone(peek_challenge(token))
+        TenantMembership.objects.filter(
+            tenant=self.tenant, user=self.owner,
+        ).update(status=MemberStatus.REMOVED)
+        code = pyotp.TOTP(secret).now()
+        response = self.client.post("/api/auth/2fa/verify/", {
+            "partial_token": token, "code": code,
+        }, format="json")
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertNotIn("access", response.data)
+        self.assertNotIn("matemail_refresh", response.cookies)
+        self.assertIsNone(peek_challenge(token))
+
+    def test_2fa_removed_member_cannot_consume_backup_code(self):
+        from apps.accounts.challenge import peek_challenge
+        from apps.tenants.models import TenantMembership, MemberStatus
+        from tests.factories import enable_2fa
+        from apps.accounts.models import TwoFactorBackupCode
+        from apps.accounts.tokens import hash_token
+
+        enable_2fa(self.owner)
+        backup = "ABCD1234"
+        TwoFactorBackupCode.objects.create(
+            user=self.owner, code_hash=hash_token(backup),
+        )
+        login = self.client.post("/api/auth/login/", {
+            "email": self.owner.email, "password": TEST_PASSWORD,
+        }, format="json")
+        self.assertEqual(login.status_code, 200, login.data)
+        partial = login.data["partial_token"]
+        TenantMembership.objects.filter(
+            tenant=self.tenant, user=self.owner,
+        ).update(status=MemberStatus.REMOVED)
+        response = self.client.post("/api/auth/2fa/verify/", {
+            "partial_token": partial, "code": backup,
+        }, format="json")
+        self.assertEqual(response.status_code, 403, response.data)
+        self.assertNotIn("access", response.data)
+        self.assertIsNone(peek_challenge(partial))
+        self.assertFalse(TwoFactorBackupCode.objects.get(
+            user=self.owner, code_hash=hash_token(backup),
+        ).is_used)
+
     def test_required_enrollment_then_verified_session(self):
         login = self.client.post("/api/auth/login/", {
             "email": self.owner.email, "password": TEST_PASSWORD,
