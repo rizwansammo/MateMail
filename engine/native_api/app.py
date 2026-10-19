@@ -799,6 +799,9 @@ def _quarantine_release(conn, body):
 
 
 _READ_ROUTES = {
+    # Internal API-secret-only, aggregate-only operational visibility. No
+    # mailbox IDs, addresses or passwords are returned.
+    "/v1/mailboxes/client/recovery/status": lambda conn, _: kick_recovery.recovery_status(conn),
     "/v1/domains":             _read_domains,
     "/v1/mailboxes":           _read_mailboxes,
     "/v1/aliases":             _read_alias,

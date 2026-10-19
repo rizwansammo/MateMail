@@ -8,6 +8,7 @@ from unittest import mock
 import app
 import kick_recovery
 import operations
+from validation import ValidationError
 
 
 class Cursor:
@@ -44,6 +45,16 @@ class RecoveryOutboxTest(unittest.TestCase):
         self.assertIn("ON CONFLICT (mailbox_id) DO UPDATE", query)
         self.assertIn("generation=gen_random_uuid()", query)
         self.assertEqual(params, ("alice@example.test",))
+
+    def test_enqueue_normalizes_valid_mailbox_before_query(self):
+        c = Connection([(13, "99999999-9999-4999-8999-999999999999")])
+        kick_recovery.enqueue(c, "  ALICE@Example.TEST  ")
+        query, params = c.cur.sql[0]
+        self.assertEqual(params, ("alice@example.test",))
+
+    def test_enqueue_rejects_invalid_mailbox_identifier(self):
+        with self.assertRaises(ValidationError):
+            kick_recovery.enqueue(Connection(), "*.example.test")
 
     def test_missing_mailbox_fails_closed(self):
         with self.assertRaises(RuntimeError):
@@ -89,6 +100,27 @@ class RecoveryOutboxTest(unittest.TestCase):
         self.assertNotIn("DELETE", c.cur.sql[1][0])
         self.assertEqual(c.cur.sql[1][1], (20, 12, row[1]))
 
+    def test_status_returns_aggregate_only_without_mailbox_identity(self):
+        c = Connection([(4, 2, 7, 231)])
+        with mock.patch.dict(os.environ, {"NATIVE_CLIENT_KICK_RECOVERY_ENABLED": "true"}):
+            response = kick_recovery.recovery_status(c)
+        self.assertEqual(response, {
+            "enabled": True, "pending": 4, "due": 2,
+            "max_attempts": 7, "oldest_pending_seconds": 231,
+        })
+        self.assertNotIn("mailbox", str(response).lower())
+        query, params = c.cur.sql[0]
+        self.assertIn("mail_client_kick_pending", query)
+        self.assertNotIn("JOIN public.mailbox", query)
+        self.assertIsNone(params)
+
+    def test_status_works_when_recovery_flag_off_to_surface_stuck_jobs(self):
+        c = Connection([(2, 0, 5, 120)])
+        with mock.patch.dict(os.environ, {"NATIVE_CLIENT_KICK_RECOVERY_ENABLED": "false"}):
+            response = kick_recovery.recovery_status(c)
+        self.assertFalse(response["enabled"])
+        self.assertEqual(response["pending"], 2)
+
     def test_worker_survives_connection_failure(self):
         stopped = threading.Event()
         attempts = []
@@ -100,6 +132,43 @@ class RecoveryOutboxTest(unittest.TestCase):
         with mock.patch.object(stopped, "wait", side_effect=wait_and_stop):
             kick_recovery.run_worker(bad_connection, stopped)
         self.assertEqual(len(attempts), 1)
+
+
+class OperatorRecoveryStatusRouteTest(unittest.TestCase):
+    @staticmethod
+    def request(events):
+        class FakeHandler:
+            _route = "/v1/mailboxes/client/recovery/status"
+            headers = {}
+            def _query(self):
+                return {}
+            def _send(self, status, payload):
+                events.append((status, payload))
+            def _fail(self, exc):
+                raise AssertionError(f"Unexpected error: {type(exc).__name__}")
+        return FakeHandler()
+
+    def test_status_requires_native_api_secret(self):
+        events = []
+        with mock.patch.object(app, "authorized", return_value=False), \
+             mock.patch.object(app.db, "connect_runtime") as connect:
+            app.Handler.do_GET(self.request(events))
+        self.assertEqual(events, [(403, {"error": "unauthorized"})])
+        connect.assert_not_called()
+
+    def test_authorized_status_exposes_only_aggregates(self):
+        events = []
+        from contextlib import nullcontext
+        payload = {
+            "enabled": False, "pending": 3, "due": 1,
+            "max_attempts": 2, "oldest_pending_seconds": 60,
+        }
+        with mock.patch.object(app, "authorized", return_value=True), \
+             mock.patch.object(app.db, "connect_runtime", return_value=nullcontext(object())), \
+             mock.patch.object(kick_recovery, "recovery_status", return_value=payload):
+            app.Handler.do_GET(self.request(events))
+        self.assertEqual(events, [(200, payload)])
+        self.assertNotIn("alice", str(events).lower())
 
 
 class NativeHandlerOutboxContractTest(unittest.TestCase):

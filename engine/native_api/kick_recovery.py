@@ -11,6 +11,7 @@ import os
 import threading
 
 import operations
+from validation import email_address
 
 logger = logging.getLogger("matemail.native.api.kick_recovery")
 POLL_SECONDS = 5
@@ -27,6 +28,7 @@ def enqueue(conn, address: str) -> tuple[int, str]:
     The API's credential/policy handler has already validated and locked the
     mailbox. Each new generation supersedes any previous acknowledgement.
     """
+    normalized = email_address(address, "address")
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO public.mail_client_kick_pending(mailbox_id)
@@ -35,7 +37,7 @@ def enqueue(conn, address: str) -> tuple[int, str]:
                    SET generation=gen_random_uuid(), attempts=0,
                        next_attempt_at=now(), last_failure_at=NULL, updated_at=now()
                RETURNING mailbox_id, generation::text""",
-            (address,),
+            (normalized,),
         )
         row = cur.fetchone()
         if row is None:
@@ -55,6 +57,32 @@ def acknowledge(conn, mailbox_id: int, generation: str) -> None:
 
 def backoff_seconds(attempts: int) -> int:
     return min(MAX_BACKOFF_SECONDS, 5 * (2 ** min(max(attempts, 0), 10)))
+
+
+def recovery_status(conn) -> dict:
+    """Authenticated operator-only aggregate; never reveal mailbox identity.
+
+    Query even when the feature is OFF, because a rollback or disabled worker
+    must not hide disconnects still waiting for reconciliation. This does not
+    kick any sessions or change the job queue.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT count(*)::integer,
+                      (count(*) FILTER (WHERE next_attempt_at <= now()))::integer,
+                      coalesce(max(attempts), 0)::integer,
+                      coalesce(greatest(0,
+                          extract(epoch from now()-min(created_at))::integer), 0)
+               FROM public.mail_client_kick_pending"""
+        )
+        pending, due, attempts, oldest = cur.fetchone()
+    return {
+        "enabled": enabled(),
+        "pending": pending,
+        "due": due,
+        "max_attempts": attempts,
+        "oldest_pending_seconds": oldest,
+    }
 
 
 def recover_one(conn) -> bool:
