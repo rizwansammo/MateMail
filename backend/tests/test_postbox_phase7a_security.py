@@ -172,6 +172,114 @@ class PostBoxMfaBoundaryTest(TestCase):
             ).enabled_at)
             self.assertTrue(self._login().data["requires_enrollment"])
 
+    def test_mfa_enrollment_refuses_unconfirmed_native_policy_ack(self):
+        """An HTTP success without exact dedicated-only confirmation is not proof."""
+        for returned in (
+            {"enabled": True, "dedicated_required": False},
+            {"enabled": False, "dedicated_required": True},
+            {"enabled": True},
+            {},
+        ):
+            with self.subTest(native_response=returned):
+                MailboxTwoFactorSetup.objects.filter(mailbox=self.mailbox).delete()
+                MailboxTwoFactorBackupCode.objects.filter(mailbox=self.mailbox).delete()
+                from django.core.cache import cache
+                cache.clear()
+                login = self._login()
+                self.assertEqual(login.status_code, 200, login.data)
+                with mock.patch.object(postbox_auth, "trusted_primary_authenticate", return_value=True):
+                    start = self.client.post("/api/postbox/auth/2fa/start/", {
+                        "current_password": "test-mailbox-pass",
+                    }, format="json")
+                self.assertEqual(start.status_code, 200, start.data)
+                partial = start.data["partial_token"]
+                begin = self.client.post("/api/postbox/auth/2fa/enroll/", {
+                    "partial_token": partial, "action": "begin",
+                }, format="json")
+                self.assertEqual(begin.status_code, 200, begin.data)
+                adapter = mock.Mock()
+                adapter.list_client_credentials.return_value = {"enabled": True}
+                adapter.issue_client_credential.return_value = {
+                    "id": "123e4567-e89b-12d3-a456-426614174000",
+                    "one_time_credential": "synthetic-dev-only-password",
+                }
+                adapter.set_client_policy.return_value = returned
+                with mock.patch("apps.postbox.two_factor_views.get_adapter", return_value=adapter):
+                    result = self.client.post("/api/postbox/auth/2fa/enroll/", {
+                        "partial_token": partial, "action": "confirm",
+                        "code": pyotp.TOTP(begin.data["secret"]).now(),
+                    }, format="json")
+                self.assertEqual(result.status_code, 503, result.data)
+                self.assertNotIn("smtp_imap_password", result.data)
+                self.assertFalse(MailboxTwoFactorSetup.objects.filter(
+                    mailbox=self.mailbox, enabled_at__isnull=False,
+                ).exists())
+                self.assertFalse(MailboxTwoFactorBackupCode.objects.filter(
+                    mailbox=self.mailbox,
+                ).exists())
+                self.assertFalse(PostBoxSession.objects.filter(
+                    mailbox=self.mailbox, mfa_verified_at__isnull=False,
+                ).exists())
+
+    def test_mfa_enrollment_refuses_malformed_native_policy_state(self):
+        self._login()
+        with mock.patch.object(postbox_auth, "trusted_primary_authenticate", return_value=True):
+            start = self.client.post("/api/postbox/auth/2fa/start/", {
+                "current_password": "test-mailbox-pass",
+            }, format="json")
+        self.assertEqual(start.status_code, 200, start.data)
+        begin = self.client.post("/api/postbox/auth/2fa/enroll/", {
+            "partial_token": start.data["partial_token"], "action": "begin",
+        }, format="json")
+        adapter = mock.Mock()
+        adapter.list_client_credentials.return_value = {"enabled": "false"}
+        with mock.patch("apps.postbox.two_factor_views.get_adapter", return_value=adapter):
+            denied = self.client.post("/api/postbox/auth/2fa/enroll/", {
+                "partial_token": start.data["partial_token"], "action": "confirm",
+                "code": pyotp.TOTP(begin.data["secret"]).now(),
+            }, format="json")
+        self.assertEqual(denied.status_code, 503)
+        adapter.issue_client_credential.assert_not_called()
+        adapter.set_client_policy.assert_not_called()
+        self.assertFalse(MailboxTwoFactorSetup.objects.filter(
+            mailbox=self.mailbox, enabled_at__isnull=False,
+        ).exists())
+
+    def test_mfa_enrollment_accepts_explicit_disabled_client_policy_ack(self):
+        """When SMTP/IMAP access is OFF, require confirmation but no new password."""
+        self._login()
+        with mock.patch.object(postbox_auth, "trusted_primary_authenticate", return_value=True):
+            start = self.client.post("/api/postbox/auth/2fa/start/", {
+                "current_password": "test-mailbox-pass",
+            }, format="json")
+        self.assertEqual(start.status_code, 200, start.data)
+        partial = start.data["partial_token"]
+        begin = self.client.post("/api/postbox/auth/2fa/enroll/", {
+            "partial_token": partial, "action": "begin",
+        }, format="json")
+        self.assertEqual(begin.status_code, 200, begin.data)
+        adapter = mock.Mock()
+        adapter.list_client_credentials.return_value = {"enabled": False}
+        adapter.set_client_policy.return_value = {
+            "enabled": False, "dedicated_required": True,
+        }
+        with mock.patch("apps.postbox.two_factor_views.get_adapter", return_value=adapter), \
+             mock.patch("apps.postbox.views_auth.postbox_auth.remember_session_on_device"), \
+             mock.patch("apps.postbox.imap.open_mailbox"):
+            response = self.client.post("/api/postbox/auth/2fa/enroll/", {
+                "partial_token": partial, "action": "confirm",
+                "code": pyotp.TOTP(begin.data["secret"]).now(),
+            }, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertNotIn("smtp_imap_password", response.data)
+        adapter.issue_client_credential.assert_not_called()
+        adapter.set_client_policy.assert_called_once_with(
+            self.mailbox.email, enabled=False, dedicated_required=True,
+        )
+        self.assertTrue(MailboxTwoFactorSetup.objects.filter(
+            mailbox=self.mailbox, enabled_at__isnull=False,
+        ).exists())
+
     def test_mfa_primary_verifier_does_not_fall_back_to_public_imap(self):
         adapter = mock.Mock()
         adapter.verify_primary_password.return_value = False

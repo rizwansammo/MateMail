@@ -201,13 +201,22 @@ class PostBoxTwoFactorEnrollView(APIView):
             adapter = get_adapter()
             policy = adapter.list_client_credentials(mailbox.email)
             enabled = policy["enabled"]
+            if type(enabled) is not bool:
+                raise ValueError("Native client access policy is not confirmed.")
             created = (
                 adapter.issue_client_credential(mailbox.email, "Initial client")
                 if enabled else None
             )
-            adapter.set_client_policy(
+            acknowledged = adapter.set_client_policy(
                 mailbox.email, enabled=enabled, dedicated_required=True,
             )
+            # An HTTP-success response is not by itself proof that the Native
+            # mail-client boundary requires a dedicated password. Refuse
+            # enrollment unless the exact effective policy is acknowledged.
+            if (not isinstance(acknowledged, dict)
+                    or acknowledged.get("enabled") is not enabled
+                    or acknowledged.get("dedicated_required") is not True):
+                raise ValueError("Native dedicated-client policy not confirmed.")
         except Exception:
             return Response({"detail": "Could not secure external mail clients."}, status=503)
 
