@@ -30,18 +30,15 @@ from .models import (
     MailClientAccessPolicy, PostBoxSession,
 )
 from .two_factor_core import (
-    decrypt_totp_secret, encrypt_totp_secret, generate_backup_codes,
-    hash_backup_code, redeem_backup_code, verify_totp,
+    decrypt_totp_secret, encrypt_totp_secret, enrollment_ready,
+    generate_backup_codes, hash_backup_code, redeem_backup_code, verify_totp,
 )
 from .views_auth import complete_postbox_login
 
 
 def _ready():
-    return (
-        getattr(settings, "POSTBOX_2FA_ENABLED", False)
-        and getattr(settings, "SMTP_IMAP_SECURITY_ENABLED", False)
-        and getattr(settings, "MAIL_ENGINE_ADAPTER", "") == "native"
-    )
+    # All enrollment, recovery and credential endpoints share one gate.
+    return enrollment_ready()
 
 
 def _gate():

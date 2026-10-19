@@ -23,8 +23,21 @@ from .models import MailboxTwoFactorBackupCode
 
 
 def enrollment_ready() -> bool:
-    # Release barrier: no config-only flag can activate incomplete protection.
-    return False
+    """Single PostBox MFA runtime readiness boundary (not Organization Require).
+
+    A config-only switch must never expose enrollment without both Native
+    client-password enforcement and a usable persistent encryption key.
+    Organization REQUIRE has its own independent, still-locked release gate.
+    """
+    if (getattr(settings, "POSTBOX_2FA_ENABLED", False) is not True
+            or getattr(settings, "SMTP_IMAP_SECURITY_ENABLED", False) is not True
+            or getattr(settings, "MAIL_ENGINE_ADAPTER", "") != "native"):
+        return False
+    try:
+        _cipher()
+    except (ImproperlyConfigured, UnicodeError):
+        return False
+    return True
 
 
 def _cipher() -> Fernet:

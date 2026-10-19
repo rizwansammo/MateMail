@@ -6,6 +6,7 @@ PostBox request/exception handling are exercised.
 """
 from unittest import mock
 
+from cryptography.fernet import Fernet
 from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -72,6 +73,7 @@ class AdapterPartialCommitContract(SimpleTestCase):
     POSTBOX_2FA_ENABLED=True,
     SMTP_IMAP_SECURITY_ENABLED=True,
     MAIL_ENGINE_ADAPTER="native",
+    POSTBOX_2FA_FERNET_KEY=Fernet.generate_key().decode("ascii"),
     CACHES={"default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "phase7c-partial-commit",
