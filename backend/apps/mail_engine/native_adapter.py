@@ -53,6 +53,7 @@ from .dto import (
 from .errors import (
     EngineCapabilityMissing,
     EngineUnavailable,
+    EngineSessionDisconnectUnverified,
     MailEngineError,
     NotFound,
     QuotaExceeded,
@@ -143,6 +144,23 @@ class NativeMailEngineAdapter(MailEngineAdapter):
         if response.status_code >= 500:
             logger.error("Native engine server error [%s] status=%s", operation,
                          response.status_code)
+            # Only the authenticated engine's exact code and the two
+            # credentials routes authorize "mutation already committed".
+            # Never infer partial commit merely from a generic HTTP 503.
+            if response.status_code == 503 and path in {
+                "/v1/mailboxes/client/revoke",
+                "/v1/mailboxes/client/policy",
+            }:
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = {}
+                if (isinstance(payload, dict) and payload.get("code")
+                        == "mail_client_disconnect_unverified"):
+                    raise EngineSessionDisconnectUnverified(
+                        "status=503 committed, kick unverified",
+                        operation=operation,
+                    )
             raise EngineUnavailable(f"status={response.status_code}", operation=operation)
 
         if response.status_code == 404:

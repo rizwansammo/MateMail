@@ -95,6 +95,50 @@ so this does not claim real IMAP/SMTP, SQL lifecycle or networked Dovecot.
 - C2 combined Native/SMTP/IMAP E2E remains pending. This test cannot
   substitute for it.
 
+## C2 Error contract hardening: committed change, unverified disconnect
+
+The Native API already COMMITs credential revocation/client-access changes
+before attempting its Dovecot HTTP session-kick. A failed kick must never be
+reported as an ordinary rolled-back update, and a generic 503 must never be
+reported as a committed change. These are distinct failure states.
+
+New cross-service contract implemented on the isolated feature branch:
+
+- Native API responds with 503 plus the structured code
+  `mail_client_disconnect_unverified` **only** after a credential
+  revoke/access-policy DB mutation has committed and the Dovecot kick failed.
+  Other 503 errors do not receive this code.
+- Django Native adapter maps the exact 503 code from those two
+  allowlisted routes to the new `EngineSessionDisconnectUnverified` type.
+  It does not infer a commit from a generic 503 or malformed response.
+- PostBox's credential-management endpoint returns a customer-facing 503
+  explicitly explaining that the security update **was saved** but existing
+  IMAP client connections may remain active. It instructs an authorized user
+  to retry the SAME operation after service recovery, rather than implying
+  that a revoked credential is still valid.
+- Unmodified native HTTP behavior, offline-first credential rejection and
+  per-mailbox kick scoping are retained. This does **not** implement automatic
+  durable reconciliation and does not prove every live IMAP session terminated.
+
+**Test evidence:**
+- Native Engine full Python unit suite: **51/51 passed** after structured
+  503 response contract update, including the real loopback HTTP test.
+- Django adapter partial-commit + existing PostBox security suite: **12/12 passed**.
+- Combined Django LiveServer HTTP/MFA/Session + adapter/PostBox regression:
+  **19/19 passed** using disposable PostgreSQL/Redis in TestLab.
+- Logs retained:
+  `results/stage7c-native-structured-errors-unit.log`,
+  `results/stage7c-partial-commit-backend-tests.log`,
+  `results/stage7c-combined-http-regression.log`.
+- Test file:
+  `backend/tests/test_phase7c_partial_commit.py`.
+
+**Pending:** Full Native-issued credential -> real Dovecot/Postfix
+authentication -> active-session disconnect on the SAME isolated candidate
+stack is NOT complete. Automatic durable reconnection reconciliation is also
+an independent production-readiness decision. Do not merge or deploy while
+these acceptance gates remain open.
+
 ## Blocker: isolated synthetic mailbox population
 
 The attempted test action that would initialize synthetic mailboxes and launch

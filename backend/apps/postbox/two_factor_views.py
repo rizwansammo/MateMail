@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.mail_engine.factory import get_adapter
+from apps.mail_engine.errors import EngineSessionDisconnectUnverified
 from apps.security import ratelimit
 from apps.security.client_ip import get_client_ip
 from apps.security.limits import POSTBOX_PASSWORD_CHANGE
@@ -333,6 +334,12 @@ class PostBoxClientCredentialView(APIView):
                     defaults={"smtp_imap_enabled": values["enabled"]},
                 )
                 return Response(updated)
+        except EngineSessionDisconnectUnverified as exc:
+            # Native credential state already committed; sessions may persist.
+            return Response({
+                "detail": exc.customer_message,
+                "code": "mail_client_disconnect_unverified",
+            }, status=503)
         except Exception:
             return Response({"detail": "Client security operation unavailable."}, status=503)
         return Response({"detail": "Invalid client security operation."}, status=400)

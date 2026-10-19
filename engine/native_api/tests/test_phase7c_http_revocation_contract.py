@@ -109,6 +109,7 @@ class NativeHTTPRevocationTest(unittest.TestCase):
             second_status, second = self.post()
         self.assertEqual(first_status, 503, first)
         self.assertIn("disconnect unverified", first["error"])
+        self.assertEqual(first["code"], "mail_client_disconnect_unverified")
         self.assertEqual(second_status, 200, second)
         self.assertEqual(second, {"revoked": False})
         self.assertEqual(self.events, [

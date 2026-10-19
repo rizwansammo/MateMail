@@ -490,7 +490,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # Do NOT claim that old IMAP sessions are gone if doveadm fails.
             if route in ("/v1/mailboxes/client/revoke",
                          "/v1/mailboxes/client/policy"):
-                self._send(503, {"error": "Credential state updated; active session disconnect unverified. Retry security action."})
+                self._send(503, {
+                    "error": "Credential state updated; active session disconnect unverified. Retry security action.",
+                    "code": "mail_client_disconnect_unverified",
+                })
             else:
                 self._send(503, {"error": "Mail administrative component unavailable"})
         except PermissionError:
