@@ -476,18 +476,31 @@ class RefreshView(APIView):
                 )
             if tenant_id:
                 tenant = Tenant.objects.filter(pk=tenant_id).first()
-                if not tenant_matches_request(request, tenant):
+                # An organization can be deleted while a signed refresh token
+                # is still valid. Never evaluate its policy on None or mint a
+                # new session for an organization that no longer exists.
+                if tenant is None or not tenant_matches_request(request, tenant):
                     return clear_refresh_cookie(
                         Response({"detail": "Session is not valid on this host."}, status=403)
                     )
             from apps.tenants.security_policy import effective_two_factor_policy
-            from apps.tenants.models import OrganizationTwoFactorMode
-            if tenant_id and effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+            from apps.tenants.models import OrganizationTwoFactorMode, TenantMembership, MemberStatus
+            if tenant_id:
                 account = _user_for(token)
-                if not account.two_factor_enabled or not token.get("mfa_verified_at"):
+                if not TenantMembership.objects.filter(
+                    tenant=tenant, user=account, status=MemberStatus.ACTIVE,
+                ).exists():
+                    # A removed member cannot keep renewing the old session,
+                    # even if their JWT still carries a valid MFA proof.
+                    token.blacklist()
                     return clear_refresh_cookie(
-                        Response({"detail": "Sign in with 2FA to continue."}, status=403)
+                        Response({"detail": "Organization access revoked."}, status=403)
                     )
+                if effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+                    if not account.two_factor_enabled or not token.get("mfa_verified_at"):
+                        return clear_refresh_cookie(
+                            Response({"detail": "Sign in with 2FA to continue."}, status=403)
+                        )
             access = str(token.access_token)
             # BLACKLIST_AFTER_ROTATION is on: blacklisting must happen before a
             # replacement is issued, so a stolen token cannot be exchanged twice.

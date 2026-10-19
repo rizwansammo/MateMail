@@ -1,4 +1,6 @@
 """Enforced Hub MFA tests; isolated, independent of production feature flags."""
+import uuid
+
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 import pyotp
@@ -51,6 +53,56 @@ class RequiredOrganizationMfaTest(TestCase):
         response = bearer_client(key).get("/api/domains/")
         self.assertEqual(response.status_code, 403)
         self.assertIn("2FA", response.json()["detail"])
+
+    def test_require_rejects_pre_mfa_refresh_cookie(self):
+        from apps.accounts.tokens import make_tokens
+        tokens = make_tokens(self.owner, tenant_id=self.tenant.pk)
+        self.client.cookies["matemail_refresh"] = tokens["refresh"]
+        response = self.client.post("/api/auth/refresh/")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.cookies["matemail_refresh"].value, "")
+
+    def test_refresh_rejects_missing_tenant_in_existing_cookie(self):
+        from apps.accounts.tokens import make_tokens
+        tokens = make_tokens(self.owner, tenant_id=uuid.uuid4())
+        self.client.cookies["matemail_refresh"] = tokens["refresh"]
+        response = self.client.post("/api/auth/refresh/")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.cookies["matemail_refresh"].value, "")
+
+    def test_refresh_refuses_removed_organization_membership(self):
+        from apps.accounts.tokens import make_tokens
+        from apps.tenants.models import TenantMembership, MemberStatus
+        from tests.factories import enable_2fa
+        enable_2fa(self.owner)
+        tokens = make_tokens(self.owner, tenant_id=self.tenant.pk, mfa_verified=True)
+        TenantMembership.objects.filter(tenant=self.tenant, user=self.owner).update(
+            status=MemberStatus.REMOVED,
+        )
+        self.client.cookies["matemail_refresh"] = tokens["refresh"]
+        response = self.client.post("/api/auth/refresh/")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.cookies["matemail_refresh"].value, "")
+        # Restoring a membership must not resurrect an already revoked cookie.
+        TenantMembership.objects.filter(tenant=self.tenant, user=self.owner).update(
+            status=MemberStatus.ACTIVE,
+        )
+        self.client.cookies["matemail_refresh"] = tokens["refresh"]
+        self.assertEqual(self.client.post("/api/auth/refresh/").status_code, 401)
+
+    def test_verified_mfa_refresh_rotates_and_preserves_proof(self):
+        from apps.accounts.tokens import make_tokens
+        from tests.factories import enable_2fa
+        enable_2fa(self.owner)
+        tokens = make_tokens(self.owner, tenant_id=self.tenant.pk, mfa_verified=True)
+        self.client.cookies["matemail_refresh"] = tokens["refresh"]
+        rotated = self.client.post("/api/auth/refresh/")
+        self.assertEqual(rotated.status_code, 200)
+        proof = APIClient()
+        proof.credentials(HTTP_AUTHORIZATION=f"Bearer {rotated.data['access']}")
+        self.assertEqual(proof.get("/api/workspaces/").status_code, 200)
+        self.client.cookies["matemail_refresh"] = tokens["refresh"]
+        self.assertEqual(self.client.post("/api/auth/refresh/").status_code, 401)
 
     def test_enrollment_challenge_cannot_be_used_as_jwt(self):
         login = self.client.post("/api/auth/login/", {
