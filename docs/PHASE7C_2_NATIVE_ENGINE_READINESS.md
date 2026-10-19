@@ -72,6 +72,29 @@ This follow-up fixed two issues identified during the Stage 7C-2 review:
 - Stage 7C-2 combined Native/SMTP/IMAP E2E test remains pending under the
   separately documented safety blocker.
 
+## Native API real loopback HTTP revocation integration — 2026-10-19
+
+With the combined synthetic PostgreSQL/Dovecot/Postfix fixture still
+unavailable, a new isolated real HTTP control-plane integration test
+verifies the actual Native API HTTP handler over 127.0.0.1. The database
+transaction and Dovecot administrative transport are explicitly mocked,
+so this does not claim real IMAP/SMTP, SQL lifecycle or networked Dovecot.
+
+- 3/3 new HTTP revocation tests passed: API-secret authorization;
+  mutation commits before a mailbox-specific disconnect; a transient
+  Dovecot outage returns 503 AFTER the committed revocation, and retrying
+  the already-revoked idempotent request reissues the session kick.
+- No cross-mailbox or wildcard disconnect route was added.
+- 51/51 complete Native Engine Python tests passed, including original
+  platform and credential tests and earlier four hardening tests.
+- Evidence: results/stage7c-native-http-revocation.log and
+  results/stage7c-native-all-unit-20261019.log
+- Source: engine/native_api/tests/test_phase7c_http_revocation_contract.py
+- No real customer account, production DB, live SMTP/IMAP connection
+  or production administrative endpoint was accessed.
+- C2 combined Native/SMTP/IMAP E2E remains pending. This test cannot
+  substitute for it.
+
 ## Blocker: isolated synthetic mailbox population
 
 The attempted test action that would initialize synthetic mailboxes and launch
