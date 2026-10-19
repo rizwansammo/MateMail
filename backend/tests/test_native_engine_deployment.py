@@ -368,11 +368,12 @@ class WriteModelTest(unittest.TestCase):
         NE1 asserted the API implemented NO provisioning, which was right then
         and is deliberately no longer true: NE2 IS the provisioning layer. The
         invariant that survives the phase change is the one that matters — every
-        write to engine state goes through one reviewed module reached only via
-        the API.
+        write to engine state goes through an explicitly reviewed module reached
+        only through the authenticated Native API.
 
-        `db.py` writes too, but only the migration ladder's own bookkeeping row,
-        so it is allowed exactly that and checked for it.
+        The Phase 7 client credential lifecycle and the durable IMAP disconnect
+        outbox add two reviewed API-only writer modules. An explicit allowlist
+        still rejects all unreviewed writers; db.py handles migrations only.
         """
         engine = REPO / "engine" / "native_api"
         writers = {}
@@ -383,9 +384,19 @@ class WriteModelTest(unittest.TestCase):
                 writers[module.name] = body
         self.assertTrue(writers, "no writer found at all — the search is wrong")
         self.assertEqual(
-            set(writers), {"provisioning.py", "db.py"},
-            "engine writes must stay in provisioning.py (state) and db.py (migrations)",
+            set(writers), {
+                "provisioning.py", "db.py", "client_credentials.py", "kick_recovery.py",
+            },
+            "engine writes must stay in four explicitly reviewed Native modules",
         )
+        # Pin permission checks and mailbox-scoped concurrency fencing for
+        # the two newly approved writer modules.
+        self.assertIn("if not mutation_enabled():", writers["client_credentials.py"])
+        self.assertIn("FOR UPDATE", writers["client_credentials.py"])
+        self.assertIn("WHERE mailbox_id=%s AND generation=%s::uuid", writers["kick_recovery.py"])
+        self.assertIn("FOR UPDATE OF q SKIP LOCKED", writers["kick_recovery.py"])
+        self.assertIn("kick_recovery.enqueue(", self.api_source)
+        self.assertIn("client_credentials.revoke_credential(", self.api_source)
         # db.py may touch the version ledger and nothing else.
         for table in ("domain", "mailbox", "alias", "forwarding", "dkim_key"):
             with self.subTest(table=table):
@@ -674,22 +685,30 @@ class DovecotDeniesAllAuthenticationTest(unittest.TestCase):
         self.assertNotRegex(self.directives, r"passdb\s+static\b")
         self.assertNotRegex(self.directives, r"driver\s*=\s*static")
 
-    def test_auth_is_backed_by_the_read_only_sql_view(self):
-        """
-        NE1 denied everyone through an empty passwd-file. NE3 replaces that with
-        a real lookup — against a VIEW, as a role that cannot write.
-
-        The NE1 property this supersedes was "nobody can authenticate". The NE3
-        property is narrower and more useful: authentication is possible, and
-        the only thing it can read is a hash.
+    def test_auth_is_backed_by_password_verified_least_privilege_sql(self):
+        """Dovecot authenticates through a restricted, password-dependent SQL
+        function, never a broad password-hash view or direct mailbox tables.
+        The user database remains a read-only SQL view.
         """
         self.assertRegex(self.directives, r"passdb\s+sql\s*\{")
         self.assertRegex(self.directives, r"userdb\s+sql\s*\{")
 
-        # Views, never base tables: a base table here would hand Dovecot columns
-        # migration 003 deliberately does not publish to it.
-        self.assertIn("FROM dovecot_auth", self.directives)
+        # Require the actual password as a verifier input; the former
+        # dovecot_auth view supplied reusable hashes without verification.
+        self.assertIn("FROM public.dovecot_client_auth('%{user}', '%{password}')", self.directives)
+        self.assertNotIn("FROM dovecot_auth", self.directives)
         self.assertIn("FROM dovecot_userdb", self.directives)
+        migration = (REPO / "engine" / "native_api" / "migrations"
+                     / "014_client_auth_verification.sql").read_text(encoding="utf-8")
+        self.assertIn("LANGUAGE plpgsql SECURITY DEFINER", migration)
+        self.assertIn("mail_client_verify_bcrypt(raw", migration)
+        self.assertIn("REVOKE ALL ON FUNCTION public.dovecot_client_auth(text, text)", migration)
+        self.assertIn("GRANT EXECUTE ON FUNCTION public.dovecot_client_auth(text, text)", migration)
+        self.assertIn("TO engine_ro_dovecot;", migration)
+        self.assertIn("REVOKE ALL ON FUNCTION public.mail_client_verify_bcrypt", migration)
+        credentials_sql = (REPO / "engine" / "native_api" / "migrations"
+                           / "013_mail_client_credentials.sql").read_text(encoding="utf-8")
+        self.assertIn("FROM PUBLIC, engine_ro_postfix, engine_ro_dovecot", credentials_sql)
         for table in ("FROM mailbox", "FROM domain", "FROM dkim_key"):
             with self.subTest(table=table):
                 self.assertNotIn(table, self.directives)
