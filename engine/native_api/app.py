@@ -467,6 +467,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if handler is None:
             self._send(404, {"error": "not found"})
             return
+        committed = False
         try:
             body = self._body()
             # Security credentials are revoked/disabled in PostgreSQL FIRST.
@@ -480,16 +481,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             }
             with db.connect_runtime() as conn:
                 result = handler(conn, body)
+            # Only a successfully exited transaction guarantees commit. Any
+            # database/handler failure before this line must never be called
+            # a saved security change by the HTTP/adapter error contract.
+            committed = True
             if needs_kick:
                 operations.kick_mailbox_sessions(body["address"])
             self._send(200, result if result is not None else {"ok": True})
         except operations.InvalidIdentifier as exc:
             self._send(400, {"error": str(exc)})
         except operations.OperationUnavailable:
-            # Credential revocation is committed before the Dovecot kick.
-            # Do NOT claim that old IMAP sessions are gone if doveadm fails.
-            if route in ("/v1/mailboxes/client/revoke",
-                         "/v1/mailboxes/client/policy"):
+            # Only the post-commit doveadm failure may assert that the
+            # credential change was saved. Earlier failures may have rolled
+            # back and must retain the ordinary service-unavailable response.
+            if committed and route in ("/v1/mailboxes/client/revoke",
+                                        "/v1/mailboxes/client/policy"):
                 self._send(503, {
                     "error": "Credential state updated; active session disconnect unverified. Retry security action.",
                     "code": "mail_client_disconnect_unverified",

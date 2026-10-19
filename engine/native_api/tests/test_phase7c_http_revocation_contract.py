@@ -117,6 +117,33 @@ class NativeHTTPRevocationTest(unittest.TestCase):
             "begin", "revoke", "commit", "kick-attempt",
         ])
 
+    def test_precommit_unavailability_must_not_claim_saved_credential(self):
+        def unavailable(_conn, _payload):
+            raise operations.OperationUnavailable("synthetic precommit error")
+        with mock.patch.dict(app._WRITE_ROUTES, {
+            "/v1/mailboxes/client/revoke": unavailable,
+        }), mock.patch.object(operations, "kick_mailbox_sessions") as kick:
+            status, body = self.post()
+        self.assertEqual(status, 503, body)
+        self.assertNotIn("mail_client_disconnect_unverified", body.values())
+        self.assertNotIn("saved", body.get("error", "").lower())
+        self.assertEqual(self.events, ["begin", "rollback"])
+        kick.assert_not_called()
+
+    def test_transaction_failure_does_not_claim_saved_credential(self):
+        class FailedCommit(Connection):
+            def __exit__(self, exc_type, exc, tb):
+                self.events.append("rollback")
+                raise operations.OperationUnavailable("synthetic commit failed")
+        with mock.patch.object(app.db, "connect_runtime",
+                               return_value=FailedCommit(self.events)), \
+             mock.patch.object(operations, "kick_mailbox_sessions") as kick:
+            status, body = self.post()
+        self.assertEqual(status, 503, body)
+        self.assertNotIn("mail_client_disconnect_unverified", body.values())
+        self.assertEqual(self.events, ["begin", "revoke", "rollback"])
+        kick.assert_not_called()
+
     def test_wrong_secret_cannot_mutate_or_kick(self):
         with mock.patch.object(operations, "kick_mailbox_sessions") as kick:
             for secret in (None, "incorrect-secret"):
