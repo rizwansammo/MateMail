@@ -45,6 +45,13 @@ class RequiredOrganizationMfaTest(TestCase):
         response = client.get("/api/workspaces/")
         self.assertEqual(response.status_code, 403)
 
+    def test_api_key_cannot_bypass_required_interactive_mfa(self):
+        from tests.factories import make_api_key, bearer_client
+        key, _ = make_api_key(self.tenant, self.owner)
+        response = bearer_client(key).get("/api/domains/")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("2FA", response.json()["detail"])
+
     def test_enrollment_challenge_cannot_be_used_as_jwt(self):
         login = self.client.post("/api/auth/login/", {
             "email": self.owner.email, "password": TEST_PASSWORD,

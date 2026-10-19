@@ -57,6 +57,17 @@ class TenantMiddleware:
                     {"detail": "This tenant is not available on this host."},
                     status=403,
                 )
+            # Machine keys have no interactive second-factor proof. When a
+            # workspace explicitly requires MFA, do not let this early return
+            # bypass the live tenant policy enforced on JWT requests below.
+            if request.tenant is not None:
+                from .security_policy import effective_two_factor_policy
+                from .models import OrganizationTwoFactorMode
+                if effective_two_factor_policy(request.tenant) == OrganizationTwoFactorMode.REQUIRE:
+                    return JsonResponse(
+                        {"detail": "API keys cannot satisfy required interactive 2FA."},
+                        status=403,
+                    )
             return self.get_response(request)
 
         # Attempt JWT authentication.
