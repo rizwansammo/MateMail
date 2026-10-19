@@ -367,6 +367,9 @@ jobs:
           EMAIL_HOST: localhost
         run: python3 phase7c_mfa_compose_check.py
 
+      - name: Validate immutable GHCR release-manifest contract (synthetic)
+        run: python3 -B deploy/release_image_manifest.py self-test
+
       - name: docker compose config
         working-directory: deploy
         env:
@@ -563,6 +566,7 @@ jobs:
       # `latest` is deliberately NOT produced: production must name the exact
       # image it runs so a rollback can name the one it is returning to.
       - name: Build and push backend
+        id: backend_push
         uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -574,6 +578,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Build and push frontend
+        id: frontend_push
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
@@ -590,6 +595,32 @@ jobs:
             ${{ env.FRONTEND_IMAGE }}:main
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
+
+      # Provenance evidence is produced only AFTER the real GHCR pushes.
+      # Pull requests cannot reach this job (publish is gated above).
+      # Keep the exact sha256 image digests; commit-SHA tags are convenient
+      # names but registry tags themselves can still be reassigned.
+      - name: Create immutable digest release manifest
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          BACKEND_DIGEST: ${{ steps.backend_push.outputs.digest }}
+          FRONTEND_DIGEST: ${{ steps.frontend_push.outputs.digest }}
+        run: |
+          python3 deploy/release_image_manifest.py emit \
+            --source-sha "$RELEASE_SHA" \
+            --backend-digest "$BACKEND_DIGEST" \
+            --frontend-digest "$FRONTEND_DIGEST" \
+            --output candidate/production-image-digests.json
+          python3 deploy/release_image_manifest.py verify \
+            --input candidate/production-image-digests.json
+
+      - name: Retain production image provenance manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: matemail-app-image-digests-${{ github.sha }}
+          path: candidate/production-image-digests.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Deployment instructions
         run: |
