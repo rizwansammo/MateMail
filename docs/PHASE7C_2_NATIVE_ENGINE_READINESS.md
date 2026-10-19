@@ -45,6 +45,33 @@
 - `deploy/stage7c-dovecot.conf`
 - `deploy/stage7c-dovecot-db.conf`
 
+## Additional Native credential security hardening (2026-10-19)
+
+This follow-up fixed two issues identified during the Stage 7C-2 review:
+
+1. **Unknown-mailbox timing equalization.** The Native trusted web primary
+   password verifier now executes a dummy bcrypt check before returning its
+   always-negative answer for unknown, inactive, or protected identities. This
+   reduces an obvious timing distinction between missing and existing mailbox
+   records. The decoy password can never authenticate any mailbox. This does
+   **not** claim formally constant-time behavior over an entire network path.
+2. **Per-mailbox credential lifecycle serialization.** Password issue and
+   revoke now lock the specific mailbox database row before writes. The
+   existing policy update already used this lock; all three operations now
+   serialize so concurrent credential issuance cannot bypass the 10-active-
+   credential maximum and policy update sees a consistent credential count.
+
+- New focused tests: **4/4 passed**.
+- Entire Native API Python unit suite (including old revocation and platform
+  security tests): **48/48 passed** in a 384 MiB, network-disabled test
+  container. This confirms unit behavior only, not the blocked full combined
+  SMTP/IMAP run.
+- Logs: `results/stage7c-native-hardening-unit.log` and
+  `results/stage7c-native-all-unit.log`.
+- All code changes remain on the feature branch. Release flags remain OFF.
+- Stage 7C-2 combined Native/SMTP/IMAP E2E test remains pending under the
+  separately documented safety blocker.
+
 ## Blocker: isolated synthetic mailbox population
 
 The attempted test action that would initialize synthetic mailboxes and launch

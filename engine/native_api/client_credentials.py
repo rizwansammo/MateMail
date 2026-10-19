@@ -14,6 +14,12 @@ import uuid
 from validation import ValidationError, email_address
 from passwords import hash_password, verify_password
 
+# An unknown, suspended, or platform-reserved mailbox must consume a bcrypt
+# verification just like a real mailbox. The hash is a disposable, non-login
+# decoy generated once per API process; it is NOT an authentication credential.
+# The decoy verification result is NEVER used to grant access.
+_UNKNOWN_MAILBOX_HASH = hash_password("matemail-nonloginable-timing-decoy")
+
 
 def mutation_enabled() -> bool:
     return os.environ.get("NATIVE_CLIENT_CREDENTIAL_API_ENABLED", "").lower() == "true"
@@ -52,6 +58,9 @@ def verify_primary(conn, address, password):
     try:
         _, stored = _customer_mailbox(conn, address)
     except ValidationError:
+        # Keep negative responses generic AND similar in timing to a valid
+        # bcrypt check. No early return that becomes a mailbox-existence oracle.
+        verify_password(password, _UNKNOWN_MAILBOX_HASH)
         return {"valid": False}
     return {"valid": verify_password(password, stored)}
 
@@ -90,6 +99,10 @@ def issue_credential(conn, address, label):
         raise ValidationError("Device label must be 1–80 characters", "label")
     mailbox_id, _ = _customer_mailbox(conn, address)
     with conn.cursor() as cur:
+        # Serialize the active-password cap with other creates/revokes and
+        # policy transitions for this ONE mailbox (no global lock).
+        cur.execute("SELECT id FROM public.mailbox WHERE id=%s FOR UPDATE",
+                    (mailbox_id,))
         cur.execute(
             """SELECT count(*) FROM public.mail_client_password
                 WHERE mailbox_id=%s AND revoked_at IS NULL""", (mailbox_id,),
@@ -116,6 +129,9 @@ def revoke_credential(conn, address, credential_id):
     except (ValueError, TypeError, AttributeError):
         raise ValidationError("Invalid credential ID", "id") from None
     with conn.cursor() as cur:
+        # Also serialize revocation with a concurrent create / policy update.
+        cur.execute("SELECT id FROM public.mailbox WHERE id=%s FOR UPDATE",
+                    (mailbox_id,))
         cur.execute(
             """UPDATE public.mail_client_password SET revoked_at=now()
                 WHERE mailbox_id=%s AND id=%s AND revoked_at IS NULL
