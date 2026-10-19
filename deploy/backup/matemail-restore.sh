@@ -92,6 +92,22 @@ for rel, meta in sorted(manifest["staged_files"].items()):
             h.update(chunk)
     if h.hexdigest() != meta["sha256"]:
         bad.append(f"{rel}: checksum mismatch")
+
+# Require proof of BOTH deployment environments, not merely 'at least one'
+# file under config/. An archive with no record of a required secret-bearing
+# config is not suitable for a verified MFA/key-continuity recovery drill.
+required = [
+    "config/opt_MateMail_app_.env",
+    "config/opt_MateMail_engine_deploy_native-engine_.env",
+]
+if manifest.get("required_config") != required:
+    bad.append("required recovery configuration manifest is incomplete")
+for rel in required:
+    p = stage / rel
+    if not p.is_file() or p.stat().st_size == 0:
+        bad.append(f"{rel}: required recovery configuration missing or empty")
+    if rel not in manifest["staged_files"]:
+        bad.append(f"{rel}: missing required checksum manifest entry")
 for line in bad:
     print(f"  FAIL  {line}", file=sys.stderr)
 if bad:
