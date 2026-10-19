@@ -52,6 +52,7 @@ import urllib.parse
 
 import db
 import client_credentials
+import kick_recovery
 import dkim as dkim_lib
 import operations
 import provisioning
@@ -479,14 +480,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "/v1/mailboxes/client/revoke",
                 "/v1/mailboxes/client/policy",
             }
+            pending = None
             with db.connect_runtime() as conn:
                 result = handler(conn, body)
+                if needs_kick and kick_recovery.enabled():
+                    # The queue record and the credential/policy change either
+                    # commit together or both roll back. Crash-safe outbox.
+                    pending = kick_recovery.enqueue(conn, body["address"])
             # Only a successfully exited transaction guarantees commit. Any
             # database/handler failure before this line must never be called
             # a saved security change by the HTTP/adapter error contract.
             committed = True
             if needs_kick:
                 operations.kick_mailbox_sessions(body["address"])
+                if pending is not None:
+                    try:
+                        with db.connect_runtime() as conn:
+                            kick_recovery.acknowledge(conn, *pending)
+                    except Exception as exc:  # noqa: BLE001
+                        # Queue remains durable; never pretend it was cleared.
+                        logger.warning("IMAP kick acknowledgement failed: %s", type(exc).__name__)
+                        raise operations.OperationUnavailable("disconnect acknowledgement unavailable") from exc
             self._send(200, result if result is not None else {"ok": True})
         except operations.InvalidIdentifier as exc:
             self._send(400, {"error": str(exc)})
@@ -835,6 +849,8 @@ class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
 
 
 def main():
+    migrations_ready = False
+    recovery_worker = None
     try:
         with db.connect() as conn:
             version = db.apply_migrations(conn)
@@ -850,6 +866,7 @@ def main():
             # Idempotent, and it never generates a key — minting one here would
             # publish material no DNS record names.
             provisioning.reconcile_dkim(conn)
+            migrations_ready = version >= db.REQUIRED_VERSION
     except Exception as exc:                     # noqa: BLE001
         # Start anyway and report unready. Exiting would make the container
         # restart-loop against a database that may simply be slow to come up,
@@ -857,6 +874,12 @@ def main():
         # not ready.
         logger.error("could not apply engine migrations: %s", type(exc).__name__)
 
+    if kick_recovery.enabled():
+        if migrations_ready and client_credentials.mutation_enabled():
+            recovery_worker = kick_recovery.start_worker(db.connect_runtime)
+            logger.info("durable IMAP session-disconnect recovery enabled")
+        else:
+            logger.error("durable IMAP recovery requested but schema or credential API is not ready")
     server = ThreadedHTTPServer(("0.0.0.0", LISTEN_PORT), Handler)
     logger.info("MateMail Native Engine API (NE2) listening on 0.0.0.0:%s", LISTEN_PORT)
     logger.info("engine database target %s:%s/%s", DB_HOST, DB_PORT, DB_NAME)
@@ -876,6 +899,9 @@ def main():
         logger.info("shutting down")
     finally:
         server.server_close()
+        if recovery_worker is not None:
+            recovery_worker[0].set()
+            recovery_worker[1].join(timeout=2)
 
 
 if __name__ == "__main__":
