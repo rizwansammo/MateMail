@@ -50,7 +50,11 @@ class TenantMiddleware:
         # role-aware permission class refuse the request. Dispatch on the
         # credential type rather than discovering it from an exception.
         if request.META.get("HTTP_AUTHORIZATION", "").startswith("Bearer mm_"):
-            self._try_api_key_auth(request)
+            if self._try_api_key_auth(request) is False:
+                return JsonResponse(
+                    {"detail": "API key workspace access has been revoked."},
+                    status=403,
+                )
             bound_slug = bound_tenant_slug(request)
             if bound_slug and request.tenant and request.tenant.slug != bound_slug:
                 return JsonResponse(
@@ -151,19 +155,23 @@ class TenantMiddleware:
             return
         if api_key.expires_at and timezone.now() > api_key.expires_at:
             return
-        # Cache user so APIKeyAuthentication (DRF) avoids a second DB lookup.
-        # The key object is attached as well: APIKeyScopeMiddleware runs before
-        # DRF and needs the scopes, and DRF needs it for request.auth.
-        request._mm_api_key_user = api_key.created_by
-        request._mm_api_key_id = api_key.id
-        request._mm_api_key = api_key
-        request.tenant = api_key.tenant
+        # A tenant-issued API key may only be used while its creator retains
+        # active membership of that tenant. Otherwise the early-return key
+        # path could expose endpoints checking tenant context but not roles.
+        # A suspended/deleted creator likewise cannot authenticate the key.
+        if api_key.created_by is None or not api_key.created_by.is_active:
+            return False
         try:
             membership = TenantMembership.objects.select_related("tenant").get(
                 tenant=api_key.tenant,
                 user=api_key.created_by,
                 status="active",
             )
-            request.tenant_membership = membership
         except TenantMembership.DoesNotExist:
-            pass
+            return False
+        # Populate authenticated state only after membership validation.
+        request._mm_api_key_user = api_key.created_by
+        request._mm_api_key_id = api_key.id
+        request._mm_api_key = api_key
+        request.tenant = api_key.tenant
+        request.tenant_membership = membership

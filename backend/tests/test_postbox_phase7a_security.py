@@ -82,6 +82,96 @@ class PostBoxMfaBoundaryTest(TestCase):
         self.assertIsNone(postbox_auth.session_for_token(token))
         self.assertIsNone(session.mfa_verified_at)
 
+
+    def _require_mfa_policy(self):
+        self.tenant.two_factor_policy = "require"
+        self.tenant.save(update_fields=["two_factor_policy"])
+        return override_settings(
+            ORGANIZATION_2FA_POLICY_ENABLED=True,
+            ORGANIZATION_2FA_ENFORCEMENT_READY=True,
+        )
+
+    def test_require_policy_blocks_password_only_postbox_and_existing_session(self):
+        raw, _ = PostBoxSession.issue(self.mailbox)
+        with self._require_mfa_policy():
+            self.assertIsNone(postbox_auth.session_for_token(raw))
+            response = self._login()
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertTrue(response.data["requires_2fa"])
+            self.assertTrue(response.data["requires_enrollment"])
+            self.assertNotIn("session", response.data)
+            self.assertEqual(PostBoxSession.objects.filter(
+                mailbox=self.mailbox, mfa_verified_at__isnull=False,
+            ).count(), 0)
+
+    def test_require_policy_enrolls_only_after_native_security_ack_and_denies_disable(self):
+        with self._require_mfa_policy():
+            login = self._login()
+            self.assertTrue(login.data["requires_enrollment"])
+            partial = login.data["partial_token"]
+            no_setup = self.client.post("/api/postbox/auth/2fa/verify/", {
+                "partial_token": partial, "code": "123456",
+            }, format="json")
+            self.assertEqual(no_setup.status_code, 409)
+            begin = self.client.post("/api/postbox/auth/2fa/enroll/", {
+                "partial_token": partial, "action": "begin",
+            }, format="json")
+            self.assertEqual(begin.status_code, 200, begin.data)
+
+            adapter = mock.Mock()
+            adapter.list_client_credentials.return_value = {"enabled": True}
+            adapter.issue_client_credential.return_value = {
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "one_time_credential": "synthetic-mfa-client-only",
+            }
+            adapter.set_client_policy.return_value = {
+                "enabled": True, "dedicated_required": True,
+            }
+            with mock.patch("apps.postbox.two_factor_views.get_adapter", return_value=adapter), \
+                 mock.patch("apps.postbox.views_auth.postbox_auth.remember_session_on_device"), \
+                 mock.patch("apps.postbox.imap.open_mailbox"):
+                finish = self.client.post("/api/postbox/auth/2fa/enroll/", {
+                    "partial_token": partial, "action": "confirm",
+                    "code": pyotp.TOTP(begin.data["secret"]).now(),
+                }, format="json")
+            self.assertEqual(finish.status_code, 200, finish.data)
+            adapter.set_client_policy.assert_called_once_with(
+                self.mailbox.email, enabled=True, dedicated_required=True,
+            )
+            self.assertTrue(PostBoxSession.objects.filter(
+                mailbox=self.mailbox, mfa_verified_at__isnull=False,
+            ).exists())
+            denial = self.client.post("/api/postbox/auth/2fa/disable/", {
+                "current_password": "anything", "code": "123456",
+            }, format="json")
+            self.assertEqual(denial.status_code, 409)
+            self.assertTrue(MailboxTwoFactorSetup.objects.filter(
+                mailbox=self.mailbox, enabled_at__isnull=False,
+            ).exists())
+
+    def test_require_policy_enrollment_native_outage_leaves_mailbox_locked(self):
+        with self._require_mfa_policy():
+            login = self._login()
+            partial = login.data["partial_token"]
+            begin = self.client.post("/api/postbox/auth/2fa/enroll/", {
+                "partial_token": partial, "action": "begin",
+            }, format="json")
+            adapter = mock.Mock()
+            adapter.list_client_credentials.side_effect = RuntimeError("isolated native outage")
+            with mock.patch("apps.postbox.two_factor_views.get_adapter", return_value=adapter):
+                refused = self.client.post("/api/postbox/auth/2fa/enroll/", {
+                    "partial_token": partial, "action": "confirm",
+                    "code": pyotp.TOTP(begin.data["secret"]).now(),
+                }, format="json")
+            self.assertEqual(refused.status_code, 503)
+            self.assertFalse(PostBoxSession.objects.filter(
+                mailbox=self.mailbox, mfa_verified_at__isnull=False,
+            ).exists())
+            self.assertIsNone(MailboxTwoFactorSetup.objects.get(
+                mailbox=self.mailbox,
+            ).enabled_at)
+            self.assertTrue(self._login().data["requires_enrollment"])
+
     def test_mfa_primary_verifier_does_not_fall_back_to_public_imap(self):
         adapter = mock.Mock()
         adapter.verify_primary_password.return_value = False
