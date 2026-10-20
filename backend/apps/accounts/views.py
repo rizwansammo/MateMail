@@ -510,6 +510,13 @@ class RefreshView(APIView):
 
         try:
             token = RefreshToken(raw)
+            account_for_refresh = _user_for(token)
+            if (token.get("hub_security_epoch", 0) != account_for_refresh.hub_security_epoch or
+                    account_for_refresh.hub_mfa_reenrollment_required):
+                token.blacklist()
+                return clear_refresh_cookie(
+                    Response({"detail": "Security recovery requires a new sign in."}, status=403)
+                )
             tenant_id = token.get("tenant_id")
             if bound_tenant_slug(request) and not tenant_id:
                 return clear_refresh_cookie(
