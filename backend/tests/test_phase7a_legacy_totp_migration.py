@@ -7,7 +7,13 @@ from apps.accounts.totp_crypto import decrypt_secret
 
 OTP = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 LEGACY = ("accounts", "0003_platformemailcode")
-CURRENT = ("accounts", "0005_verified_recovery_email")
+# The disposable migration test MUST restore the full current schema, not
+# only the historical recovery-email migration. Phase 3 added new User fields
+# and a tenant-scoped recovery ticket dependent on those fields.
+CURRENT = [
+    ("accounts", "0006_hub_mfa_recovery_account_guards"),
+    ("tenants", "0008_admin_mfa_recovery_ticket"),
+]
 
 
 @override_settings(HUB_2FA_FERNET_KEY="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
@@ -28,8 +34,8 @@ class ExistingHubAuthenticatorMigrationTest(TransactionTestCase):
         Setup.objects.create(user_id=user.id, totp_secret=OTP)
         try:
             executor = MigrationExecutor(connection)
-            executor.migrate([CURRENT])
-            new_apps = executor.loader.project_state([CURRENT]).apps
+            executor.migrate(CURRENT)
+            new_apps = executor.loader.project_state(CURRENT).apps
             migrated = new_apps.get_model("accounts", "TwoFactorSetup").objects.get(
                 user_id=user.id
             )
@@ -44,12 +50,12 @@ class ExistingHubAuthenticatorMigrationTest(TransactionTestCase):
             ).objects.get(user_id=user.id)
             self.assertEqual(restored.totp_secret, OTP)
             executor = MigrationExecutor(connection)
-            executor.migrate([CURRENT])
-            final_apps = executor.loader.project_state([CURRENT]).apps
+            executor.migrate(CURRENT)
+            final_apps = executor.loader.project_state(CURRENT).apps
             reencrypted = final_apps.get_model(
                 "accounts", "TwoFactorSetup"
             ).objects.get(user_id=user.id)
             self.assertEqual(decrypt_secret(reencrypted.totp_secret), OTP)
         finally:
             executor = MigrationExecutor(connection)
-            executor.migrate([CURRENT])
+            executor.migrate(CURRENT)
