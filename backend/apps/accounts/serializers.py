@@ -65,6 +65,12 @@ class TwoFactorSetupConfirmSerializer(serializers.Serializer):
     code = serializers.CharField(max_length=6, min_length=6)
 
 
+class TwoFactorBackupCodeRegenerateSerializer(serializers.Serializer):
+    password = serializers.CharField(trim_whitespace=False, write_only=True)
+    code = serializers.RegexField(regex=r"^[0-9]{6}$", write_only=True)
+
+
+
 class TwoFactorDisableSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
     code = serializers.CharField(write_only=True, required=False, default="", max_length=64)

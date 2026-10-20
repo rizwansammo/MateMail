@@ -14,6 +14,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
 import { IndependentRecoveryEmail } from "@/components/workspace/independent-recovery-email";
 import { AuthenticatorSetupDialog } from "@/components/security/authenticator-setup-dialog";
+import { BackupCodesRotationDialog } from "@/components/security/backup-codes-rotation-dialog";
 import {
   PortalButton,
   PortalCard,
@@ -50,6 +51,7 @@ export default function SecurityPage() {
   const [setupBusy, setSetupBusy] = useState(false);
   const [setupError, setSetupError] = useState("");
   const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [rotationOpen, setRotationOpen] = useState(false);
 
   const [disableOpen, setDisableOpen] = useState(false);
   const [disablePassword, setDisablePassword] = useState("");
@@ -162,6 +164,14 @@ export default function SecurityPage() {
     setSetupError("");
   }
 
+  function finishRecoveryDisclosure() {
+    setBackupCodes([]);
+    setSetupOpen(false);
+    setSetup(null);
+    setSetupCode("");
+    setSetupError("");
+  }
+
   async function confirmTwoFactor(event: React.FormEvent) {
     event.preventDefault();
     if (setupCode.length !== 6) return;
@@ -179,8 +189,8 @@ export default function SecurityPage() {
         setBackupCodes(codes);
         setSetupCode("");
         setProfile((current) => current ? { ...current, two_factor_enabled: true } : current);
-        setSetupOpen(false);
-        setSetup(null);
+        // Keep the setup modal open until the user has explicitly acknowledged
+        // the one-time recovery codes (they cannot be viewed again).
         setMessageTone("success");
         setMessage("Two-factor authentication is enabled.");
       } else {
@@ -245,10 +255,12 @@ export default function SecurityPage() {
 
   return (
     <div className="portal-page astra-resource-page astra-advanced-page astra-security-page">
-      {setupOpen && !profile.two_factor_enabled && (
+      {setupOpen && (
         <AuthenticatorSetupDialog
           setup={setup}
           code={setupCode}
+          backupCodes={backupCodes}
+          onCodesSaved={finishRecoveryDisclosure}
           error={setupError}
           busy={setupBusy}
           onCodeChange={setSetupCode}
@@ -257,6 +269,7 @@ export default function SecurityPage() {
           onClose={closeSetup}
         />
       )}
+      {rotationOpen && <BackupCodesRotationDialog onClose={() => setRotationOpen(false)} />}
       <PortalPageHeading
         title="Account security"
         description="Protect your MateMail Portal account and manage the security controls the backend currently supports."
@@ -322,9 +335,14 @@ export default function SecurityPage() {
                 <span>{profile.two_factor_enabled ? "Authenticator app protection is active." : "Use a TOTP-compatible authenticator app."}</span>
               </div>
               {profile.two_factor_enabled ? (
-                <PortalButton type="button" variant="secondary" onClick={() => setDisableOpen((value) => !value)}>
-                  Disable
-                </PortalButton>
+                <div className="flex flex-wrap items-center gap-2">
+                  <PortalButton type="button" variant="secondary" onClick={() => setRotationOpen(true)}>
+                    Regenerate backup codes
+                  </PortalButton>
+                  <PortalButton type="button" variant="secondary" onClick={() => setDisableOpen((value) => !value)}>
+                    Disable
+                  </PortalButton>
+                </div>
               ) : (
                 <PortalButton type="button" variant="secondary" disabled={setupBusy} onClick={beginTwoFactor}>
                   {setupBusy ? "Starting…" : "Set up 2FA"}
@@ -334,24 +352,6 @@ export default function SecurityPage() {
           </PortalCard>
 
           <IndependentRecoveryEmail primaryEmail={profile.email} twoFactorEnabled={profile.two_factor_enabled} />
-
-          {backupCodes.length > 0 && (
-            <PortalCard className="mt-5 portal-secret-card" title="Save your backup codes" subtitle="Each code can be used once if your authenticator is unavailable. MateMail stores only hashes and cannot show these codes again.">
-              <div className="portal-backup-code-grid">
-                {backupCodes.map((code) => <code key={code}>{code}</code>)}
-              </div>
-              <div className="portal-detail-actions">
-                <PortalButton
-                  type="button"
-                  variant="secondary"
-                  onClick={() => void navigator.clipboard.writeText(backupCodes.join("\n"))}
-                >
-                  <KeyRound className="h-4 w-4" />
-                  Copy all codes
-                </PortalButton>
-              </div>
-            </PortalCard>
-          )}
 
           {disableOpen && profile.two_factor_enabled && (
             <PortalCard className="mt-5" title="Disable two-factor authentication" subtitle="Enter your current password AND a current authenticator or unused backup code. Organization-required 2FA cannot be disabled.">

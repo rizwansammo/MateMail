@@ -16,6 +16,7 @@ from .views import (
     SignupView,
     TwoFactorDisableView,
     TwoFactorSetupView,
+    TwoFactorBackupCodeRegenerateView,
     TwoFactorVerifyView,
     VerifyEmailView,
 )
@@ -30,6 +31,7 @@ urlpatterns = [
     path("verify-email/", VerifyEmailView.as_view(), name="auth-verify-email"),
     path("resend-verification/", ResendVerificationView.as_view(), name="auth-resend-verification"),
     path("2fa/setup/", TwoFactorSetupView.as_view(), name="auth-2fa-setup"),
+    path("2fa/backup-codes/regenerate/", TwoFactorBackupCodeRegenerateView.as_view(), name="auth-2fa-backup-codes-regenerate"),
     path("2fa/verify/", TwoFactorVerifyView.as_view(), name="auth-2fa-verify"),
     path("2fa/enroll-required/", RequiredTwoFactorEnrollmentView.as_view(), name="auth-2fa-enroll-required"),
     path("recovery-email/", RecoveryEmailSetupView.as_view(), name="auth-recovery-email"),
