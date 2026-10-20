@@ -254,8 +254,11 @@ class WorkspaceAdminHubMfaRecoveryConfirmView(APIView):
             revoked = revoke_all_refresh_tokens(user)
             # Machine API keys issued by this admin must not outlive a
             # credential compromise or be used to bypass forced reenrollment.
+            # Recovery increments the user's account-wide security epoch.
+            # Machine keys for this same user across other workspaces must not
+            # survive either; keys issued by OTHER users remain untouched.
             api_keys_revoked = APIKey.objects.filter(
-                tenant=member.tenant, created_by=user, is_active=True,
+                created_by=user, is_active=True,
             ).update(is_active=False)
             ticket.consumed_at = timezone.now()
             ticket.save(update_fields=["consumed_at"])
