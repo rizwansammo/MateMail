@@ -368,6 +368,10 @@ class OwnerEmergencyConfirmView(APIView):
                     return Response({"detail": "Invalid, expired or already used approval."}, status=401)
                 tenant = Tenant.objects.select_for_update().select_related("owner").get(pk=case.tenant_id)
                 owner = User.objects.select_for_update().get(pk=case.owner_id)
+                # Reuse the freshly locked identity for every epoch and
+                # active-status recheck; a cached select_related copy could
+                # otherwise miss a concurrent account security change.
+                case.owner = owner
                 if not _case_valid(case, tenant) or case.hold_until > timezone.now():
                     return Response({"detail": "Recovery conditions have changed."}, status=409)
                 if (case.initiated_by_id == case.approved_by_id or
