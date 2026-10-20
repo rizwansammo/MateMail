@@ -416,6 +416,12 @@ SMTP_IMAP_SECURITY_ENABLED = env.bool("SMTP_IMAP_SECURITY_ENABLED", default=Fals
 POSTBOX_2FA_FERNET_KEY = env("POSTBOX_2FA_FERNET_KEY", default="")
 HUB_2FA_FERNET_KEY = env("HUB_2FA_FERNET_KEY", default="")
 POSTBOX_2FA_ENABLED = env.bool("POSTBOX_2FA_ENABLED", default=False)
+# Staged acceptance: when true, ONLY UUIDs in the comma-separated allowlist
+# may begin new PostBox MFA enrollment or change mail-client credentials.
+# Empty/invalid allowlists select nobody. Previously enrolled mailboxes stay
+# protected regardless of allowlist changes. False preserves global behavior.
+POSTBOX_2FA_CANARY_ENABLED = env.bool("POSTBOX_2FA_CANARY_ENABLED", default=False)
+POSTBOX_2FA_CANARY_MAILBOX_IDS = env("POSTBOX_2FA_CANARY_MAILBOX_IDS", default="")
 
 # MateMail platform settings
 MAIL_DOMAIN = env("MAIL_DOMAIN", default="matemail.pro")
