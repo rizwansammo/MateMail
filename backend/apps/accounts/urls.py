@@ -6,6 +6,7 @@ from .recovery_views import (
 )
 from .required_enrollment import RequiredTwoFactorEnrollmentView
 from apps.tenants.admin_hub_mfa_recovery_views import WorkspaceAdminHubMfaRecoveryConfirmView
+from apps.platform_admin.owner_emergency_views import OwnerEmergencyConfirmView
 from .views import (
     ForgotPasswordView,
     LoginView,
@@ -36,6 +37,7 @@ urlpatterns = [
     path("2fa/verify/", TwoFactorVerifyView.as_view(), name="auth-2fa-verify"),
     path("2fa/enroll-required/", RequiredTwoFactorEnrollmentView.as_view(), name="auth-2fa-enroll-required"),
     path("2fa/admin-recovery/confirm/", WorkspaceAdminHubMfaRecoveryConfirmView.as_view(), name="auth-admin-mfa-recovery-confirm"),
+    path("owner-emergency/confirm/", OwnerEmergencyConfirmView.as_view(), name="owner-emergency-confirm"),
     path("recovery-email/", RecoveryEmailSetupView.as_view(), name="auth-recovery-email"),
     path("recovery-email/confirm/", RecoveryEmailConfirmView.as_view(), name="auth-recovery-confirm"),
     path("2fa/recovery/start/", RecoveryLoginStartView.as_view(), name="auth-2fa-recovery-start"),
