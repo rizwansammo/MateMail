@@ -1,5 +1,6 @@
 """Phase 5: release gating and platform refresh security regression tests."""
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 import json
 
@@ -120,3 +121,15 @@ class Phase5ReleaseTest(TestCase):
         client.cookies[REFRESH_COOKIE_NAME] = tokens["refresh"]
         response = client.post("/api/auth/refresh/", format="json")
         self.assertEqual(response.status_code, 403)
+
+    def test_production_compose_passes_all_release_flags_as_disabled_by_default(self):
+        compose = (Path(__file__).resolve().parents[2] / "deploy" / "docker-compose.yml").read_text()
+        env_template = (Path(__file__).resolve().parents[2] / "deploy" / "env.production.example").read_text()
+        for key in (
+            "HUB_ADMIN_MFA_POLICY_ENABLED",
+            "HUB_ADMIN_MFA_RECOVERY_ENABLED",
+            "PLATFORM_OWNER_EMERGENCY_RECOVERY_ENABLED",
+            "HUB_ADMIN_MFA_ENFORCEMENT_READY",
+        ):
+            self.assertIn(key + ": ${" + key + ":-False}", compose)
+            self.assertIn(key + "=False", env_template)
