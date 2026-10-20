@@ -181,9 +181,10 @@ class PlatformOwnerEmergencyCasesView(APIView):
         value = StartCase(data=request.data)
         value.is_valid(raise_exception=True)
         data = value.validated_data
+        owner = tenant.owner
+        _rate(request.user.pk, owner.pk)
         if not _platform_operator(request, data["current_password"]):
             return Response({"detail": "Recent Platform Console MFA and password verification required."}, status=403)
-        owner = tenant.owner
         if owner.id == request.user.id:
             return Response({"detail": "An operator cannot recover their own account."}, status=403)
         contact = _owner_contact(owner)
@@ -191,7 +192,6 @@ class PlatformOwnerEmergencyCasesView(APIView):
             return Response({
                 "detail": "A verified independent owner recovery address and active authenticator are required. Use a separately approved offline identity recovery process."
             }, status=409)
-        _rate(request.user.pk, owner.pk)
         with transaction.atomic():
             tenant = Tenant.objects.select_for_update().select_related("owner").get(pk=tenant.pk)
             if tenant.owner_id != owner.id:
@@ -240,6 +240,12 @@ class PlatformOwnerEmergencyCaseActionView(APIView):
         payload = cls(data=request.data)
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
+        attempted = OwnerEmergencyRecoveryCase.objects.filter(
+            tenant_id=pk, pk=case_id
+        ).values_list("owner_id", flat=True).first()
+        if attempted is None:
+            return Response({"detail": "Not found."}, status=404)
+        _rate(request.user.pk, attempted)
         if not _platform_operator(request, data["current_password"]):
             return Response({"detail": "Recent Platform Console MFA and password verification required."}, status=403)
         with transaction.atomic():
@@ -253,7 +259,6 @@ class PlatformOwnerEmergencyCaseActionView(APIView):
                 return Response({"detail": "Case is closed or expired."}, status=409)
             if action != "cancel" and not _case_valid(case, tenant):
                 return Response({"detail": "Owner verification conditions have changed."}, status=409)
-            _rate(request.user.id, case.owner_id)
             if action == "approve":
                 if case.approved_at:
                     return Response({"detail": "Already approved."}, status=409)
