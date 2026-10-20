@@ -41,6 +41,32 @@ class PolicyChangeInput(serializers.Serializer):
         return super().to_internal_value(data)
 
 
+class WorkspaceAdminHubMfaAvailabilityView(APIView):
+    """Reveal only whether Hub admin management has been released."""
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "head", "options"]
+
+    def get(self, request, pk):
+        actor = scope_memberships(
+            request,
+            TenantMembership.objects.select_related("tenant").filter(
+                tenant_id=pk, user=request.user, status=MemberStatus.ACTIVE,
+            ),
+        ).first()
+        if actor is None:
+            return Response({"detail": "Not found."}, status=404)
+        return Response({
+            "configurable": (
+                actor.role == MemberRole.OWNER and
+                actor.tenant.owner_id == request.user.pk and
+                bool(getattr(settings, "HUB_ADMIN_MFA_POLICY_ENABLED", False))
+            ),
+            "require_ready": bool(
+                getattr(settings, "HUB_ADMIN_MFA_ENFORCEMENT_READY", False)
+            ),
+        })
+
+
 class WorkspaceAdminHubMfaPolicyView(APIView):
     permission_classes = [IsAuthenticated]
     http_method_names = ["get", "patch", "head", "options"]
