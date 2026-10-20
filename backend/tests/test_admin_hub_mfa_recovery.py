@@ -157,6 +157,15 @@ class AdminMfaRecoveryTests(TestCase):
     def test_confirmation_resets_factor_codes_sessions_and_api_keys(self):
         tokens = make_tokens(self.admin, tenant_id=self.tenant.pk)
         _raw_api_key, key = make_api_key(self.tenant, self.admin)
+        # One person can administer multiple workspaces. A security recovery
+        # invalidates their own API keys everywhere, not another user's keys.
+        second_owner = make_user("second-tenant-owner@example.test")
+        second_tenant = make_tenant(second_owner, "Recovery Other", "recovery-b")
+        unrelated_user = make_user("unrelated-key-owner@example.test")
+        add_member(second_tenant, self.admin, MemberRole.SUPPORT)
+        add_member(second_tenant, unrelated_user, MemberRole.ADMIN)
+        _cross_raw, cross_key = make_api_key(second_tenant, self.admin)
+        _unrelated_raw, unrelated_key = make_api_key(second_tenant, unrelated_user)
         self.assertEqual(self.start().status_code, 202)
         token = self.approval_token()
         self.assertEqual(
@@ -171,7 +180,11 @@ class AdminMfaRecoveryTests(TestCase):
         self.assertFalse(TwoFactorSetup.objects.filter(user=self.admin).exists())
         self.assertFalse(TwoFactorBackupCode.objects.filter(user=self.admin).exists())
         key.refresh_from_db()
+        cross_key.refresh_from_db()
+        unrelated_key.refresh_from_db()
         self.assertFalse(key.is_active)
+        self.assertFalse(cross_key.is_active)
+        self.assertTrue(unrelated_key.is_active)
         self.assertIn(
             bearer_client(tokens["access"]).get("/api/workspaces/").status_code,
             (401, 403),
@@ -184,7 +197,7 @@ class AdminMfaRecoveryTests(TestCase):
         audit = MailLog.objects.get(tenant=self.tenant, event_type="hub_admin_mfa_recovery_completed")
         self.assertEqual(audit.metadata["target_user_id"], str(self.admin.pk))
         self.assertGreaterEqual(audit.metadata["revoked_refresh_tokens"], 1)
-        self.assertEqual(audit.metadata["revoked_api_keys"], 1)
+        self.assertEqual(audit.metadata["revoked_api_keys"], 2)
 
     def test_recovery_forces_enrollment_even_when_admin_policy_off(self):
         self.assertEqual(self.member.admin_hub_mfa_policy, "off")
