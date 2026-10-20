@@ -399,6 +399,13 @@ class OwnerEmergencyConfirmView(APIView):
                     if not delivered:
                         raise RecoveryDeliveryFailed()
 
+                # Invalidate old password-reset links as well: a link issued
+                # before emergency recovery must never survive a credential
+                # compromise, including for the MFA-only mode.
+                if case.mode == OwnerEmergencyRecoveryCase.Mode.MFA:
+                    PasswordResetToken.objects.filter(
+                        user=owner, is_used=False,
+                    ).update(is_used=True)
                 TwoFactorBackupCode.objects.filter(user=owner).delete()
                 TwoFactorSetup.objects.filter(user=owner).delete()
                 RecoveryLoginChallenge.objects.filter(
