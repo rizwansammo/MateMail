@@ -252,6 +252,11 @@ class WorkspaceAdminHubMfaRecoveryConfirmView(APIView):
                 "hub_security_epoch",
             ])
             revoked = revoke_all_refresh_tokens(user)
+            # Machine API keys issued by this admin must not outlive a
+            # credential compromise or be used to bypass forced reenrollment.
+            api_keys_revoked = APIKey.objects.filter(
+                tenant=member.tenant, created_by=user, is_active=True,
+            ).update(is_active=False)
             ticket.consumed_at = timezone.now()
             ticket.save(update_fields=["consumed_at"])
             MailLog.objects.create(
@@ -262,6 +267,7 @@ class WorkspaceAdminHubMfaRecoveryConfirmView(APIView):
                     "actor_user_id": str(ticket.requested_by_id),
                     "target_user_id": str(user.pk), "ticket_id": str(ticket.pk),
                     "revoked_refresh_tokens": revoked,
+                    "revoked_api_keys": api_keys_revoked,
                 },
             )
         # Alerts contain no recovery token or sensitive credential.
@@ -271,7 +277,7 @@ class WorkspaceAdminHubMfaRecoveryConfirmView(APIView):
                 body=(
                     "An administrator authenticator reset was completed. All old "
                     "backup codes and authenticator settings are invalid. "
-                    "Existing sessions are revoked. The administrator must sign "
+                    "Existing sessions and administrator-created API keys are revoked. The administrator must sign "
                     "in with their existing account password and set up a new "
                     "authenticator before accessing the Hub. "
                     "If unexpected, contact your organization security owner."
