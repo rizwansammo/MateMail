@@ -335,20 +335,28 @@ export default function SecurityPage() {
                 <span>{profile.two_factor_enabled ? "Authenticator app protection is active." : "Use a TOTP-compatible authenticator app."}</span>
               </div>
               {profile.two_factor_enabled ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <PortalButton type="button" variant="secondary" onClick={() => setRotationOpen(true)}>
-                    Regenerate backup codes
-                  </PortalButton>
-                  <PortalButton type="button" variant="secondary" onClick={() => setDisableOpen((value) => !value)}>
-                    Disable
-                  </PortalButton>
-                </div>
+                <PortalButton type="button" variant="secondary" onClick={() => setDisableOpen((value) => !value)}>
+                  Disable
+                </PortalButton>
               ) : (
                 <PortalButton type="button" variant="secondary" disabled={setupBusy} onClick={beginTwoFactor}>
                   {setupBusy ? "Starting…" : "Set up 2FA"}
                 </PortalButton>
               )}
             </div>
+
+            {profile.two_factor_enabled && (
+              <div className="portal-security-action">
+                <KeyRound className="h-5 w-5" aria-hidden="true" />
+                <div>
+                  <strong>Backup authentication codes</strong>
+                  <span>Generate new recovery codes. Previously issued backup codes will be invalidated.</span>
+                </div>
+                <PortalButton type="button" variant="secondary" onClick={() => setRotationOpen(true)}>
+                  Regenerate
+                </PortalButton>
+              </div>
+            )}
           </PortalCard>
 
           <IndependentRecoveryEmail primaryEmail={profile.email} twoFactorEnabled={profile.two_factor_enabled} />
