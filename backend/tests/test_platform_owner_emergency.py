@@ -125,3 +125,86 @@ class OwnerEmergencyTest(TestCase):
         self.assertTrue(self.owner.two_factor_enabled)
         self.assertTrue(self.owner.check_password(TEST_PASSWORD))
         self.assertIsNone(self.case().completed_at)
+
+    def test_no_credentials_change_until_owner_confirms(self):
+        token = self.prepare("mfa")
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.two_factor_enabled)
+        self.assertEqual(self.owner.hub_security_epoch, 0)
+        self.assertIsNone(self.case().completed_at)
+        self.assertNotIn(token, str(self.client_b.get(self.url).data))
+        self.assertNotIn(token, str(self.case().capability_hash))
+
+    def test_changed_external_recovery_email_invalidates_case(self):
+        token = self.prepare("mfa")
+        self.external.email = "new-contact@outside.test"
+        self.external.save(update_fields=["email"])
+        self.assertEqual(self.confirm(token).status_code, 409)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.two_factor_enabled)
+
+    def test_changed_workspace_owner_invalidates_case(self):
+        token = self.prepare("mfa")
+        different = make_user("different-owner@example.test")
+        self.tenant.owner = different
+        self.tenant.save(update_fields=["owner"])
+        self.assertEqual(self.confirm(token).status_code, 409)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.two_factor_enabled)
+
+    def test_removed_second_operator_disables_completion(self):
+        token = self.prepare("mfa")
+        self.b.is_platform_admin = False
+        self.b.save(update_fields=["is_platform_admin"])
+        self.assertEqual(self.confirm(token).status_code, 403)
+
+    def test_expired_owner_capability_fails_closed(self):
+        token = self.prepare("mfa")
+        OwnerEmergencyRecoveryCase.objects.update(
+            capability_expires_at=timezone.now()-timedelta(seconds=1)
+        )
+        self.assertEqual(self.confirm(token).status_code, 401)
+
+    def test_no_second_review_on_platform_unverified_session(self):
+        self.assertEqual(self.request().status_code, 201)
+        weak = bearer_client(make_tokens(self.b)["access"])
+        self.assertEqual(self.action("approve",weak).status_code, 403)
+        self.assertIsNone(self.case().approved_at)
+
+    def test_cancelled_case_cannot_be_used(self):
+        token = self.prepare("mfa")
+        self.assertEqual(self.action("cancel").status_code, 200)
+        self.assertEqual(self.confirm(token).status_code, 401)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.two_factor_enabled)
+
+    def test_unknown_target_field_is_rejected(self):
+        result = self.client_a.post(self.url, {
+            "mode": "mfa",
+            "reason": "The owner lost control of their authenticator",
+            "evidence_reference": "CASE-1002",
+            "verification_note": "Identity and company ownership verified independently",
+            "current_password": TEST_PASSWORD,
+            "target_user_id": str(self.b.pk),
+        }, format="json")
+        self.assertEqual(result.status_code, 400)
+        self.assertFalse(OwnerEmergencyRecoveryCase.objects.exists())
+
+    def test_full_recovery_password_link_is_one_use(self):
+        token = self.prepare("full")
+        self.assertEqual(self.confirm(token).status_code, 200)
+        delivered = next(m for m in mail.outbox
+                         if "Complete your owner password" in m.subject)
+        raw = re.search(r"reset-password\\?token=([A-Za-z0-9_-]+)",delivered.body)
+        self.assertIsNotNone(raw)
+        reset = APIClient().post("/api/auth/reset-password/", {
+            "token":raw.group(1), "new_password":"New-Secure-Passphrase-987",
+        },format="json")
+        self.assertEqual(reset.status_code,200,getattr(reset,"data",None))
+        retry = APIClient().post("/api/auth/reset-password/", {
+            "token":raw.group(1), "new_password":"Another-Secure-Passphrase-876",
+        },format="json")
+        self.assertEqual(retry.status_code,400)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.hub_mfa_reenrollment_required)
+        self.assertTrue(self.owner.check_password("New-Secure-Passphrase-987"))
