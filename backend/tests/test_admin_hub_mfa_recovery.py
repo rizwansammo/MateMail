@@ -159,9 +159,13 @@ class AdminMfaRecoveryTests(TestCase):
         _raw_api_key, key = make_api_key(self.tenant, self.admin)
         # One person can administer multiple workspaces. A security recovery
         # invalidates their own API keys everywhere, not another user's keys.
-        add_member(self.other_tenant, self.admin, MemberRole.SUPPORT)
-        _cross_raw, cross_key = make_api_key(self.other_tenant, self.admin)
-        _unrelated_raw, unrelated_key = make_api_key(self.other_tenant, self.other_admin)
+        second_owner = make_user("second-tenant-owner@example.test")
+        second_tenant = make_tenant(second_owner, "Recovery Other", "recovery-b")
+        unrelated_user = make_user("unrelated-key-owner@example.test")
+        add_member(second_tenant, self.admin, MemberRole.SUPPORT)
+        add_member(second_tenant, unrelated_user, MemberRole.ADMIN)
+        _cross_raw, cross_key = make_api_key(second_tenant, self.admin)
+        _unrelated_raw, unrelated_key = make_api_key(second_tenant, unrelated_user)
         self.assertEqual(self.start().status_code, 202)
         token = self.approval_token()
         self.assertEqual(
