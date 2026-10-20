@@ -25,6 +25,8 @@ from apps.tenants.membership_policy import (
 )
 from apps.tenants.permissions import HasTenantAccess, IsTenantAdmin
 from apps.tenants.security_policy import effective_two_factor_policy
+from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+from apps.tenants.models import AdminHubMfaMode
 from apps.tenants.models import OrganizationTwoFactorMode
 from .invite_mailbox import (
     InviteMailboxError, complete_invited_mailbox,
@@ -178,7 +180,11 @@ class TeamInviteRevokeView(APIView):
 
 def _invite_session_response(user, tenant, payload, *, status=200):
     """An invite never issues a password-only session into a Require tenant."""
-    if effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+    member = TenantMembership.objects.select_related("tenant").filter(
+        tenant=tenant, user=user, status=MemberStatus.ACTIVE,
+    ).first()
+    if (effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE or
+            effective_admin_hub_mfa_policy(member) == AdminHubMfaMode.REQUIRED):
         return Response({
             **payload,
             "requires_login": True,
