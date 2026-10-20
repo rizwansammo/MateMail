@@ -25,6 +25,7 @@ from apps.tenants.models import OrganizationTwoFactorMode
 from apps.tenants.security_policy import effective_two_factor_policy
 from . import auth as postbox_auth
 from . import two_factor_challenge as challenges
+from .canary_scope import can_start_mfa_enrollment, mailbox_in_mfa_scope
 from .models import (
     MailboxTwoFactorSetup, MailboxTwoFactorBackupCode,
     MailClientAccessPolicy, PostBoxSession,
@@ -156,6 +157,9 @@ class PostBoxTwoFactorEnrollView(APIView):
         current_setup = MailboxTwoFactorSetup.objects.filter(mailbox=mailbox).first()
         if current_setup and current_setup.enabled_at:
             return Response({"detail": "2FA is already enabled."}, status=409)
+        if not can_start_mfa_enrollment(mailbox):
+            # A pre-existing partial challenge cannot survive scope removal.
+            return Response({"detail": "Mailbox security is not yet available."}, status=503)
         if not _rate_limit(mailbox):
             challenges.reject_attempt(raw)
             return Response({"detail": "Too many attempts."}, status=429)
@@ -256,6 +260,8 @@ class PostBoxTwoFactorStartView(APIView):
             return refused
         password = request.data.get("current_password", "")
         mailbox = request.postbox_session.mailbox
+        if not can_start_mfa_enrollment(mailbox):
+            return Response({"detail": "Mailbox security is not yet available."}, status=503)
         if not _rate_limit(mailbox) or not postbox_auth.trusted_primary_authenticate(
             mailbox.email, password
         ):
@@ -289,6 +295,8 @@ class PostBoxClientCredentialView(APIView):
         if refused:
             return refused
         mailbox = request.postbox_session.mailbox
+        if not mailbox_in_mfa_scope(mailbox):
+            return Response({"detail": "Mailbox security is not yet available."}, status=503)
         try:
             payload = get_adapter().list_client_credentials(mailbox.email)
         except Exception:
@@ -313,6 +321,8 @@ class PostBoxClientCredentialView(APIView):
         data.is_valid(raise_exception=True)
         values = data.validated_data
         mailbox = request.postbox_session.mailbox
+        if not mailbox_in_mfa_scope(mailbox):
+            return Response({"detail": "Mailbox security is not yet available."}, status=503)
         if not _require_recent_primary_and_factor(
             request, values["current_password"], values.get("code", "")
         ):
