@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { KeyRound, Loader2, Mail, ShieldCheck } from "lucide-react";
 
+import { AuthenticatorSetupCode } from "@/components/security/authenticator-setup-code";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
 import { postbox, type PostBoxMfaChallenge, type SavedPostBoxAccount } from "@/lib/postbox-api";
 
@@ -158,9 +159,8 @@ export default function PostBoxLoginPage() {
                 <>
                   {mfaSetup && (
                     <div className="pb-premium-field">
-                      <label>Authenticator setup secret</label>
-                      <code className="break-all">{mfaSetup.secret}</code>
-                      <button type="button" className="pb-settings-secondary" onClick={() => void navigator.clipboard.writeText(mfaSetup.secret)}>Copy secret</button>
+                      <label>Scan to set up authenticator</label>
+                      <AuthenticatorSetupCode secret={mfaSetup.secret} uri={mfaSetup.uri} compact />
                     </div>
                   )}
                   <div className="pb-premium-field">

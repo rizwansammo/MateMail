@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  CheckCircle2,
   KeyRound,
   LockKeyhole,
   MailCheck,
@@ -14,10 +13,10 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
 import { IndependentRecoveryEmail } from "@/components/workspace/independent-recovery-email";
+import { AuthenticatorSetupDialog } from "@/components/security/authenticator-setup-dialog";
 import {
   PortalButton,
   PortalCard,
-  PortalCopyButton,
   PortalNotice,
   PortalPageHeading,
   PortalSkeleton,
@@ -155,6 +154,14 @@ export default function SecurityPage() {
     }
   }
 
+  function closeSetup() {
+    if (setupBusy) return;
+    setSetupOpen(false);
+    setSetup(null);
+    setSetupCode("");
+    setSetupError("");
+  }
+
   async function confirmTwoFactor(event: React.FormEvent) {
     event.preventDefault();
     if (setupCode.length !== 6) return;
@@ -172,6 +179,8 @@ export default function SecurityPage() {
         setBackupCodes(codes);
         setSetupCode("");
         setProfile((current) => current ? { ...current, two_factor_enabled: true } : current);
+        setSetupOpen(false);
+        setSetup(null);
         setMessageTone("success");
         setMessage("Two-factor authentication is enabled.");
       } else {
@@ -236,6 +245,18 @@ export default function SecurityPage() {
 
   return (
     <div className="portal-page astra-resource-page astra-advanced-page astra-security-page">
+      {setupOpen && !profile.two_factor_enabled && (
+        <AuthenticatorSetupDialog
+          setup={setup}
+          code={setupCode}
+          error={setupError}
+          busy={setupBusy}
+          onCodeChange={setSetupCode}
+          onSubmit={confirmTwoFactor}
+          onRetry={() => void beginTwoFactor()}
+          onClose={closeSetup}
+        />
+      )}
       <PortalPageHeading
         title="Account security"
         description="Protect your MateMail Portal account and manage the security controls the backend currently supports."
@@ -311,55 +332,6 @@ export default function SecurityPage() {
               )}
             </div>
           </PortalCard>
-
-          {setupOpen && !profile.two_factor_enabled && (
-            <PortalCard className="mt-5" title="Set up an authenticator" subtitle="Add this account to a TOTP-compatible authenticator, then enter the current six-digit code.">
-              {setupError && <div className="mb-4"><PortalNotice tone="danger">{setupError}</PortalNotice></div>}
-              {setup && (
-                <>
-                  <div className="portal-secret-stack">
-                    <div>
-                      <span>Setup secret</span>
-                      <div className="portal-secret-value">
-                        <code>{setup.secret}</code>
-                        <PortalCopyButton value={setup.secret} label="Copy authenticator secret" />
-                      </div>
-                    </div>
-                    <div>
-                      <span>Authenticator URI</span>
-                      <div className="portal-secret-value">
-                        <code>{setup.uri}</code>
-                        <PortalCopyButton value={setup.uri} label="Copy authenticator URI" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <form onSubmit={confirmTwoFactor} className="mt-4">
-                    <div className="portal-field">
-                      <label>Six-digit verification code</label>
-                      <input
-                        inputMode="numeric"
-                        pattern="[0-9]{6}"
-                        maxLength={6}
-                        minLength={6}
-                        required
-                        value={setupCode}
-                        onChange={(event) => setSetupCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                        placeholder="123456"
-                      />
-                    </div>
-                    <div className="portal-detail-actions">
-                      <PortalButton type="submit" disabled={setupBusy || setupCode.length !== 6}>
-                        <ShieldCheck className="h-4 w-4" />
-                        {setupBusy ? "Verifying…" : "Verify & enable"}
-                      </PortalButton>
-                      <PortalButton type="button" variant="secondary" onClick={() => setSetupOpen(false)} disabled={setupBusy}>Cancel</PortalButton>
-                    </div>
-                  </form>
-                </>
-              )}
-            </PortalCard>
-          )}
 
           <IndependentRecoveryEmail primaryEmail={profile.email} twoFactorEnabled={profile.two_factor_enabled} />
 
