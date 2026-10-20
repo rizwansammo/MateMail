@@ -36,7 +36,7 @@ interface AuthContextValue {
   login: (
     email: string,
     password: string
-  ) => Promise<{ requires_2fa: boolean; requires_enrollment?: boolean; partial_token?: string }>;
+  ) => Promise<{ requires_2fa: boolean; requires_enrollment?: boolean; partial_token?: string; recommend_2fa_setup?: boolean }>;
   signup: (
     email: string,
     password: string,
@@ -138,6 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await api.post<{
         requires_2fa?: boolean;
         requires_enrollment?: boolean;
+        recommend_2fa_setup?: boolean;
         partial_token?: string;
         access?: string;
         user?: AuthUser;
@@ -151,7 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAccessToken(data.access!);
       setUser(data.user!);
       setTenant(data.tenant!);
-      return { requires_2fa: false };
+      return { requires_2fa: false, recommend_2fa_setup: data.recommend_2fa_setup ?? false };
     },
     []
   );

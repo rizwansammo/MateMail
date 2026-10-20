@@ -66,8 +66,10 @@ class TenantMiddleware:
             # bypass the live tenant policy enforced on JWT requests below.
             if request.tenant is not None:
                 from .security_policy import effective_two_factor_policy
-                from .models import OrganizationTwoFactorMode
-                if effective_two_factor_policy(request.tenant) == OrganizationTwoFactorMode.REQUIRE:
+                from .admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+                from .models import OrganizationTwoFactorMode, AdminHubMfaMode
+                if (effective_two_factor_policy(request.tenant) == OrganizationTwoFactorMode.REQUIRE or
+                        effective_admin_hub_mfa_policy(request.tenant_membership) == AdminHubMfaMode.REQUIRED):
                     return JsonResponse(
                         {"detail": "API keys cannot satisfy required interactive 2FA."},
                         status=403,
@@ -128,8 +130,10 @@ class TenantMiddleware:
         # Checks the live tenant setting on every request, not a stale claim.
         if request.tenant is not None:
             from .security_policy import effective_two_factor_policy
-            from .models import OrganizationTwoFactorMode
-            if effective_two_factor_policy(request.tenant) == OrganizationTwoFactorMode.REQUIRE:
+            from .admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+            from .models import OrganizationTwoFactorMode, AdminHubMfaMode
+            if (effective_two_factor_policy(request.tenant) == OrganizationTwoFactorMode.REQUIRE or
+                    effective_admin_hub_mfa_policy(request.tenant_membership) == AdminHubMfaMode.REQUIRED):
                 if not user.two_factor_enabled or not token.get("mfa_verified_at"):
                     return JsonResponse(
                         {"detail": "Sign in with 2FA to continue."}, status=403

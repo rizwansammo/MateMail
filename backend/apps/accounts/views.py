@@ -260,8 +260,13 @@ class SignupView(APIView):
 
             _send_verification_email(user)
             from apps.tenants.security_policy import effective_two_factor_policy
-            from apps.tenants.models import OrganizationTwoFactorMode
-            if effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+            from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+            from apps.tenants.models import OrganizationTwoFactorMode, AdminHubMfaMode
+            invite_membership = TenantMembership.objects.select_related("tenant").get(
+                tenant=tenant, user=user, status=MemberStatus.ACTIVE,
+            )
+            if (effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE or
+                    effective_admin_hub_mfa_policy(invite_membership) == AdminHubMfaMode.REQUIRED):
                 # Signup proves the new password, but it does not establish
                 # an enrolled second factor. Do not mint a refresh cookie or
                 # JWT that cannot legally access this workspace. A fresh Hub
@@ -331,6 +336,19 @@ class SignupView(APIView):
                 status=201,
             )
 
+        from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+        from apps.tenants.models import AdminHubMfaMode
+        owner_membership = TenantMembership.objects.select_related("tenant").get(
+            tenant=tenant, user=user, status=MemberStatus.ACTIVE,
+        )
+        if effective_admin_hub_mfa_policy(owner_membership) == AdminHubMfaMode.REQUIRED:
+            return Response({
+                "user": UserProfileSerializer(user).data,
+                "tenant": _tenant_brief(tenant),
+                "requires_login": True,
+                "requires_2fa": True,
+                "detail": "Account created. Sign in to complete required 2FA.",
+            }, status=201)
         tokens = make_tokens(user, tenant_id=tenant.id)
 
         return authenticated_response(
@@ -438,9 +456,12 @@ class LoginView(APIView):
         tenant_id = membership.tenant_id if membership else None
 
         from apps.tenants.security_policy import effective_two_factor_policy
-        from apps.tenants.models import OrganizationTwoFactorMode
+        from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+        from apps.tenants.models import OrganizationTwoFactorMode, AdminHubMfaMode
+        admin_policy = effective_admin_hub_mfa_policy(membership)
         if (membership is not None and
-                effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE and
+                (effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE or
+                 admin_policy == AdminHubMfaMode.REQUIRED) and
                 not user.two_factor_enabled):
             partial = create_challenge(user, tenant_id)
             return Response({"requires_2fa": True, "requires_enrollment": True,
@@ -458,6 +479,9 @@ class LoginView(APIView):
             {
                 "user": UserProfileSerializer(user).data,
                 "tenant": _tenant_brief(membership.tenant) if membership else None,
+                "recommend_2fa_setup": (
+                    admin_policy == AdminHubMfaMode.OPTIONAL and not user.two_factor_enabled
+                ),
             },
         )
 
@@ -500,20 +524,26 @@ class RefreshView(APIView):
                         Response({"detail": "Session is not valid on this host."}, status=403)
                     )
             from apps.tenants.security_policy import effective_two_factor_policy
-            from apps.tenants.models import OrganizationTwoFactorMode, TenantMembership, MemberStatus
+            from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+            from apps.tenants.models import (
+                OrganizationTwoFactorMode, AdminHubMfaMode, TenantMembership, MemberStatus,
+            )
             if tenant_id:
                 account = _user_for(token)
-                if not TenantMembership.objects.filter(
+                membership = TenantMembership.objects.select_related("tenant").filter(
                     tenant=tenant, user=account, status=MemberStatus.ACTIVE,
-                ).exists():
+                ).first()
+                if membership is None:
                     # A removed member cannot keep renewing the old session,
                     # even if their JWT still carries a valid MFA proof.
                     token.blacklist()
                     return clear_refresh_cookie(
                         Response({"detail": "Organization access revoked."}, status=403)
                     )
-                if effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE:
+                if (effective_two_factor_policy(tenant) == OrganizationTwoFactorMode.REQUIRE or
+                        effective_admin_hub_mfa_policy(membership) == AdminHubMfaMode.REQUIRED):
                     if not account.two_factor_enabled or not token.get("mfa_verified_at"):
+                        token.blacklist()
                         return clear_refresh_cookie(
                             Response({"detail": "Sign in with 2FA to continue."}, status=403)
                         )
@@ -1014,10 +1044,15 @@ class TwoFactorDisableView(APIView):
         # Do not reset the rate-limit after password verification alone:
         # otherwise someone who knows the password can brute force the OTP.
         from apps.tenants.security_policy import effective_two_factor_policy
-        from apps.tenants.models import OrganizationTwoFactorMode
-        if any(effective_two_factor_policy(m.tenant) == OrganizationTwoFactorMode.REQUIRE
-               for m in TenantMembership.objects.select_related("tenant").filter(
-                   user=user, status=MemberStatus.ACTIVE)):
+        from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+        from apps.tenants.models import OrganizationTwoFactorMode, AdminHubMfaMode
+        if any(
+            effective_two_factor_policy(m.tenant) == OrganizationTwoFactorMode.REQUIRE or
+            effective_admin_hub_mfa_policy(m) == AdminHubMfaMode.REQUIRED
+            for m in TenantMembership.objects.select_related("tenant").filter(
+                user=user, status=MemberStatus.ACTIVE,
+            )
+        ):
             return Response({"detail": "Your organization requires 2FA."}, status=409)
 
         # A mailbox password alone is NOT permission to remove an enrolled

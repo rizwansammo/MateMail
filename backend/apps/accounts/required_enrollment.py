@@ -18,6 +18,8 @@ from apps.security.throttling import AuthEndpointThrottle
 from apps.tenants.host_binding import scope_memberships
 from apps.tenants.models import TenantMembership, MemberStatus, OrganizationTwoFactorMode
 from apps.tenants.security_policy import effective_two_factor_policy
+from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+from apps.tenants.models import AdminHubMfaMode
 
 from .totp_crypto import encrypt_secret, decrypt_secret
 from .challenge import (
@@ -61,7 +63,10 @@ class RequiredTwoFactorEnrollmentView(APIView):
                 status=MemberStatus.ACTIVE,
             ),
         ).first()
-        if membership is None or effective_two_factor_policy(membership.tenant) != OrganizationTwoFactorMode.REQUIRE:
+        if membership is None or not (
+            effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE or
+            effective_admin_hub_mfa_policy(membership) == AdminHubMfaMode.REQUIRED
+        ):
             return Response({"detail": "Not available."}, status=403)
         if user.two_factor_enabled:
             return Response({"detail": "Two-factor enrollment already completed."}, status=409)
