@@ -45,6 +45,14 @@ class OrganizationTwoFactorMode(models.TextChoices):
     REQUIRE = "require", "Require 2FA"
 
 
+class AdminHubMfaMode(models.TextChoices):
+    """Per-workspace Hub administrator policy. Never applies to PostBox."""
+
+    OFF = "off", "Off"
+    OPTIONAL = "optional", "Optional"
+    REQUIRED = "required", "Required"
+
+
 class TenantManager(models.Manager):
     pass
 
@@ -298,6 +306,11 @@ class TenantMembership(models.Model):
         related_name="memberships",
     )
     role = models.CharField(max_length=20, choices=MemberRole.choices, default=MemberRole.READ_ONLY)
+    # Hub-only admin policy. Existing memberships remain OFF until explicitly
+    # configured by the verified workspace owner and activated by release gates.
+    admin_hub_mfa_policy = models.CharField(
+        max_length=12, choices=AdminHubMfaMode.choices, default=AdminHubMfaMode.OFF,
+    )
     status = models.CharField(max_length=20, choices=MemberStatus.choices, default=MemberStatus.INVITED)
     invited_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
