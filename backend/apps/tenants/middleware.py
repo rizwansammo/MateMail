@@ -24,7 +24,7 @@ class TenantMiddleware:
 
     def __init__(self, get_response):
         self.get_response = get_response
-        self._jwt_auth = JWTAuthentication()
+        self._jwt_auth = HubSecurityJWTAuthentication()
 
     def __call__(self, request):
         request.tenant = None
