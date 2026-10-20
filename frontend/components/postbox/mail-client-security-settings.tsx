@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Check, KeyRound, Loader2, ShieldCheck, ShieldOff } from "lucide-react";
+import { AuthenticatorSetupCode } from "@/components/security/authenticator-setup-code";
 import { describePostBoxError, usePostBox } from "@/contexts/postbox-context";
 import { postbox, PostBoxError, type MailSecurityState, type MailSecurityOneTimeSecret } from "@/lib/postbox-api";
 
@@ -221,7 +222,8 @@ export function MailClientSecuritySettings() {
             </div>
           ) : (
             <>
-              <div className="pb-info-box"><ShieldCheck className="h-5 w-5" /><div><strong>Add the authenticator secret</strong><p>Paste this secret into a trusted authenticator app, then enter its six-digit code. The secret is only for enrollment.</p><code className="break-all">{enrollment.secret}</code><button type="button" className="pb-settings-secondary" onClick={() => void navigator.clipboard.writeText(enrollment.secret)}>Copy secret</button></div></div>
+              <div className="pb-info-box"><ShieldCheck className="h-5 w-5" /><div><strong>Scan to secure your mailbox</strong><p>Scan with an authenticator app, or switch to the manual setup key.</p></div></div>
+              <AuthenticatorSetupCode secret={enrollment.secret} uri={enrollment.uri} compact />
               <label className="pb-premium-field">Authenticator code
                 <input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={enrollmentCode} onChange={(e) => setEnrollmentCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
               </label>
