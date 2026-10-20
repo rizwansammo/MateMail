@@ -120,3 +120,9 @@ OWNER_RECOVERY_PER_ADMIN = Limit("platform:recovery:admin", 20, HOUR)
 #: password resets; both the owner and targeted account have independent limits.
 ADMIN_MFA_RECOVERY_PER_OWNER = Limit("hub:admin-mfa-recovery:owner", 5, HOUR)
 ADMIN_MFA_RECOVERY_PER_TARGET = Limit("hub:admin-mfa-recovery:target", 3, HOUR)
+
+
+#: Owner emergency requests/approvals are rate limited BEFORE password reauth.
+#: A single operator cannot flood review or guess passwords via these endpoints.
+OWNER_EMERGENCY_PER_ACTOR = Limit("platform:owner-emergency:actor", 10, HOUR)
+OWNER_EMERGENCY_PER_OWNER = Limit("platform:owner-emergency:owner", 5, HOUR)
