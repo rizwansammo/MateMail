@@ -39,7 +39,17 @@ export function OwnerEmergencyPanel({ tenantId, ownerEmail, mfaEnabled }: {
     }
   }, [tenantId]);
 
-  useEffect(() => { void reload(); }, [reload]);
+  useEffect(() => {
+    let active = true;
+    platformApi.ownerEmergencyCases(tenantId).then((data) => {
+      if (active) { setCases(data.cases); setAvailable(true); }
+    }).catch((caught) => {
+      if (!active) return;
+      if (caught instanceof ApiError && caught.status === 503) setAvailable(false);
+      else setError(describeError(caught, "Could not load emergency cases."));
+    });
+    return () => { active = false; };
+  }, [tenantId]);
 
   async function start(event: React.FormEvent) {
     event.preventDefault();
