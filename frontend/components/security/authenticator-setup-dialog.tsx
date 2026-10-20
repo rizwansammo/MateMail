@@ -4,10 +4,13 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ShieldCheck, X } from "lucide-react";
 import { AuthenticatorSetupCode } from "@/components/security/authenticator-setup-code";
+import { BackupCodesDisclosure } from "@/components/security/backup-codes-disclosure";
 
 interface Props {
   setup: { secret: string; uri: string } | null;
   code: string;
+  backupCodes: string[];
+  onCodesSaved: () => void;
   error: string;
   busy: boolean;
   onCodeChange: (value: string) => void;
@@ -18,7 +21,7 @@ interface Props {
 
 /** Only the X explicitly dismisses enrollment; backdrop and Escape do nothing. */
 export function AuthenticatorSetupDialog({
-  setup, code, error, busy, onCodeChange, onSubmit, onRetry, onClose,
+  setup, code, backupCodes, onCodesSaved, error, busy, onCodeChange, onSubmit, onRetry, onClose,
 }: Props) {
   const dialog = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -50,7 +53,7 @@ export function AuthenticatorSetupDialog({
         onKeyDown={onKeyDown}
         className="relative my-auto w-full max-w-[465px] rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl outline-none sm:p-7 dark:border-slate-700 dark:bg-slate-900">
         <button ref={closeButton} type="button" aria-label="Close two-factor setup"
-          title="Close setup" onClick={onClose} disabled={busy}
+          title="Close setup" onClick={onClose} disabled={busy || backupCodes.length > 0}
           className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-white">
           <X className="h-[19px] w-[19px]" aria-hidden="true" />
         </button>
@@ -59,14 +62,18 @@ export function AuthenticatorSetupDialog({
             <ShieldCheck className="h-6 w-6" aria-hidden="true" />
           </div>
           <h2 id="hub-mfa-dialog-title" className="pr-3 text-xl font-bold tracking-tight text-slate-900 dark:text-white">
-            Set up two-factor authentication
+            {backupCodes.length > 0 ? "Save your recovery codes" : "Set up two-factor authentication"}
           </h2>
           <p id="hub-mfa-dialog-description" className="max-w-[360px] text-sm leading-6 text-slate-500 dark:text-slate-400">
-            Scan the QR code in your authenticator app, then enter its six-digit verification code.
+            {backupCodes.length > 0
+              ? "Your authenticator is enabled. Save your one-time backup codes now."
+              : "Scan the QR code in your authenticator app, then enter its six-digit verification code."}
           </p>
         </div>
         {error && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-200">{error}</div>}
-        {setup ? (
+        {backupCodes.length > 0 ? (
+          <BackupCodesDisclosure codes={backupCodes} onSaved={onCodesSaved} />
+        ) : setup ? (
           <>
             <AuthenticatorSetupCode secret={setup.secret} uri={setup.uri} />
             <form onSubmit={onSubmit} className="mt-5 space-y-3">
@@ -90,7 +97,7 @@ export function AuthenticatorSetupDialog({
             {busy ? "Loading…" : "Try setup again"}
           </button>
         )}
-        <p className="mt-4 text-center text-[11px] leading-4 text-slate-400">Setup stays open if you click outside. Use × to close.</p>
+        <p className="mt-4 text-center text-[11px] leading-4 text-slate-400">Clicking outside never closes the setup. Use × to close before verification.</p>
       </div>
     </div>,
     document.body,

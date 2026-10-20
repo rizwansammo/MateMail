@@ -33,6 +33,7 @@ from .serializers import (
     SignupSerializer,
     TwoFactorDisableSerializer,
     TwoFactorSetupConfirmSerializer,
+    TwoFactorBackupCodeRegenerateSerializer,
     TwoFactorVerifySerializer,
     UpdateProfileSerializer,
     UserProfileSerializer,
@@ -794,6 +795,79 @@ class TwoFactorSetupView(APIView):
         user.save(update_fields=["two_factor_enabled"])
 
         return Response({"detail": "2FA enabled.", "backup_codes": raw_codes})
+
+
+class TwoFactorBackupCodeRegenerateView(APIView):
+    """Replace ALL Hub 2FA recovery codes after fresh password and TOTP proof.
+
+    Never return previously issued codes. Only salted-by-entropy code hashes
+    persist; an atomic replacement makes old codes unusable immediately.
+    """
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [AuthenticatedActionThrottle]
+
+    def post(self, request):
+        serializer = TwoFactorBackupCodeRegenerateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        code = serializer.validated_data["code"]
+
+        _enforce(
+            ratelimit.check(
+                TWO_FACTOR_MANAGE_PER_USER.bucket, request.user.pk,
+                limit=TWO_FACTOR_MANAGE_PER_USER.limit,
+                window=TWO_FACTOR_MANAGE_PER_USER.window,
+            ),
+            _TOO_MANY_ATTEMPTS,
+        )
+        with transaction.atomic():
+            # Serialize concurrent rotations for this account.
+            user = User.objects.select_for_update().get(pk=request.user.pk)
+            setup = TwoFactorSetup.objects.filter(user=user).first()
+            if not user.is_active or not user.two_factor_enabled or setup is None:
+                return Response({"detail": "2FA is not enabled."}, status=409)
+
+            valid_password = user.check_password(serializer.validated_data["password"])
+            valid_totp = (
+                valid_password
+                and pyotp.TOTP(decrypt_secret(setup.totp_secret)).verify(code, valid_window=1)
+            )
+            if not valid_totp:
+                ratelimit.hit(
+                    TWO_FACTOR_MANAGE_PER_USER.bucket, user.pk,
+                    limit=TWO_FACTOR_MANAGE_PER_USER.limit,
+                    window=TWO_FACTOR_MANAGE_PER_USER.window,
+                )
+                return Response({"detail": "Password or authenticator code is incorrect."}, status=403)
+
+            # Reusing an OTP already accepted at login or another security
+            # operation cannot rotate codes again during its validity window.
+            if not ratelimit.claim_once(
+                "2fa:totp", f"{user.pk}:{code}", ttl=TOTP_REPLAY_TTL,
+            ):
+                return Response(
+                    {"detail": "This authenticator code was already used. Wait for a new code."},
+                    status=403,
+                )
+
+            raw_codes = generate_backup_codes(10)
+            TwoFactorBackupCode.objects.filter(user=user).delete()
+            TwoFactorBackupCode.objects.bulk_create([
+                TwoFactorBackupCode(user=user, code_hash=hash_token(value))
+                for value in raw_codes
+            ])
+
+        ratelimit.reset(
+            TWO_FACTOR_MANAGE_PER_USER.bucket, request.user.pk,
+            window=TWO_FACTOR_MANAGE_PER_USER.window,
+        )
+        response = Response({
+            "detail": "Previous backup codes revoked. Save the new codes now.",
+            "backup_codes": raw_codes,
+        })
+        response["Cache-Control"] = "no-store, private"
+        response["Pragma"] = "no-cache"
+        return response
 
 
 class TwoFactorVerifyView(APIView):
