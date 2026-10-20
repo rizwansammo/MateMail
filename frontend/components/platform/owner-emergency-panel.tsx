@@ -130,7 +130,7 @@ export function OwnerEmergencyPanel({ tenantId, ownerEmail, mfaEnabled }: {
                       )}
                       {c.status === "security_hold" && (
                         <button type="button" className="pf-btn pf-btn-ghost"
-                          disabled={!c.hold_until || Date.parse(c.hold_until)>Date.now()}
+                          disabled={!c.hold_until}
                           onClick={() => { setSelected({id:c.id,action:"dispatch"}); setError(""); }}>
                           Send owner confirmation
                         </button>
