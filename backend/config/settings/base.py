@@ -327,7 +327,7 @@ REST_FRAMEWORK = {
     # for anything that is not an `mm_` token, so JWTs still reach simplejwt.
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "apps.teams.authentication.APIKeyAuthentication",
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.accounts.jwt_auth.HubSecurityJWTAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
