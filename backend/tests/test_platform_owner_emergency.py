@@ -208,3 +208,13 @@ class OwnerEmergencyTest(TestCase):
         self.owner.refresh_from_db()
         self.assertTrue(self.owner.hub_mfa_reenrollment_required)
         self.assertTrue(self.owner.check_password("New-Secure-Passphrase-987"))
+
+    def test_mfa_only_recovery_invalidates_earlier_password_reset_links(self):
+        previous, _row = PasswordResetToken.make(self.owner)
+        token = self.prepare("mfa")
+        self.assertEqual(self.confirm(token).status_code, 200)
+        self.assertEqual(APIClient().post("/api/auth/reset-password/", {
+            "token":previous, "new_password":"No-Replay-Passphrase-987",
+        }, format="json").status_code, 400)
+        self.owner.refresh_from_db()
+        self.assertTrue(self.owner.check_password(TEST_PASSWORD))
