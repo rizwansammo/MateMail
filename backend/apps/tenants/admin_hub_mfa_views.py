@@ -64,6 +64,9 @@ class WorkspaceAdminHubMfaAvailabilityView(APIView):
             "require_ready": bool(
                 getattr(settings, "HUB_ADMIN_MFA_ENFORCEMENT_READY", False)
             ),
+            "recovery_available": bool(
+                getattr(settings, "HUB_ADMIN_MFA_RECOVERY_ENABLED", False)
+            ),
         })
 
 
@@ -113,6 +116,12 @@ class WorkspaceAdminHubMfaPolicyView(APIView):
             "policy": configured_admin_hub_mfa_policy(target),
             "effective_policy": effective_admin_hub_mfa_policy(target),
             "two_factor_enabled": target.user.two_factor_enabled,
+            "verified_independent_recovery": (
+                target.user.recovery_contact.verified_at is not None
+                and bool(target.user.recovery_contact.email)
+                and target.user.recovery_contact.email.lower() != target.user.email.lower()
+            ) if hasattr(target.user, "recovery_contact") else False,
+            "recovery_available": bool(getattr(settings, "HUB_ADMIN_MFA_RECOVERY_ENABLED", False)),
             "require_ready": bool(getattr(settings, "HUB_ADMIN_MFA_ENFORCEMENT_READY", False)),
         })
 

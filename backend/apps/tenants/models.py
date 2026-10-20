@@ -328,3 +328,31 @@ class TenantMembership(models.Model):
 
     def __str__(self):
         return f"{self.user.email} → {self.tenant.name} ({self.role})"
+
+
+class AdminHubMfaRecoveryTicket(models.Model):
+    """Owner approved recovery, finalized only by a verified external contact."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    target_membership = models.ForeignKey(
+        TenantMembership, on_delete=models.CASCADE,
+        related_name="hub_mfa_recovery_tickets",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="requested_hub_admin_mfa_recoveries",
+    )
+    nonce_hash = models.CharField(max_length=64, unique=True)
+    recipient_email = models.EmailField()
+    reason = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "tenants_admin_hub_mfa_recovery"
+        indexes = [
+            models.Index(fields=["target_membership", "-created_at"],
+                         name="hub_mfa_target_created_idx"),
+        ]

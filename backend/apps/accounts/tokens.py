@@ -19,7 +19,10 @@ def make_tokens(user, tenant_id=None, *, platform_verified=False, mfa_verified=F
         if (effective_admin_hub_mfa_policy(membership) == AdminHubMfaMode.REQUIRED and
                 not mfa_verified):
             raise ValueError("Required Hub admin MFA proof is missing")
+    if getattr(user, "hub_mfa_reenrollment_required", False) and not mfa_verified:
+        raise ValueError("Hub MFA recovery requires new authenticator enrollment")
     refresh = RefreshToken.for_user(user)
+    refresh["hub_security_epoch"] = user.hub_security_epoch
     if mfa_verified:
         from django.utils import timezone
         if not getattr(user, "two_factor_enabled", False):

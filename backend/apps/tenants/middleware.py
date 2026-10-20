@@ -3,7 +3,7 @@ import hashlib
 from django.http import JsonResponse
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed
-from rest_framework_simplejwt.authentication import JWTAuthentication
+from apps.accounts.jwt_auth import HubSecurityJWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 from .models import TenantMembership
@@ -24,7 +24,7 @@ class TenantMiddleware:
 
     def __init__(self, get_response):
         self.get_response = get_response
-        self._jwt_auth = JWTAuthentication()
+        self._jwt_auth = HubSecurityJWTAuthentication()
 
     def __call__(self, request):
         request.tenant = None

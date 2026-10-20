@@ -459,10 +459,11 @@ class LoginView(APIView):
         from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
         from apps.tenants.models import OrganizationTwoFactorMode, AdminHubMfaMode
         admin_policy = effective_admin_hub_mfa_policy(membership)
-        if (membership is not None and
-                (effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE or
-                 admin_policy == AdminHubMfaMode.REQUIRED) and
-                not user.two_factor_enabled):
+        if (not user.two_factor_enabled and
+                (user.hub_mfa_reenrollment_required or
+                 (membership is not None and
+                  (effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE or
+                   admin_policy == AdminHubMfaMode.REQUIRED)))):
             partial = create_challenge(user, tenant_id)
             return Response({"requires_2fa": True, "requires_enrollment": True,
                              "partial_token": partial})
@@ -509,6 +510,13 @@ class RefreshView(APIView):
 
         try:
             token = RefreshToken(raw)
+            account_for_refresh = _user_for(token)
+            if (token.get("hub_security_epoch", 0) != account_for_refresh.hub_security_epoch or
+                    account_for_refresh.hub_mfa_reenrollment_required):
+                token.blacklist()
+                return clear_refresh_cookie(
+                    Response({"detail": "Security recovery requires a new sign in."}, status=403)
+                )
             tenant_id = token.get("tenant_id")
             if bound_tenant_slug(request) and not tenant_id:
                 return clear_refresh_cookie(
@@ -551,7 +559,8 @@ class RefreshView(APIView):
             # BLACKLIST_AFTER_ROTATION is on: blacklisting must happen before a
             # replacement is issued, so a stolen token cannot be exchanged twice.
             token.blacklist()
-            new_refresh = RefreshToken.for_user(_user_for(token))
+            new_refresh = RefreshToken.for_user(account_for_refresh)
+            new_refresh["hub_security_epoch"] = account_for_refresh.hub_security_epoch
             if token.get("mfa_verified_at"):
                 new_refresh["mfa_verified_at"] = token["mfa_verified_at"]
             if token.get("tenant_id"):

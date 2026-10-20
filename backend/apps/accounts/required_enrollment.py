@@ -64,6 +64,7 @@ class RequiredTwoFactorEnrollmentView(APIView):
             ),
         ).first()
         if membership is None or not (
+            user.hub_mfa_reenrollment_required or
             effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE or
             effective_admin_hub_mfa_policy(membership) == AdminHubMfaMode.REQUIRED
         ):
@@ -111,7 +112,8 @@ class RequiredTwoFactorEnrollmentView(APIView):
         codes = generate_backup_codes(10)
         with transaction.atomic():
             user.two_factor_enabled = True
-            user.save(update_fields=["two_factor_enabled"])
+            user.hub_mfa_reenrollment_required = False
+            user.save(update_fields=["two_factor_enabled", "hub_mfa_reenrollment_required"])
             TwoFactorBackupCode.objects.filter(user=user).delete()
             TwoFactorBackupCode.objects.bulk_create([
                 TwoFactorBackupCode(user=user, code_hash=hash_token(c))

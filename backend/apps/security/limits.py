@@ -114,3 +114,9 @@ POSTBOX_SEND_PER_MAILBOX = Limit("postbox:send:mailbox", 60, HOUR)
 #: send mail to a customer, so an operator with a stuck script must not be able
 #: to turn the console into a way of mailbombing an organization's owner.
 OWNER_RECOVERY_PER_ADMIN = Limit("platform:recovery:admin", 20, HOUR)
+
+
+#: Hub admin recovery is a highly sensitive action, separate from ordinary
+#: password resets; both the owner and targeted account have independent limits.
+ADMIN_MFA_RECOVERY_PER_OWNER = Limit("hub:admin-mfa-recovery:owner", 5, HOUR)
+ADMIN_MFA_RECOVERY_PER_TARGET = Limit("hub:admin-mfa-recovery:target", 3, HOUR)

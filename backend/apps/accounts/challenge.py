@@ -54,6 +54,7 @@ def create_challenge(user, tenant_id=None) -> str:
             "user_id": str(user.pk),
             "tenant_id": str(tenant_id) if tenant_id else None,
             "pw": _password_fingerprint(user),
+            "epoch": user.hub_security_epoch,
         },
         timeout=CHALLENGE_TTL_SECONDS,
     )
@@ -69,7 +70,11 @@ def peek_challenge(raw_token: str) -> dict | None:
 
 def challenge_matches_password(payload: dict, user) -> bool:
     """False if the account's password changed after the challenge was issued."""
-    return bool(payload) and payload.get("pw") == _password_fingerprint(user)
+    return (
+        bool(payload)
+        and payload.get("pw") == _password_fingerprint(user)
+        and payload.get("epoch", 0) == user.hub_security_epoch
+    )
 
 
 def consume_challenge(raw_token: str) -> bool:

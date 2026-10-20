@@ -1,6 +1,10 @@
 from django.urls import path
 
 from .security_views import WorkspaceTwoFactorPolicyView
+from .admin_hub_mfa_recovery_views import (
+    WorkspaceAdminHubMfaRecoveryRequestView,
+    WorkspaceAdminHubMfaRecoveryConfirmView,
+)
 from .admin_hub_mfa_views import (
     WorkspaceAdminHubMfaAvailabilityView,
     WorkspaceAdminHubMfaPolicyView,
@@ -24,4 +28,5 @@ urlpatterns = [
     path("<uuid:pk>/members/", WorkspaceMemberListView.as_view(), name="workspace-members"),
     path("<uuid:pk>/members/<uuid:member_id>/", WorkspaceMemberDetailView.as_view(), name="workspace-member-detail"),
     path("<uuid:pk>/members/<uuid:member_id>/hub-mfa/", WorkspaceAdminHubMfaPolicyView.as_view(), name="workspace-admin-hub-mfa"),
+    path("<uuid:pk>/members/<uuid:member_id>/hub-mfa/recovery/", WorkspaceAdminHubMfaRecoveryRequestView.as_view(), name="workspace-admin-hub-mfa-recovery"),
 ]

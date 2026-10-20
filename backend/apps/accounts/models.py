@@ -34,6 +34,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     is_platform_admin = models.BooleanField(default=False)
     two_factor_enabled = models.BooleanField(default=False)
+    # Increments on security recovery so all pre-recovery JWTs are rejected,
+    # including already issued access tokens, not just refresh cookies.
+    hub_security_epoch = models.PositiveIntegerField(default=0)
+    # An approved emergency reset never downgrades account MFA to password-only.
+    hub_mfa_reenrollment_required = models.BooleanField(default=False)
     email_verified = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(null=True, blank=True)
