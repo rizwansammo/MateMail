@@ -402,6 +402,9 @@ HUB_ADMIN_MFA_ENFORCEMENT_READY = env.bool("HUB_ADMIN_MFA_ENFORCEMENT_READY", de
 # An independent gate: recovery needs both real owner approval and a separate
 # verified secondary email before any credential can be revoked.
 HUB_ADMIN_MFA_RECOVERY_ENABLED = env.bool("HUB_ADMIN_MFA_RECOVERY_ENABLED", default=False)
+# Platform Owner emergency recovery is opt-in after security and operator checks.
+# A successful build or schema migration NEVER enables destructive recovery.
+PLATFORM_OWNER_EMERGENCY_RECOVERY_ENABLED = env.bool("PLATFORM_OWNER_EMERGENCY_RECOVERY_ENABLED", default=False)
 
 # Phase 7A foundation. Both OFF by default; requiring MFA is blocked
 # until the Hub, PostBox and Native Engine enforcement paths are ready.
