@@ -78,8 +78,8 @@ def enabled():
     return bool(getattr(settings, "PLATFORM_OWNER_EMERGENCY_RECOVERY_ENABLED", False))
 
 
-def _platform_operator(request, password):
-    """A live, *recently* email-MFA-verified Platform Console session only."""
+def _verified_platform_session(request):
+    """Only a recently verified Platform Console session, not a Hub JWT."""
     token = request.auth
     issued = token.get("platform_otp_verified_at", 0) if hasattr(token, "get") else 0
     now = int(timezone.now().timestamp())
@@ -88,8 +88,11 @@ def _platform_operator(request, password):
         and not getattr(request, "_mm_api_key", None)
         and not isinstance(token, APIKey)
         and isinstance(issued, int) and 0 <= now - issued <= 900
-        and request.user.check_password(password)
     )
+
+
+def _platform_operator(request, password):
+    return _verified_platform_session(request) and request.user.check_password(password)
 
 
 def _rate(actor_id, owner_id):
@@ -160,6 +163,8 @@ class PlatformOwnerEmergencyCasesView(APIView):
     def get(self, request, pk):
         if not enabled():
             return Response({"detail": "Emergency recovery is disabled."}, status=503)
+        if not _verified_platform_session(request):
+            return Response({"detail": "A recent Platform Console security verification is required."}, status=403)
         tenant = Tenant.objects.filter(pk=pk).first()
         if tenant is None:
             return Response({"detail": "Not found."}, status=404)
