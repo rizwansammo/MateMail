@@ -6455,3 +6455,395 @@ body {
 @media (min-width: 768px) {
   .pf .pf-mobile-menu-trigger { display: none; }
 }
+
+
+/* PostBox Security: deliberate, task-first layout. Scoped: other Settings
+   sections and the three mail-list density preferences remain unchanged. */
+.pb-premium-shell .pb-security-settings-page {
+  width:100%;
+  min-width:0;
+}
+.pb-premium-shell .pb-security-redesign {
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+  margin-bottom:22px;
+}
+.pb-premium-shell .pb-security-redesign > .pb-setting-card { margin-bottom:0; }
+.pb-premium-shell .pb-security-overview {
+  border:1px solid var(--pb-border);
+  border-radius:10px;
+  padding:20px;
+  background:var(--pb-surface);
+}
+.pb-premium-shell .pb-security-overview-heading {
+  display:flex;
+  align-items:center;
+  gap:13px;
+}
+.pb-premium-shell .pb-security-heading-icon,
+.pb-premium-shell .pb-security-section-icon {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
+  width:40px;
+  height:40px;
+  border-radius:9px;
+  background:var(--pb-accent);
+  color:var(--pb-primary);
+}
+.pb-premium-shell .pb-security-overline {
+  display:block;
+  margin-bottom:5px;
+  font-size:10px;
+  font-weight:750;
+  letter-spacing:.065em;
+  text-transform:uppercase;
+  color:var(--pb-muted);
+}
+.pb-premium-shell .pb-security-mailbox-address {
+  overflow-wrap:anywhere;
+  margin:0 0 4px;
+  color:var(--pb-fg);
+  font-size:15px;
+  font-weight:700;
+  line-height:1.35;
+}
+.pb-premium-shell .pb-security-overview-heading p,
+.pb-premium-shell .pb-security-section-head p {
+  margin:3px 0 0;
+  color:var(--pb-muted);
+  font-size:11px;
+  line-height:1.55;
+}
+.pb-premium-shell .pb-security-status-grid {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:9px;
+  margin-top:20px;
+}
+.pb-premium-shell .pb-security-status-item {
+  min-width:0;
+  border:1px solid var(--pb-border);
+  border-radius:8px;
+  padding:12px 13px;
+  background:var(--pb-bg);
+}
+.pb-premium-shell .pb-security-status-item > span,
+.pb-premium-shell .pb-security-status-item > strong,
+.pb-premium-shell .pb-security-status-item > small { display:block; }
+.pb-premium-shell .pb-security-status-item > span {
+  color:var(--pb-muted);
+  font-size:10px;
+  font-weight:600;
+}
+.pb-premium-shell .pb-security-status-item > strong {
+  margin-top:6px;
+  overflow-wrap:anywhere;
+  color:var(--pb-fg);
+  font-size:12px;
+  font-weight:700;
+}
+.pb-premium-shell .pb-security-status-item > small {
+  margin-top:3px;
+  color:var(--pb-muted);
+  font-size:10px;
+  line-height:1.5;
+}
+.pb-premium-shell .pb-security-section {
+  border-radius:10px;
+}
+.pb-premium-shell .pb-setting-card > header.pb-security-card-header {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  padding:19px 20px;
+}
+.pb-premium-shell .pb-security-section-head {
+  display:flex;
+  align-items:flex-start;
+  min-width:0;
+  gap:12px;
+}
+.pb-premium-shell .pb-security-section-head > div { min-width:0; }
+.pb-premium-shell .pb-security-section-head h2 {
+  color:var(--pb-fg);
+  font-size:15px;
+  line-height:1.4;
+}
+.pb-premium-shell .pb-security-card-header > .pb-settings-pill {
+  flex-shrink:0;
+  margin-top:2px;
+}
+.pb-premium-shell .pb-security-card-body {
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+  padding:20px;
+}
+.pb-premium-shell .pb-security-explanation {
+  border:1px solid var(--pb-border);
+  border-radius:8px;
+  padding:13px 15px;
+  background:var(--pb-sidebar);
+}
+.pb-premium-shell .pb-security-explanation strong {
+  display:block;
+  color:var(--pb-fg);
+  font-size:12px;
+}
+.pb-premium-shell .pb-security-explanation p {
+  margin:5px 0 0;
+  color:var(--pb-muted);
+  font-size:11px;
+  line-height:1.6;
+}
+.pb-premium-shell .pb-security-explanation-positive {
+  border-color:color-mix(in srgb,var(--pb-primary) 26%,var(--pb-border));
+  background:color-mix(in srgb,var(--pb-accent) 35%,var(--pb-surface));
+}
+.pb-premium-shell .pb-security-form {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:13px;
+  max-width:440px;
+}
+.pb-premium-shell .pb-security-form > .pb-premium-field { width:100%; }
+.pb-premium-shell .pb-security-actions {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:9px;
+}
+.pb-premium-shell .pb-security-actions > button,
+.pb-premium-shell .pb-security-nested-form > button { width:auto; }
+.pb-premium-shell .pb-security-form .pb-premium-field,
+.pb-premium-shell .pb-security-fields .pb-premium-field {
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  min-width:0;
+  gap:8px;
+  margin:0;
+  color:var(--pb-fg);
+  font-size:11px;
+  font-weight:600;
+}
+.pb-premium-shell .pb-security-form .pb-premium-field input,
+.pb-premium-shell .pb-security-fields .pb-premium-field input {
+  width:100%;
+  min-width:0;
+  height:40px;
+  border:1px solid var(--pb-border-strong);
+  border-radius:7px;
+  padding:8px 11px;
+  background:var(--pb-bg);
+  color:var(--pb-fg);
+  font:inherit;
+  font-size:12px;
+}
+.pb-premium-shell .pb-security-form .pb-premium-field input:focus-visible,
+.pb-premium-shell .pb-security-fields .pb-premium-field input:focus-visible {
+  outline:2px solid var(--pb-ring);
+  outline-offset:2px;
+}
+.pb-premium-shell .pb-security-redesign .pb-settings-primary,
+.pb-premium-shell .pb-security-redesign .pb-settings-secondary {
+  min-height:37px;
+  padding:8px 13px;
+  white-space:normal;
+  text-align:center;
+}
+.pb-premium-shell .pb-security-enrollment {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:16px;
+  min-width:0;
+}
+.pb-premium-shell .pb-security-enrollment > .pb-security-explanation { width:100%; }
+.pb-premium-shell .pb-security-inline-option {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:15px;
+  min-width:0;
+  border:1px solid var(--pb-border);
+  border-radius:8px;
+  padding:13px 15px;
+}
+.pb-premium-shell .pb-security-inline-option > div { min-width:0; }
+.pb-premium-shell .pb-security-inline-option strong,
+.pb-premium-shell .pb-security-secret-group > strong,
+.pb-premium-shell .pb-security-client-list h3 {
+  display:block;
+  color:var(--pb-fg);
+  font-size:12px;
+  font-weight:650;
+}
+.pb-premium-shell .pb-security-inline-option p,
+.pb-premium-shell .pb-security-nested-form > p,
+.pb-premium-shell .pb-security-secret-group p,
+.pb-premium-shell .pb-security-empty-note {
+  margin:5px 0 0;
+  color:var(--pb-muted);
+  font-size:11px;
+  line-height:1.6;
+}
+.pb-premium-shell .pb-security-inline-option > button { flex-shrink:0; }
+.pb-premium-shell .pb-security-fields {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px;
+  max-width:760px;
+}
+.pb-premium-shell .pb-security-nested-form {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:14px;
+  border:1px solid var(--pb-border);
+  border-radius:8px;
+  padding:17px;
+  background:var(--pb-sidebar);
+}
+.pb-premium-shell .pb-security-nested-form .pb-security-fields { width:100%; }
+.pb-premium-shell .pb-security-nested-form > p { margin:0; }
+.pb-premium-shell .pb-security-access-option { background:var(--pb-sidebar); }
+.pb-premium-shell .pb-security-danger-zone {
+  border-color:color-mix(in srgb,var(--pb-danger) 30%,var(--pb-border));
+}
+.pb-premium-shell .pb-security-danger-zone > p {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:var(--pb-danger);
+}
+.pb-premium-shell .pb-security-policy-note {
+  margin:0;
+  color:var(--pb-muted);
+  font-size:11px;
+}
+.pb-premium-shell .pb-security-client-list {
+  border:1px solid var(--pb-border);
+  border-radius:8px;
+  overflow:hidden;
+}
+.pb-premium-shell .pb-security-client-list h3 {
+  margin:0;
+  padding:12px 15px;
+  background:var(--pb-sidebar);
+}
+.pb-premium-shell .pb-security-client-list .pb-session-list article {
+  flex-wrap:wrap;
+  padding:12px 15px;
+}
+.pb-premium-shell .pb-security-client-list .pb-session-list article > div.min-w-0 small {
+  display:block;
+  margin-top:3px;
+  color:var(--pb-muted);
+}
+.pb-premium-shell .pb-security-revoke-confirm {
+  flex:0 0 100%;
+  border:1px solid var(--pb-border);
+  border-radius:8px;
+  padding:13px;
+  background:var(--pb-sidebar);
+}
+.pb-premium-shell .pb-security-revoke-confirm > p {
+  margin:0 0 12px;
+  color:var(--pb-muted);
+  font-size:11px;
+}
+.pb-premium-shell .pb-security-revoke-confirm .pb-security-fields { margin-bottom:12px; }
+.pb-premium-shell .pb-security-one-time {
+  border-color:var(--pb-primary);
+}
+.pb-premium-shell .pb-security-one-time > header h2 {
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.pb-premium-shell .pb-security-secret-group {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:10px;
+  width:100%;
+}
+.pb-premium-shell .pb-security-secret-group + .pb-security-secret-group {
+  border-top:1px solid var(--pb-border);
+  padding-top:16px;
+}
+.pb-premium-shell .pb-security-secret-value {
+  display:block;
+  width:100%;
+  overflow-wrap:anywhere;
+  border:1px solid var(--pb-border-strong);
+  border-radius:6px;
+  padding:12px;
+  background:var(--pb-bg);
+  color:var(--pb-fg);
+  font-size:12px;
+}
+.pb-premium-shell .pb-security-recovery-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  width:100%;
+}
+.pb-premium-shell .pb-security-recovery-grid code {
+  min-width:0;
+  overflow-wrap:anywhere;
+  border:1px solid var(--pb-border);
+  border-radius:6px;
+  padding:9px;
+  background:var(--pb-bg);
+  color:var(--pb-fg);
+  font-size:11px;
+}
+.pb-premium-shell .pb-security-settings-page > .pb-setting-card > .pb-password-grid {
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  align-items:end;
+  gap:12px;
+  padding:18px 20px 12px;
+}
+.pb-premium-shell .pb-security-settings-page > .pb-setting-card > .pb-password-grid > label:first-child {
+  grid-column:auto;
+}
+.pb-premium-shell .pb-security-settings-page > .pb-setting-card > .pb-settings-primary { margin-top:3px; }
+@media (max-width:850px) {
+  .pb-premium-shell .pb-security-status-grid { grid-template-columns:1fr; }
+  .pb-premium-shell .pb-security-status-item { padding:10px 12px; }
+  .pb-premium-shell .pb-security-settings-page > .pb-setting-card > .pb-password-grid {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .pb-premium-shell .pb-security-settings-page > .pb-setting-card > .pb-password-grid > label:first-child {
+    grid-column:1 / -1;
+  }
+}
+@media (max-width:640px) {
+  .pb-premium-shell .pb-security-overview,
+  .pb-premium-shell .pb-security-card-body { padding:15px; }
+  .pb-premium-shell .pb-setting-card > header.pb-security-card-header { padding:15px; }
+  .pb-premium-shell .pb-security-section-head { gap:9px; }
+  .pb-premium-shell .pb-security-section-icon { width:34px; height:34px; }
+  .pb-premium-shell .pb-security-inline-option {
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .pb-premium-shell .pb-security-inline-option > button { align-self:flex-start; }
+  .pb-premium-shell .pb-security-fields,
+  .pb-premium-shell .pb-security-recovery-grid,
+  .pb-premium-shell .pb-security-settings-page > .pb-setting-card > .pb-password-grid {
+    grid-template-columns:1fr;
+  }
+  .pb-premium-shell .pb-security-settings-page > .pb-setting-card > .pb-password-grid > label:first-child {
+    grid-column:auto;
+  }
+  .pb-premium-shell .pb-security-actions > button { max-width:100%; }
+  .pb-premium-shell .pb-security-nested-form { padding:12px; }
+}
