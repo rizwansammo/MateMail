@@ -45,6 +45,14 @@ class OrganizationTwoFactorMode(models.TextChoices):
     REQUIRE = "require", "Require 2FA"
 
 
+class AdminHubMfaMode(models.TextChoices):
+    """Per-workspace Hub administrator policy. Never applies to PostBox."""
+
+    OFF = "off", "Off"
+    OPTIONAL = "optional", "Optional"
+    REQUIRED = "required", "Required"
+
+
 class TenantManager(models.Manager):
     pass
 
