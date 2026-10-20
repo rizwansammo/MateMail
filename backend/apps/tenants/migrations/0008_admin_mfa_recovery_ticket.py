@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
                 "db_table": "tenants_admin_hub_mfa_recovery",
                 "indexes": [
                     models.Index(fields=["target_membership", "-created_at"],
-                                 name="hub_admin_mfa_target_created_idx"),
+                                 name="hub_mfa_target_created_idx"),
                 ],
             },
         ),
