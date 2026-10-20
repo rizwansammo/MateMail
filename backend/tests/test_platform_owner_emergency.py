@@ -195,7 +195,7 @@ class OwnerEmergencyTest(TestCase):
         self.assertEqual(self.confirm(token).status_code, 200)
         delivered = next(m for m in mail.outbox
                          if "Complete your owner password" in m.subject)
-        raw = re.search(r"reset-password\\?token=([A-Za-z0-9_-]+)",delivered.body)
+        raw = re.search(r"reset-password\?token=([A-Za-z0-9_-]+)",delivered.body)
         self.assertIsNotNone(raw)
         reset = APIClient().post("/api/auth/reset-password/", {
             "token":raw.group(1), "new_password":"New-Secure-Passphrase-987",
