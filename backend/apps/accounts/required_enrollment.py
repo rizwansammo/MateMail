@@ -64,6 +64,7 @@ class RequiredTwoFactorEnrollmentView(APIView):
             ),
         ).first()
         if membership is None or not (
+            user.hub_mfa_reenrollment_required or
             effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE or
             effective_admin_hub_mfa_policy(membership) == AdminHubMfaMode.REQUIRED
         ):
