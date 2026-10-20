@@ -12,6 +12,8 @@ type Status = {
   effective_policy: Policy;
   two_factor_enabled: boolean;
   require_ready: boolean;
+  recovery_available?: boolean;
+  verified_independent_recovery?: boolean;
 };
 
 interface Props {
@@ -31,6 +33,12 @@ export function AdminHubMfaPolicyDialog({ tenantId, memberId, memberEmail, onClo
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryReason, setRecoveryReason] = useState("");
+  const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [recoverySent, setRecoverySent] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const url = `/api/workspaces/${tenantId}/members/${memberId}/hub-mfa/`;
@@ -106,13 +114,42 @@ export function AdminHubMfaPolicyDialog({ tenantId, memberId, memberEmail, onClo
     }
   }
 
+  async function requestRecovery(event: React.FormEvent) {
+    event.preventDefault();
+    if (recoveryBusy || !state?.recovery_available || !state.verified_independent_recovery ||
+        !state.two_factor_enabled || recoveryReason.trim().length < 10 ||
+        !recoveryPassword || recoveryCode.length !== 6) return;
+    setRecoveryBusy(true);
+    setError("");
+    try {
+      const response = await apiRequest(`${url}recovery/`, {
+        method: "POST",
+        body: JSON.stringify({
+          reason: recoveryReason.trim(),
+          current_password: recoveryPassword,
+          authenticator_code: recoveryCode,
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.detail || "Recovery request could not be sent.");
+      setRecoverySent(true);
+      setRecoveryOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Recovery request could not be sent.");
+    } finally {
+      setRecoveryPassword("");
+      setRecoveryCode("");
+      setRecoveryBusy(false);
+    }
+  }
+
   return createPortal(
     <div className="fixed inset-0 z-[210] flex items-center justify-center overflow-y-auto bg-slate-950/70 p-3 backdrop-blur-[5px] sm:p-6">
       <div ref={panel} role="dialog" aria-modal="true" aria-labelledby="hub-admin-mfa-dialog-title"
         onKeyDown={onKeyDown}
         className="relative my-auto w-full max-w-[490px] rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-7 dark:border-slate-700 dark:bg-slate-900">
         <button ref={closeButton} type="button" aria-label="Close admin security settings" title="Close"
-          disabled={busy} onClick={onClose}
+          disabled={busy || recoveryBusy} onClick={onClose}
           className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-40 dark:hover:bg-slate-800">
           <X className="h-[19px] w-[19px]" aria-hidden="true" />
         </button>
@@ -175,6 +212,66 @@ export function AdminHubMfaPolicyDialog({ tenantId, memberId, memberEmail, onClo
                   </>
                 )}
               </form>
+            )}
+            {state?.recovery_available && (
+              <section className="mt-5 border-t border-slate-200 pt-5 dark:border-slate-700" aria-labelledby="admin-mfa-recovery-title">
+                <h3 id="admin-mfa-recovery-title" className="text-sm font-semibold text-slate-900 dark:text-white">Authenticator recovery</h3>
+                <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  Send a recovery approval link to this administrator's previously verified independent email.
+                  No authenticator or backup code is reset until they confirm the request.
+                </p>
+                {recoverySent ? (
+                  <p role="status" className="mt-3 rounded-xl bg-green-50 p-3 text-sm text-green-800 dark:bg-green-950/30 dark:text-green-200">
+                    Recovery approval email sent. The administrator has 30 minutes to confirm.
+                  </p>
+                ) : !state.two_factor_enabled ? (
+                  <p className="mt-3 text-xs text-slate-500">This administrator has no active authenticator to reset.</p>
+                ) : !state.verified_independent_recovery ? (
+                  <p className="mt-3 text-xs text-amber-700 dark:text-amber-300">
+                    Verified independent recovery email is missing. The administrator must register one while signed in,
+                    or use a separately verified support recovery process.
+                  </p>
+                ) : !recoveryOpen ? (
+                  <button type="button" onClick={() => setRecoveryOpen(true)}
+                    className="mt-3 h-10 rounded-xl border border-amber-300 px-4 text-sm font-semibold text-amber-800 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-950/30">
+                    Request 2FA recovery
+                  </button>
+                ) : (
+                  <form onSubmit={requestRecovery} className="mt-3 space-y-3">
+                    <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+                      You are authorizing a security recovery request, not signing in as this administrator.
+                    </p>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      Recovery reason
+                      <textarea minLength={10} maxLength={500} required rows={2}
+                        value={recoveryReason} onChange={(e) => setRecoveryReason(e.target.value)}
+                        className="mt-1 w-full rounded-xl border border-slate-300 bg-white p-3 dark:border-slate-600 dark:bg-slate-800" />
+                    </label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      Your current password
+                      <input type="password" autoComplete="current-password" required
+                        value={recoveryPassword} onChange={(e) => setRecoveryPassword(e.target.value)}
+                        className="mt-1 h-11 w-full rounded-xl border border-slate-300 bg-white px-3 dark:border-slate-600 dark:bg-slate-800" />
+                    </label>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-200">
+                      Your authenticator code
+                      <input type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}"
+                        maxLength={6} required value={recoveryCode}
+                        onChange={(e) => setRecoveryCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        className="mt-1 h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-center font-mono tracking-widest dark:border-slate-600 dark:bg-slate-800" />
+                    </label>
+                    <div className="flex gap-2">
+                      <button type="button" disabled={recoveryBusy} onClick={() => setRecoveryOpen(false)}
+                        className="h-11 flex-1 rounded-xl border border-slate-300 text-sm font-semibold dark:border-slate-700">Cancel</button>
+                      <button type="submit" disabled={recoveryBusy || recoveryReason.trim().length < 10 ||
+                          !recoveryPassword || recoveryCode.length !== 6}
+                        className="h-11 flex-1 rounded-xl bg-amber-600 px-3 text-sm font-semibold text-white disabled:opacity-50">
+                        {recoveryBusy ? "Sending…" : "Send approval link"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
             )}
           </>
         )}
