@@ -39,6 +39,7 @@ function LoginContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showAdminMfaRecommendation, setShowAdminMfaRecommendation] = useState(false);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -46,10 +47,17 @@ function LoginContent() {
     setLoading(true);
     try {
       const result = await login(email, password);
+      setPassword("");
       if (result.requires_2fa && result.partial_token) {
         router.push(
           `/2fa?token=${encodeURIComponent(result.partial_token)}&next=${encodeURIComponent(destination)}${result.requires_enrollment ? "&enroll=1" : ""}`,
         );
+        return;
+      }
+      if (result.recommend_2fa_setup) {
+        // Optional MFA is already authenticated. The prompt is advisory only;
+        // the user may skip or proceed to the standard Account Security setup.
+        setShowAdminMfaRecommendation(true);
         return;
       }
       router.push(destination);
@@ -58,6 +66,24 @@ function LoginContent() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (showAdminMfaRecommendation) {
+    return (
+      <PremiumAuthShell
+        title="Protect your MateMail account"
+        description="Your workspace recommends adding an authenticator to your Hub sign-in."
+        icon={<LockKeyhole className="h-6 w-6" />}
+      >
+        <div className="auth-form">
+          <p>Set up two-factor authentication now, or skip this reminder and continue to your workspace.</p>
+          <AuthButton type="button" onClick={() => router.push("/app/security")}>Set up 2FA</AuthButton>
+          <button type="button" className="auth-text-button" onClick={() => router.push(destination)}>
+            Skip for now
+          </button>
+        </div>
+      </PremiumAuthShell>
+    );
   }
 
   return (
