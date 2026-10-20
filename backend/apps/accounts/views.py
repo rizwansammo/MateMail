@@ -459,10 +459,11 @@ class LoginView(APIView):
         from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
         from apps.tenants.models import OrganizationTwoFactorMode, AdminHubMfaMode
         admin_policy = effective_admin_hub_mfa_policy(membership)
-        if (membership is not None and
-                (effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE or
-                 admin_policy == AdminHubMfaMode.REQUIRED) and
-                not user.two_factor_enabled):
+        if (not user.two_factor_enabled and
+                (user.hub_mfa_reenrollment_required or
+                 (membership is not None and
+                  (effective_two_factor_policy(membership.tenant) == OrganizationTwoFactorMode.REQUIRE or
+                   admin_policy == AdminHubMfaMode.REQUIRED)))):
             partial = create_challenge(user, tenant_id)
             return Response({"requires_2fa": True, "requires_enrollment": True,
                              "partial_token": partial})
