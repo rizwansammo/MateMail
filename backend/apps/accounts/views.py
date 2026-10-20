@@ -559,7 +559,8 @@ class RefreshView(APIView):
             # BLACKLIST_AFTER_ROTATION is on: blacklisting must happen before a
             # replacement is issued, so a stolen token cannot be exchanged twice.
             token.blacklist()
-            new_refresh = RefreshToken.for_user(_user_for(token))
+            new_refresh = RefreshToken.for_user(account_for_refresh)
+            new_refresh["hub_security_epoch"] = account_for_refresh.hub_security_epoch
             if token.get("mfa_verified_at"):
                 new_refresh["mfa_verified_at"] = token["mfa_verified_at"]
             if token.get("tenant_id"):
