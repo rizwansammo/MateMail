@@ -555,7 +555,6 @@ class RefreshView(APIView):
                         return clear_refresh_cookie(
                             Response({"detail": "Sign in with 2FA to continue."}, status=403)
                         )
-            access = str(token.access_token)
             # BLACKLIST_AFTER_ROTATION is on: blacklisting must happen before a
             # replacement is issued, so a stolen token cannot be exchanged twice.
             token.blacklist()
@@ -563,9 +562,13 @@ class RefreshView(APIView):
             new_refresh["hub_security_epoch"] = account_for_refresh.hub_security_epoch
             if token.get("mfa_verified_at"):
                 new_refresh["mfa_verified_at"] = token["mfa_verified_at"]
-            if token.get("tenant_id"):
-                new_refresh["tenant_id"] = token["tenant_id"]
-                access = str(new_refresh.access_token)
+            if token.get("platform_otp_verified_at") and account_for_refresh.is_platform_admin:
+                # Never reset the verification timestamp during refresh.
+                # A platform security re-auth check still expires after 15 minutes.
+                new_refresh["platform_otp_verified_at"] = token["platform_otp_verified_at"]
+            if tenant_id:
+                new_refresh["tenant_id"] = tenant_id
+            access = str(new_refresh.access_token)
         except (InvalidToken, TokenError, User.DoesNotExist):
             # Expired, blacklisted, tampered with, or the account is gone.
             return clear_refresh_cookie(
