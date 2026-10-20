@@ -57,6 +57,10 @@ from .ops_views import (
     PlatformQuarantineActionView,
     PlatformQueueCancelView,
 )
+from .owner_emergency_views import (
+    PlatformOwnerEmergencyCasesView,
+    PlatformOwnerEmergencyCaseActionView,
+)
 from .owner_views import (
     PlatformOwnerPasswordRecoveryView,
     PlatformOwnerRevokeSessionsView,
@@ -112,6 +116,11 @@ urlpatterns = [
     path("tenants/<uuid:pk>/owner/revoke-sessions/",
          PlatformOwnerRevokeSessionsView.as_view(),
          name="platform-owner-revoke-sessions"),
+
+    path("tenants/<uuid:pk>/owner/emergency/",
+         PlatformOwnerEmergencyCasesView.as_view(), name="platform-owner-emergency"),
+    path("tenants/<uuid:pk>/owner/emergency/<uuid:case_id>/<str:action>/",
+         PlatformOwnerEmergencyCaseActionView.as_view(), name="platform-owner-emergency-action"),
 
     # POST suspends, DELETE releases.
     path("mailboxes/<uuid:pk>/suspend/", AdminMailboxSuspendView.as_view(), name="admin-mailbox-suspend"),
