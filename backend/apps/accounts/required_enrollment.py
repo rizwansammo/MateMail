@@ -112,7 +112,8 @@ class RequiredTwoFactorEnrollmentView(APIView):
         codes = generate_backup_codes(10)
         with transaction.atomic():
             user.two_factor_enabled = True
-            user.save(update_fields=["two_factor_enabled"])
+            user.hub_mfa_reenrollment_required = False
+            user.save(update_fields=["two_factor_enabled", "hub_mfa_reenrollment_required"])
             TwoFactorBackupCode.objects.filter(user=user).delete()
             TwoFactorBackupCode.objects.bulk_create([
                 TwoFactorBackupCode(user=user, code_hash=hash_token(c))
