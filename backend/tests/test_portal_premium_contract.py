@@ -121,11 +121,20 @@ class PremiumPortalTruthfulnessContractTest(SimpleTestCase):
         ):
             self.assertNotIn(fake_endpoint, security)
 
-    def test_security_only_reveals_backup_codes_from_setup_response(self):
+    def test_security_only_reveals_backup_codes_after_setup_or_verified_rotation(self):
         security = read("app", "app", "security", "page.tsx")
+        setup = read("components", "security", "authenticator-setup-dialog.tsx")
+        rotation = read("components", "security", "backup-codes-rotation-dialog.tsx")
+        disclosure = read("components", "security", "backup-codes-disclosure.tsx")
         self.assertIn("data?.backup_codes", security)
-        self.assertIn("cannot show these codes again", security)
-        self.assertNotIn("/api/auth/2fa/backup-codes/", security)
+        self.assertIn("<BackupCodesDisclosure", setup)
+        self.assertIn("<BackupCodesDisclosure", rotation)
+        self.assertIn("I&apos;ve saved my backup codes", disclosure)
+        self.assertIn("cannot be viewed again after closing", disclosure)
+        self.assertIn('"/api/auth/2fa/backup-codes/regenerate/"', rotation)
+        # No old-code lookup endpoint may disclose hashed stored credentials.
+        self.assertNotIn('"/api/auth/2fa/backup-codes/"', security)
+        self.assertNotIn('"/api/auth/2fa/backup-codes/"', rotation)
 
     def test_mailbox_administration_does_not_restore_admin_webmail_sso(self):
         mailbox = read("app", "app", "mailboxes", "[id]", "page.tsx")
