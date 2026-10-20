@@ -351,6 +351,57 @@ class PostBoxClientCredentialView(APIView):
         return Response({"detail": "Invalid client security operation."}, status=400)
 
 
+
+class BackupCodeRotationInput(serializers.Serializer):
+    current_password = serializers.CharField(trim_whitespace=False)
+    code = serializers.RegexField(regex=r"^[0-9]{6}$")
+
+
+class PostBoxBackupCodeRegenerateView(APIView):
+    """Replace old recovery codes only after fresh primary password and TOTP.
+
+    A recovery code cannot authorize minting its own replacements.
+    The new random codes are returned only in this response; DB stores hashes.
+    SMTP/IMAP app passwords and Connected App grants are left untouched.
+    """
+    authentication_classes = [postbox_auth.PostBoxSessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        refused = _gate()
+        if refused:
+            return refused
+        payload = BackupCodeRotationInput(data=request.data)
+        payload.is_valid(raise_exception=True)
+        mailbox = request.postbox_session.mailbox
+        setup = MailboxTwoFactorSetup.objects.filter(
+            mailbox=mailbox, enabled_at__isnull=False,
+        ).first()
+        if setup is None or request.postbox_session.mfa_verified_at is None:
+            return Response({"detail": "Authenticator enrollment and a verified session are required."}, status=409)
+        if not _require_recent_primary_and_factor(
+            request, payload.validated_data["current_password"],
+            payload.validated_data["code"],
+        ):
+            return Response({"detail": "Security verification failed."}, status=403)
+        codes = generate_backup_codes()
+        with transaction.atomic():
+            # Serialize concurrent rotations against the same mailbox.
+            MailboxTwoFactorSetup.objects.select_for_update().get(
+                mailbox=mailbox, enabled_at__isnull=False,
+            )
+            MailboxTwoFactorBackupCode.objects.filter(mailbox=mailbox).delete()
+            MailboxTwoFactorBackupCode.objects.bulk_create([
+                MailboxTwoFactorBackupCode(
+                    mailbox=mailbox, code_hash=hash_backup_code(value),
+                ) for value in codes
+            ])
+        return Response({
+            "backup_codes": codes,
+            "detail": "Backup codes regenerated. All previous codes are invalid.",
+        })
+
+
 class PostBoxTwoFactorDisableView(APIView):
     """Disable voluntary mailbox MFA only after fresh password plus TOTP proof."""
     authentication_classes = [postbox_auth.PostBoxSessionAuthentication]

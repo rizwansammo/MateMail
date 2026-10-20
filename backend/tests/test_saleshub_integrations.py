@@ -3,7 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pyotp
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.core.cache import cache
+from cryptography.fernet import Fernet
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -11,6 +13,8 @@ from apps.accounts.models import TwoFactorSetup, User
 from apps.accounts.tokens import make_tokens
 from apps.domains.models import Domain
 from apps.integrations.models import AccessToken, Integration
+from apps.postbox.models import MailboxTwoFactorSetup, MailboxTwoFactorBackupCode
+from apps.postbox.two_factor_core import encrypt_totp_secret, hash_backup_code
 from apps.mailboxes.models import Mailbox
 from apps.tenants.models import (
     MemberRole,
@@ -279,3 +283,131 @@ class ConnectedAppIntegrationTests(TestCase):
         self.assertEqual(data["from_address"], self.mailbox.email)
         submit.assert_called_once()
         self.assertEqual(response.data["mailbox"], self.mailbox.email)
+
+    def _new_connection_request(self):
+        secret, _ = Integration.issue(
+            tenant=self.tenant, mailbox=self.mailbox,
+            name="Helpdesk Mailbox MFA Test",
+            created_by=self.user, purpose="helpdesk",
+            permissions=["mailbox.read", "mail.read", "mail.send"],
+        )
+        r = APIClient().post("/api/integrations/connect/start/", {
+            "tenant_id": str(self.tenant.id), "integration_secret": secret,
+        }, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        return r.data["request_token"]
+
+    @override_settings(
+        POSTBOX_2FA_ENABLED=True,
+        SMTP_IMAP_SECURITY_ENABLED=True,
+        MAIL_ENGINE_ADAPTER="native",
+        POSTBOX_2FA_FERNET_KEY=Fernet.generate_key().decode("ascii"),
+    )
+    def test_new_helpdesk_connection_requires_postbox_mfa_and_keeps_existing_grant(self):
+        from django.core.cache import cache
+        cache.clear()
+        secret = pyotp.random_base32()
+        MailboxTwoFactorSetup.objects.create(
+            mailbox=self.mailbox, enabled_at=timezone.now(),
+            totp_secret_encrypted=encrypt_totp_secret(secret),
+        )
+        _, existing = Integration.issue(
+            tenant=self.tenant, mailbox=self.mailbox,
+            name="Existing Helpdesk", created_by=self.user,
+            permissions=["mailbox.read", "mail.read", "mail.send"],
+        )
+        existing_raw, _ = AccessToken.issue(existing)
+        external = APIClient()
+        external.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {existing_raw}",
+            HTTP_X_MATEMAIL_TENANT=str(self.tenant.pk),
+        )
+        self.assertEqual(external.get("/api/integrations/external/profile/").status_code, 200)
+
+        token = self._new_connection_request()
+        url = f"/api/integrations/authorize/?request={token}"
+        details = self.client.get("/api/integrations/authorize/", {"request": token})
+        self.assertEqual(details.status_code, 200)
+        self.assertTrue(details.data["mailbox_verification_required"])
+        self.assertFalse(details.data["user_2fa_required"])
+
+        without_factor = self.client.post(url, {"password": "Strong-password-123!"}, format="json")
+        self.assertEqual(without_factor.status_code, 400)
+        wrong_factor = self.client.post(url, {
+            "password": "Strong-password-123!", "mailbox_factor_code": "000000",
+        }, format="json")
+        self.assertEqual(wrong_factor.status_code, 400)
+        # Enrollment alone must not invalidate an existing explicitly approved
+        # app connection or make it suddenly depend on a fresh OTP per API call.
+        self.assertEqual(external.get("/api/integrations/external/profile/").status_code, 200)
+        approved = self.client.post(url, {
+            "password": "Strong-password-123!",
+            "mailbox_factor_code": pyotp.TOTP(secret).now(),
+        }, format="json")
+        self.assertEqual(approved.status_code, 200, getattr(approved, "data", None))
+        self.assertEqual(external.get("/api/integrations/external/profile/").status_code, 200)
+
+    @override_settings(
+        POSTBOX_2FA_ENABLED=True,
+        SMTP_IMAP_SECURITY_ENABLED=True,
+        MAIL_ENGINE_ADAPTER="native",
+        POSTBOX_2FA_FERNET_KEY=Fernet.generate_key().decode("ascii"),
+    )
+    def test_mailbox_backup_code_single_use_for_connected_app_approval(self):
+        cache.clear()
+        secret = pyotp.random_base32()
+        MailboxTwoFactorSetup.objects.create(
+            mailbox=self.mailbox, enabled_at=timezone.now(),
+            totp_secret_encrypted=encrypt_totp_secret(secret),
+        )
+        backup = "mailbox-backup-12345678901234567890"
+        row = MailboxTwoFactorBackupCode.objects.create(
+            mailbox=self.mailbox, code_hash=hash_backup_code(backup),
+        )
+        first = self._new_connection_request()
+        approved = self.client.post(
+            f"/api/integrations/authorize/?request={first}",
+            {"password": "Strong-password-123!", "mailbox_factor_code": backup},
+            format="json",
+        )
+        self.assertEqual(approved.status_code, 200, getattr(approved, "data", None))
+        row.refresh_from_db()
+        self.assertIsNotNone(row.used_at)
+        second = self._new_connection_request()
+        rejected = self.client.post(
+            f"/api/integrations/authorize/?request={second}",
+            {"password": "Strong-password-123!", "mailbox_factor_code": backup},
+            format="json",
+        )
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("mailbox_factor_code", rejected.data)
+
+    @override_settings(POSTBOX_2FA_ENABLED=True)
+    def test_required_but_unenrolled_mailbox_fails_closed_for_new_connections(self):
+        token = self._new_connection_request()
+        self.tenant.two_factor_policy = "require"
+        self.tenant.save(update_fields=["two_factor_policy"])
+        with override_settings(
+            ORGANIZATION_2FA_POLICY_ENABLED=True,
+            ORGANIZATION_2FA_ENFORCEMENT_READY=True,
+        ):
+            # The Hub middleware may refuse the request first because the
+            # owner has not enrolled Hub MFA. Test the mailbox-specific policy
+            # directly; either refusal must keep the grant unapproved.
+            from apps.integrations.security import (
+                mailbox_verification_requirement, verify_mailbox_factor,
+            )
+            from django.core.exceptions import ValidationError
+            self.assertTrue(mailbox_verification_requirement(self.mailbox)["required"])
+            with self.assertRaises(ValidationError):
+                verify_mailbox_factor(self.mailbox, "000000")
+            refusal = self.client.post(
+                f"/api/integrations/authorize/?request={token}",
+                {"password": "Strong-password-123!", "mailbox_factor_code": "000000"},
+                format="json",
+            )
+            self.assertIn(refusal.status_code, (400, 403))
+            from apps.integrations.models import ConnectionRequest
+            self.assertIsNone(ConnectionRequest.objects.get(
+                request_hash=__import__("hashlib").sha256(token.encode()).hexdigest()
+            ).approved_at)

@@ -13,7 +13,7 @@ from django.urls import path
 from .two_factor_views import (
     PostBoxTwoFactorVerifyView, PostBoxTwoFactorEnrollView,
     PostBoxTwoFactorStartView, PostBoxClientCredentialView,
-    PostBoxTwoFactorDisableView,
+    PostBoxTwoFactorDisableView, PostBoxBackupCodeRegenerateView,
 )
 from .views_auth import (
     PostBoxAccountListView,
@@ -79,6 +79,7 @@ urlpatterns = [
     path("auth/2fa/enroll/", PostBoxTwoFactorEnrollView.as_view(), name="postbox-2fa-enroll"),
     path("auth/2fa/start/", PostBoxTwoFactorStartView.as_view(), name="postbox-2fa-start"),
     path("auth/2fa/disable/", PostBoxTwoFactorDisableView.as_view(), name="postbox-2fa-disable"),
+    path("auth/2fa/backup-codes/regenerate/", PostBoxBackupCodeRegenerateView.as_view(), name="postbox-2fa-backup-rotation"),
     path("security/smtp-imap/", PostBoxClientCredentialView.as_view(), name="postbox-smtp-imap"),
     path("auth/accounts/", PostBoxAccountListView.as_view(), name="postbox-accounts"),
     path("auth/switch/", PostBoxAccountSwitchView.as_view(), name="postbox-switch-account"),

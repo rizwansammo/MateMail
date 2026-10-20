@@ -691,6 +691,12 @@ class PasswordChangeView(PostBoxView):
             )
             return Response({"detail": exc.customer_message}, status=502)
 
+        # Any MFA partial challenge was issued against the OLD password.
+        # Do not allow a stale password-proven challenge to finish after this
+        # mailbox's password was changed.
+        from .two_factor_challenge import invalidate_mailbox_challenges
+        invalidate_mailbox_challenges(request.identity_mailbox)
+
         with transaction.atomic():
             revoked = revoke_other_sessions(request.identity_mailbox, keep=request.postbox_session)
 

@@ -798,6 +798,10 @@ export const postbox = {
     request<{ mailbox: MailboxProfile; session: { expires_at: string } }>(
       "/auth/2fa/verify/", { method: "POST", body: JSON.stringify({ partial_token, code }) },
     ),
+  regenerateMailboxBackupCodes: (current_password: string, code: string) =>
+    request<{ detail: string; backup_codes: string[] }>("/auth/2fa/backup-codes/regenerate/", {
+      method: "POST", body: JSON.stringify({ current_password, code }),
+    }),
   disableMailbox2fa: (current_password: string, code: string) =>
     request<{ detail: string }>("/auth/2fa/disable/", {
       method: "POST", body: JSON.stringify({ current_password, code }),
