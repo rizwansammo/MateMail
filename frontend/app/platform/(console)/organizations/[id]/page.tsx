@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { platformApi, type PlatformOwner } from "@/lib/platform-api";
+import { OwnerEmergencyPanel } from "@/components/platform/owner-emergency-panel";
 import { describeError } from "@/contexts/platform-auth-context";
 import {
   Badge,
@@ -447,6 +448,8 @@ export default function OrganizationDetailPage() {
                   Revoke owner sessions
                 </button>
               </div>
+              <OwnerEmergencyPanel tenantId={id} ownerEmail={ownerRecord.email}
+                mfaEnabled={ownerRecord.two_factor_enabled} />
             </>
           )}
         </Card>

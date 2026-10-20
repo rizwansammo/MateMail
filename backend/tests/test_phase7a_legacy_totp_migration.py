@@ -13,6 +13,7 @@ LEGACY = ("accounts", "0003_platformemailcode")
 CURRENT = [
     ("accounts", "0006_hub_mfa_recovery_account_guards"),
     ("tenants", "0008_admin_mfa_recovery_ticket"),
+    ("platform_admin", "0004_owner_emergency_recovery"),
 ]
 
 

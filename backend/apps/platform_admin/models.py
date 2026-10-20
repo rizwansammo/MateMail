@@ -165,3 +165,50 @@ class PlatformSystemMailboxGrant(models.Model):
                 name="platform_sensitive_mail_role_allowlist",
             ),
         ]
+
+
+class OwnerEmergencyRecoveryCase(models.Model):
+    """Two-operator, owner-confirmed recovery of a workspace owner account.
+
+    The applicant is always Tenant.owner, never a user ID from the browser.
+    The recipient of the recovery capability is a previously verified,
+    independent recovery mailbox, NOT either platform operator.
+    """
+
+    class Mode(models.TextChoices):
+        MFA = "mfa", "Reset authenticator"
+        FULL = "full", "Reset password and authenticator"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.PROTECT,
+                               related_name="owner_emergency_cases")
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                              related_name="owner_emergency_cases")
+    initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                                     related_name="initiated_owner_emergency_cases")
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                                    null=True, blank=True,
+                                    related_name="approved_owner_emergency_cases")
+    mode = models.CharField(max_length=8, choices=Mode.choices)
+    reason = models.CharField(max_length=500)
+    identity_evidence_reference = models.CharField(max_length=200)
+    identity_verification_note = models.CharField(max_length=500, blank=True)
+    reviewer_verification_note = models.CharField(max_length=500, blank=True)
+    recovery_address = models.EmailField()
+    recovery_address_verified_at = models.DateTimeField()
+    owner_security_epoch = models.PositiveIntegerField()
+    # The hold starts at independent approval, not at creation.
+    approved_at = models.DateTimeField(null=True, blank=True)
+    hold_until = models.DateTimeField(null=True, blank=True)
+    capability_hash = models.CharField(max_length=64, blank=True)
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    capability_expires_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "platform_owner_emergency_recovery"
+        indexes = [models.Index(fields=["tenant", "-created_at"],
+                                name="owner_emergency_tenant_idx")]

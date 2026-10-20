@@ -171,6 +171,20 @@ export interface PlatformBackups {
   };
 }
 
+export interface OwnerEmergencyCase {
+  id: string;
+  mode: "mfa" | "full";
+  status: "pending_second_approval" | "security_hold" | "awaiting_owner" | "completed" | "cancelled" | "expired";
+  reason: string;
+  evidence_reference: string;
+  initiated_by: string;
+  approved_by: string | null;
+  created_at: string;
+  hold_until: string | null;
+  capability_expires_at: string | null;
+  completed_at: string | null;
+}
+
 export interface PlatformOwner {
   id: string;
   full_name: string;
@@ -238,6 +252,22 @@ export const platformApi = {
       `${P}/tenants/${tenantId}/owner/password-recovery/`,
       { reason },
     ),
+  ownerEmergencyCases: (tenantId: string) =>
+    api.get<{ owner_id: string; cases: OwnerEmergencyCase[]; min_hold_hours: number }>(
+      `${P}/tenants/${tenantId}/owner/emergency/`,
+    ),
+  ownerEmergencyStart: (tenantId: string, data: {
+    mode: "mfa" | "full"; reason: string; evidence_reference: string;
+    verification_note: string; current_password: string;
+  }) => api.post<{ detail: string; case: OwnerEmergencyCase }>(
+    `${P}/tenants/${tenantId}/owner/emergency/`, data,
+  ),
+  ownerEmergencyAction: (
+    tenantId: string, caseId: string, action: "approve" | "dispatch" | "cancel",
+    data: { current_password: string; verification_note?: string },
+  ) => api.post<{ detail: string; case: OwnerEmergencyCase }>(
+    `${P}/tenants/${tenantId}/owner/emergency/${caseId}/${action}/`, data,
+  ),
   ownerRevokeSessions: (tenantId: string, reason: string) =>
     api.post<{ detail: string; sessions_revoked: number }>(
       `${P}/tenants/${tenantId}/owner/revoke-sessions/`,
