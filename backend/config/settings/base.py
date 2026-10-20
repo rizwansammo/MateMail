@@ -394,6 +394,12 @@ PLATFORM_MAIL_CENTER_PURPOSE_READ_ENABLED = env.bool("PLATFORM_MAIL_CENTER_PURPO
 PLATFORM_MAIL_CENTER_REPORTS_ENABLED = env.bool("PLATFORM_MAIL_CENTER_REPORTS_ENABLED", default=False)
 NATIVE_ENGINE_PLATFORM_SECRET = env("NATIVE_ENGINE_PLATFORM_SECRET", default="")
 
+# Hub administrator MFA is separate from organization-wide Hub/PostBox policy.
+# These new gates stay OFF until enrollment, session and recovery paths are
+# independently tested. The schema alone never changes existing sign-ins.
+HUB_ADMIN_MFA_POLICY_ENABLED = env.bool("HUB_ADMIN_MFA_POLICY_ENABLED", default=False)
+HUB_ADMIN_MFA_ENFORCEMENT_READY = env.bool("HUB_ADMIN_MFA_ENFORCEMENT_READY", default=False)
+
 # Phase 7A foundation. Both OFF by default; requiring MFA is blocked
 # until the Hub, PostBox and Native Engine enforcement paths are ready.
 ORGANIZATION_2FA_POLICY_ENABLED = env.bool("ORGANIZATION_2FA_POLICY_ENABLED", default=False)
