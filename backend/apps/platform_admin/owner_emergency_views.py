@@ -256,7 +256,7 @@ class PlatformOwnerEmergencyCaseActionView(APIView):
         with transaction.atomic():
             tenant = Tenant.objects.select_for_update().select_related("owner").filter(pk=pk).first()
             case = OwnerEmergencyRecoveryCase.objects.select_for_update().select_related(
-                "owner", "initiated_by", "approved_by",
+                "owner", "initiated_by",
             ).filter(tenant_id=pk, pk=case_id).first()
             if case is None or tenant is None:
                 return Response({"detail": "Not found."}, status=404)
@@ -359,7 +359,7 @@ class OwnerEmergencyConfirmView(APIView):
         try:
             with transaction.atomic():
                 case = OwnerEmergencyRecoveryCase.objects.select_for_update().select_related(
-                    "tenant", "owner", "initiated_by", "approved_by",
+                    "tenant", "owner", "initiated_by",
                 ).filter(capability_hash=hash_token(data["capability"])).first()
                 if (case is None or case.completed_at or case.cancelled_at or
                         not case.approved_by_id or case.expires_at <= timezone.now() or
