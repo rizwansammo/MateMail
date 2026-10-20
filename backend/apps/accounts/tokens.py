@@ -7,6 +7,18 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 def make_tokens(user, tenant_id=None, *, platform_verified=False, mfa_verified=False):
     """Issue JWTs. Platform OTP proof is set only after successful verification."""
+    resolved = str(tenant_id) if tenant_id else _first_tenant_id(user)
+    if resolved and not platform_verified:
+        # A signup/invitation/secondary token issuer must not bypass Required
+        # enrollment. Reject BEFORE writing an outstanding refresh token.
+        from apps.tenants.models import AdminHubMfaMode, TenantMembership
+        from apps.tenants.admin_hub_mfa_policy import effective_admin_hub_mfa_policy
+        membership = TenantMembership.objects.select_related("tenant").filter(
+            tenant_id=resolved, user=user, status="active",
+        ).first()
+        if (effective_admin_hub_mfa_policy(membership) == AdminHubMfaMode.REQUIRED and
+                not mfa_verified):
+            raise ValueError("Required Hub admin MFA proof is missing")
     refresh = RefreshToken.for_user(user)
     if mfa_verified:
         from django.utils import timezone
@@ -18,7 +30,6 @@ def make_tokens(user, tenant_id=None, *, platform_verified=False, mfa_verified=F
         if not getattr(user, "is_platform_admin", False):
             raise ValueError("Platform verification requires a platform administrator")
         refresh["platform_otp_verified_at"] = int(timezone.now().timestamp())
-    resolved = str(tenant_id) if tenant_id else _first_tenant_id(user)
     if resolved:
         refresh["tenant_id"] = resolved
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
