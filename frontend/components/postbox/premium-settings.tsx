@@ -1729,7 +1729,7 @@ function SecuritySection() {
   };
 
   return (
-    <>
+    <div className="pb-security-settings-page">
       <MailClientSecuritySettings />
       <SettingsCard
         title="Change password"
@@ -1821,7 +1821,7 @@ function SecuritySection() {
         </button>
       </SettingsCard>
       <InlineError message={error ?? sessions.error} />
-    </>
+    </div>
   );
 }
 
