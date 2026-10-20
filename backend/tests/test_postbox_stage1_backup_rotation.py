@@ -113,3 +113,20 @@ class PostBoxBackupRotationTest(TestCase):
             response = self.submit()
         self.assertEqual(response.status_code, 503)
         self.assertTrue(redeem_backup_code(self.mailbox, self.old_code))
+
+    def test_password_change_revokes_pending_mfa_challenges(self):
+        from apps.postbox import two_factor_challenge as challenges
+        prior = challenges.create_challenge(self.mailbox)
+        self.assertIsNotNone(challenges.peek_challenge(prior))
+        with mock.patch.object(postbox_auth, "trusted_primary_authenticate", return_value=True), \
+             mock.patch("apps.mail_engine.factory.get_adapter") as adapter:
+            response = self.client.post("/api/postbox/security/change-password/", {
+                "current_password": "mailbox-password",
+                "new_password": "New-Random-Mailbox-Passphrase-987!",
+            }, format="json")
+        self.assertEqual(response.status_code, 200, getattr(response, "data", None))
+        self.assertIsNone(challenges.peek_challenge(prior))
+        self.assertFalse(challenges.consume_challenge(prior))
+        fresh = challenges.create_challenge(self.mailbox)
+        self.assertIsNotNone(challenges.peek_challenge(fresh))
+        adapter.return_value.set_mailbox_password.assert_called_once()
