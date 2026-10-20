@@ -27,6 +27,8 @@ export function MailClientSecuritySettings() {
   const [enrollmentCode, setEnrollmentCode] = useState("");
   const [disablePassword, setDisablePassword] = useState("");
   const [disableCode, setDisableCode] = useState("");
+  const [rotationPassword, setRotationPassword] = useState("");
+  const [rotationCode, setRotationCode] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -109,6 +111,26 @@ export function MailClientSecuritySettings() {
       await refresh();
     } catch (caught) { setError(describePostBoxError(caught, "Authenticator verification failed.")); }
     finally { setBusy(false); }
+  }
+
+  async function regenerateBackupCodes() {
+    if (busy || !rotationPassword || rotationCode.length !== 6) return;
+    if (!window.confirm("Regenerate all 10 backup codes? Every previous unused code will immediately stop working.")) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await postbox.regenerateMailboxBackupCodes(rotationPassword, rotationCode);
+      if (result.backup_codes.length !== 10) {
+        throw new Error("Backup code regeneration returned an unexpected result.");
+      }
+      setBackupCodes(result.backup_codes);
+      setRotationPassword("");
+      setRotationCode("");
+      setNotice("New backup codes generated. Save them now; all previous backup codes have been invalidated.");
+    } catch (caught) {
+      setError(describePostBoxError(caught, "Could not regenerate backup codes."));
+    } finally { setBusy(false); }
   }
 
   async function disableMailbox2fa() {
@@ -240,6 +262,24 @@ export function MailClientSecuritySettings() {
             <h2>Two-factor authentication</h2>
             <p>Authenticator protection is currently required for this mailbox. Organization-required 2FA cannot be disabled by a mailbox user.</p>
           </header>
+          <div className="pb-info-box">
+            <ShieldCheck className="h-5 w-5" />
+            <div>
+              <strong>Backup codes</strong>
+              <p>Regenerate 10 one-time backup codes if yours are lost or compromised. The old ones will stop working immediately. Your SMTP/IMAP Passwords and Connected Apps remain unchanged.</p>
+            </div>
+          </div>
+          <div className="pb-password-grid">
+            <label className="pb-premium-field">Current mailbox password for code regeneration
+              <input type="password" autoComplete="current-password" value={rotationPassword} onChange={(e) => setRotationPassword(e.target.value)} />
+            </label>
+            <label className="pb-premium-field">Current authenticator code
+              <input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" value={rotationCode} onChange={(e) => setRotationCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
+            </label>
+          </div>
+          <button type="button" className="pb-settings-secondary" disabled={busy || !rotationPassword || rotationCode.length !== 6} onClick={() => void regenerateBackupCodes()}>
+            Regenerate backup codes
+          </button>
           <div className="pb-password-grid">
             <label className="pb-premium-field">Current mailbox password
               <input type="password" autoComplete="current-password" value={disablePassword} onChange={(e) => setDisablePassword(e.target.value)} />
