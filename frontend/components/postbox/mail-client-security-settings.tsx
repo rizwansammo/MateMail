@@ -33,6 +33,7 @@ export function MailClientSecuritySettings() {
   const [showClientAccess, setShowClientAccess] = useState(false);
   const [showBackupRotation, setShowBackupRotation] = useState(false);
   const [showDisable2fa, setShowDisable2fa] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -78,7 +79,10 @@ export function MailClientSecuritySettings() {
       }
       setPassword("");
       setCode("");
-      if (action !== "create") await refresh(); // One-time password stays visible.
+      if (action !== "create") {
+        if (action === "revoke") setRevokeTarget(null);
+        await refresh(); // One-time password stays visible.
+      }
 
     } catch (caught) {
       setError(describePostBoxError(caught, "Security operation could not be completed."));
@@ -378,9 +382,29 @@ export function MailClientSecuritySettings() {
                       <small>Created {new Date(item.created_at).toLocaleDateString()} · {item.revoked_at ? "Revoked" : "Active"}</small>
                     </div>
                     {!item.revoked_at && (
-                      <button type="button" className="pb-settings-secondary" disabled={busy || !password || (state.two_factor_enabled && code.length !== 6)} onClick={() => {
-                        if (window.confirm("Revoke the SMTP/IMAP password for " + item.label + "? This mail client may need a new password.")) void modify("revoke", { credential_id: item.id });
-                      }}>Revoke</button>
+                      <button type="button" className="pb-settings-secondary" disabled={busy} aria-expanded={revokeTarget === item.id} onClick={() => {
+                        setPassword("");
+                        setCode("");
+                        setShowClientForm(false);
+                        setShowClientAccess(false);
+                        setRevokeTarget((current) => current === item.id ? null : item.id);
+                      }}>{revokeTarget === item.id ? "Cancel" : "Revoke"}</button>
+                    )}
+                    {revokeTarget === item.id && !item.revoked_at && (
+                      <div className="pb-security-revoke-confirm">
+                        <p>Revoke this app password? Sign-in from this mail client will stop immediately.</p>
+                        <div className="pb-security-fields">
+                          <label className="pb-premium-field" htmlFor={"pb-revoke-password-" + item.id}>Current mailbox password
+                            <input id={"pb-revoke-password-" + item.id} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+                          </label>
+                          {state.two_factor_enabled && <label className="pb-premium-field" htmlFor={"pb-revoke-code-" + item.id}>Authenticator code
+                            <input id={"pb-revoke-code-" + item.id} inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
+                          </label>}
+                        </div>
+                        <button type="button" className="pb-settings-secondary" disabled={busy || !password || (state.two_factor_enabled && code.length !== 6)} onClick={() => {
+                          if (window.confirm("Permanently revoke the SMTP/IMAP app password for " + item.label + "?")) void modify("revoke", { credential_id: item.id });
+                        }}>Confirm revoke</button>
+                      </div>
                     )}
                   </article>
                 ))}
