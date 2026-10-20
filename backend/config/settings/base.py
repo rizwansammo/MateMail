@@ -399,6 +399,9 @@ NATIVE_ENGINE_PLATFORM_SECRET = env("NATIVE_ENGINE_PLATFORM_SECRET", default="")
 # independently tested. The schema alone never changes existing sign-ins.
 HUB_ADMIN_MFA_POLICY_ENABLED = env.bool("HUB_ADMIN_MFA_POLICY_ENABLED", default=False)
 HUB_ADMIN_MFA_ENFORCEMENT_READY = env.bool("HUB_ADMIN_MFA_ENFORCEMENT_READY", default=False)
+# An independent gate: recovery needs both real owner approval and a separate
+# verified secondary email before any credential can be revoked.
+HUB_ADMIN_MFA_RECOVERY_ENABLED = env.bool("HUB_ADMIN_MFA_RECOVERY_ENABLED", default=False)
 
 # Phase 7A foundation. Both OFF by default; requiring MFA is blocked
 # until the Hub, PostBox and Native Engine enforcement paths are ready.
