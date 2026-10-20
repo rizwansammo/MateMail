@@ -94,6 +94,10 @@ x-backend-env: &backend_env
   PLATFORM_OWNER_EMERGENCY_RECOVERY_ENABLED: ${PLATFORM_OWNER_EMERGENCY_RECOVERY_ENABLED:-False}
   HUB_ADMIN_MFA_ENFORCEMENT_READY: ${HUB_ADMIN_MFA_ENFORCEMENT_READY:-False}
   POSTBOX_2FA_ENABLED: ${POSTBOX_2FA_ENABLED:-False}
+  # Restricts activation to allowlisted synthetic mailbox UUIDs during canary.
+  # Canary enabled with empty IDs is intentionally fail-closed.
+  POSTBOX_2FA_CANARY_ENABLED: ${POSTBOX_2FA_CANARY_ENABLED:-False}
+  POSTBOX_2FA_CANARY_MAILBOX_IDS: ${POSTBOX_2FA_CANARY_MAILBOX_IDS:-}
   SMTP_IMAP_SECURITY_ENABLED: ${SMTP_IMAP_SECURITY_ENABLED:-False}
   # Inactive system mail staging is OFF for ordinary production deployments.
   SYSTEM_MAIL_STAGING_ENABLED: ${SYSTEM_MAIL_STAGING_ENABLED:-False}
