@@ -19,12 +19,17 @@ export default function OwnerEmergencyConfirmation() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-    setCapability(params.get("capability") ?? "");
-    if (window.location.hash) {
-      window.history.replaceState(window.history.state, "", window.location.pathname);
-    }
-    setLoaded(true);
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      setCapability(params.get("capability") ?? "");
+      if (window.location.hash) {
+        window.history.replaceState(window.history.state, "", window.location.pathname);
+      }
+      setLoaded(true);
+    });
+    return () => { active = false; };
   }, []);
 
   async function confirm() {
