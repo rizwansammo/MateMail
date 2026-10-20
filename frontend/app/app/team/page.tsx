@@ -18,6 +18,7 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { apiRequest } from "@/lib/api";
 import { AstraResourceDialog } from "@/components/workspace/astra-resource-dialog";
+import { AdminHubMfaPolicyDialog } from "@/components/security/admin-hub-mfa-policy-dialog";
 import {
   PortalButton,
   PortalCard,
@@ -78,6 +79,8 @@ function TeamPageContent() {
   const [members, setMembers] = useState<Member[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [myRole, setMyRole] = useState<Member["role"] | "">("");
+  const [adminMfaAvailable, setAdminMfaAvailable] = useState(false);
+  const [mfaTarget, setMfaTarget] = useState<Member | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [query, setQuery] = useState(requestedSearch);
@@ -122,6 +125,13 @@ function TeamPageContent() {
 
       const resolvedRole = stats?.my_role || memberRows.find((member) => member.email === user?.email)?.role || "";
       setMyRole(resolvedRole);
+      if (resolvedRole === "owner") {
+        const mfaResponse = await apiRequest(`/api/workspaces/${tenant.id}/security/admin-hub-mfa/`);
+        const mfaStatus = mfaResponse.ok ? await mfaResponse.json().catch(() => null) : null;
+        setAdminMfaAvailable(mfaStatus?.configurable === true);
+      } else {
+        setAdminMfaAvailable(false);
+      }
 
       if (resolvedRole === "owner" || resolvedRole === "admin") {
         const inviteResponse = await apiRequest("/api/teams/invites/");
@@ -306,6 +316,19 @@ function TeamPageContent() {
 
   return (
     <div className="portal-page astra-resource-page astra-users-page">
+      {mfaTarget && tenant?.id && (
+        <AdminHubMfaPolicyDialog
+          tenantId={tenant.id}
+          memberId={mfaTarget.id}
+          memberEmail={mfaTarget.email}
+          onClose={() => setMfaTarget(null)}
+          onSaved={() => {
+            setMessageTone("success");
+            setMessage("Administrator 2FA policy updated.");
+            void loadTeam(false);
+          }}
+        />
+      )}
       <PortalPageHeading
         title="Users & access"
         description="Manage workspace members, invitations and administrative roles."
@@ -547,6 +570,12 @@ function TeamPageContent() {
                         <td>{new Date(member.created_at).toLocaleDateString()}</td>
                         <td>
                           <div className="portal-inline-actions">
+                            {adminMfaAvailable && canChangeRoles && member.role === "admin" && (
+                              <PortalButton type="button" variant="secondary" onClick={() => setMfaTarget(member)}>
+                                <ShieldCheck className="h-3.5 w-3.5" />
+                                Manage 2FA
+                              </PortalButton>
+                            )}
                             {canRemove && (
                               <button
                                 type="button"
