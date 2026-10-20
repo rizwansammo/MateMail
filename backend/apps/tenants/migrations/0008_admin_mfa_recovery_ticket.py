@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="AdminHubMfaRecoveryTicket",
             fields=[
-                ("id", models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)),
+                ("id", models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, serialize=False)),
                 ("nonce_hash", models.CharField(max_length=64, unique=True)),
                 ("recipient_email", models.EmailField(max_length=254)),
                 ("reason", models.CharField(max_length=500)),
