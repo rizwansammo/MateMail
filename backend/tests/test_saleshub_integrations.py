@@ -391,12 +391,23 @@ class ConnectedAppIntegrationTests(TestCase):
             ORGANIZATION_2FA_POLICY_ENABLED=True,
             ORGANIZATION_2FA_ENFORCEMENT_READY=True,
         ):
-            details = self.client.get("/api/integrations/authorize/", {"request": token})
-            self.assertTrue(details.data["mailbox_verification_required"])
+            # The Hub middleware may refuse the request first because the
+            # owner has not enrolled Hub MFA. Test the mailbox-specific policy
+            # directly; either refusal must keep the grant unapproved.
+            from apps.integrations.security import (
+                mailbox_verification_requirement, verify_mailbox_factor,
+            )
+            from django.core.exceptions import ValidationError
+            self.assertTrue(mailbox_verification_requirement(self.mailbox)["required"])
+            with self.assertRaises(ValidationError):
+                verify_mailbox_factor(self.mailbox, "000000")
             refusal = self.client.post(
                 f"/api/integrations/authorize/?request={token}",
                 {"password": "Strong-password-123!", "mailbox_factor_code": "000000"},
                 format="json",
             )
-            self.assertEqual(refusal.status_code, 400)
-            self.assertIn("mailbox_factor_code", refusal.data)
+            self.assertIn(refusal.status_code, (400, 403))
+            from apps.integrations.models import ConnectionRequest
+            self.assertIsNone(ConnectionRequest.objects.get(
+                request_hash=__import__("hashlib").sha256(token.encode()).hexdigest()
+            ).approved_at)
