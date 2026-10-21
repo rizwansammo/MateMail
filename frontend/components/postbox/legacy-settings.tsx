@@ -130,6 +130,7 @@ function GeneralSection() {
           onChange={(e) => void set({ theme: e.target.value as "light" })}>
           <option value="light">Light</option>
           <option value="dark">Dark</option>
+          <option value="navy">Navy sidebar</option>
           <option value="system">Match my device</option>
         </select>
       </Row>
