@@ -541,7 +541,7 @@ body {
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-pb-theme="light"]) .pb {
+  :root:not([data-pb-theme="light"]):not([data-pb-theme="navy"]) .pb {
     --pb-bg: #131c27;
     --pb-fg: #e2e9f1;
     --pb-surface: #16212d;
@@ -1832,7 +1832,7 @@ body {
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-pb-theme="light"]) .pb.nm-postbox {
+  :root:not([data-pb-theme="light"]):not([data-pb-theme="navy"]) .pb.nm-postbox {
     --pb-bg: #0d1724;
     --pb-fg: #e6edf6;
     --pb-surface: #111d2c;
@@ -1901,8 +1901,8 @@ body {
   font-family:var(--pb-font);
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-pb-theme="light"]) .pb-premium-shell,
-  :root:not([data-pb-theme="light"]) .pb-premium-login {
+  :root:not([data-pb-theme="light"]):not([data-pb-theme="navy"]) .pb-premium-shell,
+  :root:not([data-pb-theme="light"]):not([data-pb-theme="navy"]) .pb-premium-login {
     --pb-bg:#141c21;
     --pb-fg:#e3eaec;
     --pb-surface:#192329;
@@ -6432,8 +6432,8 @@ body {
   background-image:url("/assets/matemail-logo-black.svg");
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-pb-theme="light"]) .pb-premium-brand-mark,
-  :root:not([data-pb-theme="light"]) .pb-premium-login-mark {
+  :root:not([data-pb-theme="light"]):not([data-pb-theme="navy"]) .pb-premium-brand-mark,
+  :root:not([data-pb-theme="light"]):not([data-pb-theme="navy"]) .pb-premium-login-mark {
     background-color:#FFFFFF;
     background-image:url("/assets/matemail-logo-black.svg");
   }
@@ -6921,8 +6921,8 @@ body {
   .pb-security-dialog-actions { flex-direction: column-reverse; }
   .pb-security-dialog-actions button { width: 100%; }
 }
-/* Keep the original white master visible on navy, including OS dark preference. */
+/* Match the white PostBox wordmark with the white official logo in Navy mode. */
 :root[data-pb-theme="navy"] .pb-premium-brand-mark {
-  background-color: #f7faff;
-  background-image: url("/assets/matemail-logo-black.svg");
+  background-color: transparent;
+  background-image: url("/assets/matemail-logo-white.svg");
 }
