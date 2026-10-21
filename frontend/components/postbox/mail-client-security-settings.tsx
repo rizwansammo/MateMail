@@ -34,6 +34,7 @@ export function MailClientSecuritySettings() {
   const [showBackupRotation, setShowBackupRotation] = useState(false);
   const [showDisable2fa, setShowDisable2fa] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<{ title: string; description: string; confirmLabel: string; action: () => void } | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -123,7 +124,6 @@ export function MailClientSecuritySettings() {
 
   async function regenerateBackupCodes() {
     if (busy || !rotationPassword || rotationCode.length !== 6) return;
-    if (!window.confirm("Regenerate all 10 backup codes? Every previous unused code will immediately stop working.")) return;
     setBusy(true);
     setError("");
     setNotice("");
@@ -143,7 +143,6 @@ export function MailClientSecuritySettings() {
 
   async function disableMailbox2fa() {
     if (!disablePassword || disableCode.length !== 6) return;
-    if (!window.confirm("Disable mailbox 2FA and revoke external client passwords? You will be signed out.")) return;
     setBusy(true);
     setError("");
     try {
@@ -318,7 +317,7 @@ export function MailClientSecuritySettings() {
                     <input id="pb-recovery-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" value={rotationCode} onChange={(e) => setRotationCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
                   </label>
                 </div>
-                <button type="button" className="pb-settings-secondary" disabled={busy || !rotationPassword || rotationCode.length !== 6} onClick={() => void regenerateBackupCodes()}>Generate new backup codes</button>
+                <button type="button" className="pb-settings-secondary" disabled={busy || !rotationPassword || rotationCode.length !== 6} onClick={() => setConfirmation({ title: "Replace backup codes?", description: "All 10 recovery codes will be regenerated. Every existing code will stop working immediately. Save the new codes securely.", confirmLabel: "Regenerate codes", action: () => void regenerateBackupCodes() })}>Generate new backup codes</button>
               </div>
             )}
             {state.organization_policy === "require" ? (
@@ -342,7 +341,7 @@ export function MailClientSecuritySettings() {
                         <input id="pb-disable-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" value={disableCode} onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
                       </label>
                     </div>
-                    <button type="button" className="pb-settings-secondary" disabled={busy || !disablePassword || disableCode.length !== 6} onClick={() => void disableMailbox2fa()}>Disable voluntary mailbox 2FA</button>
+                    <button type="button" className="pb-settings-secondary" disabled={busy || !disablePassword || disableCode.length !== 6} onClick={() => setConfirmation({ title: "Turn off two-factor authentication?", description: "This removes authenticator protection, invalidates every external mail app password and signs you out of PostBox. You will need to sign in again.", confirmLabel: "Disable 2FA", action: () => void disableMailbox2fa() })}>Disable voluntary mailbox 2FA</button>
                   </div>
                 )}
               </>
@@ -402,7 +401,7 @@ export function MailClientSecuritySettings() {
                           </label>}
                         </div>
                         <button type="button" className="pb-settings-secondary" disabled={busy || !password || (state.two_factor_enabled && code.length !== 6)} onClick={() => {
-                          if (window.confirm("Permanently revoke the SMTP/IMAP app password for " + item.label + "?")) void modify("revoke", { credential_id: item.id });
+                          setConfirmation({ title: "Revoke app password?", description: `The app password for ${item.label} will be permanently revoked. This mail client will no longer be able to authenticate.`, confirmLabel: "Revoke password", action: () => void modify("revoke", { credential_id: item.id }) });
                         }}>Confirm revoke</button>
                       </div>
                     )}
@@ -457,12 +456,25 @@ export function MailClientSecuritySettings() {
                 </label>}
               </div>
               <button type="button" className="pb-settings-secondary" disabled={busy || !password || (state.two_factor_enabled && code.length !== 6)} onClick={() => {
-                if (window.confirm(state.enabled ? "Disable IMAP/SMTP sign-ins for this mailbox? Existing sessions will be disconnected." : "Enable external IMAP/SMTP sign-ins?")) void modify("access", { enabled: !state.enabled });
+                setConfirmation({ title: state.enabled ? "Disable external mail access?" : "Enable external mail access?", description: state.enabled ? "IMAP and SMTP sign-ins will be blocked. Existing mail client sessions may be disconnected." : "External mail clients will be allowed to connect using the applicable credentials.", confirmLabel: state.enabled ? "Disable access" : "Enable access", action: () => void modify("access", { enabled: !state.enabled }) });
               }}>{state.enabled ? "Disable external mail access" : "Enable external mail access"}</button>
             </div>
           )}
         </div>
       </section>
+      {confirmation && (
+        <div className="pb-security-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setConfirmation(null); }}>
+          <section className="pb-security-dialog" role="alertdialog" aria-modal="true" aria-labelledby="pb-security-confirm-title" aria-describedby="pb-security-confirm-description">
+            <div className="pb-security-dialog-symbol"><AlertTriangle className="h-5 w-5" aria-hidden="true" /></div>
+            <h2 id="pb-security-confirm-title">{confirmation.title}</h2>
+            <p id="pb-security-confirm-description">{confirmation.description}</p>
+            <div className="pb-security-dialog-actions">
+              <button type="button" className="pb-settings-secondary" disabled={busy} onClick={() => setConfirmation(null)}>Keep current settings</button>
+              <button type="button" className="pb-security-dialog-confirm" disabled={busy} onClick={() => { const action = confirmation.action; setConfirmation(null); action(); }}>{confirmation.confirmLabel}</button>
+            </div>
+          </section>
+        </div>
+      )}
       {notice && <p className="pb-settings-success" role="status">{notice}</p>}
       {loadFailure && <p className="pb-settings-error" role="status">{loadFailure}</p>}
       {error && <p className="pb-settings-error" role="alert">{error}</p>}
