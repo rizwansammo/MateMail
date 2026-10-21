@@ -33,9 +33,20 @@ def can_start_mfa_enrollment(mailbox) -> bool:
     Canary ON with no valid UUIDs selects NO new mailboxes (fail closed).
     Canary OFF retains the previous global enrollment behavior.
     """
-    if not getattr(settings, "POSTBOX_2FA_CANARY_ENABLED", False):
-        return True
-    return mailbox is not None and str(mailbox.pk) in _canary_ids()
+    if mailbox is None:
+        return False
+    if getattr(settings, "POSTBOX_2FA_CANARY_ENABLED", False):
+        return str(mailbox.pk) in _canary_ids()
+
+    # Once Organization policy is available, OFF means no *new* enrollments
+    # for this tenant. Existing protected identities remain protected even
+    # when an administrator later turns optional enrollment OFF.
+    if getattr(settings, "ORGANIZATION_2FA_POLICY_ENABLED", False):
+        from apps.tenants.models import OrganizationTwoFactorMode
+        from apps.tenants.security_policy import effective_two_factor_policy
+
+        return effective_two_factor_policy(mailbox.tenant) != OrganizationTwoFactorMode.OFF
+    return True
 
 
 def mailbox_in_mfa_scope(mailbox) -> bool:
@@ -58,10 +69,22 @@ def mailbox_in_mfa_scope(mailbox) -> bool:
 
 def native_primary_required_for_mailbox(mailbox) -> bool:
     """A Required org policy also must never silently fall back to public IMAP."""
-    if mailbox_in_mfa_scope(mailbox):
-        return True
     if mailbox is None:
         return False
+
+    # During a scoped test the canary's primary password must use the Native
+    # verifier even before TOTP enrollment. Once broadly available, normal
+    # unenrolled accounts KEEP their legacy IMAP verification; flipping a
+    # global feature flag must not switch every existing mailbox's verifier.
+    if (getattr(settings, "POSTBOX_2FA_CANARY_ENABLED", False)
+            and can_start_mfa_enrollment(mailbox)):
+        return True
+
+    from .models import MailboxTwoFactorSetup
+    if MailboxTwoFactorSetup.objects.filter(
+        mailbox=mailbox, enabled_at__isnull=False,
+    ).exists():
+        return True
 
     from apps.tenants.models import OrganizationTwoFactorMode
     from apps.tenants.security_policy import effective_two_factor_policy
