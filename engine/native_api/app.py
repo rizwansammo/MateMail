@@ -476,14 +476,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # password valid for new authentications. After COMMIT, disconnect
             # existing IMAP sessions. A disconnect failure surfaces as 503
             # (the mutation is already committed and requires reconciliation).
+            tenant_transition = route == "/v1/tenants/mfa/require"
             needs_kick = route in {
                 "/v1/mailboxes/client/revoke",
                 "/v1/mailboxes/client/policy",
             }
             pending = None
+            tenant_pending = []
             with db.connect_runtime() as conn:
                 result = handler(conn, body)
-                if needs_kick and kick_recovery.enabled():
+                if tenant_transition:
+                    # Never turn on organization-wide protocol enforcement
+                    # without durable reconnection handling for live sessions.
+                    addresses = result.pop("_kick_addresses")
+                    if not kick_recovery.enabled():
+                        raise PermissionError("Native session reconciliation is disabled")
+                    for address in addresses:
+                        tenant_pending.append(
+                            (address, kick_recovery.enqueue(conn, address))
+                        )
+                elif needs_kick and kick_recovery.enabled():
                     # The queue record and the credential/policy change either
                     # commit together or both roll back. Crash-safe outbox.
                     pending = kick_recovery.enqueue(conn, body["address"])
@@ -491,6 +503,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # database/handler failure before this line must never be called
             # a saved security change by the HTTP/adapter error contract.
             committed = True
+            if tenant_transition:
+                # Complete the entire batch: even if one mailbox's kick fails,
+                # other kicks must proceed. The outbox retains each failure.
+                disconnect_unverified = False
+                for address, pending_item in tenant_pending:
+                    try:
+                        operations.kick_mailbox_sessions(address)
+                        with db.connect_runtime() as conn:
+                            kick_recovery.acknowledge(conn, *pending_item)
+                    except Exception as exc:  # noqa: BLE001 — preserve outbox
+                        logger.warning("Tenant MFA session kick failed: %s",
+                                       type(exc).__name__)
+                        disconnect_unverified = True
+                if disconnect_unverified:
+                    raise operations.OperationUnavailable("Tenant disconnect unverified")
             if needs_kick:
                 operations.kick_mailbox_sessions(body["address"])
                 if pending is not None:
@@ -509,7 +536,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # credential change was saved. Earlier failures may have rolled
             # back and must retain the ordinary service-unavailable response.
             if committed and route in ("/v1/mailboxes/client/revoke",
-                                        "/v1/mailboxes/client/policy"):
+                                        "/v1/mailboxes/client/policy",
+                                        "/v1/tenants/mfa/require"):
                 self._send(503, {
                     "error": "Credential state updated; active session disconnect unverified. Retry security action.",
                     "code": "mail_client_disconnect_unverified",
@@ -619,6 +647,14 @@ def _client_policy(conn, body):
                        required={"address", "enabled", "dedicated_required"})
     return client_credentials.set_policy(conn, body["address"],
                                          body["enabled"], body["dedicated_required"])
+
+
+def _tenant_mfa_require(conn, body):
+    validation.payload(body, allowed={"tenant_id", "domains", "required"},
+                       required={"tenant_id", "domains", "required"})
+    return client_credentials.set_tenant_required(
+        conn, body["tenant_id"], body["domains"], body["required"],
+    )
 
 
 def _mailboxes_set_quota(conn, body):
@@ -829,6 +865,7 @@ _WRITE_ROUTES = {
     "/v1/mailboxes/client/issue":   _client_issue,
     "/v1/mailboxes/client/revoke":  _client_revoke,
     "/v1/mailboxes/client/policy":  _client_policy,
+    "/v1/tenants/mfa/require":       _tenant_mfa_require,
     "/v1/mailboxes/set-quota":     _mailboxes_set_quota,
     "/v1/mailboxes/delete":        _mailboxes_delete,
     "/v1/aliases/ensure":          _aliases_ensure,
