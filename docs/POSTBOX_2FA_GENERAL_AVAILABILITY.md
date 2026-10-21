@@ -23,30 +23,108 @@ Organization-scoped Hub MFA is distinct from the independent admin-only Hub poli
 - The existing optional 2FA UI, recovery code rotation, revocation and automatic logout retain their existing protections.
 - The organization policy API remains owner/admin-only and requires fresh Hub password reauthentication.
 
-## Why Require is still blocked
+## Native tenant protocol enforcement candidate
 
-The current Native `mail_client_policy` applies to each mailbox, not each tenant, and a missing policy permits legacy SMTP/IMAP credentials. Switching only Django's organization policy to Require would demand OTP in PostBox while **unenrolled mailboxes could still authenticate to SMTP/IMAP with the primary password**. That is not sufficient enforcement and must not be released.
+The draft PR adds **additive Native migration 016**. Its `domain.tenant_id`
+binding is immutable across different tenants, while `native_tenant_mfa_policy`
+stores a durable tenant-level Required bit (default False). Dovecot's existing
+`dovecot_client_auth` function checks this bit **before** accepting a mailbox's
+primary password. Every mailbox belonging to the bound domain, including new
+mailboxes created later, inherits the same security rule.
 
-The current Native API rejects `dedicated_required=true, enabled=true` until an active app password exists. A safe Require rollout must therefore support a lifecycle for *unenrolled* identities in which legacy external authentication is blocked until MFA enrollment and dedicated credentials are ready.
+The authenticated internal Native API route `POST /v1/tenants/mfa/require`:
+- strictly validates tenant UUID, bounded domain list and boolean policy;
+- rejects cross-tenant ownership and reserved platform domains;
+- updates domain-to-tenant bindings and the protocol enforcement row in one
+  Native PostgreSQL transaction;
+- queues durable IMAP session disconnects in the SAME transaction before
+  acknowledging the policy change, and reports an unverified disconnect as
+  HTTP 503, not success;
+- never exposes the internal mailbox identities in public Hub responses.
 
-The production-grade Require path needs:
+The Hub policy API enables Native Require *before* committing the Django
+Require policy. Disabling Require commits Django's relaxed policy before
+relaxing Native; a Native outage then leaves clients temporarily restricted
+rather than leaving a security bypass. Repeating the same Off/Encourage update
+reconciles a failed Native release.
 
-1. An atomic or durably recoverable tenant-scoped Native client-policy transition for every existing mailbox (including service failures and rollback), with positive enforcement acknowledgment **before** declaring Require effective.
-2. New-mailbox, TeamBox, provisioning/reconciliation and changed-domain paths that cannot open a legacy SMTP/IMAP bypass before their security policy is installed.
-3. Clear administrator warnings about client migration, session invalidation and how external applications regain access after enrollment.
-4. Tests across Hub login/refresh/API keys, PostBox first-login enrollment/recovery/disable, Native IMAPS/SMTP acceptance, non-Require tenants, and failure/rollback.
-5. Restore/recovery and persistent independent encryption-key verification before unlocking `can_activate_require()`. Merely setting `ORGANIZATION_2FA_ENFORCEMENT_READY=True` must never bypass it.
+### Explicit final release gate
 
-**Do not** change `can_activate_require()` to simply return True or toggle Require flags in production until these gates have passed.
+The configured `ORGANIZATION_2FA_ENFORCEMENT_READY` flag is not sufficient.
+The additional independent `ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED`
+flag defaults to **False**. `can_activate_require()` checks all participating
+flags, Native adapter and separate valid Hub/PostBox Fernet keys before making
+Require selectable by a customer. No tenant is changed automatically.
 
-## General availability readiness checklist
+**DO NOT set the acceptance flag in production** until the real Native image,
+migration, IMAP/SMTP session-disconnect acceptance and recovery runbook have
+been explicitly verified. It is a deliberate manual release declaration, not a
+way to bypass testing.
 
-- Exact candidate commit: CI, security tests, Django check/migrations, Next build and browser QA green.
-- Existing Native runtime capability and PostBox encryption key continuity verified without printing key material.
-- Unenrolled mailboxes: unchanged web login, external SMTP/IMAP and email routing verified; enrolled mailboxes: trusted Native verification, OTP/recovery, app-password issuance/revocation.
-- Canary ON with empty/invalid IDs selects nobody, and removing an already enrolled mailbox from the allowlist never removes MFA.
-- Production activation occurs through the normal manual SHA-pinned deployment and explicit operator approval. Preserve a reversible feature config backup. **Do not disable both MFA flags after users enroll**, since recovery of protected identities must remain possible.
-- Per-organization settings must never affect a different tenant.
-- No broad authentication/organization policy flag changes are part of this candidate branch.
+### CI acceptance in this draft
 
-Next engineering task: implement and test durable Native tenant Require policy enforcement before enabling the Organization Require UI.
+- Synthetic Native HTTP test: policy transaction commits after the durable kick
+  outbox; outgoing kicks/acknowledgements occur after commit; failed kicks
+  return 503 with pending jobs retained; invalid internal secret denied.
+- Native unit tests: UUID validation, domain ownership, platform-domain denial,
+  incomplete tenant domain set, empty tenant and new-domain persistence.
+- **Real disposable PostgreSQL test** applies Native migrations 001–016 and
+  calls the Dovecot authentication function for existing/new mailboxes,
+  primary/dedicated passwords, cross-tenant isolation, revoke and rollback.
+- Django synthetic tests cover the Native-before-Django Require ordering,
+  downstream outage and idempotent release retry.
+- The old canary manual IMAP/SMTP tests already accepted app-password behavior,
+  but do not substitute for a *new* native tenant-Require protocol acceptance.
+
+## Release order (manual, not executed by this PR)
+
+1. Verify production backups and the actual installed Native/Dovecot image
+   without exposing encryption keys. Prepare the recovery plan.
+2. Build and deploy the updated **Native Engine** independently, with migration
+   016, while the tenant-enforcement acceptance flag remains OFF. Confirm
+   runtime `NATIVE_CLIENT_CREDENTIAL_API_ENABLED` and
+   `NATIVE_CLIENT_KICK_RECOVERY_ENABLED` are enabled.
+3. Deploy the SHA-pinned MateMail Backend and Frontend images with default
+   feature flags still OFF. Verify healthy services and no changed SMTP/IMAP
+   authentication for non-enrolled mailboxes.
+4. After read-only config checks, activate the voluntary PostBox and
+   organization policy features, while keeping
+   `ORGANIZATION_2FA_ENFORCEMENT_READY=False` and
+   `ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED=False`.
+   The tenant's persisted existing Off/Encourage policy remains unchanged.
+5. On explicitly authorized synthetic test identities, verify the true
+   Org Require state transition, IMAPS 993 and submission 587, fresh and
+   established sessions, recovery and re-enrollment, plus an unenrolled
+   second-tenant control account.
+6. Only after acceptance and operator approval, set both independent Org
+   Require release flags, confirm Django deployment checks, and make the
+   Require option selectable. Customer owners/admins decide *whether* to
+   enforce it; the platform does not choose for them.
+
+### Rollback
+
+- Do NOT revert to an older Native image while any tenant is Required: the
+  database migration and persistent tenant policy must stay enforceable.
+- Disable Require only through an authorized, positively acknowledged
+  organization policy transition, not an unreviewed SQL edit.
+- Keep PostBox 2FA and SMTP/IMAP security active for enrolled mailboxes;
+  switching both flags OFF is fail-closed and can strand their recovery flow.
+- If the Native engine cannot confirm session disconnect, do not call rollout
+  completed; reconcile the durable kick queue, then retry the same operation.
+- Never drop the Native tenant-policy table merely to reverse the feature.
+
+## Remaining acceptance before GA
+
+- Exact PR commit: Backend tests, Django checks/migrations, Next build and Native
+  engine candidate tests must pass with no unreviewed failures.
+- Native migration 016 on an isolated PostgreSQL database and all Dovecot
+  protocol checks must pass.
+- A separate controlled live IMAPS/SMTP **tenant Require** rehearsal and safe
+  operator recovery/rollback must be signed off.
+- New-domain provisioning, TeamBox, API key, Hub login/refresh, PostBox first
+  login/enrollment, cross-tenant isolation and failure handling must be
+  verified as part of that rehearsal.
+- No customer organization policies or runtime security flags may be changed
+  as a side effect of this draft PR.
+
+Current state: **implementation candidate, not merged or deployed**.
