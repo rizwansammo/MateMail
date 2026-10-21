@@ -102,7 +102,6 @@ class WorkspaceTwoFactorPolicyView(APIView):
                 tenant = membership.tenant.__class__.objects.select_for_update().get(
                     pk=membership.tenant_id,
                 )
-                was_required = tenant.two_factor_policy == OrganizationTwoFactorMode.REQUIRE
                 if selected == OrganizationTwoFactorMode.REQUIRE:
                     if not (getattr(settings, "POSTBOX_2FA_ENABLED", False)
                             and getattr(settings, "SMTP_IMAP_SECURITY_ENABLED", False)
@@ -116,7 +115,11 @@ class WorkspaceTwoFactorPolicyView(APIView):
                 "detail": "Could not confirm SMTP/IMAP enforcement. Organization policy was not changed."
             }, status=503)
 
-        if was_required and selected != OrganizationTwoFactorMode.REQUIRE:
+        if (selected != OrganizationTwoFactorMode.REQUIRE
+                and getattr(settings, "ORGANIZATION_2FA_ENFORCEMENT_READY", False)):
+            # Always reconcile Native when the platform supports enforcement,
+            # even if Django already says Off. A prior Native success + Django
+            # failure must be repairable by retrying the very same action.
             # Removal order is intentionally the opposite of enabling Require:
             # first commit the less restrictive Django policy, then remove
             # Native enforcement. A Native failure leaves legacy clients
