@@ -25,6 +25,7 @@ import {
   LogOut,
   Mail,
   PenLine,
+  PanelLeft,
   Menu,
   Moon,
   Monitor,
@@ -501,6 +502,7 @@ function PremiumPostBoxShell({
     { value: "light" as const, Icon: Sun, label: "Light" },
     { value: "system" as const, Icon: Monitor, label: "System" },
     { value: "dark" as const, Icon: Moon, label: "Dark" },
+    { value: "navy" as const, Icon: PanelLeft, label: "Navy sidebar" },
   ];
 
   useEffect(() => {

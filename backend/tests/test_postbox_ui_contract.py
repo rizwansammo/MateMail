@@ -949,3 +949,25 @@ class AppRailVisualPreferenceContractTest(SimpleTestCase):
         self.assertIn("mm-official-brand-inverse", component)
         self.assertIn('/assets/matemail-mark-black.svg', component)
         self.assertIn("pb-astra-settings-breadcrumb", read("app", "postbox", "(app)", "layout.tsx"))
+
+
+class PostBoxNavyThemeAndSecurityDialogContractTest(SimpleTestCase):
+    def test_navy_theme_is_supported_across_preference_and_ui(self):
+        model = (FRONTEND.parent / "backend/apps/postbox/models.py").read_text()
+        api = (FRONTEND / "lib/postbox-api.ts").read_text()
+        layout = (FRONTEND / "app/postbox/(app)/layout.tsx").read_text()
+        css = (FRONTEND / "app/postbox/(app)/postbox-astra-integration.css").read_text()
+        self.assertIn('NAVY = "navy", "Navy sidebar"', model)
+        self.assertIn('"system" | "navy"', api)
+        self.assertIn('label: "Navy sidebar"', layout)
+        self.assertIn('[data-pb-theme="navy"]', css)
+        self.assertIn('.pb-premium-sidebar', css)
+        self.assertIn('.pb-astra-app-rail', css)
+
+    def test_sensitive_confirmations_use_the_product_dialog(self):
+        source = (FRONTEND / "components/postbox/mail-client-security-settings.tsx").read_text()
+        self.assertNotIn("window.confirm(", source)
+        self.assertIn('role="alertdialog"', source)
+        self.assertIn('aria-modal="true"', source)
+        self.assertIn('Revoke app password?', source)
+        self.assertIn('Turn off two-factor authentication?', source)
