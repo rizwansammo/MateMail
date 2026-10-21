@@ -100,6 +100,7 @@ export function OrganizationTwoFactorPolicy({
                   <option value="require" disabled={!status.require_ready}>Enforce — require 2FA for organization access</option>
                 </select>
               </div>
+              {selected === "require" && status.require_ready && <div className="mt-3"><PortalNotice tone="info">Enforcing 2FA requires immediate authenticator enrollment for members. Existing external SMTP/IMAP sign-ins will be disconnected; users must configure dedicated app passwords before reconnecting their mail clients. Notify your team before saving.</PortalNotice></div>}
               {canEdit && status.configurable && selected !== status.policy && (
                 <>
                   <div className="portal-field mt-4">
