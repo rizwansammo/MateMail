@@ -13,9 +13,9 @@ interface PolicyStatus {
   require_ready: boolean;
 }
 const POLICY_LABELS: Record<Policy, string> = {
-  off: "Off",
-  encourage: "Encourage",
-  require: "Require",
+  off: "No organization requirement",
+  encourage: "Enabled (optional)",
+  require: "Enforced (required)",
 };
 
 export function OrganizationTwoFactorPolicy({
@@ -95,9 +95,9 @@ export function OrganizationTwoFactorPolicy({
               <div className="portal-field">
                 <label htmlFor="organization-2fa-policy">Member sign-in policy</label>
                 <select id="organization-2fa-policy" value={selected} onChange={(event) => setSelected(event.target.value as Policy)} disabled={!canEdit || !status.configurable || saving}>
-                  <option value="off">Off — members may enable 2FA themselves</option>
-                  <option value="encourage">Encourage — recommend authenticator protection</option>
-                  <option value="require" disabled={!status.require_ready}>Require — enforce 2FA for organization access</option>
+                  <option value="off">Off — no organization-wide requirement; individual 2FA remains available</option>
+                  <option value="encourage">Enable — optional 2FA for members, recommended</option>
+                  <option value="require" disabled={!status.require_ready}>Enforce — require 2FA for organization access</option>
                 </select>
               </div>
               {canEdit && status.configurable && selected !== status.policy && (
