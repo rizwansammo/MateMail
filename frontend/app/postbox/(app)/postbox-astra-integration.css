@@ -354,47 +354,110 @@
 .pb-astra-postbox.pb-density-extra-compact .pb-message-label{font-size:9px;line-height:15px;padding:0 5px}
 @media(max-width:767px){.pb-astra-postbox .pb-astra-row-preview{display:none}.pb-astra-postbox .pb-message-labels{max-width:90px;margin-left:5px}}
 
-/* Navy sidebar theme: a unified dark navigation surface, light mail content. */
+/* Navy Sidebar: one cohesive navy navigation surface with full white contrast.
+   Mail, contacts and settings content remain light. Keep this scoped to the
+   selected theme so approved Light, Dark and System layouts remain unchanged. */
 :root[data-pb-theme="navy"] .pb-premium-shell.pb-astra-postbox {
   --pb-bg: #ffffff;
   --pb-fg: #202b3d;
   --pb-surface: #ffffff;
   --pb-surface-2: #f2f5fa;
-  --pb-sidebar: #101e35;
-  --pb-selected: #243f69;
+  --pb-sidebar: #101d32;
+  --pb-selected: #29466c;
   --pb-border: #e3e8ef;
+  --pb-border-strong: #d3dbe7;
   --pb-primary: #415fc2;
+  --pb-primary-fg: #ffffff;
+  --pb-accent: #29466c;
+  --pb-accent-fg: #ffffff;
   --pb-muted: #69768a;
+  --pb-subtle: #8e99aa;
+  --pb-ring: #758ada;
 }
+
+/* Rail, mailbox navigation and settings navigation share the same surface. */
 :root[data-pb-theme="navy"] .pb-astra-postbox .pb-astra-app-rail,
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar,
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-settings-nav {
+  background-color: #101d32;
+  border-color: #243753;
+  color: #ffffff;
+}
 :root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar {
-  background: #101e35;
-  border-color: #263a59;
-  color: #d4e0f5;
+  transition: none; /* Theme switching must not animate the desktop navigation. */
 }
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-astra-app-rail {
-  background: #0d192d;
+@media (max-width: 767px) {
+  :root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar {
+    transition: transform .18s ease; /* Preserve the existing mobile drawer. */
+  }
 }
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-astra-rail-item,
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-nav-link {
-  color: #c1d0e9;
-}
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-astra-rail-item:hover,
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-nav-link:hover {
-  background: #1c3457;
+
+/* All navigation text and icons are solid white, not muted foreground tokens. */
+:root[data-pb-theme="navy"] .pb-astra-postbox :is(
+  .pb-astra-rail-item,
+  .pb-premium-sidebar .pb-premium-wordmark,
+  .pb-premium-sidebar .pb-premium-nav-link,
+  .pb-premium-sidebar .pb-premium-folder-label,
+  .pb-premium-sidebar .pb-premium-nav-count,
+  .pb-premium-sidebar .pb-premium-nav-section-label,
+  .pb-premium-sidebar .pb-premium-nav-heading,
+  .pb-premium-settings-nav .pb-settings-nav-title,
+  .pb-premium-settings-nav .pb-settings-back,
+  .pb-premium-settings-nav nav button
+) {
   color: #ffffff;
 }
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-astra-rail-item[aria-current="page"],
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-nav-link[aria-current="page"] {
-  background: #294773;
+:root[data-pb-theme="navy"] .pb-astra-postbox :is(
+  .pb-astra-app-rail svg,
+  .pb-premium-sidebar svg,
+  .pb-premium-settings-nav nav svg,
+  .pb-premium-settings-nav .pb-settings-back svg
+) {
   color: #ffffff;
+  stroke: currentColor;
 }
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar :is(.pb-premium-wordmark, .pb-premium-nav-heading, .pb-premium-nav-title) {
-  color: #f1f6ff;
-}
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar :is(.pb-premium-nav-count, .pb-premium-nav-section-label) {
-  color: #a8bddb;
-}
+
+/* Full white official mark on navy: no inverted dark logo or white badge. */
 :root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-brand-mark {
   background-color: transparent;
+  background-image: url("/assets/matemail-logo-white.svg");
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-wordmark {
+  color: #ffffff;
+}
+
+/* Consistent, clearly visible hover and selection treatment in both rails. */
+:root[data-pb-theme="navy"] .pb-astra-postbox :is(
+  .pb-astra-rail-item:hover,
+  .pb-premium-nav-link:hover,
+  .pb-premium-settings-nav nav button:hover
+) {
+  background: #203757;
+  color: #ffffff;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox :is(
+  .pb-astra-rail-item[aria-current="page"],
+  .pb-premium-nav-link[aria-current="page"],
+  .pb-premium-settings-nav nav button.active
+) {
+  background: #29466c;
+  color: #ffffff;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar .pb-premium-compose {
+  background: #3e61c6;
+  border-color: #5979dc;
+  color: #ffffff;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar .pb-premium-compose:hover {
+  background: #4c6ed0;
+  filter: none;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar .pb-premium-compose :is(svg, kbd) {
+  color: #ffffff;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox :is(
+  .pb-premium-sidebar button:not(.pb-premium-compose),
+  .pb-premium-settings-nav button
+):focus-visible {
+  outline-color: #ffffff;
 }
