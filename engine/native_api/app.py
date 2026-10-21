@@ -554,7 +554,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def _domains_ensure(conn, body):
     validation.payload(body, allowed={
         "name", "dkim_selector", "dkim_key_size", "max_mailboxes", "max_aliases",
-        "default_quota_mb", "max_quota_mb", "total_quota_mb", "active",
+        "default_quota_mb", "max_quota_mb", "total_quota_mb", "active", "tenant_id",
     }, required={"name"})
     return provisioning.ensure_domain(conn, body)
 
