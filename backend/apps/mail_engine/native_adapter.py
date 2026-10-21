@@ -210,6 +210,7 @@ class NativeMailEngineAdapter(MailEngineAdapter):
     def ensure_domain(self, spec: DomainSpec) -> None:
         self._request("POST", "/v1/domains/ensure", json={
             "name": spec.name,
+            "tenant_id": spec.tenant_id,
             "dkim_selector": spec.dkim_selector,
             "max_mailboxes": spec.max_mailboxes,
             "max_aliases": spec.max_aliases,
@@ -300,6 +301,16 @@ class NativeMailEngineAdapter(MailEngineAdapter):
                              json={"address": address, "enabled": enabled,
                                    "dedicated_required": dedicated_required},
                              operation="set_client_policy")
+
+    def set_tenant_mfa_required(
+        self, tenant_id: str, domains: list[str], required: bool,
+    ) -> dict:
+        """Native-only organization protocol gate; never inferred from UI."""
+        return self._request(
+            "POST", "/v1/tenants/mfa/require",
+            json={"tenant_id": tenant_id, "domains": domains, "required": required},
+            operation="set_tenant_mfa_required",
+        )
 
     def set_mailbox_quota(self, address: str, quota_mb: int) -> None:
         self._request("POST", "/v1/mailboxes/set-quota",

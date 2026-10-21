@@ -1,10 +1,15 @@
 """Stage 7A policy foundation: rollout is safe before enforcement exists."""
 from django.test import TestCase, override_settings
+from unittest import mock
+from types import SimpleNamespace
+
+from apps.mail_engine.errors import EngineUnavailable
+from apps.mail_engine.native_adapter import NativeMailEngineAdapter
 from rest_framework.test import APIClient
 
 from apps.tenants.models import OrganizationTwoFactorMode
 from tests.factories import (
-    FAST_PASSWORD_HASHERS, TEST_PASSWORD, auth_client, make_tenant, make_user,
+    FAST_PASSWORD_HASHERS, TEST_PASSWORD, auth_client, make_tenant, make_user, make_domain,
 )
 
 
@@ -28,6 +33,52 @@ class OrganizationTwoFactorPolicyTest(TestCase):
         response = auth_client(self.owner, self.tenant).get(self.url)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["effective_policy"], "off")
+
+    def test_persisted_require_remains_enforced_after_feature_flag_rollback(self):
+        from apps.tenants.security_policy import effective_two_factor_policy
+        self.tenant.two_factor_policy = OrganizationTwoFactorMode.REQUIRE
+        self.tenant.save(update_fields=["two_factor_policy"])
+        with override_settings(
+            ORGANIZATION_2FA_POLICY_ENABLED=False,
+            ORGANIZATION_2FA_ENFORCEMENT_READY=False,
+            ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED=False,
+        ):
+            self.assertEqual(
+                effective_two_factor_policy(self.tenant),
+                OrganizationTwoFactorMode.REQUIRE,
+            )
+
+    @override_settings(
+        ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ORGANIZATION_2FA_ENFORCEMENT_READY=False,
+    )
+    def test_cannot_relax_an_existing_required_policy_during_native_rollback(self):
+        self.tenant.two_factor_policy = OrganizationTwoFactorMode.REQUIRE
+        self.tenant.save(update_fields=["two_factor_policy"])
+        # A legacy password-only JWT must be rejected before the view runs.
+        password_only = auth_client(self.owner, self.tenant).patch(
+            self.url, {"policy": "off", "current_password": TEST_PASSWORD},
+            format="json",
+        )
+        self.assertEqual(password_only.status_code, 403)
+
+        # Use an MFA-verified session to reach the actual policy mutation
+        # and ensure a disabled Native release gate cannot relax Require.
+        from apps.accounts.tokens import make_tokens
+        from tests.factories import enable_2fa
+        enable_2fa(self.owner)
+        tokens = make_tokens(
+            self.owner, tenant_id=self.tenant.id, mfa_verified=True,
+        )
+        verified = APIClient()
+        verified.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+        response = verified.patch(
+            self.url, {"policy": "off", "current_password": TEST_PASSWORD},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 503, response.json())
+        self.tenant.refresh_from_db()
+        self.assertEqual(self.tenant.two_factor_policy, OrganizationTwoFactorMode.REQUIRE)
 
     def test_anonymous_is_denied(self):
         self.assertEqual(APIClient().get(self.url).status_code, 401)
@@ -94,3 +145,65 @@ class OrganizationTwoFactorPolicyTest(TestCase):
             "enable_without_otp": True,
         }, format="json")
         self.assertEqual(response.status_code, 400)
+
+    @override_settings(
+        ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ORGANIZATION_2FA_ENFORCEMENT_READY=True,
+        POSTBOX_2FA_ENABLED=True,
+        SMTP_IMAP_SECURITY_ENABLED=True,
+    )
+    def test_require_commits_only_after_native_protocol_enforcement(self):
+        domain = make_domain(self.tenant, "primary.example.test")
+        adapter = mock.Mock(spec=NativeMailEngineAdapter)
+        adapter.list_domains.return_value = [SimpleNamespace(name=domain.domain)]
+        with mock.patch("apps.tenants.security_views.get_adapter", return_value=adapter), \
+             mock.patch("apps.tenants.security_views.can_activate_require", return_value=True):
+            response = auth_client(self.owner, self.tenant).patch(
+                self.url, {"policy": "require", "current_password": TEST_PASSWORD},
+                format="json",
+            )
+        self.assertEqual(response.status_code, 200, response.data)
+        adapter.set_tenant_mfa_required.assert_called_once_with(
+            str(self.tenant.pk), [domain.domain], True,
+        )
+        self.tenant.refresh_from_db()
+        self.assertEqual(self.tenant.two_factor_policy, "require")
+
+    @override_settings(
+        ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ORGANIZATION_2FA_ENFORCEMENT_READY=True,
+        POSTBOX_2FA_ENABLED=True,
+        SMTP_IMAP_SECURITY_ENABLED=True,
+    )
+    def test_native_enforcement_failure_does_not_save_require(self):
+        adapter = mock.Mock(spec=NativeMailEngineAdapter)
+        adapter.list_domains.return_value = []
+        adapter.set_tenant_mfa_required.side_effect = EngineUnavailable("synthetic outage")
+        with mock.patch("apps.tenants.security_views.get_adapter", return_value=adapter), \
+             mock.patch("apps.tenants.security_views.can_activate_require", return_value=True):
+            response = auth_client(self.owner, self.tenant).patch(
+                self.url, {"policy": "require", "current_password": TEST_PASSWORD},
+                format="json",
+            )
+        self.assertEqual(response.status_code, 503, response.data)
+        self.tenant.refresh_from_db()
+        self.assertEqual(self.tenant.two_factor_policy, "off")
+
+    @override_settings(
+        ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ORGANIZATION_2FA_ENFORCEMENT_READY=True,
+    )
+    def test_native_require_release_retries_even_if_django_already_off(self):
+        # Model may already be Off after a failed Native relaxation, so a
+        # second identical Off update must attempt Native reconciliation.
+        adapter = mock.Mock(spec=NativeMailEngineAdapter)
+        adapter.list_domains.return_value = []
+        with mock.patch("apps.tenants.security_views.get_adapter", return_value=adapter):
+            response = auth_client(self.owner, self.tenant).patch(
+                self.url, {"policy": "off", "current_password": TEST_PASSWORD},
+                format="json",
+            )
+        self.assertEqual(response.status_code, 200, response.data)
+        adapter.set_tenant_mfa_required.assert_called_once_with(
+            str(self.tenant.pk), [], False,
+        )

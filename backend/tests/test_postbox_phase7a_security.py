@@ -281,6 +281,7 @@ class PostBoxMfaBoundaryTest(TestCase):
         ).exists())
 
     def test_mfa_primary_verifier_does_not_fall_back_to_public_imap(self):
+        self._enroll_directly()
         adapter = mock.Mock()
         adapter.verify_primary_password.return_value = False
         with mock.patch("apps.mail_engine.factory.get_adapter", return_value=adapter), \

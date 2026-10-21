@@ -410,6 +410,8 @@ PLATFORM_OWNER_EMERGENCY_RECOVERY_ENABLED = env.bool("PLATFORM_OWNER_EMERGENCY_R
 # until the Hub, PostBox and Native Engine enforcement paths are ready.
 ORGANIZATION_2FA_POLICY_ENABLED = env.bool("ORGANIZATION_2FA_POLICY_ENABLED", default=False)
 ORGANIZATION_2FA_ENFORCEMENT_READY = env.bool("ORGANIZATION_2FA_ENFORCEMENT_READY", default=False)
+# Independent manual acceptance after real Native protocol/client migration tests.
+ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED = env.bool("ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED", default=False)
 SMTP_IMAP_SECURITY_ENABLED = env.bool("SMTP_IMAP_SECURITY_ENABLED", default=False)
 # Dedicated at-rest encryption key, never derived from the mail password.
 # No mailbox 2FA service may initialize without this independently generated key.

@@ -1,0 +1,81 @@
+name: Organization 2FA isolated IMAPS SMTP acceptance
+
+# PR candidate only. Synthetic credentials and two .invalid tenants live in
+# the GitHub-hosted runner; not a single public port or production resource.
+on:
+  pull_request:
+    paths:
+      - 'engine/native_api/**'
+      - 'deploy/native-engine/images/api/**'
+      - 'deploy/native-engine/images/dovecot/**'
+      - 'deploy/native-engine/images/postfix/**'
+      - '.github/workflows/org-mfa-wire-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-organization-mfa:
+    name: Four-scenario real IMAPS and SMTP acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build real Native API candidate locally (never publish)
+        run: docker build -f deploy/native-engine/images/api/Dockerfile -t matemail-native-api-ga:ci .
+
+      - name: Build isolated Dovecot and Postfix from pinned source
+        run: |
+          docker build -f deploy/native-engine/images/dovecot/Dockerfile -t matemail-native-dovecot-ga:ci deploy/native-engine/images/dovecot
+          docker build -f deploy/native-engine/images/postfix/Dockerfile -t matemail-native-postfix-ga:ci deploy/native-engine/images/postfix
+
+      - name: Generate one-day synthetic TLS identity
+        run: |
+          set -euo pipefail
+          fixture=engine/native_api/tests/ga_wire/.runtime
+          mkdir -p "$fixture"
+          openssl req -x509 -nodes -newkey rsa:2048 -sha256 -days 1 \
+            -keyout "$fixture/lab.key" -out "$fixture/lab.crt" \
+            -subj "/CN=dovecot" -addext "subjectAltName=DNS:dovecot,DNS:postfix" \
+            >/dev/null 2>&1
+          chmod 0600 "$fixture/lab.key"
+
+      - name: Audit container isolation before starting
+        run: |
+          set -euo pipefail
+          docker compose -f engine/native_api/tests/ga_wire/compose.yml config --format json | python3 -c '
+          import json,sys
+          cfg=json.load(sys.stdin)
+          assert cfg["name"] == "mmga-ci"
+          assert len(cfg["networks"]) == 1
+          assert next(iter(cfg["networks"].values())).get("internal") is True
+          for name,svc in cfg["services"].items():
+              assert not svc.get("ports"), name+" has a published port"
+              assert not svc.get("network_mode"), name+" bypasses isolation"
+              assert not svc.get("privileged"), name+" is privileged"
+          print("PASS: closed Docker network, no host ports, no production mounts")
+          '
+
+      - name: Boot disposable PostgreSQL Native API Dovecot and Postfix
+        run: docker compose -f engine/native_api/tests/ga_wire/compose.yml up -d --wait
+
+      - name: Real IMAPS and SMTP organization 2FA acceptance
+        run: |
+          docker compose -f engine/native_api/tests/ga_wire/compose.yml \
+            exec -T api python -B \
+            /opt/matemail/native_api/tests/ga_wire/acceptance.py
+
+      - name: Diagnostics on failure (synthetic fixture only)
+        if: failure()
+        run: |
+          docker compose -f engine/native_api/tests/ga_wire/compose.yml ps -a || true
+          docker compose -f engine/native_api/tests/ga_wire/compose.yml \
+            logs --tail=75 api dovecot postfix pg || true
+
+      - name: Always destroy isolated containers, volumes and network
+        if: always()
+        run: |
+          docker compose -f engine/native_api/tests/ga_wire/compose.yml down -v --remove-orphans || true
+          rm -rf engine/native_api/tests/ga_wire/.runtime

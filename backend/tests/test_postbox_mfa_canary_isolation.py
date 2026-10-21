@@ -198,15 +198,125 @@ class PostBoxCanaryIsolationTest(TestCase):
             ))
             old_imap.assert_not_called()
 
-    def test_canary_off_retains_preexisting_global_feature_semantics(self):
+    def test_general_availability_preserves_unenrolled_legacy_login(self):
         with override_settings(
             POSTBOX_2FA_CANARY_ENABLED=False,
             POSTBOX_2FA_CANARY_MAILBOX_IDS="",
-        ), mock.patch.object(postbox_auth.imap, "authenticate") as old_imap, \
+        ), mock.patch.object(postbox_auth.imap, "authenticate", return_value=True) as old_imap, \
                 mock.patch("apps.mail_engine.factory.get_adapter") as adapter:
-            adapter.return_value.verify_primary_password.return_value = True
             self.assertTrue(can_start_mfa_enrollment(self.control))
             self.assertTrue(postbox_auth.trusted_primary_authenticate(
                 self.control.email, "synthetic-password",
             ))
+            old_imap.assert_called_once_with(self.control.email, "synthetic-password")
+            adapter.assert_not_called()
+
+    def test_organization_off_keeps_optional_enrollment_and_password_login(self):
+        with override_settings(
+            POSTBOX_2FA_CANARY_ENABLED=False,
+            ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ), mock.patch.object(postbox_auth.imap, "authenticate", return_value=True) as old_imap, \
+                mock.patch("apps.mail_engine.factory.get_adapter") as adapter:
+            self.assertTrue(can_start_mfa_enrollment(self.control))
+            self.assertTrue(mailbox_in_mfa_scope(self.control))
+            self.assertTrue(postbox_auth.trusted_primary_authenticate(
+                self.control.email, "synthetic-password",
+            ))
+            old_imap.assert_called_once()
+            adapter.assert_not_called()
+
+            raw, _ = PostBoxSession.issue(self.control)
+            client = APIClient()
+            client.cookies[postbox_auth.SESSION_COOKIE_NAME] = raw
+            with mock.patch.object(postbox_auth, "trusted_primary_authenticate", return_value=True):
+                started = client.post(
+                    "/api/postbox/auth/2fa/start/",
+                    {"current_password": "synthetic-password"}, format="json",
+                )
+            self.assertEqual(started.status_code, 200)
+            self.assertTrue(started.data["requires_enrollment"])
+
+    def test_organization_enable_allows_voluntary_enrollment_without_client_disruption(self):
+        self.tenant.two_factor_policy = "encourage"
+        self.tenant.save(update_fields=["two_factor_policy"])
+        with override_settings(
+            POSTBOX_2FA_CANARY_ENABLED=False,
+            ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ), mock.patch.object(postbox_auth.imap, "authenticate", return_value=True) as old_imap, \
+                mock.patch("apps.mail_engine.factory.get_adapter") as adapter:
+            self.assertTrue(can_start_mfa_enrollment(self.control))
+            self.assertTrue(postbox_auth.trusted_primary_authenticate(
+                self.control.email, "synthetic-password",
+            ))
+            old_imap.assert_called_once()
+            adapter.assert_not_called()
+
+    def test_organization_off_cannot_downgrade_already_enrolled_mfa(self):
+        MailboxTwoFactorSetup.objects.create(
+            mailbox=self.control,
+            enabled_at=timezone.now(),
+            totp_secret_encrypted=encrypt_totp_secret(pyotp.random_base32()),
+        )
+        with override_settings(
+            POSTBOX_2FA_CANARY_ENABLED=False,
+            ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ), mock.patch.object(postbox_auth.imap, "authenticate") as old_imap, \
+                mock.patch("apps.mail_engine.factory.get_adapter") as adapter:
+            adapter.return_value.verify_primary_password.return_value = True
+            self.assertTrue(can_start_mfa_enrollment(self.control))
+            self.assertTrue(mailbox_in_mfa_scope(self.control))
+            self.assertTrue(postbox_auth.mailbox_requires_two_factor(self.control))
+            self.assertTrue(postbox_auth.trusted_primary_authenticate(
+                self.control.email, "synthetic-password",
+            ))
             old_imap.assert_not_called()
+            adapter.return_value.verify_primary_password.assert_called_once()
+
+    def test_general_availability_keeps_tenant_choices_isolated(self):
+        owner = make_user("another-ga-owner@example.test")
+        other_tenant = make_tenant(owner, "Other GA tenant", "other-ga")
+        domain = make_domain(other_tenant, "other-ga.example.test")
+        other_mailbox = make_mailbox(other_tenant, domain, "staff")
+        self.tenant.two_factor_policy = "encourage"
+        self.tenant.save(update_fields=["two_factor_policy"])
+        with override_settings(
+            POSTBOX_2FA_CANARY_ENABLED=False,
+            ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ):
+            self.assertTrue(can_start_mfa_enrollment(self.control))
+            self.assertTrue(can_start_mfa_enrollment(other_mailbox))
+            self.assertTrue(mailbox_in_mfa_scope(other_mailbox))
+
+        # A Require policy in one tenant must not silently change the verifier
+        # used by a different tenant that still has an Off policy.
+        self.tenant.two_factor_policy = "require"
+        self.tenant.save(update_fields=["two_factor_policy"])
+        from apps.postbox.canary_scope import native_primary_required_for_mailbox
+        with override_settings(
+            POSTBOX_2FA_CANARY_ENABLED=False,
+            ORGANIZATION_2FA_POLICY_ENABLED=True,
+            ORGANIZATION_2FA_ENFORCEMENT_READY=True,
+        ):
+            self.assertTrue(native_primary_required_for_mailbox(self.control))
+            self.assertFalse(native_primary_required_for_mailbox(other_mailbox))
+
+    def test_disabling_platform_flags_cannot_turn_enrolled_mfa_into_password_login(self):
+        MailboxTwoFactorSetup.objects.create(
+            mailbox=self.control,
+            enabled_at=timezone.now(),
+            totp_secret_encrypted=encrypt_totp_secret(pyotp.random_base32()),
+        )
+        raw, _ = PostBoxSession.issue(self.control)
+        with override_settings(
+            POSTBOX_2FA_ENABLED=False,
+            SMTP_IMAP_SECURITY_ENABLED=False,
+            POSTBOX_2FA_CANARY_ENABLED=False,
+        ), mock.patch.object(postbox_auth.imap, "authenticate") as old_imap:
+            self.assertTrue(postbox_auth.mailbox_requires_two_factor(self.control))
+            self.assertIsNone(postbox_auth.session_for_token(raw))
+            self.assertFalse(postbox_auth.trusted_primary_authenticate(
+                self.control.email, "synthetic-app-password",
+            ))
+            old_imap.assert_not_called()
+
+

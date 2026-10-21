@@ -11,7 +11,7 @@ import os
 import secrets
 import uuid
 
-from validation import ValidationError, email_address
+from validation import ValidationError, email_address, domain_name
 from passwords import hash_password, verify_password
 
 # An unknown, suspended, or platform-reserved mailbox must consume a bcrypt
@@ -168,3 +168,110 @@ def set_policy(conn, address, enabled, dedicated_required):
             (mailbox_id, enabled, dedicated_required),
         )
     return {"enabled": enabled, "dedicated_required": dedicated_required}
+
+
+def set_tenant_required(conn, tenant_id, domains, required):
+    """Atomically bind a tenant and reconcile its persistent protocol policy.
+
+    Re-saving an unchanged policy must not disconnect healthy mail clients.
+    On retry after a partial commit/kick outage, process only the durable
+    outstanding disconnects, never re-kick the whole organization.
+    """
+    if not mutation_enabled():
+        raise PermissionError("Native tenant MFA management disabled")
+    if type(required) is not bool:
+        raise ValidationError("required must be a boolean", "required")
+    try:
+        normalized_tenant = str(uuid.UUID(str(tenant_id)))
+    except (ValueError, TypeError, AttributeError):
+        raise ValidationError("tenant_id must be a UUID", "tenant_id") from None
+    if (not isinstance(domains, list) or len(domains) > 200
+            or any(not isinstance(value, str) for value in domains)):
+        raise ValidationError("domains must be a bounded list", "domains")
+    normalized_domains = [domain_name(value) for value in domains]
+    if len(set(normalized_domains)) != len(normalized_domains):
+        raise ValidationError("Duplicate domain names", "domains")
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT d.name, d.tenant_id::text, (rd.name IS NOT NULL)
+                 FROM public.domain d
+                 LEFT JOIN public.platform_reserved_domain rd ON rd.name=d.name
+                 WHERE d.name = ANY(%s) ORDER BY d.name FOR UPDATE OF d""",
+            (normalized_domains,),
+        )
+        found = cur.fetchall()
+        if len(found) != len(normalized_domains):
+            raise ValidationError("Some tenant domains are not provisioned", "domains")
+        if any(is_platform for _, _, is_platform in found):
+            raise ValidationError("Protected platform domain", "domains")
+        if any(owner is not None and owner != normalized_tenant
+               for _, owner, _ in found):
+            raise ValidationError("Domain belongs to another tenant", "domains")
+
+        cur.execute(
+            "SELECT name FROM public.domain WHERE tenant_id=%s::uuid",
+            (normalized_tenant,),
+        )
+        bound = {row[0] for row in cur.fetchall()}
+        if not bound.issubset(set(normalized_domains)):
+            raise ValidationError("Tenant domain list is incomplete", "domains")
+
+        cur.execute(
+            """SELECT required FROM public.native_tenant_mfa_policy
+               WHERE tenant_id=%s::uuid FOR UPDATE""",
+            (normalized_tenant,),
+        )
+        previous = cur.fetchone()
+        changed = (required if previous is None
+                   else bool(previous[0]) != required)
+        newly_bound = [name for name, owner, _ in found if owner is None]
+
+        if normalized_domains:
+            cur.execute(
+                """UPDATE public.domain SET tenant_id=%s::uuid
+                    WHERE name = ANY(%s)
+                      AND (tenant_id IS NULL OR tenant_id=%s::uuid)""",
+                (normalized_tenant, normalized_domains, normalized_tenant),
+            )
+            if cur.rowcount != len(normalized_domains):
+                raise ValidationError("Domain binding changed concurrently", "domains")
+
+        cur.execute(
+            """INSERT INTO public.native_tenant_mfa_policy(tenant_id, required)
+               VALUES (%s::uuid, %s)
+               ON CONFLICT (tenant_id) DO UPDATE SET
+                 required=EXCLUDED.required, updated_at=now()""",
+            (normalized_tenant, required),
+        )
+
+        # Only an actual transition or newly protected, previously unmapped
+        # domains requires disconnecting currently authenticated clients.
+        changed_addresses = []
+        if changed or (required and newly_bound):
+            cur.execute(
+                """SELECT m.address FROM public.mailbox m
+                   JOIN public.domain d ON d.id=m.domain_id
+                   WHERE d.tenant_id=%s::uuid AND m.login_enabled
+                     AND (%s OR d.name = ANY(%s))
+                   ORDER BY m.address""",
+                (normalized_tenant, changed, newly_bound),
+            )
+            changed_addresses = [row[0] for row in cur.fetchall()]
+
+        # A retry after an HTTP 503 must reconcile just the previously queued
+        # failures; returning success while pending disconnects exist is unsafe.
+        cur.execute(
+            """SELECT m.address FROM public.mail_client_kick_pending k
+               JOIN public.mailbox m ON m.id=k.mailbox_id
+               JOIN public.domain d ON d.id=m.domain_id
+               WHERE d.tenant_id=%s::uuid ORDER BY m.address""",
+            (normalized_tenant,),
+        )
+        pending_addresses = [row[0] for row in cur.fetchall()]
+        to_disconnect = sorted(set(changed_addresses) | set(pending_addresses))
+    return {
+        "required": required,
+        "mailbox_count": len(to_disconnect),
+        "_kick_addresses": to_disconnect,
+    }

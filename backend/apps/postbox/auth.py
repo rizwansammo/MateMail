@@ -70,16 +70,19 @@ class MailboxSecondFactorRequired(Exception):
 def mailbox_requires_two_factor(mailbox) -> bool:
     """Evaluate live mailbox+organization security; never infer Hub user by email."""
     from django.conf import settings
+    from .models import MailboxTwoFactorSetup
+    # An enrolled account may never become password-only merely because a
+    # platform switch is rolled back. The native client password could then
+    # otherwise be mistaken for the PostBox primary password.
+    if MailboxTwoFactorSetup.objects.filter(
+        mailbox=mailbox, enabled_at__isnull=False,
+    ).exists():
+        return True
     if not getattr(settings, "POSTBOX_2FA_ENABLED", False):
         return False
     from apps.tenants.security_policy import effective_two_factor_policy
     from apps.tenants.models import OrganizationTwoFactorMode
-    from .models import MailboxTwoFactorSetup
-    if effective_two_factor_policy(mailbox.tenant) == OrganizationTwoFactorMode.REQUIRE:
-        return True
-    return MailboxTwoFactorSetup.objects.filter(
-        mailbox=mailbox, enabled_at__isnull=False,
-    ).exists()
+    return effective_two_factor_policy(mailbox.tenant) == OrganizationTwoFactorMode.REQUIRE
 
 
 def trusted_primary_authenticate(address: str, password: str) -> bool:
@@ -93,18 +96,23 @@ def trusted_primary_authenticate(address: str, password: str) -> bool:
     mfa = getattr(settings, "POSTBOX_2FA_ENABLED", False)
     clients = getattr(settings, "SMTP_IMAP_SECURITY_ENABLED", False)
     if not mfa and not clients:
+        # A disabled feature gate is NOT a downgrade path for accounts that
+        # were already enrolled. They must stay denied until MFA is safely
+        # restored/recovered; their client app password must never log in here.
+        mailbox = resolve_mailbox(address)
+        if mailbox is not None and mailbox_requires_two_factor(mailbox):
+            return False
         return imap.authenticate(address, password)
     if not (mfa and clients) or getattr(settings, "MAIL_ENGINE_ADAPTER", "") != "native":
         return False
 
-    # Canary activation is scoped. Unselected and unenrolled mailboxes retain
-    # their exact legacy public IMAP password-verification path. Removing an
-    # already-enrolled mailbox from the allowlist MUST NOT remove its MFA guard;
-    # it continues using trusted Native primary authentication.
-    if getattr(settings, "POSTBOX_2FA_CANARY_ENABLED", False):
-        from .canary_scope import native_primary_required_for_mailbox
-        if not native_primary_required_for_mailbox(resolve_mailbox(address)):
-            return imap.authenticate(address, password)
+    # Preserve legacy password verification for UNENROLLED mailboxes even
+    # after general availability. Native is mandatory for enrolled mailboxes,
+    # canary-selected accounts and Required-2FA mailboxes. In those cases a
+    # Native outage must fail closed, never fall back to public IMAP.
+    from .canary_scope import native_primary_required_for_mailbox
+    if not native_primary_required_for_mailbox(resolve_mailbox(address)):
+        return imap.authenticate(address, password)
 
     try:
         from apps.mail_engine.factory import get_adapter
