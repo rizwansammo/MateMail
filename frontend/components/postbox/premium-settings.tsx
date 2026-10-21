@@ -289,12 +289,13 @@ function AppearanceSection() {
             className="pb-settings-select"
             value={preferences.theme}
             onChange={(event) =>
-              void save({ theme: event.target.value as "light" | "dark" | "system" })
+              void save({ theme: event.target.value as "light" | "dark" | "system" | "navy" })
             }
           >
             <option value="system">Match my device</option>
             <option value="light">Light</option>
             <option value="dark">Dark</option>
+            <option value="navy">Navy sidebar</option>
           </select>
         </SettingRow>
         <SettingRow label="Density" description="Change how much vertical space each message row uses.">
