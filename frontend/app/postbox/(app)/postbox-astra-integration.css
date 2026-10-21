@@ -375,13 +375,32 @@
   --pb-ring: #758ada;
 }
 
-/* Rail, mailbox navigation and settings navigation share the same surface. */
+/* Only the permanent application and mailbox-folder rails are navy. */
 :root[data-pb-theme="navy"] .pb-astra-postbox .pb-astra-app-rail,
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar,
-:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-settings-nav {
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar {
   background-color: #101d32;
   border-color: #243753;
   color: #ffffff;
+}
+/* Settings has its own light navigation independent of the app rail. */
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-settings-nav {
+  background: #f7f8fb;
+  border-color: #e3e8ef;
+  color: #202b3d;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-settings-nav .pb-settings-nav-title {
+  color: #202b3d;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-settings-nav :is(.pb-settings-back, nav button) {
+  color: #69768a;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-settings-nav nav button:hover {
+  background: #eaf0fd;
+  color: #334fae;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-settings-nav nav button.active {
+  background: #eaf0fd;
+  color: #334fae;
 }
 :root[data-pb-theme="navy"] .pb-astra-postbox .pb-premium-sidebar {
   transition: none; /* Theme switching must not animate the desktop navigation. */
@@ -400,18 +419,13 @@
   .pb-premium-sidebar .pb-premium-folder-label,
   .pb-premium-sidebar .pb-premium-nav-count,
   .pb-premium-sidebar .pb-premium-nav-section-label,
-  .pb-premium-sidebar .pb-premium-nav-heading,
-  .pb-premium-settings-nav .pb-settings-nav-title,
-  .pb-premium-settings-nav .pb-settings-back,
-  .pb-premium-settings-nav nav button
+  .pb-premium-sidebar .pb-premium-nav-heading
 ) {
   color: #ffffff;
 }
 :root[data-pb-theme="navy"] .pb-astra-postbox :is(
   .pb-astra-app-rail svg,
-  .pb-premium-sidebar svg,
-  .pb-premium-settings-nav nav svg,
-  .pb-premium-settings-nav .pb-settings-back svg
+  .pb-premium-sidebar svg
 ) {
   color: #ffffff;
   stroke: currentColor;
@@ -429,16 +443,14 @@
 /* Consistent, clearly visible hover and selection treatment in both rails. */
 :root[data-pb-theme="navy"] .pb-astra-postbox :is(
   .pb-astra-rail-item:hover,
-  .pb-premium-nav-link:hover,
-  .pb-premium-settings-nav nav button:hover
+  .pb-premium-nav-link:hover
 ) {
   background: #203757;
   color: #ffffff;
 }
 :root[data-pb-theme="navy"] .pb-astra-postbox :is(
   .pb-astra-rail-item[aria-current="page"],
-  .pb-premium-nav-link[aria-current="page"],
-  .pb-premium-settings-nav nav button.active
+  .pb-premium-nav-link[aria-current="page"]
 ) {
   background: #29466c;
   color: #ffffff;
@@ -456,8 +468,96 @@
   color: #ffffff;
 }
 :root[data-pb-theme="navy"] .pb-astra-postbox :is(
-  .pb-premium-sidebar button:not(.pb-premium-compose),
-  .pb-premium-settings-nav button
+  .pb-premium-sidebar button:not(.pb-premium-compose)
 ):focus-visible {
   outline-color: #ffffff;
+}
+
+
+/* App rail folds away without affecting the Mailbox or Settings navigation.
+   This applies only when its separate Settings visibility toggle is enabled. */
+.pb-premium-shell.pb-astra-postbox {
+  position: relative;
+}
+.pb-premium-shell.pb-astra-postbox .pb-astra-app-rail {
+  overflow: hidden;
+  transition: width .2s ease, min-width .2s ease, flex-basis .2s ease,
+    padding .2s ease, opacity .16s ease;
+}
+.pb-premium-shell.pb-astra-postbox.pb-app-rail-collapsed .pb-astra-app-rail {
+  width: 0;
+  min-width: 0;
+  flex: 0 0 0;
+  padding-inline: 0;
+  border-right-width: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.pb-premium-shell.pb-astra-postbox .pb-app-rail-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  flex: 0 0 auto;
+  width: 37px;
+  height: 34px;
+  margin-top: auto;
+  border: 1px solid var(--pb-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--pb-muted);
+  cursor: pointer;
+}
+.pb-premium-shell.pb-astra-postbox .pb-app-rail-collapse:hover {
+  background: var(--pb-selected);
+  color: var(--pb-fg);
+}
+.pb-premium-shell.pb-astra-postbox .pb-app-rail-expand {
+  position: absolute;
+  z-index: 65;
+  bottom: 22px;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--pb-border);
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+  background: #eef3fa;
+  color: #334fae;
+  box-shadow: 1px 2px 8px rgb(14 32 61 / .12);
+  cursor: pointer;
+}
+.pb-premium-shell.pb-astra-postbox .pb-app-rail-expand:hover {
+  width: 24px;
+  background: #dce8fa;
+}
+.pb-premium-shell.pb-astra-postbox :is(.pb-app-rail-collapse, .pb-app-rail-expand):focus-visible {
+  outline: 2px solid var(--pb-ring);
+  outline-offset: 2px;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-app-rail-collapse {
+  border-color: #314762;
+  background: #152943;
+  color: #ffffff;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-app-rail-collapse:hover {
+  background: #29466c;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-app-rail-expand {
+  border-color: #314762;
+  background: #101d32;
+  color: #ffffff;
+}
+:root[data-pb-theme="navy"] .pb-astra-postbox .pb-app-rail-expand:hover {
+  background: #29466c;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pb-premium-shell.pb-astra-postbox .pb-astra-app-rail {
+    transition: none;
+  }
 }
