@@ -37,6 +37,8 @@ The authenticated internal Native API route `POST /v1/tenants/mfa/require`:
 - rejects cross-tenant ownership and reserved platform domains;
 - updates domain-to-tenant bindings and the protocol enforcement row in one
   Native PostgreSQL transaction;
+- avoids mass session disconnects when an unchanged Off/Enable policy is saved;
+- retries only pending failed kicks when reapplying an already committed tenant policy;
 - queues durable IMAP session disconnects in the SAME transaction before
   acknowledging the policy change, and reports an unverified disconnect as
   HTTP 503, not success;

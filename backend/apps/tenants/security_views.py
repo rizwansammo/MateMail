@@ -102,6 +102,15 @@ class WorkspaceTwoFactorPolicyView(APIView):
                 tenant = membership.tenant.__class__.objects.select_for_update().get(
                     pk=membership.tenant_id,
                 )
+                if (tenant.two_factor_policy == OrganizationTwoFactorMode.REQUIRE
+                        and selected != OrganizationTwoFactorMode.REQUIRE
+                        and not getattr(settings, "ORGANIZATION_2FA_ENFORCEMENT_READY", False)):
+                    # Do not claim Off while Native still has Required enabled.
+                    # Wait until the release gate and its recovery controls are
+                    # restored so the protocol policy can be reconciled.
+                    return Response({
+                        "detail": "Native enforcement must be available before disabling an active Require policy."
+                    }, status=503)
                 if selected == OrganizationTwoFactorMode.REQUIRE:
                     if not (getattr(settings, "POSTBOX_2FA_ENABLED", False)
                             and getattr(settings, "SMTP_IMAP_SECURITY_ENABLED", False)

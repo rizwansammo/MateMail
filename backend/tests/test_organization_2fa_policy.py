@@ -48,6 +48,21 @@ class OrganizationTwoFactorPolicyTest(TestCase):
                 OrganizationTwoFactorMode.REQUIRE,
             )
 
+    @override_settings(
+        ORGANIZATION_2FA_POLICY_ENABLED=True,
+        ORGANIZATION_2FA_ENFORCEMENT_READY=False,
+    )
+    def test_cannot_relax_an_existing_required_policy_during_native_rollback(self):
+        self.tenant.two_factor_policy = OrganizationTwoFactorMode.REQUIRE
+        self.tenant.save(update_fields=["two_factor_policy"])
+        response = auth_client(self.owner, self.tenant).patch(
+            self.url, {"policy": "off", "current_password": TEST_PASSWORD},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 503, response.data)
+        self.tenant.refresh_from_db()
+        self.assertEqual(self.tenant.two_factor_policy, OrganizationTwoFactorMode.REQUIRE)
+
     def test_anonymous_is_denied(self):
         self.assertEqual(APIClient().get(self.url).status_code, 401)
 

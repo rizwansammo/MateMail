@@ -171,13 +171,11 @@ def set_policy(conn, address, enabled, dedicated_required):
 
 
 def set_tenant_required(conn, tenant_id, domains, required):
-    """Bind a tenant's provisioned domains and atomically change SMTP/IMAP MFA.
+    """Atomically bind a tenant and reconcile its persistent protocol policy.
 
-    The persistent tenant policy applies to FUTURE mailboxes/domains as well as
-    existing ones. A Require transition denies primary-password protocol auth
-    until the mailbox's own dedicated client policy has been established.
-    Callers are the internal control plane only; customer input must never
-    reach this operation without scoped Owner/Admin authorization.
+    Re-saving an unchanged policy must not disconnect healthy mail clients.
+    On retry after a partial commit/kick outage, process only the durable
+    outstanding disconnects, never re-kick the whole organization.
     """
     if not mutation_enabled():
         raise PermissionError("Native tenant MFA management disabled")
@@ -195,8 +193,6 @@ def set_tenant_required(conn, tenant_id, domains, required):
         raise ValidationError("Duplicate domain names", "domains")
 
     with conn.cursor() as cur:
-        # Lock the concrete domains while validating ownership; one tenant
-        # must never be able to alter another's protocol authentication.
         cur.execute(
             """SELECT d.name, d.tenant_id::text, (rd.name IS NOT NULL)
                  FROM public.domain d
@@ -212,8 +208,7 @@ def set_tenant_required(conn, tenant_id, domains, required):
         if any(owner is not None and owner != normalized_tenant
                for _, owner, _ in found):
             raise ValidationError("Domain belongs to another tenant", "domains")
-        # A partial list must not silently disable enforcement on already
-        # registered tenant domains. The application supplies the full set.
+
         cur.execute(
             "SELECT name FROM public.domain WHERE tenant_id=%s::uuid",
             (normalized_tenant,),
@@ -221,6 +216,17 @@ def set_tenant_required(conn, tenant_id, domains, required):
         bound = {row[0] for row in cur.fetchall()}
         if not bound.issubset(set(normalized_domains)):
             raise ValidationError("Tenant domain list is incomplete", "domains")
+
+        cur.execute(
+            """SELECT required FROM public.native_tenant_mfa_policy
+               WHERE tenant_id=%s::uuid FOR UPDATE""",
+            (normalized_tenant,),
+        )
+        previous = cur.fetchone()
+        changed = (required if previous is None
+                   else bool(previous[0]) != required)
+        newly_bound = [name for name, owner, _ in found if owner is None]
+
         if normalized_domains:
             cur.execute(
                 """UPDATE public.domain SET tenant_id=%s::uuid
@@ -238,19 +244,34 @@ def set_tenant_required(conn, tenant_id, domains, required):
                  required=EXCLUDED.required, updated_at=now()""",
             (normalized_tenant, required),
         )
-        # Session kicks are required on either transition, since the effective
-        # authorized credential set can change. Outbox records are committed
-        # in the same transaction by app.py before these rows become visible.
+
+        # Only an actual transition or newly protected, previously unmapped
+        # domains requires disconnecting currently authenticated clients.
+        changed_addresses = []
+        if changed or (required and newly_bound):
+            cur.execute(
+                """SELECT m.address FROM public.mailbox m
+                   JOIN public.domain d ON d.id=m.domain_id
+                   WHERE d.tenant_id=%s::uuid AND m.login_enabled
+                     AND (%s OR d.name = ANY(%s))
+                   ORDER BY m.address""",
+                (normalized_tenant, changed, newly_bound),
+            )
+            changed_addresses = [row[0] for row in cur.fetchall()]
+
+        # A retry after an HTTP 503 must reconcile just the previously queued
+        # failures; returning success while pending disconnects exist is unsafe.
         cur.execute(
-            """SELECT m.address FROM public.mailbox m
+            """SELECT m.address FROM public.mail_client_kick_pending k
+               JOIN public.mailbox m ON m.id=k.mailbox_id
                JOIN public.domain d ON d.id=m.domain_id
-               WHERE d.tenant_id=%s::uuid AND m.login_enabled
-               ORDER BY m.address""",
+               WHERE d.tenant_id=%s::uuid ORDER BY m.address""",
             (normalized_tenant,),
         )
-        addresses = [row[0] for row in cur.fetchall()]
+        pending_addresses = [row[0] for row in cur.fetchall()]
+        to_disconnect = sorted(set(changed_addresses) | set(pending_addresses))
     return {
         "required": required,
-        "mailbox_count": len(addresses),
-        "_kick_addresses": addresses,
+        "mailbox_count": len(to_disconnect),
+        "_kick_addresses": to_disconnect,
     }

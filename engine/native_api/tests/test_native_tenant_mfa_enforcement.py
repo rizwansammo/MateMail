@@ -15,9 +15,17 @@ OTHER_TENANT = str(uuid.uuid4())
 
 
 class TenantNativeMfaTest(unittest.TestCase):
-    def _conn(self, found, bound, addresses, *, updated=1):
+    def _conn(self, found, bound, addresses, *, updated=1,
+              previous=None, pending=(), selects_addresses=True):
         cursor = mock.MagicMock()
-        cursor.fetchall.side_effect = [found, bound, addresses]
+        cursor.fetchall.side_effect = (
+            [found, bound] +
+            ([addresses] if selects_addresses else []) +
+            [list(pending)]
+        )
+        cursor.fetchone.return_value = (
+            None if previous is None else (previous,)
+        )
         cursor.rowcount = updated
         conn = mock.MagicMock()
         conn.cursor.return_value.__enter__.return_value = cursor
@@ -86,6 +94,44 @@ class TenantNativeMfaTest(unittest.TestCase):
             result = client_credentials.set_tenant_required(conn, TENANT, [], True)
         self.assertEqual(result["mailbox_count"], 0)
         self.assertEqual(result["_kick_addresses"], [])
+
+    def test_unchanged_optional_policy_never_kicks_healthy_clients(self):
+        conn, cursor = self._conn(
+            [("acme.test", TENANT, False)], [("acme.test",)], [],
+            previous=False, selects_addresses=False,
+        )
+        with mock.patch.dict(os.environ, {"NATIVE_CLIENT_CREDENTIAL_API_ENABLED": "true"}, clear=True):
+            result = client_credentials.set_tenant_required(
+                conn, TENANT, ["acme.test"], False,
+            )
+        self.assertEqual(result["_kick_addresses"], [])
+        self.assertEqual(result["mailbox_count"], 0)
+        statements = [x.args[0] for x in cursor.execute.call_args_list]
+        self.assertFalse(any("AND (%s OR d.name = ANY(%s))" in x for x in statements))
+
+    def test_retry_reconnects_only_pending_sessions_not_all_mailboxes(self):
+        conn, cursor = self._conn(
+            [("acme.test", TENANT, False)], [("acme.test",)], [],
+            previous=True, pending=[("pending@acme.test",)],
+            selects_addresses=False,
+        )
+        with mock.patch.dict(os.environ, {"NATIVE_CLIENT_CREDENTIAL_API_ENABLED": "true"}, clear=True):
+            result = client_credentials.set_tenant_required(
+                conn, TENANT, ["acme.test"], True,
+            )
+        self.assertEqual(result["_kick_addresses"], ["pending@acme.test"])
+        self.assertEqual(result["mailbox_count"], 1)
+
+    def test_newly_bound_domain_gets_enforced_when_policy_was_already_required(self):
+        conn, cursor = self._conn(
+            [("added.test", None, False)], [],
+            [("new@added.test",)], previous=True,
+        )
+        with mock.patch.dict(os.environ, {"NATIVE_CLIENT_CREDENTIAL_API_ENABLED": "true"}, clear=True):
+            result = client_credentials.set_tenant_required(
+                conn, TENANT, ["added.test"], True,
+            )
+        self.assertEqual(result["_kick_addresses"], ["new@added.test"])
 
     def test_native_http_contract_for_tenant_required_is_strict(self):
         payload = {"tenant_id": TENANT, "domains": ["acme.test"], "required": True}
