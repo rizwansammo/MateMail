@@ -1,6 +1,6 @@
 # PostBox 2FA general availability and organization-controlled policy
 
-Status: **implementation in progress**. Do not activate production-wide MFA or Organization Require with this document alone.
+Status: **development and isolated IMAPS/SMTP acceptance passed; pending manual production rollout**. No live feature flags or organization policies are changed by the candidate build. Do not activate production-wide MFA or Organization Require with this document alone.
 
 ## Product ownership
 
@@ -77,6 +77,41 @@ way to bypass testing.
   downstream outage and idempotent release retry.
 - The old canary manual IMAP/SMTP tests already accepted app-password behavior,
   but do not substitute for a *new* native tenant-Require protocol acceptance.
+
+### Published Native API artifact
+
+After merge, GitHub Actions `.github/workflows/org-mfa-native-api-publish.yml`
+builds the Native API image from the merged commit, publishes a separate
+`org-mfa-<SHA>` tag, and reports the **immutable SHA256 digest** in the
+workflow summary. This is an image build ONLY; it never reaches MateServer.
+It does not modify the legacy `ne1` tag.
+
+The ordinary application `Deploy to MateServer` workflow deploys Backend
+and Frontend only: **it does not deploy the new Native API**. The Native API
+digest **MUST** be updated and validated first on the MateServer operator's
+normal Native Compose path `/opt/MateMail/engine/deploy/native-engine`.
+Release deployment to the application stack must use the matching merged
+commit SHA, not the PR head SHA.
+
+Read-only preflight already confirmed on 2026-10-21:
+- Native API and Mail Services healthy, and an internal `matemail_engine_link`.
+- App env uses `MAIL_ENGINE_ADAPTER=native`, with Hub and PostBox encryption
+  keys present (actual key values were not copied or exposed).
+- Native env has Client Credential API and Disconnect Recovery enabled.
+- Application MFA and Organization policy release flags are currently unset
+  (OFF). The operator must deliberately set them after native/app deploy and
+  positive verification. **No organization is switched to Require by us.**
+
+For GA the optional mailbox enrollment and organization policy controls need
+`POSTBOX_2FA_ENABLED=True`,
+`SMTP_IMAP_SECURITY_ENABLED=True`,
+`POSTBOX_2FA_CANARY_ENABLED=False`, and
+`ORGANIZATION_2FA_POLICY_ENABLED=True`, while Native migration 016 is
+confirmed active. Require is a separate explicit acceptance; do not set
+`ORGANIZATION_2FA_ENFORCEMENT_READY=True` or
+`ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED=True` until Native and
+PostBox recovery checks on the deployed release have been accepted by the
+operator. Neither flag may silently change any persisted customer policy.
 
 ## Release order (manual, not executed by this PR)
 
