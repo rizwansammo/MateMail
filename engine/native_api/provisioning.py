@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import uuid
 
 import db
 import dkim as dkim_lib
@@ -67,6 +68,12 @@ def ensure_domain(conn, spec: dict) -> dict:
     """
     name = validation.domain_name(spec["name"])
     _refuse_platform_domain(conn, name)
+    requested_tenant = spec.get("tenant_id")
+    if requested_tenant is not None:
+        try:
+            requested_tenant = str(uuid.UUID(str(requested_tenant)))
+        except (ValueError, AttributeError, TypeError):
+            raise ValidationError("tenant_id must be a UUID", "tenant_id") from None
     selector = validation.selector(spec.get("dkim_selector") or "mm1")
     default_mb = validation.quota_mb(spec.get("default_quota_mb", 1024), "default_quota_mb")
     max_mb = validation.quota_mb(spec.get("max_quota_mb", 1024), "max_quota_mb")
@@ -97,8 +104,8 @@ def ensure_domain(conn, spec: dict) -> dict:
             """
             INSERT INTO domain (name, active, dkim_selector, max_mailboxes,
                                 max_aliases, default_quota_mb, max_quota_mb,
-                                total_quota_mb)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                total_quota_mb, tenant_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (name) DO UPDATE SET
                 active           = EXCLUDED.active,
                 dkim_selector    = EXCLUDED.dkim_selector,
@@ -107,12 +114,17 @@ def ensure_domain(conn, spec: dict) -> dict:
                 default_quota_mb = EXCLUDED.default_quota_mb,
                 max_quota_mb     = EXCLUDED.max_quota_mb,
                 total_quota_mb   = EXCLUDED.total_quota_mb,
+                tenant_id        = COALESCE(domain.tenant_id, EXCLUDED.tenant_id),
                 updated_at       = now()
+            WHERE domain.tenant_id IS NULL OR EXCLUDED.tenant_id IS NULL
+               OR domain.tenant_id = EXCLUDED.tenant_id
             RETURNING id
             """,
-            (name, active, selector, max_mailboxes, max_aliases, default_mb, max_mb, total_mb),
+            (name, active, selector, max_mailboxes, max_aliases, default_mb, max_mb, total_mb,
+             requested_tenant),
         )
-        cur.fetchone()
+        if cur.fetchone() is None:
+            raise ValidationError("Domain is bound to a different tenant", "tenant_id")
 
     _ensure_dkim_for(conn, name, selector)
     return {"name": name}
