@@ -504,12 +504,51 @@ try{
     content:css('.pb-premium-settings').backgroundColor,
    };
   });
-  check('Navy settings keeps full white navigation and light content',
-   settings.rail===settings.navigation&&
-   settings.title===white&&settings.inactive===white&&settings.active===white&&
-   settings.activeBg!=='rgba(0, 0, 0, 0)'&&settings.content===white,settings);
+  check('Navy Settings navigation is light and independent of the navy app rail',
+   settings.rail!==settings.navigation&&
+   settings.navigation==='rgb(247, 248, 251)'&&
+   settings.title==='rgb(32, 43, 61)'&&
+   settings.inactive==='rgb(105, 118, 138)'&&
+   settings.active==='rgb(51, 79, 174)'&&
+   settings.activeBg==='rgb(234, 240, 253)'&&
+   settings.content===white,settings);
   await shot(page,'10-navy-settings-contrast');
   check('Navy sidebar has no JS exceptions',errors.length===0,{errors});
+ });
+ await scenario({label:'App Sidebar collapse and expand respects Settings visibility',options:{theme:'navy'}},async({page,errors})=>{
+  await visit(page);
+  check('Visible mailbox app rail starts expanded',
+   await page.getByRole('button',{name:'Collapse App Sidebar'}).isVisible());
+  const width=await page.locator('.pb-astra-app-rail').evaluate(el=>Math.round(el.getBoundingClientRect().width));
+  await page.getByRole('button',{name:'Collapse App Sidebar'}).click();
+  await page.getByRole('button',{name:'Expand App Sidebar'}).waitFor({state:'visible'});
+  await page.waitForTimeout(250);
+  check('Collapsing frees the full app rail width',
+   await page.locator('.pb-astra-app-rail').evaluate(el=>Math.round(el.getBoundingClientRect().width))===0&&
+   !(await page.locator('.pb-astra-rail-item').first().isVisible()),{width});
+  await shot(page,'11-app-rail-collapsed');
+  await visit(page,'/postbox/settings?section=appearance');
+  check('Collapsed rail stays consistent on Settings',
+   await page.getByRole('button',{name:'Expand App Sidebar'}).isVisible()&&
+   await page.locator('.pb-premium-settings-nav').isVisible());
+  await page.getByRole('button',{name:'Expand App Sidebar'}).click();
+  await page.waitForTimeout(250);
+  check('Expand restores original app rail width',
+   await page.locator('.pb-astra-app-rail').evaluate(el=>Math.round(el.getBoundingClientRect().width))===width&&
+   await page.getByRole('button',{name:'Collapse App Sidebar'}).isVisible());
+  await page.reload();
+  check('Expanded state persists on reload',
+   await page.getByRole('button',{name:'Collapse App Sidebar'}).isVisible());
+  const toggle=page.locator('.pb-setting-toggle').filter({hasText:'Show App Sidebar in Settings'}).locator('input');
+  await toggle.uncheck();
+  check('Settings OFF hides rail, expand handle and collapse control',
+   !(await page.locator('.pb-astra-app-rail').isVisible())&&
+   await page.getByRole('button',{name:'Collapse App Sidebar'}).count()===0&&
+   await page.getByRole('button',{name:'Expand App Sidebar'}).count()===0);
+  await toggle.check();
+  check('Settings ON restores collapse control',
+   await page.getByRole('button',{name:'Collapse App Sidebar'}).isVisible());
+  check('Collapse/expand produces no JS errors',errors.length===0,{errors});
  });
  await scenario({label:'dark theme and mobile layout',options:{viewport:{width:390,height:844},theme:'dark',density:'extra_compact'}},async({page,errors})=>{
   await visit(page);
