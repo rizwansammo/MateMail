@@ -198,15 +198,19 @@ def set_tenant_required(conn, tenant_id, domains, required):
         # Lock the concrete domains while validating ownership; one tenant
         # must never be able to alter another's protocol authentication.
         cur.execute(
-            """SELECT name, tenant_id::text FROM public.domain
-                 WHERE name = ANY(%s) ORDER BY name FOR UPDATE""",
+            """SELECT d.name, d.tenant_id::text, (rd.name IS NOT NULL)
+                 FROM public.domain d
+                 LEFT JOIN public.platform_reserved_domain rd ON rd.name=d.name
+                 WHERE d.name = ANY(%s) ORDER BY d.name FOR UPDATE OF d""",
             (normalized_domains,),
         )
         found = cur.fetchall()
         if len(found) != len(normalized_domains):
             raise ValidationError("Some tenant domains are not provisioned", "domains")
+        if any(is_platform for _, _, is_platform in found):
+            raise ValidationError("Protected platform domain", "domains")
         if any(owner is not None and owner != normalized_tenant
-               for _, owner in found):
+               for _, owner, _ in found):
             raise ValidationError("Domain belongs to another tenant", "domains")
         # A partial list must not silently disable enforcement on already
         # registered tenant domains. The application supplies the full set.
