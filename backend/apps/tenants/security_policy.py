@@ -11,10 +11,13 @@ from .models import OrganizationTwoFactorMode
 
 
 def effective_two_factor_policy(tenant):
+    # Activation flags govern NEW policy mutations, not existing commitments.
+    # A previously enforced tenant must never silently become password-only
+    # because an operator accidentally disables a rollout flag. Administrators
+    # must explicitly change the persisted policy through the authorized path.
+    if tenant.two_factor_policy == OrganizationTwoFactorMode.REQUIRE:
+        return OrganizationTwoFactorMode.REQUIRE
     if not getattr(settings, "ORGANIZATION_2FA_POLICY_ENABLED", False):
-        return OrganizationTwoFactorMode.OFF
-    if (tenant.two_factor_policy == OrganizationTwoFactorMode.REQUIRE
-            and not getattr(settings, "ORGANIZATION_2FA_ENFORCEMENT_READY", False)):
         return OrganizationTwoFactorMode.OFF
     return tenant.two_factor_policy
 
