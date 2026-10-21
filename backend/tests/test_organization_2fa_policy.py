@@ -55,11 +55,28 @@ class OrganizationTwoFactorPolicyTest(TestCase):
     def test_cannot_relax_an_existing_required_policy_during_native_rollback(self):
         self.tenant.two_factor_policy = OrganizationTwoFactorMode.REQUIRE
         self.tenant.save(update_fields=["two_factor_policy"])
-        response = auth_client(self.owner, self.tenant).patch(
+        # A legacy password-only JWT must be rejected before the view runs.
+        password_only = auth_client(self.owner, self.tenant).patch(
             self.url, {"policy": "off", "current_password": TEST_PASSWORD},
             format="json",
         )
-        self.assertEqual(response.status_code, 503, response.data)
+        self.assertEqual(password_only.status_code, 403)
+
+        # Use an MFA-verified session to reach the actual policy mutation
+        # and ensure a disabled Native release gate cannot relax Require.
+        from apps.accounts.tokens import make_tokens
+        from tests.factories import enable_2fa
+        enable_2fa(self.owner)
+        tokens = make_tokens(
+            self.owner, tenant_id=self.tenant.id, mfa_verified=True,
+        )
+        verified = APIClient()
+        verified.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+        response = verified.patch(
+            self.url, {"policy": "off", "current_password": TEST_PASSWORD},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 503, response.json())
         self.tenant.refresh_from_db()
         self.assertEqual(self.tenant.two_factor_policy, OrganizationTwoFactorMode.REQUIRE)
 
