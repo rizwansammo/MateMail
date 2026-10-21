@@ -14,6 +14,7 @@ BASE = {
     "SMTP_IMAP_SECURITY_ENABLED": False,
     "ORGANIZATION_2FA_POLICY_ENABLED": False,
     "ORGANIZATION_2FA_ENFORCEMENT_READY": False,
+    "ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED": False,
     "MAIL_ENGINE_ADAPTER": "stub",
     "HUB_2FA_FERNET_KEY": "",
     "POSTBOX_2FA_FERNET_KEY": "",
@@ -94,3 +95,27 @@ class MFADeploymentGuardTest(SimpleTestCase):
             HUB_2FA_FERNET_KEY=HUB,
         )
         self.assertEqual(issues, {"tenants.E036"})
+
+    def test_accepted_enforcement_requires_all_independent_gates(self):
+        required = dict(
+            POSTBOX_2FA_ENABLED=True,
+            SMTP_IMAP_SECURITY_ENABLED=True,
+            ORGANIZATION_2FA_POLICY_ENABLED=True,
+            ORGANIZATION_2FA_ENFORCEMENT_READY=True,
+            ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED=True,
+            MAIL_ENGINE_ADAPTER="native",
+            POSTBOX_2FA_FERNET_KEY=POSTBOX,
+            HUB_2FA_FERNET_KEY=HUB,
+        )
+        self.assertEqual(check_ids(**required), set())
+        for omitted in (
+            "POSTBOX_2FA_ENABLED",
+            "SMTP_IMAP_SECURITY_ENABLED",
+            "ORGANIZATION_2FA_POLICY_ENABLED",
+            "ORGANIZATION_2FA_ENFORCEMENT_READY",
+            "ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED",
+        ):
+            with self.subTest(gate=omitted):
+                self.assertIn("tenants.E036", check_ids(
+                    **{**required, omitted: False},
+                ))
