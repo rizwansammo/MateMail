@@ -38,14 +38,10 @@ def can_start_mfa_enrollment(mailbox) -> bool:
     if getattr(settings, "POSTBOX_2FA_CANARY_ENABLED", False):
         return str(mailbox.pk) in _canary_ids()
 
-    # Once Organization policy is available, OFF means no *new* enrollments
-    # for this tenant. Existing protected identities remain protected even
-    # when an administrator later turns optional enrollment OFF.
-    if getattr(settings, "ORGANIZATION_2FA_POLICY_ENABLED", False):
-        from apps.tenants.models import OrganizationTwoFactorMode
-        from apps.tenants.security_policy import effective_two_factor_policy
-
-        return effective_two_factor_policy(mailbox.tenant) != OrganizationTwoFactorMode.OFF
+    # Existing product behavior: policy OFF means no organization-wide
+    # mandate, NOT a prohibition on a user's voluntary authenticator setup.
+    # ENCOURAGE recommends it; REQUIRE makes it mandatory. Organization policy
+    # must never silently undo protection a mailbox user already chose.
     return True
 
 
