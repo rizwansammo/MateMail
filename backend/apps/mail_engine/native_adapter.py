@@ -210,6 +210,7 @@ class NativeMailEngineAdapter(MailEngineAdapter):
     def ensure_domain(self, spec: DomainSpec) -> None:
         self._request("POST", "/v1/domains/ensure", json={
             "name": spec.name,
+            "tenant_id": spec.tenant_id,
             "dkim_selector": spec.dkim_selector,
             "max_mailboxes": spec.max_mailboxes,
             "max_aliases": spec.max_aliases,
