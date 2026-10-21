@@ -97,14 +97,13 @@ def trusted_primary_authenticate(address: str, password: str) -> bool:
     if not (mfa and clients) or getattr(settings, "MAIL_ENGINE_ADAPTER", "") != "native":
         return False
 
-    # Canary activation is scoped. Unselected and unenrolled mailboxes retain
-    # their exact legacy public IMAP password-verification path. Removing an
-    # already-enrolled mailbox from the allowlist MUST NOT remove its MFA guard;
-    # it continues using trusted Native primary authentication.
-    if getattr(settings, "POSTBOX_2FA_CANARY_ENABLED", False):
-        from .canary_scope import native_primary_required_for_mailbox
-        if not native_primary_required_for_mailbox(resolve_mailbox(address)):
-            return imap.authenticate(address, password)
+    # Preserve legacy password verification for UNENROLLED mailboxes even
+    # after general availability. Native is mandatory for enrolled mailboxes,
+    # canary-selected accounts and Required-2FA mailboxes. In those cases a
+    # Native outage must fail closed, never fall back to public IMAP.
+    from .canary_scope import native_primary_required_for_mailbox
+    if not native_primary_required_for_mailbox(resolve_mailbox(address)):
+        return imap.authenticate(address, password)
 
     try:
         from apps.mail_engine.factory import get_adapter
