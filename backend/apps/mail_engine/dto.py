@@ -65,6 +65,7 @@ class DomainSpec:
     max_quota_mb: int = 1024
     total_quota_mb: int = 10240
     active: bool = True
+    tenant_id: str | None = None
 
     def __post_init__(self):
         from .errors import InvalidStorageConfiguration
@@ -109,6 +110,7 @@ class DomainSpec:
 
         kwargs = {
             "name": domain.domain,
+            "tenant_id": str(domain.tenant_id),
             # The deployment-wide selector is the fallback, not a literal. A
             # hard-coded "mm1" here would disagree with DKIM_SELECTOR the moment
             # anyone changed it, and the disagreement would surface as published
