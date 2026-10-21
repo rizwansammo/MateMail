@@ -13,6 +13,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
   ChevronDown,
+  ChevronLeft,
   Clock,
   FileText,
   Folder as FolderIcon,
@@ -45,7 +46,7 @@ import {
 } from "lucide-react";
 
 import { usePostBox } from "@/contexts/postbox-context";
-import { usePostBoxAppRail } from "@/lib/postbox-app-rail";
+import { usePostBoxAppRail, usePostBoxAppRailCollapse } from "@/lib/postbox-app-rail";
 import "./postbox-astra-integration.css";
 import "./postbox-astra-reader.css";
 import "./postbox-astra-parity.css";
@@ -266,6 +267,7 @@ function PremiumPostBoxShell({
   const pathname = usePathname();
   const mailboxRail = usePostBoxAppRail("mailbox");
   const settingsRail = usePostBoxAppRail("settings");
+  const appRailCollapse = usePostBoxAppRailCollapse();
   const showAppRail = pathname.startsWith("/postbox/settings")
     ? settingsRail.visible : mailboxRail.visible;
   const accountMenuRef = useRef<HTMLDetailsElement | null>(null);
@@ -526,7 +528,7 @@ function PremiumPostBoxShell({
   }, [canSendMailbox, router]);
 
   return (
-    <div className={`pb pb-premium-shell pb-astra-postbox ${showAppRail ? "" : "pb-app-rail-hidden"} ${
+    <div className={`pb pb-premium-shell pb-astra-postbox ${showAppRail ? (appRailCollapse.collapsed ? "pb-app-rail-collapsed" : "") : "pb-app-rail-hidden"} ${
       preferences.density === "compact"
         ? "pb-density-compact"
         : preferences.density === "extra_compact"
@@ -535,7 +537,7 @@ function PremiumPostBoxShell({
     }`}>
       {railOpen && <button type="button" className="pb-premium-overlay" aria-label="Close folders" onClick={closeRail} />}
 
-      {showAppRail && <nav className="pb-astra-app-rail" aria-label="PostBox applications">
+      {showAppRail && <nav id="pb-postbox-app-rail" className="pb-astra-app-rail" aria-label="PostBox applications" aria-hidden={appRailCollapse.collapsed}>
         <Link href="/postbox?folder=INBOX" className="pb-astra-rail-item"
           aria-current={!pathname.startsWith("/postbox/contacts") && !pathname.startsWith("/postbox/settings") ? "page" : undefined}
           onClick={() => { closeRail(); window.dispatchEvent(new Event("postbox:return-to-list")); }}>
@@ -551,7 +553,21 @@ function PremiumPostBoxShell({
           onClick={closeRail}>
           <Settings2 size={19} aria-hidden="true" /><span>Settings</span>
         </Link>
+        <button type="button" className="pb-app-rail-collapse"
+          aria-label="Collapse App Sidebar" title="Collapse App Sidebar"
+          aria-controls="pb-postbox-app-rail" aria-expanded={true}
+          onClick={() => appRailCollapse.setCollapsed(true)}>
+          <ChevronLeft size={17} aria-hidden="true" />
+        </button>
       </nav>}
+      {showAppRail && appRailCollapse.collapsed && (
+        <button type="button" className="pb-app-rail-expand"
+          aria-label="Expand App Sidebar" title="Expand App Sidebar"
+          aria-controls="pb-postbox-app-rail" aria-expanded={false}
+          onClick={() => appRailCollapse.setCollapsed(false)}>
+          <ChevronRight size={15} aria-hidden="true" />
+        </button>
+      )}
 
       <aside className="pb-premium-sidebar" data-open={railOpen ? "true" : "false"}>
         <Link
