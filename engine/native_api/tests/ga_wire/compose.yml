@@ -1,0 +1,81 @@
+# Entirely ephemeral GH Actions runner. No published ports, no production
+# network/volume/credential, and no messages can leave the internal bridge.
+name: mmga-ci
+services:
+  pg:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: matemail_engine
+      POSTGRES_USER: engine
+      POSTGRES_PASSWORD: ga-test-db-only
+    networks: [isolated]
+    tmpfs: ["/var/lib/postgresql/data:rw,size=256m"]
+    mem_limit: 384m
+    restart: "no"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engine -d matemail_engine"]
+      interval: 3s
+      timeout: 2s
+      retries: 25
+  api:
+    image: matemail-native-api-ga:ci
+    environment:
+      NATIVE_DB_HOST: pg
+      NATIVE_DB_NAME: matemail_engine
+      NATIVE_DB_USER: engine
+      NATIVE_DB_PASSWORD: ga-test-db-only
+      NATIVE_API_SECRET: ga-test-api-only
+      NATIVE_CLIENT_CREDENTIAL_API_ENABLED: "true"
+      NATIVE_TRUSTED_WEB_AUTH_ENABLED: "true"
+      NATIVE_RUNTIME_DB_ENABLED: "true"
+      NATIVE_RUNTIME_DB_PASSWORD: ga-test-runtime-secret-isolated-only-2026
+      NATIVE_DOVECOT_DB_PASSWORD: ga-test-reader-only
+      NATIVE_DOVEADM_URL: http://dovecot:8080
+      NATIVE_DOVEADM_API_KEY: ga-test-doveadm-key
+      NATIVE_CLIENT_KICK_RECOVERY_ENABLED: "true"
+      NATIVE_API_PORT: "8451"
+      NATIVE_DKIM_DIR: /tmp/ga-dkim
+      LOG_LEVEL: WARNING
+    networks: [isolated]
+    tmpfs: ["/tmp:rw,size=32m"]
+    restart: "no"
+    depends_on:
+      pg: {condition: service_healthy}
+  dovecot:
+    image: matemail-native-dovecot-ga:ci
+    entrypoint: ["/dovecot/sbin/dovecot", "-F", "-c", "/etc/dovecot/dovecot.conf"]
+    volumes:
+      - ./dovecot.conf:/etc/dovecot/dovecot.conf:ro
+      - ./db-runtime.conf:/etc/dovecot/db-runtime.conf:ro
+      - ./master-pass.test:/etc/dovecot/master-pass.test:ro
+      - ./.runtime/lab.crt:/etc/dovecot/lab.crt:ro
+      - ./.runtime/lab.key:/etc/dovecot/lab.key:ro
+      - auth-socket:/run/dovecot-auth
+      - maildir:/var/vmail
+    networks: [isolated]
+    tmpfs: ["/run/dovecot:rw,size=20m"]
+    mem_limit: 256m
+    restart: "no"
+    depends_on:
+      pg: {condition: service_healthy}
+  postfix:
+    image: matemail-native-postfix-ga:ci
+    entrypoint: ["postfix", "start-fg"]
+    volumes:
+      - ./postfix-main.cf:/etc/postfix/main.cf:ro
+      - ./postfix-master.cf:/etc/postfix/master.cf:ro
+      - ./.runtime/lab.crt:/etc/postfix/lab.crt:ro
+      - ./.runtime/lab.key:/etc/postfix/lab.key:ro
+      - auth-socket:/run/dovecot-auth
+    networks: [isolated]
+    mem_limit: 256m
+    restart: "no"
+    depends_on:
+      - dovecot
+networks:
+  isolated:
+    internal: true
+    driver: bridge
+volumes:
+  auth-socket:
+  maildir:

@@ -1,0 +1,20 @@
+# Isolated authentication-only SMTP submission: never deliver or relay.
+compatibility_level = 3.6
+myhostname = ga-smtp.test.invalid
+mydomain = test.invalid
+myorigin = $myhostname
+inet_interfaces = all
+inet_protocols = ipv4
+mynetworks = 127.0.0.0/8
+mydestination = localhost
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = /run/dovecot-auth/auth-client
+smtpd_sasl_auth_enable = no
+smtpd_tls_security_level = none
+smtpd_relay_restrictions = permit_sasl_authenticated,reject
+smtpd_recipient_restrictions = reject
+default_transport = error:CI refuses outbound mail
+relay_transport = error:CI refuses outbound mail
+maillog_file = /dev/stdout
+smtpd_tls_cert_file = /etc/postfix/lab.crt
+smtpd_tls_key_file = /etc/postfix/lab.key
