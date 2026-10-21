@@ -178,7 +178,7 @@ export interface MailClientSettings {
 }
 
 export interface Preferences {
-  theme: "light" | "dark" | "system";
+  theme: "light" | "dark" | "system" | "navy";
   density: "comfortable" | "compact" | "extra_compact";
   reading_pane: "right" | "bottom" | "off";
   list_view: "conversations" | "messages";
