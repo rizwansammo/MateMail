@@ -953,10 +953,10 @@ class AppRailVisualPreferenceContractTest(SimpleTestCase):
 
 class PostBoxNavyThemeAndSecurityDialogContractTest(SimpleTestCase):
     def test_navy_theme_is_supported_across_preference_and_ui(self):
-        model = (ROOT / "backend/apps/postbox/models.py").read_text()
-        api = (ROOT / "frontend/lib/postbox-api.ts").read_text()
-        layout = (ROOT / "frontend/app/postbox/(app)/layout.tsx").read_text()
-        css = (ROOT / "frontend/app/postbox/(app)/postbox-astra-integration.css").read_text()
+        model = (FRONTEND.parent / "backend/apps/postbox/models.py").read_text()
+        api = (FRONTEND / "lib/postbox-api.ts").read_text()
+        layout = (FRONTEND / "app/postbox/(app)/layout.tsx").read_text()
+        css = (FRONTEND / "app/postbox/(app)/postbox-astra-integration.css").read_text()
         self.assertIn('NAVY = "navy", "Navy sidebar"', model)
         self.assertIn('"system" | "navy"', api)
         self.assertIn('label: "Navy sidebar"', layout)
@@ -965,7 +965,7 @@ class PostBoxNavyThemeAndSecurityDialogContractTest(SimpleTestCase):
         self.assertIn('.pb-astra-app-rail', css)
 
     def test_sensitive_confirmations_use_the_product_dialog(self):
-        source = (ROOT / "frontend/components/postbox/mail-client-security-settings.tsx").read_text()
+        source = (FRONTEND / "components/postbox/mail-client-security-settings.tsx").read_text()
         self.assertNotIn("window.confirm(", source)
         self.assertIn('role="alertdialog"', source)
         self.assertIn('aria-modal="true"', source)
