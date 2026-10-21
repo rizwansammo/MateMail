@@ -20,8 +20,30 @@ def effective_two_factor_policy(tenant):
 
 
 def can_activate_require():
-    # Deliberate fail-closed release gate. Require policy cannot be activated
-    # until encrypted Hub OTP migration, independent recovery, and Native client
-    # session revocation are verified in the *complete* Stage 7A review.
-    # Enabling only environment switches must not activate partial security.
-    return False
+    """Independent operator-accepted release gate for REQUIRED organization MFA.
+
+    Customer administrators choose their organization's policy, but cannot
+    enable Require until both Hub and Native/PostBox are ready for enforcement.
+    An accidental partial flag activation must never unlock Require.
+    """
+    from cryptography.fernet import Fernet
+
+    if not all((
+        getattr(settings, "ORGANIZATION_2FA_POLICY_ENABLED", False),
+        getattr(settings, "ORGANIZATION_2FA_ENFORCEMENT_READY", False),
+        getattr(settings, "ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED", False),
+        getattr(settings, "POSTBOX_2FA_ENABLED", False),
+        getattr(settings, "SMTP_IMAP_SECURITY_ENABLED", False),
+        getattr(settings, "MAIL_ENGINE_ADAPTER", "") == "native",
+    )):
+        return False
+    hub = getattr(settings, "HUB_2FA_FERNET_KEY", "")
+    postbox = getattr(settings, "POSTBOX_2FA_FERNET_KEY", "")
+    if not hub or not postbox or hub == postbox:
+        return False
+    try:
+        Fernet(hub.encode("ascii") if isinstance(hub, str) else hub)
+        Fernet(postbox.encode("ascii") if isinstance(postbox, str) else postbox)
+    except (ValueError, TypeError, UnicodeError):
+        return False
+    return True
