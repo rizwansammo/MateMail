@@ -25,6 +25,7 @@ import {
   LogOut,
   Mail,
   PenLine,
+  PanelLeft,
   Menu,
   Moon,
   Monitor,
