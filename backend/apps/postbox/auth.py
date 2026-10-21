@@ -70,16 +70,19 @@ class MailboxSecondFactorRequired(Exception):
 def mailbox_requires_two_factor(mailbox) -> bool:
     """Evaluate live mailbox+organization security; never infer Hub user by email."""
     from django.conf import settings
+    from .models import MailboxTwoFactorSetup
+    # An enrolled account may never become password-only merely because a
+    # platform switch is rolled back. The native client password could then
+    # otherwise be mistaken for the PostBox primary password.
+    if MailboxTwoFactorSetup.objects.filter(
+        mailbox=mailbox, enabled_at__isnull=False,
+    ).exists():
+        return True
     if not getattr(settings, "POSTBOX_2FA_ENABLED", False):
         return False
     from apps.tenants.security_policy import effective_two_factor_policy
     from apps.tenants.models import OrganizationTwoFactorMode
-    from .models import MailboxTwoFactorSetup
-    if effective_two_factor_policy(mailbox.tenant) == OrganizationTwoFactorMode.REQUIRE:
-        return True
-    return MailboxTwoFactorSetup.objects.filter(
-        mailbox=mailbox, enabled_at__isnull=False,
-    ).exists()
+    return effective_two_factor_policy(mailbox.tenant) == OrganizationTwoFactorMode.REQUIRE
 
 
 def trusted_primary_authenticate(address: str, password: str) -> bool:
@@ -93,6 +96,12 @@ def trusted_primary_authenticate(address: str, password: str) -> bool:
     mfa = getattr(settings, "POSTBOX_2FA_ENABLED", False)
     clients = getattr(settings, "SMTP_IMAP_SECURITY_ENABLED", False)
     if not mfa and not clients:
+        # A disabled feature gate is NOT a downgrade path for accounts that
+        # were already enrolled. They must stay denied until MFA is safely
+        # restored/recovered; their client app password must never log in here.
+        mailbox = resolve_mailbox(address)
+        if mailbox is not None and mailbox_requires_two_factor(mailbox):
+            return False
         return imap.authenticate(address, password)
     if not (mfa and clients) or getattr(settings, "MAIL_ENGINE_ADAPTER", "") != "native":
         return False
