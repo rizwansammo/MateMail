@@ -130,6 +130,13 @@ jobs:
         working-directory: backend
         run: python manage.py makemigrations --check --dry-run --settings=config.settings.dev
 
+      # Native Engine's real Dovecot SQL auth must reject the mailbox primary
+      # password for Required tenants, including mailboxes created later.
+      # Uses a NEW database in this job's disposable PostgreSQL service,
+      # never a production or MateServer connection.
+      - name: Native tenant MFA real PostgreSQL protocol acceptance
+        run: python engine/native_api/tests/native_tenant_mfa_sql_smoke.py
+
       - name: Test suite
         working-directory: backend
         run: python manage.py test --settings=config.settings.dev --verbosity=2
