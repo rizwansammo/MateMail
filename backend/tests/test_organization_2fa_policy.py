@@ -34,6 +34,20 @@ class OrganizationTwoFactorPolicyTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["effective_policy"], "off")
 
+    def test_persisted_require_remains_enforced_after_feature_flag_rollback(self):
+        from apps.tenants.security_policy import effective_two_factor_policy
+        self.tenant.two_factor_policy = OrganizationTwoFactorMode.REQUIRE
+        self.tenant.save(update_fields=["two_factor_policy"])
+        with override_settings(
+            ORGANIZATION_2FA_POLICY_ENABLED=False,
+            ORGANIZATION_2FA_ENFORCEMENT_READY=False,
+            ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED=False,
+        ):
+            self.assertEqual(
+                effective_two_factor_policy(self.tenant),
+                OrganizationTwoFactorMode.REQUIRE,
+            )
+
     def test_anonymous_is_denied(self):
         self.assertEqual(APIClient().get(self.url).status_code, 401)
 
