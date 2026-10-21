@@ -11,7 +11,7 @@ import os
 import secrets
 import uuid
 
-from validation import ValidationError, email_address
+from validation import ValidationError, email_address, domain_name
 from passwords import hash_password, verify_password
 
 # An unknown, suspended, or platform-reserved mailbox must consume a bcrypt
@@ -168,3 +168,85 @@ def set_policy(conn, address, enabled, dedicated_required):
             (mailbox_id, enabled, dedicated_required),
         )
     return {"enabled": enabled, "dedicated_required": dedicated_required}
+
+
+def set_tenant_required(conn, tenant_id, domains, required):
+    """Bind a tenant's provisioned domains and atomically change SMTP/IMAP MFA.
+
+    The persistent tenant policy applies to FUTURE mailboxes/domains as well as
+    existing ones. A Require transition denies primary-password protocol auth
+    until the mailbox's own dedicated client policy has been established.
+    Callers are the internal control plane only; customer input must never
+    reach this operation without scoped Owner/Admin authorization.
+    """
+    if not mutation_enabled():
+        raise PermissionError("Native tenant MFA management disabled")
+    if type(required) is not bool:
+        raise ValidationError("required must be a boolean", "required")
+    try:
+        normalized_tenant = str(uuid.UUID(str(tenant_id)))
+    except (ValueError, TypeError, AttributeError):
+        raise ValidationError("tenant_id must be a UUID", "tenant_id") from None
+    if (not isinstance(domains, list) or len(domains) > 200
+            or any(not isinstance(value, str) for value in domains)):
+        raise ValidationError("domains must be a bounded list", "domains")
+    normalized_domains = [domain_name(value) for value in domains]
+    if len(set(normalized_domains)) != len(normalized_domains):
+        raise ValidationError("Duplicate domain names", "domains")
+
+    with conn.cursor() as cur:
+        # Lock the concrete domains while validating ownership; one tenant
+        # must never be able to alter another's protocol authentication.
+        cur.execute(
+            """SELECT name, tenant_id::text FROM public.domain
+                 WHERE name = ANY(%s) ORDER BY name FOR UPDATE""",
+            (normalized_domains,),
+        )
+        found = cur.fetchall()
+        if len(found) != len(normalized_domains):
+            raise ValidationError("Some tenant domains are not provisioned", "domains")
+        if any(owner is not None and owner != normalized_tenant
+               for _, owner in found):
+            raise ValidationError("Domain belongs to another tenant", "domains")
+        # A partial list must not silently disable enforcement on already
+        # registered tenant domains. The application supplies the full set.
+        cur.execute(
+            "SELECT name FROM public.domain WHERE tenant_id=%s::uuid",
+            (normalized_tenant,),
+        )
+        bound = {row[0] for row in cur.fetchall()}
+        if not bound.issubset(set(normalized_domains)):
+            raise ValidationError("Tenant domain list is incomplete", "domains")
+        if normalized_domains:
+            cur.execute(
+                """UPDATE public.domain SET tenant_id=%s::uuid
+                    WHERE name = ANY(%s)
+                      AND (tenant_id IS NULL OR tenant_id=%s::uuid)""",
+                (normalized_tenant, normalized_domains, normalized_tenant),
+            )
+            if cur.rowcount != len(normalized_domains):
+                raise ValidationError("Domain binding changed concurrently", "domains")
+
+        cur.execute(
+            """INSERT INTO public.native_tenant_mfa_policy(tenant_id, required)
+               VALUES (%s::uuid, %s)
+               ON CONFLICT (tenant_id) DO UPDATE SET
+                 required=EXCLUDED.required, updated_at=now()""",
+            (normalized_tenant, required),
+        )
+        # Session kicks are required on either transition, since the effective
+        # authorized credential set can change. Outbox records are committed
+        # in the same transaction by app.py before these rows become visible.
+        cur.execute(
+            """SELECT m.address FROM public.mailbox m
+               JOIN public.domain d ON d.id=m.domain_id
+               WHERE d.tenant_id=%s::uuid AND m.login_enabled
+               ORDER BY m.address""",
+            (normalized_tenant,),
+        )
+        addresses = [row[0] for row in cur.fetchall()]
+    return {
+        "required": required,
+        "mailbox_count": len(addresses),
+        "_kick_addresses": addresses,
+    }
