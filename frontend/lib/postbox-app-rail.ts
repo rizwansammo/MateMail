@@ -31,3 +31,26 @@ export function usePostBoxAppRail(area: AppRailArea) {
   }, [area]);
   return { visible, setVisible };
 }
+
+
+/** Collapsing is shared between Mailbox and Settings but never changes
+ * their independent Show App Sidebar preferences. */
+const COLLAPSE_KEY = "matemail.postbox.appRail.collapsed";
+
+function collapsedFromStorage(): boolean {
+  try { return window.localStorage.getItem(COLLAPSE_KEY) === "on"; }
+  catch { return false; }
+}
+
+export function usePostBoxAppRailCollapse() {
+  const collapsed = useSyncExternalStore(subscribe, collapsedFromStorage, () => false);
+  const setCollapsed = useCallback((next: boolean) => {
+    try {
+      window.localStorage.setItem(COLLAPSE_KEY, next ? "on" : "off");
+      window.dispatchEvent(new Event(CHANGE));
+    } catch {
+      // Private browsing storage restrictions must never block navigation.
+    }
+  }, []);
+  return { collapsed, setCollapsed };
+}
