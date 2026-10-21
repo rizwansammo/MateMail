@@ -6847,3 +6847,82 @@ body {
   .pb-premium-shell .pb-security-actions > button { max-width:100%; }
   .pb-premium-shell .pb-security-nested-form { padding:12px; }
 }
+
+/* PostBox security confirmations use a product-owned dialog instead of browser prompts. */
+.pb-security-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgb(8 20 39 / .64);
+  backdrop-filter: blur(3px);
+}
+.pb-security-dialog {
+  width: min(440px, 100%);
+  padding: 27px;
+  border: 1px solid var(--pb-border);
+  border-radius: 12px;
+  background: var(--pb-surface);
+  color: var(--pb-fg);
+  box-shadow: 0 24px 70px rgb(8 20 39 / .3);
+}
+.pb-security-dialog-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 16px;
+  border-radius: 10px;
+  background: #fff0ed;
+  color: #b83228;
+}
+.pb-security-dialog h2 {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 0 0 10px;
+}
+.pb-security-dialog p {
+  color: var(--pb-muted);
+  font-size: 13px;
+  line-height: 1.65;
+  margin: 0;
+}
+.pb-security-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
+}
+.pb-security-dialog-confirm {
+  border: 1px solid #b83228;
+  border-radius: 6px;
+  background: #b83228;
+  color: white;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.pb-security-dialog-confirm:hover { background: #91261e; }
+.pb-security-dialog-confirm:focus-visible,
+.pb-security-dialog .pb-settings-secondary:focus-visible {
+  outline: 2px solid var(--pb-ring);
+  outline-offset: 3px;
+}
+.pb-security-dialog :is(button):disabled { cursor: not-allowed; opacity: .55; }
+@media (max-width: 480px) {
+  .pb-security-dialog { padding: 20px; }
+  .pb-security-dialog-actions { flex-direction: column-reverse; }
+  .pb-security-dialog-actions button { width: 100%; }
+}
+/* Keep the original white master visible on navy, including OS dark preference. */
+:root[data-pb-theme="navy"] .pb-premium-brand-mark {
+  background-color: #f7faff;
+  background-image: url("/assets/matemail-logo-black.svg");
+}
