@@ -80,15 +80,18 @@ class WorkspaceTwoFactorPolicyView(APIView):
         from apps.mail_engine.native_adapter import NativeMailEngineAdapter
 
         def native_policy(tenant, required):
-            # Only the verified, Native-provisioned domain set can be bound.
-            # Newly provisioned domains carry tenant_id from DomainSpec, so
-            # the Native policy automatically applies before the first login.
-            domains = list(Domain.objects.filter(
-                tenant=tenant, mail_engine_provisioned=True,
-            ).order_by("domain").values_list("domain", flat=True))
             adapter = get_adapter()
             if not isinstance(adapter, NativeMailEngineAdapter):
                 raise RuntimeError("Organization Require needs Native Mail Engine")
+            # Inspect the live Native domain inventory rather than trusting a
+            # possibly stale Django provisioning flag. Every existing Native
+            # domain owned by this tenant MUST be bound before Require commits.
+            # New domains carry tenant_id in DomainSpec on their first ensure.
+            tenant_domains = set(Domain.objects.filter(
+                tenant=tenant,
+            ).values_list("domain", flat=True))
+            native_domains = {row.name for row in adapter.list_domains()}
+            domains = sorted(tenant_domains.intersection(native_domains))
             return adapter.set_tenant_mfa_required(str(tenant.pk), domains, required)
 
         # NEVER issue a customer-facing Require success until Dovecot's native
