@@ -11,6 +11,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.domains.models import Domain
+from apps.mail_engine.errors import MailEngineError
+from apps.mail_engine.factory import get_adapter
+from apps.mail_engine.native_adapter import NativeMailEngineAdapter
+
 from .host_binding import scope_memberships
 from .models import MemberRole, MemberStatus, OrganizationTwoFactorMode, TenantMembership
 from .security_policy import can_activate_require, effective_two_factor_policy
@@ -74,11 +79,6 @@ class WorkspaceTwoFactorPolicyView(APIView):
             return Response({
                 "detail": "Require 2FA cannot be activated before end-to-end enforcement and recovery are ready."
             }, status=409)
-        from apps.domains.models import Domain
-        from apps.mail_engine.errors import MailEngineError
-        from apps.mail_engine.factory import get_adapter
-        from apps.mail_engine.native_adapter import NativeMailEngineAdapter
-
         def native_policy(tenant, required):
             adapter = get_adapter()
             if not isinstance(adapter, NativeMailEngineAdapter):
