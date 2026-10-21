@@ -463,6 +463,54 @@ try{
   check('Mailbox rail On restores navigation',await page.locator('.pb-astra-app-rail').isVisible());
   check('settings page without JS exception',errors.length===0,{errors});
  });
+ await scenario({label:'navy sidebar white contrast on desktop and settings',options:{theme:'navy'}},async({page,errors})=>{
+  // Dark OS preferences must not recolor Navy mode's content or invert the logo.
+  await page.emulateMedia({colorScheme:'dark'});
+  await visit(page);
+  const mail=await page.evaluate(()=>{
+   const css=s=>getComputedStyle(document.querySelector(s));
+   return {
+    theme:document.documentElement.getAttribute('data-pb-theme'),
+    rail:css('.pb-astra-app-rail').backgroundColor,
+    sidebar:css('.pb-premium-sidebar').backgroundColor,
+    appText:css('.pb-astra-rail-item').color,
+    folderText:css('.pb-premium-nav-link').color,
+    brand:css('.pb-premium-wordmark').color,
+    logo:css('.pb-premium-brand-mark').backgroundImage,
+    logoBackground:css('.pb-premium-brand-mark').backgroundColor,
+    compose:css('.pb-premium-compose').color,
+    canvas:css('.pb-premium-workspace').backgroundColor,
+   };
+  });
+  const white='rgb(255, 255, 255)';
+  check('Navy rail, navigation and brand are unified and full white',
+   mail.theme==='navy'&&mail.rail===mail.sidebar&&
+   mail.appText===white&&mail.folderText===white&&mail.brand===white&&
+   mail.compose===white&&mail.logo.includes('matemail-logo-white.svg')&&
+   mail.logoBackground==='rgba(0, 0, 0, 0)',mail);
+  check('Navy preserves light mailbox content with dark system appearance',mail.canvas===white,mail);
+  await shot(page,'09-navy-mailbox-contrast');
+
+  await visit(page,'/postbox/settings?section=appearance');
+  const settings=await page.evaluate(()=>{
+   const css=s=>getComputedStyle(document.querySelector(s));
+   return {
+    rail:css('.pb-astra-app-rail').backgroundColor,
+    navigation:css('.pb-premium-settings-nav').backgroundColor,
+    title:css('.pb-settings-nav-title').color,
+    inactive:css('.pb-premium-settings-nav nav button:not(.active)').color,
+    active:css('.pb-premium-settings-nav nav button.active').color,
+    activeBg:css('.pb-premium-settings-nav nav button.active').backgroundColor,
+    content:css('.pb-premium-settings').backgroundColor,
+   };
+  });
+  check('Navy settings keeps full white navigation and light content',
+   settings.rail===settings.navigation&&
+   settings.title===white&&settings.inactive===white&&settings.active===white&&
+   settings.activeBg!=='rgba(0, 0, 0, 0)'&&settings.content===white,settings);
+  await shot(page,'10-navy-settings-contrast');
+  check('Navy sidebar has no JS exceptions',errors.length===0,{errors});
+ });
  await scenario({label:'dark theme and mobile layout',options:{viewport:{width:390,height:844},theme:'dark',density:'extra_compact'}},async({page,errors})=>{
   await visit(page);
   await shot(page,'07-phone-closed-dark');
