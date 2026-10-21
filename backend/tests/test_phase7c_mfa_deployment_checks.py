@@ -108,6 +108,7 @@ class MFADeploymentGuardTest(SimpleTestCase):
             HUB_2FA_FERNET_KEY=HUB,
         )
         self.assertEqual(check_ids(**required), set())
+        from apps.tenants.security_policy import can_activate_require
         for omitted in (
             "POSTBOX_2FA_ENABLED",
             "SMTP_IMAP_SECURITY_ENABLED",
@@ -115,7 +116,10 @@ class MFADeploymentGuardTest(SimpleTestCase):
             "ORGANIZATION_2FA_ENFORCEMENT_READY",
             "ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED",
         ):
-            with self.subTest(gate=omitted):
-                self.assertIn("tenants.E036", check_ids(
-                    **{**required, omitted: False},
-                ))
+            with self.subTest(gate=omitted), override_settings(
+                **{**BASE, **required, omitted: False},
+            ):
+                self.assertFalse(can_activate_require())
+        self.assertIn("tenants.E036", check_ids(
+            **{**required, "ORGANIZATION_2FA_NATIVE_ENFORCEMENT_ACCEPTED": False},
+        ))
