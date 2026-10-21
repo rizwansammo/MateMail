@@ -152,7 +152,7 @@
   background: #141d2a;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-pb-theme="light"]) .pb-premium-shell.pb-astra-postbox {
+  :root:not([data-pb-theme="light"]):not([data-pb-theme="navy"]) .pb-premium-shell.pb-astra-postbox {
     --pb-bg: #1b2533;
     --pb-fg: #e0e7f2;
     --pb-surface: #1b2533;
@@ -169,7 +169,7 @@
     --pb-subtle: #8494ad;
     --pb-ring: #9aafff;
   }
-  :root:not([data-pb-theme="light"]) .pb-astra-postbox .pb-astra-app-rail {
+  :root:not([data-pb-theme="light"]):not([data-pb-theme="navy"]) .pb-astra-postbox .pb-astra-app-rail {
     background: #141d2a;
   }
 }
