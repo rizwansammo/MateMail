@@ -74,10 +74,56 @@ class WorkspaceTwoFactorPolicyView(APIView):
             return Response({
                 "detail": "Require 2FA cannot be activated before end-to-end enforcement and recovery are ready."
             }, status=409)
-        with transaction.atomic():
-            tenant = membership.tenant.__class__.objects.select_for_update().get(pk=membership.tenant_id)
-            tenant.two_factor_policy = selected
-            tenant.save(update_fields=["two_factor_policy", "updated_at"])
+        from apps.domains.models import Domain
+        from apps.mail_engine.errors import MailEngineError
+        from apps.mail_engine.factory import get_adapter
+        from apps.mail_engine.native_adapter import NativeMailEngineAdapter
+
+        def native_policy(tenant, required):
+            # Only the verified, Native-provisioned domain set can be bound.
+            # Newly provisioned domains carry tenant_id from DomainSpec, so
+            # the Native policy automatically applies before the first login.
+            domains = list(Domain.objects.filter(
+                tenant=tenant, mail_engine_provisioned=True,
+            ).order_by("domain").values_list("domain", flat=True))
+            adapter = get_adapter()
+            if not isinstance(adapter, NativeMailEngineAdapter):
+                raise RuntimeError("Organization Require needs Native Mail Engine")
+            return adapter.set_tenant_mfa_required(str(tenant.pk), domains, required)
+
+        # NEVER issue a customer-facing Require success until Dovecot's native
+        # protocol gate commits first. A subsequent Django failure leaves
+        # Native MORE restrictive, never a permissive SMTP/IMAP bypass.
+        try:
+            with transaction.atomic():
+                tenant = membership.tenant.__class__.objects.select_for_update().get(
+                    pk=membership.tenant_id,
+                )
+                was_required = tenant.two_factor_policy == OrganizationTwoFactorMode.REQUIRE
+                if selected == OrganizationTwoFactorMode.REQUIRE:
+                    if not (getattr(settings, "POSTBOX_2FA_ENABLED", False)
+                            and getattr(settings, "SMTP_IMAP_SECURITY_ENABLED", False)
+                            and getattr(settings, "ORGANIZATION_2FA_ENFORCEMENT_READY", False)):
+                        return Response({"detail": "Organization enforcement is not ready."}, status=503)
+                    native_policy(tenant, True)
+                tenant.two_factor_policy = selected
+                tenant.save(update_fields=["two_factor_policy", "updated_at"])
+        except (MailEngineError, RuntimeError):
+            return Response({
+                "detail": "Could not confirm SMTP/IMAP enforcement. Organization policy was not changed."
+            }, status=503)
+
+        if was_required and selected != OrganizationTwoFactorMode.REQUIRE:
+            # Removal order is intentionally the opposite of enabling Require:
+            # first commit the less restrictive Django policy, then remove
+            # Native enforcement. A Native failure leaves legacy clients
+            # temporarily blocked (safe), not a policy bypass.
+            try:
+                native_policy(tenant, False)
+            except (MailEngineError, RuntimeError):
+                return Response({
+                    "detail": "Organization policy changed, but external mail-client access remains restricted. Retry this action."
+                }, status=503)
         return Response({
             "policy": selected,
             "effective_policy": effective_two_factor_policy(tenant),
