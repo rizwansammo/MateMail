@@ -110,7 +110,7 @@ class OrganizationTwoFactorPolicyTest(TestCase):
         domain = make_domain(self.tenant, "primary.example.test")
         adapter = mock.Mock(spec=NativeMailEngineAdapter)
         adapter.list_domains.return_value = [SimpleNamespace(name=domain.domain)]
-        with mock.patch("apps.mail_engine.factory.get_adapter", return_value=adapter), \
+        with mock.patch("apps.tenants.security_views.get_adapter", return_value=adapter), \
              mock.patch("apps.tenants.security_views.can_activate_require", return_value=True):
             response = auth_client(self.owner, self.tenant).patch(
                 self.url, {"policy": "require", "current_password": TEST_PASSWORD},
@@ -133,7 +133,7 @@ class OrganizationTwoFactorPolicyTest(TestCase):
         adapter = mock.Mock(spec=NativeMailEngineAdapter)
         adapter.list_domains.return_value = []
         adapter.set_tenant_mfa_required.side_effect = EngineUnavailable("synthetic outage")
-        with mock.patch("apps.mail_engine.factory.get_adapter", return_value=adapter), \
+        with mock.patch("apps.tenants.security_views.get_adapter", return_value=adapter), \
              mock.patch("apps.tenants.security_views.can_activate_require", return_value=True):
             response = auth_client(self.owner, self.tenant).patch(
                 self.url, {"policy": "require", "current_password": TEST_PASSWORD},
@@ -152,7 +152,7 @@ class OrganizationTwoFactorPolicyTest(TestCase):
         # second identical Off update must attempt Native reconciliation.
         adapter = mock.Mock(spec=NativeMailEngineAdapter)
         adapter.list_domains.return_value = []
-        with mock.patch("apps.mail_engine.factory.get_adapter", return_value=adapter):
+        with mock.patch("apps.tenants.security_views.get_adapter", return_value=adapter):
             response = auth_client(self.owner, self.tenant).patch(
                 self.url, {"policy": "off", "current_password": TEST_PASSWORD},
                 format="json",
