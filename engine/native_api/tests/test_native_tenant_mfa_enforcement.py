@@ -41,7 +41,7 @@ class TenantNativeMfaTest(unittest.TestCase):
 
     def test_required_transition_binds_only_verified_tenant_domain_and_queues_mailboxes(self):
         conn, cursor = self._conn(
-            [("acme.test", None)], [],
+            [("acme.test", None, False)], [],
             [("alice@acme.test",), ("bob@acme.test",)],
         )
         with mock.patch.dict(os.environ, {"NATIVE_CLIENT_CREDENTIAL_API_ENABLED": "true"}, clear=True):
@@ -54,12 +54,22 @@ class TenantNativeMfaTest(unittest.TestCase):
         self.assertTrue(any("SET tenant_id=" in statement for statement in sql_calls))
 
     def test_cross_tenant_domain_rebinding_fails_before_enforcement(self):
-        conn, cursor = self._conn([("acme.test", OTHER_TENANT)], [], [])
+        conn, cursor = self._conn([("acme.test", OTHER_TENANT, False)], [], [])
         with mock.patch.dict(os.environ, {"NATIVE_CLIENT_CREDENTIAL_API_ENABLED": "true"}, clear=True):
             with self.assertRaises(ValidationError):
                 client_credentials.set_tenant_required(conn, TENANT, ["acme.test"], True)
         statements = [call.args[0] for call in cursor.execute.call_args_list]
         self.assertFalse(any("native_tenant_mfa_policy" in statement for statement in statements))
+
+    def test_protected_platform_domain_cannot_be_claimed(self):
+        conn, cursor = self._conn([("system.matemail.pro", None, True)], [], [])
+        with mock.patch.dict(os.environ, {"NATIVE_CLIENT_CREDENTIAL_API_ENABLED": "true"}, clear=True):
+            with self.assertRaises(ValidationError):
+                client_credentials.set_tenant_required(
+                    conn, TENANT, ["system.matemail.pro"], True,
+                )
+        self.assertFalse(any("native_tenant_mfa_policy" in call.args[0]
+                             for call in cursor.execute.call_args_list))
 
     def test_partial_domain_list_and_missing_domain_refused(self):
         with mock.patch.dict(os.environ, {"NATIVE_CLIENT_CREDENTIAL_API_ENABLED": "true"}, clear=True):
