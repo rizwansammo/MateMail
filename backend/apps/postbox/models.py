@@ -229,6 +229,7 @@ class PostBoxPreference(models.Model):
         LIGHT = "light", "Light"
         DARK = "dark", "Dark"
         SYSTEM = "system", "System"
+        NAVY = "navy", "Navy sidebar"
 
     class Density(models.TextChoices):
         COMFORTABLE = "comfortable", "Comfortable"
