@@ -21,7 +21,7 @@
 | Current GitHub secret scanning alert state | Connector does not expose necessary alerts | Not Verified |
 | Current OS/image CVE posture | Historical high/critical findings, no fresh reviewed scan | Open |
 | Independent current disaster recovery | Azure job failed 2026-10-22 | Open |
-| Production post-cleanup health | No cleanup undertaken | Pending |
+| Production post-cleanup health | Ten key production containers running and healthy after scoped TestLab Docker cleanup | Verified for sampled containers; final broader regression pending |
 | Final release closing | Security gates above outstanding | Pending |
 
 ## Historical GitHub runs
