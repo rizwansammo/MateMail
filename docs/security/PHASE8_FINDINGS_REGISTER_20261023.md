@@ -24,3 +24,9 @@ Use `Resolved`, `Accepted Risk`, `Deferred` or `Open` only with dated supporting
 - https://github.com/rizwansammo/MateMail/issues/79
 - https://github.com/rizwansammo/MateMail/issues/80
 - `docs/NATIVE_ENGINE_IMAGE_AUDIT_20261009.md`
+
+## Follow-up reconciliation (2026-10-23)
+- **P8-001:** Current Native Postfix/Dovecot/Rspamd/ClamAV immutable image identifiers were reconfirmed running/healthy. `trivy` and `grype` were not installed on MateServer. Existing GitHub security jobs use `pip-audit` for candidate Python dependencies and `npm audit --omit=dev` for production JS, but these are not full operating-system package scans of all Native images. Image CVE status remains OPEN.
+- **P8-002:** Live `mateerp-database-1` later existed and was healthy. The Azure DR backup failure was transient lack of the referenced container at the time of the run; no incorrect container-name claim or script fix was made. Local Restic repository check passed 15/15 snapshots; this does not substitute for Azure DR.
+- **P8-005:** GitHub Advisory `GHSA-vfj7-8cjw-p6xm` still displayed `braces <=3.0.3` with no patched version on 2026-10-23: https://github.com/advisories/GHSA-vfj7-8cjw-p6xm . A bounded frontend runtime directory search produced no match. Keep the development toolchain issue OPEN until a trusted mitigation/fix is reviewed.
+- **P8-010:** Four dirty-worktree paths did not byte-match release. 14 affected working-file paths plus tracked diff archived root-only, with original worktree intact. Review differences before deletion.
