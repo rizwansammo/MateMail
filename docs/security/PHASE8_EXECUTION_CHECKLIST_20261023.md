@@ -20,9 +20,9 @@
 | C5 Other issues #74, #79, #80, #146 | Open / Deferred | Evidence-based classification |
 | D1 TestLab file and Docker inventory | Completed initial read-only inventory | Check remaining anonymous volumes and owners |
 | D2 Evidence preservation | Initial protected archive verified | Preserve archive, assess browser fixtures and offsite copy before deletion |
-| D3 Worktree safety | Blocked: uncommitted ui-qr-setup changes | Reconcile and preserve changes before removal |
-| D4 Temporary resource cleanup | Pending | Delete only positively owned, unneeded resources |
-| D5 Health regression after cleanup | Pending | Check SMTP/IMAP, DB, volumes, other projects |
+| D3 Worktree safety | Blocked: eleven uncommitted ui-qr-setup paths | Reconcile and preserve changes before removal |
+| D4 Temporary resource cleanup | Partial: eight stopped containers, two isolated networks and three test-only volumes removed | Assess filesystem, browser artifacts and worktrees separately |
+| D5 Health regression after cleanup | Ten production containers verified running/healthy immediately after Docker cleanup | Broader SMTP/IMAP and filesystem cleanup regression pending |
 | E1 Seven Phase 8 Markdown reports | Drafted on documentation branch | Review findings and revise with final evidence |
 | E2 Final PR/CI/merge | Pending | Avoid premature CI expenditure |
 | E3 Formal acceptance | Blocked | Close only with defensible evidence and owner approval |
