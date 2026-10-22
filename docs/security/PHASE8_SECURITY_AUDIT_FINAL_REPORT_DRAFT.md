@@ -23,7 +23,7 @@ The isolated protocol tests, native recovery tests and prior CI runs support pre
 
 ## Open gates
 See `PHASE8_FINDINGS_REGISTER_20261023.md`, `PHASE8_BACKUP_RECOVERY_20261023.md` and `PHASE8_TESTLAB_CLEANUP_20261023.md`.
-No production service was restarted, no policies were changed, and no TestLab resources were deleted during this read-only review.
+No production service was restarted, no policies were changed, and no TestLab resources were deleted. A separately protected root-only results archive was created and verified after initial read-only inspection.
 
 ## Evidence references
 - CI: https://github.com/rizwansammo/MateMail/actions/runs/39602267857
