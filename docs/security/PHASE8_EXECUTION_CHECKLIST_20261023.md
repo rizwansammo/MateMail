@@ -19,7 +19,7 @@
 | C4 Restore/rollback assurance | Partial historical evidence | Controlled isolated restore, no production restore |
 | C5 Other issues #74, #79, #80, #146 | Open / Deferred | Evidence-based classification |
 | D1 TestLab file and Docker inventory | Completed initial read-only inventory | Check remaining anonymous volumes and owners |
-| D2 Evidence preservation | Partial (Markdown summaries only) | Root-only protected raw evidence archive |
+| D2 Evidence preservation | Initial protected archive verified | Preserve archive, assess browser fixtures and offsite copy before deletion |
 | D3 Worktree safety | Blocked: uncommitted ui-qr-setup changes | Reconcile and preserve changes before removal |
 | D4 Temporary resource cleanup | Pending | Delete only positively owned, unneeded resources |
 | D5 Health regression after cleanup | Pending | Check SMTP/IMAP, DB, volumes, other projects |
