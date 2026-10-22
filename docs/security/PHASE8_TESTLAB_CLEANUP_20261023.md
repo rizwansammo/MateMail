@@ -42,3 +42,6 @@ Root protected archive: `/root/matemail-phase8-evidence/stopped-lab-docker-20261
 - Root protected full working-file plus tracked diff archive: `/root/matemail-phase8-evidence/ui-qr-uncommitted-changes-20261023.tar.gz`. Mode 0600, 87,639 bytes, SHA-256 `218e7d42764225eb5edd4e830333dc83faafeb4be1189e6583af0a44e3fc0ac2`. Verified internal members. Original worktree preserved.
 - A separate root-only JSON record of normal GA worktree removal is retained.
 - Browser QA files, primary source, UI worktree, test fixtures and associated dependencies remain in TestLab. Filesystem cleanup is incomplete and no assertion is made that all lab space has been released.
+
+## Divergence review
+A targeted non-mutating diff against the exact release found the older `ui-qr-setup` local files omit several MFA recovery and backup-code UI paths present in the released source. Do not substitute this older snapshot for production code. A root-only original file/diff archive exists; the dirty working tree remains in place until deliberate reconciliation. The original source worktree also remains protected because its HEAD is not an ancestor of release commit `1638299f6046e8493d74e64077ef7599b45ba6d7`.
