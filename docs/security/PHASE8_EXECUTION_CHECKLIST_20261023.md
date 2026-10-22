@@ -36,3 +36,6 @@
 - Completed: IMAPS and SMTP Submission STARTTLS 1.3 handshake and certificate verification, without authentication or mail transmission.
 - Completed: local Restic snapshot count (15), latest dated 2026-10-22, `restic --no-lock check` passing.
 - Remaining: offsite Azure DR revalidation after 2026-10-22 failure, current image OS/package vulnerability review, security/secret scan alert evidence, full approved MFA E2E acceptance, analysis of four differing UI-worktree files, filesystem/browser QA cleanup and final acceptance.
+
+## Merge gate and CI cost
+GitHub `.github/workflows/ci.yml` runs on every pull request into main, including documentation-only requests. For this reason the draft Phase 8 documentation remains on `docs/phase8-security-evidence-20261023` without a premature PR/CI run. Review and consolidate outstanding evidence before opening the final documentation PR. Never merge an outdated local MFA implementation on top of the release.
