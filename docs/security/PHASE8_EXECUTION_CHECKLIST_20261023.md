@@ -28,3 +28,11 @@
 | E3 Formal acceptance | Blocked | Close only with defensible evidence and owner approval |
 
 **Safety:** no live policy flips, no customer test mailbox, no image rebuild, no restart, no production configuration change and no resource deletion without the defined safety gates.
+
+## Update, 2026-10-23
+- Completed: TestLab Docker cleanup of eight test containers, two isolated networks and three unshared anonymous volumes.
+- Completed: clean detached GA worktree unregister/remove; original branch and dirty UI worktree preserved.
+- Completed: root-only archives of TestLab results, Docker metadata/logs and UI worktree modified/untracked content, with checksums.
+- Completed: IMAPS and SMTP Submission STARTTLS 1.3 handshake and certificate verification, without authentication or mail transmission.
+- Completed: local Restic snapshot count (15), latest dated 2026-10-22, `restic --no-lock check` passing.
+- Remaining: offsite Azure DR revalidation after 2026-10-22 failure, current image OS/package vulnerability review, security/secret scan alert evidence, full approved MFA E2E acceptance, analysis of four differing UI-worktree files, filesystem/browser QA cleanup and final acceptance.
