@@ -33,3 +33,12 @@ Original TestLab results and README were preserved in a root-only archive under 
 
 ## Docker cleanup evidence archive
 Root protected archive: `/root/matemail-phase8-evidence/stopped-lab-docker-20261023.tar.gz`. Contains Docker inspect metadata, container log extracts, network/anonymous volume manifests and inventory. File size 10,337 bytes, mode 0600. SHA-256 `94b57289171fb8d148a0d9707d3a3336d38a2261c4085b65019ca80598a1acbd`. It may contain sensitive synthetic configuration so it must stay outside GitHub. The initial full results archive remains unchanged.
+
+## Subsequent scoped worktree handling and source preservation
+- Verified detached release QA worktree `ga-enforce-test-20261022` clean and pinned to `1638299f6046e8493d74e64077ef7599b45ba6d7`. Used normal `git worktree remove` to unregister and remove it. Parent `source` and `ui-qr-setup` remain intact.
+- Expanded porcelain status of the `ui-qr-setup` worktree found **14 individual modified/untracked files** (11 porcelain status entries where untracked directories aggregate several files).
+- Content comparison to the release showed 10/14 matching and 4/14 differing: `backend/apps/accounts/urls.py`, `backend/apps/accounts/views.py`, `frontend/app/app/security/page.tsx`, `frontend/components/postbox/mail-client-security-settings.tsx`. These differences must be reviewed before deletion; they do not by themselves prove unmerged fixes, since the worktree is based on an older revision.
+- The original `source` worktree head `3f917e73d70cd44bf95177f58ffd3884b54e64c2` was not a Git ancestor of the final release, so source must not be blindly removed.
+- Root protected full working-file plus tracked diff archive: `/root/matemail-phase8-evidence/ui-qr-uncommitted-changes-20261023.tar.gz`. Mode 0600, 87,639 bytes, SHA-256 `218e7d42764225eb5edd4e830333dc83faafeb4be1189e6583af0a44e3fc0ac2`. Verified internal members. Original worktree preserved.
+- A separate root-only JSON record of normal GA worktree removal is retained.
+- Browser QA files, primary source, UI worktree, test fixtures and associated dependencies remain in TestLab. Filesystem cleanup is incomplete and no assertion is made that all lab space has been released.
