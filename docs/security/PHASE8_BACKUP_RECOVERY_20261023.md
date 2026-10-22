@@ -22,3 +22,9 @@ See `docs/BACKUP_RESTORE.md`: MateMail local encrypted Restic repository and an 
 
 ## Outcome
 Local job success and historical restore evidence are real but insufficient to claim current whole-server DR readiness. The Azure failed run is a closeout blocker until mitigated and verified.
+
+## Additional Phase 8 local Restic verification (2026-10-23)
+- Read-only `restic snapshots --json` listed **15** snapshots; latest snapshot time 2026-10-22 03:32:21 +02:00.
+- Read-only `restic --no-lock check` returned **exit 0**, validated indexes, pack references, 15/15 snapshots, trees and blobs; final message: `no errors were found`.
+- This is repository metadata/integrity validation, **not** a full backup-data read and **not** an independent restore acceptance.
+- Azure DR remains a separate failure because the most recent scheduled whole-server job failed on 2026-10-22 while `mateerp-database-1` was temporarily unavailable. No script mutation or forced backup run was performed.
