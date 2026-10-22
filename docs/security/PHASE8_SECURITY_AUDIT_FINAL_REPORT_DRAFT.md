@@ -31,3 +31,11 @@ No production service was restarted, no policies were changed, and no production
 - Native security: https://github.com/rizwansammo/MateMail/actions/runs/39602268498
 - Isolated SMTP/IMAP protocol acceptance (prior PR SHA): https://github.com/rizwansammo/MateMail/actions/runs/39601535754
 - Source: `docs/PHASE7A_ORG_2FA_SMTP_IMAP.md`, `docs/PHASE7B_HUB_POSTBOX_SECURITY_UI.md` and Phase 7C reports.
+
+## Phase 8 continuation evidence, 2026-10-23
+- Mailbox transport TLS: IMAPS 993 and SMTP STARTTLS 587 negotiated TLS 1.3 with verified certificates; no client login or mail delivery was tested.
+- Local Restic: 15 snapshots, repository check returned `no errors were found`. Azure offsite job is still not verified following its scheduled failure.
+- Scoped lab Docker cleanup: eight exited containers, two empty isolated networks, three anonymous volumes were removed after restricted inspection/log preservation; post-cleanup 10/10 key production containers remained running and healthy.
+- The clean detached release test worktree was removed using normal Git operations; the older source branch and dirty UI worktree were retained. Four files in the dirty worktree differ from release, so do not discard them until reviewed. A root-protected archive of all 14 affected working files and their tracked diff was verified.
+- Current advisories: GHSA-vfj7-8cjw-p6xm remained without upstream patched version, and the Native image OS CVE issue remains open. Candidate Python `pip-audit` and production JS `npm audit` do not replace comprehensive OS image scan.
+- No live production mail reconfiguration, restart or customer policy change.
