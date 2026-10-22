@@ -29,3 +29,13 @@ Application CI, Native candidate publish and Native security runs completed succ
 
 ## Interpretation
 A healthy production service and green tests are not a blanket security certification. Protected customer policies and credentials were not altered.
+
+## Supplemental non-invasive protocol checks
+On 2026-10-23, independent unauthenticated TLS negotiations from MateServer showed:
+- `mx.matemail.pro:993` IMAPS, TLS 1.3, certificate verified.
+- `mx.matemail.pro:587` SMTP greeting and EHLO 250, STARTTLS advertised, STARTTLS negotiated TLS 1.3 and certificate verified after a transient first-attempt greeting timeout. The subsequent retry succeeded.
+- No credentials were used and no mail was transmitted. **Authenticated real-client functionality remains Not Verified**.
+
+A bounded `find /app -maxdepth 8 -type d -name braces` inside the running Frontend Container found no result. This is supporting evidence for a development-only dependency boundary, not a comprehensive package inventory or a patched-vulnerability claim.
+
+Local Restic `--no-lock check` passed 15/15 snapshots and reported no errors; actual current independent restore remains unverified.
