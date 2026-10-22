@@ -1,5 +1,5 @@
 # Phase 8 TestLab Cleanup and Preservation Report
-**Date:** 2026-10-23. **Status:** INVENTORIED; DELETION NOT PERFORMED.
+**Date:** 2026-10-23. **Status:** INVENTORIED; RAW RESULTS ARCHIVED SECURELY; DELETION NOT PERFORMED.
 
 ## Read-only inventory
 Primary area: `/opt/TestLab/MateMail-Stage7A`, approximately 2.3 GB.
@@ -27,3 +27,6 @@ No files, networks, containers, volumes, worktrees, test credentials or backups 
 
 ## Post-cleanup verification: Pending
 Recheck all mail services, databases, Compose networks, volumes, mailbox storage and VPS resource state after separately approved cleanup.
+
+## Protected Phase 8 results archive
+Original TestLab results and README were preserved in a root-only archive under `/root/matemail-phase8-evidence/phase7-test-results-20261023.tar.gz`. Verified tar listing/integrity completed; file mode 0600, owner root; archive 991,721 bytes; SHA-256 `52d391de9bc6bbe6ea32e025ae92524a609ce8b330da06ded8b8d8ddc116c826`. All 101 original top-level result files remain in TestLab. This is same-server preservation, **not verified offsite backup**. Browser artifacts, dirty worktrees and other fixtures remain untouched.
