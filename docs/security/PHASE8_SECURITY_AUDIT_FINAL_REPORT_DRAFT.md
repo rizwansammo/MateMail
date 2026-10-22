@@ -39,3 +39,6 @@ No production service was restarted, no policies were changed, and no production
 - The clean detached release test worktree was removed using normal Git operations; the older source branch and dirty UI worktree were retained. Four files in the dirty worktree differ from release, so do not discard them until reviewed. A root-protected archive of all 14 affected working files and their tracked diff was verified.
 - Current advisories: GHSA-vfj7-8cjw-p6xm remained without upstream patched version, and the Native image OS CVE issue remains open. Candidate Python `pip-audit` and production JS `npm audit` do not replace comprehensive OS image scan.
 - No live production mail reconfiguration, restart or customer policy change.
+
+## Residual access and branch controls
+The repository currently reports public visibility, a known owner-managed workflow choice rather than proof of credential compromise. A previously mentioned possible secret exposure cannot be confirmed remediated using the available GitHub connector access. Before release closeout, authorized owners must inspect GitHub secret scanning alerts and rotation/revocation evidence. Documentation remains on a non-main branch; the normal CI pipeline triggers on all pull requests, so a premature documentation PR was avoided.
