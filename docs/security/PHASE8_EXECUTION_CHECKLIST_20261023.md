@@ -58,3 +58,9 @@ GitHub `.github/workflows/ci.yml` runs on every pull request into main, includin
 - **C possible secret exposure item = OPEN:** two GitGuardian reports exist; still requires verified false-positive finding or credential revocation/rotation.
 - **B real-client acceptance = NOT VERIFIED:** source and CI reconciliation complete; forbidden to claim a synthetic mock-chain is real production end-to-end proof.
 - **E documentation = DRAFT/REVIEW READY:** reports reflect verified state; formal release/security closeout cannot truthfully be signed until B/C gates are resolved or explicitly accepted under policy.
+
+## Framework security patch workflow
+- New Critical Next.js and Django REST Framework advisories detected by PR #153 CI (audits intentionally failed closed).
+- Separate dependency-only PR #154 updated `next@16.4.1`, matching eslint config, and `djangorestframework==3.18.2`; lockfile regenerated.
+- Both patch PR GitHub CI and Frontend production runtime security smoke passed; PR #154 merged as `4942c4d6b9044127b6611418bf45b20480e80f7b`.
+- **Outstanding:** main-branch image publication confirmation, manual production deploy, actual running image SHA/digest and postdeployment regression. Never claim code merge already fixed the live app.
