@@ -28,3 +28,16 @@ Local job success and historical restore evidence are real but insufficient to c
 - Read-only `restic --no-lock check` returned **exit 0**, validated indexes, pack references, 15/15 snapshots, trees and blobs; final message: `no errors were found`.
 - This is repository metadata/integrity validation, **not** a full backup-data read and **not** an independent restore acceptance.
 - Azure DR remains a separate failure because the most recent scheduled whole-server job failed on 2026-10-22 while `mateerp-database-1` was temporarily unavailable. No script mutation or forced backup run was performed.
+
+## 2026-10-23 Owner-directed verification scope and current access blocker
+The owner explicitly prohibited **all restoration on MateServer**, declined repeat isolated restore drills, and requested only:
+1. Verify the newest Azure objects for both `latest/mateserver-latest.tar.gz` and `daily/YYYY-MM-DD/mateserver-full.tar.gz` and their SHA256 objects; confirm hashes and archive completeness.
+2. Read-only disaster recovery inventory: ensure the newest actual archive contains application and Native database custom dumps, Compose and environment configuration, persistent Maildir/DKIM/TLS volumes and host recovery instructions. No extraction over production, no database creation and no restoration.
+
+On 2026-10-23, Desktop Commander reported MateServer **Offline** (last seen approximately one hour previously). The available tools did not include an authenticated Azure Blob connector. Therefore **NO live Azure object, latest snapshot, downloaded archive or hash was verified in this attempt**. The previous 2026-10-21 success log and 2026-10-22 failed scheduled job are historical evidence only; do not project their states onto 2026-10-23.
+
+The current `docs/BACKUP_RESTORE.md` documents the expected archive payload and recovery procedure, and historical isolated backup validation on 2026-10-09. That documentation review does not certify the latest backup. This follow-up is **Blocked: server connection unavailable**, not `Passed`.
+
+**Safety statement:** No backup job was started, no remote archive was downloaded, no test database or VM was created, no file or DB was restored, and no production service or configuration was modified.
+
+When authorized read-only connectivity is available, establish the remote object's current date, ETag/size, matching SHA256, full archive readability and required inventory before recording Verified. Never expose Azure SAS URLs, keys or archive secrets.
