@@ -62,3 +62,8 @@ Phase 8B release CI and canary safety-code review completed, but real owner-cont
 - Azure backup: latest and date-pinned blob SHA256 and full internal manifest verified; no restoration attempted under owner prohibition.
 
 **No automatic assertion of complete Phase 8 acceptance is permitted while unresolved Critical findings and credential incidents remain.**
+
+## Urgent newly identified framework dependency advisories
+At the documentation PR CI stage, audits failed for production `next@16.3.8` and `djangorestframework==3.17.2`. The exact corrective versions Next.js **16.4.1** and DRF **3.18.2** were updated and validated in [PR #154](https://github.com/rizwansammo/MateMail/pull/154) (successful PR CI and frontend runtime smoke), and merged to main at `4942c4d6b9044127b6611418bf45b20480e80f7b`.
+
+This resolves these specific vulnerabilities **in repository source and build dependency definitions**. It does not constitute live server remediation: the manual deployment workflow was not triggered as part of Phase 8, and production still requires digest verification after human-controlled rollout. Dovecot/Rspamd OS vulnerabilities and GitGuardian exposure status remain separate unresolved gates.
