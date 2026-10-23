@@ -52,3 +52,13 @@ This resolves the **current backup-upload/integrity verification** gate followin
 An exact-image Trivy OS scan found 8 Critical records in Dovecot and 1 in Rspamd; source evidence and package/provider status are recorded in the new Phase 8C report. Native API, Olefy and Frontend had no High/Critical findings **in this scoped OS scan**, but several other images have High advisories. Two prior GitGuardian notifications for public GitHub code were located, without proof of false-positive classification or credential revocation/rotation. Prometheus is stopped/unhealthy, despite healthy Grafana and Alertmanager.
 
 Phase 8B release CI and canary safety-code review completed, but real owner-controlled browser-to-protocol and mail-client acceptance remains outstanding. Do NOT mislabel B or C Closed, and do NOT proceed with final Phase 8 sign-off without defensible evidence, mitigation and authorization.
+
+## Phase 8 workstream state reconciliation
+- A Production verification: Verified.
+- B Security acceptance: release CI and separate protocol evidence verified, **full production browser-to-protocol and real mail client end-to-end acceptance not verified**.
+- C Security findings: scanning/triage complete, **image CVEs and two possible secret leaks not remediated/verified**; **Prometheus service outage resolved** with 3/3 targets healthy.
+- D Stage 7 TestLab cleanup: **Completed**, with Git/source/browser/modified files preserved securely before removing only the TestLab directory.
+- E Documentation: evidence drafted and ready for review; **official security sign-off not granted**.
+- Azure backup: latest and date-pinned blob SHA256 and full internal manifest verified; no restoration attempted under owner prohibition.
+
+**No automatic assertion of complete Phase 8 acceptance is permitted while unresolved Critical findings and credential incidents remain.**
