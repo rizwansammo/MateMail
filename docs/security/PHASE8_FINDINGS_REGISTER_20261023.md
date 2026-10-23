@@ -37,3 +37,10 @@ Use `Resolved`, `Accepted Risk`, `Deferred` or `Open` only with dated supporting
 
 ## P8-002 live backup resolution note (2026-10-23)
 The latest Azure DR scheduled run returned success on 2026-10-23. Both actual Azure blobs, their remote checksum files, the full tar/gzip archive, all 2,786 embedded content hashes, 11 DB custom archive TOCs and required DR categories were verified with no restore. **The previously failed scheduled job's immediate backup-availability impact is Resolved**. Leave a separate **Deferred monitoring/resilience follow-up** to prevent recurrence when a dependent application database container is temporarily unavailable. Do not mark full VM failover as tested.
+
+## Live Phase 8C review, 2026-10-23
+Full scoped **13 running image OS** read-only scan completed, using official checksum-verified Trivy 0.75.0 and exact Docker image IDs, with never-started ephemeral rootfs exports. See `PHASE8_C_CURRENT_IMAGE_SECURITY_ASSESSMENT_20261023.md`. **9 Critical records** remain in Dovecot (8 across four MariaDB CVEs, two packages) and Rspamd (one libxml2 CVE). High records also remain in other images. Scanner results indicate review urgency, not proven remote exploitation. Critical remediation / independent mitigation approval is unresolved.
+
+**P8-003 now has concrete private evidence:** two GitGuardian notifications on the public MateMail repository were confirmed via connected Gmail (Generic Password, Oct 8 push; Generic Database Assignment, Oct 10 push). The incidents may be genuine secrets or false positives; credential validity and revocation/rotation status are **Not Verified**. Treat as urgent and triage privately. Root-only remediation checklist: `/root/matemail-phase8-evidence/gitguardian-private-triage-20261023.md`. Never publish values/incident URLs.
+
+**P8-009 monitoring:** `matemail-prometheus` is currently stopped/unhealthy; last exit (code 0) 2026-10-18, with orderly shutdown logging and `unless-stopped` policy. Grafana and Alertmanager remained healthy. Security alerting effectiveness remains **Not Verified**, and no restart was made without owner approval.
