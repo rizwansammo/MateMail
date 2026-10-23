@@ -64,3 +64,6 @@ GitHub `.github/workflows/ci.yml` runs on every pull request into main, includin
 - Separate dependency-only PR #154 updated `next@16.4.1`, matching eslint config, and `djangorestframework==3.18.2`; lockfile regenerated.
 - Both patch PR GitHub CI and Frontend production runtime security smoke passed; PR #154 merged as `4942c4d6b9044127b6611418bf45b20480e80f7b`.
 - **Outstanding:** main-branch image publication confirmation, manual production deploy, actual running image SHA/digest and postdeployment regression. Never claim code merge already fixed the live app.
+
+## DNS final availability gate
+**OPEN:** read-only query to both authoritative `launch*.spaceship.net` name servers returned DNS SERVFAIL. Hub and PostBox loopback requests succeeded but public host resolution failed. Verify registrar zone provisioning/authoritative DNS and external end-to-end access, preserving DNSSEC, DKIM and customer MX records. This needs authorized registrar access; no automatic DNS edits.
