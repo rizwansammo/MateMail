@@ -20,6 +20,17 @@ class RealtimeEventView(APIView):
     permission_classes = [IsAuthenticated]
     authentication_classes = [PostBoxSessionAuthentication]
 
+    def perform_content_negotiation(self, request, force=False):
+        # EventSource sends Accept: text/event-stream. This view returns a
+        # native Django StreamingHttpResponse, so no DRF renderer handles the
+        # successful response. Without this override, DRF rejects the request
+        # with 406 *before* authentication or streaming is reached.
+        #
+        # Select the normal DRF renderer for permission/error responses only.
+        # This exception is local to the SSE endpoint; authentication,
+        # throttling, and mailbox authorization remain unchanged.
+        return super().perform_content_negotiation(request, force=True)
+
     def get(self, request):
         postbox_auth.require_active_mailbox_permission(request, "read")
         response = StreamingHttpResponse(
