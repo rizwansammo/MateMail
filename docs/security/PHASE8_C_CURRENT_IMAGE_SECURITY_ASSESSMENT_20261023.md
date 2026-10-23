@@ -54,3 +54,11 @@ GitHub issue #74: `braces <=3.0.3`, `CVE-2026-93687` / `GHSA-vfj7-8cjw-p6xm`. Gi
 5. Require documented owner acceptance for any remaining Critical/High security risk.
 
 **C state: all 13 scoped OS images assessed; High/Critical remediation and secret validity/rotation evidence remain OPEN.**
+
+## Additional detection and monitoring findings (restricted details kept private)
+Two GitGuardian email notifications for `rizwansammo/MateMail` were independently located: a Generic Password alert associated with an October 8, 2026 push and a Generic Database Assignment alert associated with an October 10, 2026 push. These are **alerts, not proof of two live usable credentials**. No credential validity, rotation, revocation or false-positive classification has been verified. Because the repository is public, treat both as **urgent unverified credential-exposure incidents**; do not declare them remediated. Full triage instructions and timestamps are in the root-only file `/root/matemail-phase8-evidence/gitguardian-private-triage-20261023.md`; **do not copy secret values, incident URLs or sensitive details into this public repository**.
+
+The production monitoring stack also has `matemail-prometheus` **Exited (0), unhealthy**, stopped since 2026-10-18. Docker logs indicate orderly shutdown, not an explained crash; the restart policy is `unless-stopped`. Grafana and Alertmanager are healthy, but without Prometheus actively scraping/forwarding, telemetry and alert coverage may be incomplete. **Cause / operator intent not verified**, and no restart was attempted. Keep the monitoring coverage issue open for a separately approved targeted check.
+
+## Corrected scope and closure decision
+The current Trivy image review is **done**, but Phase 8C has **unresolved critical findings** in Dovecot and Rspamd, unresolved GitGuardian notifications and monitoring visibility uncertainty. Do not mark Phase 8C accepted or complete merely because the findings have been catalogued.
