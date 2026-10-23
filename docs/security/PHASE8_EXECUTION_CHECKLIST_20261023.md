@@ -45,3 +45,8 @@ GitHub `.github/workflows/ci.yml` runs on every pull request into main, includin
 - **Completed / Verified:** Read complete gzip/tar archive and independently compare all 2,786 embedded content hashes, including hardlinks; zero mismatches. All eleven DB dumps passed `pg_restore -l` TOC checks. MateMail App, Native Engine, SMTP/IMAP data, DKIM/TLS, host configurations, and recovery runbook/scripts are present.
 - **Deliberately not in scope:** Any database/file restore on MateServer, repeat isolated restore, new VM, production service action or backup job rerun. Prior successful isolated restore evidence remains valid historical context.
 - **Residual operational consideration:** The 2026-10-22 scheduled backup failure remains a resilience incident even though the 2026-10-23 backup succeeded. Monitor for recurrence; do not silently change shared backup script.
+
+## B/C status gate after investigation, 2026-10-23
+- **B:** exact release CI, Native isolated tests, runtime checks and updated canary code reconciled. **Actual single-identity Browser/TOTP → Native → IMAP/SMTP and real-client/owner Require acceptance are Not Verified.** Do not bypass previously blocked synthetic E2E command with an alternative.
+- **C:** all 13 current running image OS rootfs scans completed and stored root-only. **Critical open**: Dovecot MariaDB advisories, Rspamd libxml2; selected High findings, two GitGuardian credential notifications without rotation/revocation proof, and stopped Prometheus monitoring.
+- B and C are **investigated/documented, not fully accepted or closed**. Their end gates require safe remediation and owner-approved acceptance where necessary, not merely a table status update.
