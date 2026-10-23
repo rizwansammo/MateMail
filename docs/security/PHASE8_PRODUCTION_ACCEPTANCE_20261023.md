@@ -39,3 +39,6 @@ On 2026-10-23, independent unauthenticated TLS negotiations from MateServer show
 A bounded `find /app -maxdepth 8 -type d -name braces` inside the running Frontend Container found no result. This is supporting evidence for a development-only dependency boundary, not a comprehensive package inventory or a patched-vulnerability claim.
 
 Local Restic `--no-lock check` passed 15/15 snapshots and reported no errors; actual current independent restore remains unverified.
+
+## Phase 8B exact-code reconciliation on 2026-10-23
+See `PHASE8_B_SECURITY_ACCEPTANCE_RECONCILIATION_20261023.md` for the full source/CI matrix. Old issue #146's all-mailbox Native login-verifier regression was resolved in `backend/apps/postbox/auth.py` through `canary_scope.native_primary_required_for_mailbox()` with isolated legacy noncanary tests. The separate actual Browser/TOTP/Native/SMTP/IMAP single-identity walkthrough and Gmail/Outlook/Thunderbird real-client testing still lack approved evidence. CI and historical isolated real-protocol tests cannot be conflated into a passed production E2E acceptance. B evidence reconciliation is finished; full release acceptance remains **Not Verified**.
