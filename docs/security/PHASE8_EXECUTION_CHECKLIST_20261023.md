@@ -50,3 +50,11 @@ GitHub `.github/workflows/ci.yml` runs on every pull request into main, includin
 - **B:** exact release CI, Native isolated tests, runtime checks and updated canary code reconciled. **Actual single-identity Browser/TOTP → Native → IMAP/SMTP and real-client/owner Require acceptance are Not Verified.** Do not bypass previously blocked synthetic E2E command with an alternative.
 - **C:** all 13 current running image OS rootfs scans completed and stored root-only. **Critical open**: Dovecot MariaDB advisories, Rspamd libxml2; selected High findings, two GitGuardian credential notifications without rotation/revocation proof, and stopped Prometheus monitoring.
 - B and C are **investigated/documented, not fully accepted or closed**. Their end gates require safe remediation and owner-approved acceptance where necessary, not merely a table status update.
+
+## Post-review 2026-10-23 final workstream ledger
+- **D = COMPLETE:** safe full `/opt/TestLab/MateMail-Stage7A` cleanup performed. Two Git refs, all 14 modified/untracked UI files and browser/test source artifacts protected in verified root-only archives/bundle.
+- **C monitoring item = RESOLVED:** `matemail-prometheus` started, healthy, all 3 of 3 targets up, core sampled mail containers still healthy.
+- **C CVE item = OPEN:** Debian MariaDB/libxml2 vendor fixes are not available for all deployed pinned stable runtime packages; no unsafe cross-release package mixing and no unreviewed mail image deployment.
+- **C possible secret exposure item = OPEN:** two GitGuardian reports exist; still requires verified false-positive finding or credential revocation/rotation.
+- **B real-client acceptance = NOT VERIFIED:** source and CI reconciliation complete; forbidden to claim a synthetic mock-chain is real production end-to-end proof.
+- **E documentation = DRAFT/REVIEW READY:** reports reflect verified state; formal release/security closeout cannot truthfully be signed until B/C gates are resolved or explicitly accepted under policy.
