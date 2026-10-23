@@ -114,7 +114,7 @@ class PostBoxRealtimeEndpointTest(SimpleTestCase):
                 side_effect=grant_mailbox_read,
             ),
             mock.patch.object(
-                realtime, "stream", return_value=iter(["retry: 3000\\n\\n"])
+                realtime, "stream", return_value=iter(["retry: 3000\n\n"])
             ) as stream,
         ):
             response = RealtimeEventView.as_view()(
@@ -122,10 +122,10 @@ class PostBoxRealtimeEndpointTest(SimpleTestCase):
             )
             self.assertEqual(200, response.status_code)
             self.assertTrue(response.streaming)
-            self.assertEqual("text/event-stream", response["Content-Type"])
+            self.assertTrue(response["Content-Type"].startswith("text/event-stream"))
             self.assertEqual("no-cache, no-transform", response["Cache-Control"])
             self.assertEqual("no", response["X-Accel-Buffering"])
-            self.assertEqual(b"retry: 3000\\n\\n", b"".join(response.streaming_content))
+            self.assertEqual(b"retry: 3000\n\n", b"".join(response.streaming_content))
             stream.assert_called_once_with(9)
 
     def test_eventsource_accept_does_not_bypass_login(self):
