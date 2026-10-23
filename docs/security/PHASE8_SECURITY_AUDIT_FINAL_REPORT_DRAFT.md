@@ -42,3 +42,8 @@ No production service was restarted, no policies were changed, and no production
 
 ## Residual access and branch controls
 The repository currently reports public visibility, a known owner-managed workflow choice rather than proof of credential compromise. A previously mentioned possible secret exposure cannot be confirmed remediated using the available GitHub connector access. Before release closeout, authorized owners must inspect GitHub secret scanning alerts and rotation/revocation evidence. Documentation remains on a non-main branch; the normal CI pipeline triggers on all pull requests, so a premature documentation PR was avoided.
+
+## Azure DR recovery readiness, current verification (2026-10-23)
+The scheduled 2026-10-23 whole-server Azure DR backup completed successfully. Verified **both actual Azure objects** `latest/mateserver-latest.tar.gz` and `daily/2026-10-23/mateserver-full.tar.gz` at 66,762,044 bytes with two independently checked matching remote SHA256 companion objects. Full archive read and 2,786 internal file/link SHA256 checks passed, zero mismatches. All 11 PostgreSQL custom-format backup TOCs were readable without restoring. Required MateMail and host configuration/data categories, recovery runbook and shell-syntax-checked restoration scripts were present.
+
+This resolves the **current backup-upload/integrity verification** gate following the 2026-10-22 scheduled failure; it **does not** represent a new live restore or blank-VM failover acceptance. The owner explicitly prohibited any restoration or repeat restore rehearsal. Other Phase 8 gates, including CVE and secret exposure verification, remain open.
