@@ -19,3 +19,6 @@ No new image build, production deployment, service restart, database migration, 
 - Review and merge of all final documentation and explicit Phase 8 acceptance.
 
 Do not announce an absolute security guarantee or close Phase 8 before these gates are resolved.
+
+## Additional security fix merged (2026-10-23)
+A new framework dependency security update landed in [PR #154](https://github.com/rizwansammo/MateMail/pull/154), commit `4942c4d6b9044127b6611418bf45b20480e80f7b`: `next 16.4.1`, matching Next ESLint configuration, `djangorestframework 3.18.2`, regenerated npm lock. PR CI and frontend runtime security smoke completed successfully. **Production deployment remains a separate manual action, not completed by this documentation change.**
