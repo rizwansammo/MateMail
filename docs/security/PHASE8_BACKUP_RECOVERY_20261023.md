@@ -41,3 +41,31 @@ The current `docs/BACKUP_RESTORE.md` documents the expected archive payload and 
 **Safety statement:** No backup job was started, no remote archive was downloaded, no test database or VM was created, no file or DB was restored, and no production service or configuration was modified.
 
 When authorized read-only connectivity is available, establish the remote object's current date, ETag/size, matching SHA256, full archive readability and required inventory before recording Verified. Never expose Azure SAS URLs, keys or archive secrets.
+
+## Live Azure Blob and DR archive verification: 2026-10-23
+**Owner-approved scope:** Read-only Azure object verification and archive / DR inventory only. **No restore, extraction, database creation, VM creation, service restart, or manual backup execution.**
+
+The previous Desktop Commander authorization failure was resolved by owner device authorization. MateServer was Online for the following verification.
+
+### Scheduled backup and remote integrity
+- `mateserver-backup.service` last scheduled run completed **successfully**, exit status 0, on **2026-10-23 at 03:33:41 CEST**.
+- `matemail-backup.service` also completed successfully on 2026-10-23.
+- Backup run log reports `latest_bytes=66762044`, `daily_full=2026-10-23`, 24 retained daily snapshot dates.
+- Azure HEAD request independently confirmed HTTP 200 and **66,762,044 bytes** for both `latest/mateserver-latest.tar.gz` and `daily/2026-10-23/mateserver-full.tar.gz`.
+- Both remote blob byte streams were completely read and SHA256 digests matched their respective Azure `.sha256` companion objects. Both archives had **identical SHA256**.
+- The locally built archive had the same SHA256 as each verified Azure object. All network SAS/credentials were used only in protected process memory, not displayed or added to GitHub.
+
+### Full archive and recovery payload checks (read only)
+- gzip/tar archive read successfully. **3,544 tar entries**; 2,777 regular files and 15 content-linked hard link entries.
+- `meta/SHA256SUMS` had **2,786** file entries. All checksums matched, including 15 hard link paths resolved against their referenced content. **Zero missing or mismatched content hashes.**
+- **11/11 PostgreSQL custom-format dumps** passed both `PGDMP` signature inspection and `pg_restore -l` table-of-contents listing without restoring: evolution, MateAssist, MateConnect, MateCRM, MateDesk, MateERP, MateMail Native, MateMail App, MyRight, NetaMate and TalkRoom. `postgres-globals.sql` also present.
+- MateMail App and Native Engine `.env` and Compose files present at their expected relative locations. Monitoring environment / Compose files also present.
+- Persistent Maildir, DKIM, TLS, Postfix queue and host Nginx, systemd and Let's Encrypt content categories all present. The Azure archive also contains recovery runbook and script references.
+- The MateServer root-only `DR-RUNBOOK.md` exists. Six recovery scripts (`restore.sh`, `restore-preflight.sh`, `restore-health.sh`, `restore-host.sh`, `restore-seed.sh`, `restore-services.sh`) passed nonexecuting `bash -n` syntax checks.
+
+### Acceptance classification
+**Verified:** Latest and dated Azure objects exist and byte hashes match. Complete archive is readable, all internal SHA256 checks pass, the 11 database dumps have valid custom-format TOCs, required data/configuration categories and recovery instructions are present.
+
+**Not Verified (by deliberate scope):** Fresh independent database restore, blank-VM failover, application startup from recovered data, actual recovery time, and end-to-end failover. Prior isolated restore evidence from 2026-10-09 is retained; the owner does not want repetitive restore tests.
+
+**Current scheduled backup incident status:** The 2026-10-22 failure caused by a temporarily unavailable MateERP database container is recovered operationally by the successful 2026-10-23 run. Preventing future transient failure remains a separate monitoring / resilience question. No backup script modification was performed.
