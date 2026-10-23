@@ -45,3 +45,15 @@ Root protected archive: `/root/matemail-phase8-evidence/stopped-lab-docker-20261
 
 ## Divergence review
 A targeted non-mutating diff against the exact release found the older `ui-qr-setup` local files omit several MFA recovery and backup-code UI paths present in the released source. Do not substitute this older snapshot for production code. A root-only original file/diff archive exists; the dirty working tree remains in place until deliberate reconciliation. The original source worktree also remains protected because its HEAD is not an ancestor of release commit `1638299f6046e8493d74e64077ef7599b45ba6d7`.
+
+## Final Stage 7 TestLab removal completed (2026-10-23)
+**Final outcome:** `/opt/TestLab/MateMail-Stage7A` was removed after preserving and validating:
+- Full Git bundle `/root/matemail-phase8-evidence/phase7-source-all-refs-20261023.bundle`: 10,349,643 bytes, SHA256 `a23c7a4151a369776b1c2dd742b0fee13f688e666ce0304d3dd3eeea103b739a`. Git bundle verification passed and both named Phase 7 feature branch refs were present.
+- Browser scripts, source test fixtures, notes and results `phase7-browser-and-test-fixtures-20261023.tar.gz`: 1,053,870 bytes, SHA256 `f2ba54a5860881d0e90b1943ea3dcbc38a8298563c13949cadc73ca086b81992`. Tar index verification passed.
+- All 14 dirty UI worktree files plus tracked diff `ui-qr-uncommitted-changes-20261023.tar.gz` previously checked and retained.
+- Earlier Docker metadata and Stage 7 results root-only evidence archives were preserved.
+- Confirmed none of the Docker containers had bind mounts referencing the TestLab, and no live process had its current working directory in the TestLab before deletion.
+- Unregistered the obsolete UI worktree via Git worktree removal, then removed only the dedicated Stage 7 TestLab directory. All production resources and customer data remain untouched.
+- Archive directories are root-only; these are not independently verified offsite copies. GitHub repository itself retains source history.
+
+**D filesystem cleanup: COMPLETE.** Follow-up operational health checks are recorded in separate Phase 8 acceptance evidence.
