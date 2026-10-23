@@ -39,3 +39,9 @@
 
 ## Merge gate and CI cost
 GitHub `.github/workflows/ci.yml` runs on every pull request into main, including documentation-only requests. For this reason the draft Phase 8 documentation remains on `docs/phase8-security-evidence-20261023` without a premature PR/CI run. Review and consolidate outstanding evidence before opening the final documentation PR. Never merge an outdated local MFA implementation on top of the release.
+
+## Live Azure DR verification update: 2026-10-23
+- **Completed / Verified:** Scheduled Azure DR backup successful (2026-10-23, 03:33:41 CEST); Azure latest and dated full backup both HTTP 200 and 66,762,044 bytes; full remote SHA256 against both checksum companion files; both blob hashes identical; local archive digest equal.
+- **Completed / Verified:** Read complete gzip/tar archive and independently compare all 2,786 embedded content hashes, including hardlinks; zero mismatches. All eleven DB dumps passed `pg_restore -l` TOC checks. MateMail App, Native Engine, SMTP/IMAP data, DKIM/TLS, host configurations, and recovery runbook/scripts are present.
+- **Deliberately not in scope:** Any database/file restore on MateServer, repeat isolated restore, new VM, production service action or backup job rerun. Prior successful isolated restore evidence remains valid historical context.
+- **Residual operational consideration:** The 2026-10-22 scheduled backup failure remains a resilience incident even though the 2026-10-23 backup succeeded. Monitor for recurrence; do not silently change shared backup script.
