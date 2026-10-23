@@ -62,3 +62,6 @@ The production monitoring stack also has `matemail-prometheus` **Exited (0), unh
 
 ## Corrected scope and closure decision
 The current Trivy image review is **done**, but Phase 8C has **unresolved critical findings** in Dovecot and Rspamd, unresolved GitGuardian notifications and monitoring visibility uncertainty. Do not mark Phase 8C accepted or complete merely because the findings have been catalogued.
+
+## Restricted scan evidence preservation and housekeeping
+All thirteen JSON OS vulnerability reports and their scanner logs were bundled into a protected, checksum-verified tarball at `/root/matemail-phase8-evidence/scan-20261023/phase8-os-security-reports-20261023.tar.gz`. It is root-only and is **not** committed to the public repository. Archive SHA256: `97788f7efac797a80d44042e62fb9b68e54e6441fe78b8c1e11acbb88a333469`, 335,098 bytes. Individual raw reports and hash manifest remain alongside it. After preservation, only the newly downloaded Trivy executable/package and temporary scanner database cache were deleted, releasing audit storage. No production Docker image, mail volume, customer file or service was changed. Final production health check observed 10/10 selected core mail components healthy and zero leftover temporary audit containers.
