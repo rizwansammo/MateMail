@@ -1,0 +1,101 @@
+name: Native Rspamd candidate security acceptance
+
+# This evaluates an upstream security candidate only on an isolated GitHub runner.
+# Never logs into MateServer, touches production volumes, or publishes a deployment.
+on:
+  pull_request:
+    paths:
+      - 'deploy/native-engine/docker-compose.yml'
+      - '.github/workflows/native-rspamd-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-rspamd:
+    name: Verify pinned Rspamd and OS CVE
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      IMAGE: rspamd/rspamd:4.2.3@sha256:47e00f62105f8a60009a30a590ebcf3bfd0b992d45468222d34afa5ca2103690
+      TRIVY_VERSION: 0.75.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove change is the reviewed Rspamd release and immutable digest
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("deploy/native-engine/docker-compose.yml").read_text()
+          current = "rspamd/rspamd:4.2.3@sha256:47e00f62105f8a60009a30a590ebcf3bfd0b992d45468222d34afa5ca2103690"
+          assert text.count(current) == 1, "Unrecognized Rspamd candidate"
+          assert "rspamd/rspamd:4.2.1@sha256:" not in text
+          print("IMMUTABLE_RSPAMD_CANDIDATE_REVIEWED")
+          PY
+
+      - name: Pull upstream image and run isolated configuration syntax check
+        run: |
+          set -euo pipefail
+          docker pull "$IMAGE"
+          docker run --rm --pull never --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+            --entrypoint rspamadm "$IMAGE" configtest
+          echo "CANDIDATE_OFFLINE_CONFIGTEST_PASS"
+
+      - name: Install official Trivy with verified release checksum
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rspamd-security"
+          cd "$RUNNER_TEMP/rspamd-security"
+          curl -fLsS --retry 2 -o trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fLsS --retry 2 -o checksums.txt \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt"
+          grep -F "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" checksums.txt \
+            | sed "s#trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz#trivy.tar.gz#" \
+            | sha256sum -c --status
+          tar -xzf trivy.tar.gz trivy
+          ./trivy --version
+
+      - name: Export only a never-started disposable candidate container
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rspamd-security/rootfs"
+          CID="$(docker create --pull never --network none --entrypoint /bin/true "$IMAGE")"
+          trap 'docker rm -v "$CID" >/dev/null 2>&1 || true' EXIT
+          docker export "$CID" | tar -xf - -C "$RUNNER_TEMP/rspamd-security/rootfs"
+          echo "NO_LIVE_OR_PRODUCTION_CONTAINER_TOUCHED"
+
+      - name: Scan actual candidate root filesystem and enforce CVE gate
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/rspamd-security"
+          ./trivy rootfs --scanners vuln --pkg-types os \
+            --severity HIGH,CRITICAL --parallel 1 --skip-version-check \
+            --format json --output scan.json ./rootfs
+          python3 - <<'PY'
+          import collections, json
+          report=json.load(open("scan.json"))
+          vuln=[x for r in report.get("Results",[]) for x in (r.get("Vulnerabilities") or [])]
+          counts=collections.Counter(x.get("Severity") for x in vuln)
+          print("RSPAMD_CANDIDATE_OS_FINDINGS critical=%d high=%d" % (
+              counts["CRITICAL"], counts["HIGH"]))
+          for x in vuln:
+              if x.get("Severity")=="CRITICAL":
+                  print("CRITICAL_RECORD",x.get("VulnerabilityID"),x.get("PkgName"))
+          if any(x.get("VulnerabilityID")=="CVE-2026-6653" for x in vuln):
+              raise SystemExit("BLOCKED: libxml2 CVE-2026-6653 still exists in official candidate")
+          if counts["CRITICAL"]:
+              raise SystemExit("BLOCKED: other unresolved Critical OS advisories")
+          print("RSPAMD_CANDIDATE_CRITICAL_CVE_GATE_PASS")
+          PY
+
+      - name: Always dispose of runner-only audit files
+        if: always()
+        run: |
+          docker ps -a --filter ancestor="$IMAGE" --format '{{.ID}}' \
+            | xargs -r docker rm -fv || true
+          if [ -d "$RUNNER_TEMP/rspamd-security" ]; then
+            rm -rf "$RUNNER_TEMP/rspamd-security"
+          fi
