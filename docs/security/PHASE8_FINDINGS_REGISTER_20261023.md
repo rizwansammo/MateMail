@@ -49,3 +49,10 @@ Full scoped **13 running image OS** read-only scan completed, using official che
 After verifying the service was an existing `matemail-monitoring` Compose container, its stop state, resource limit and network, the previously stopped `matemail-prometheus` container was selectively started. Prometheus subsequently became **Running/Healthy**, returned `Prometheus Server is Healthy` on the health endpoint, and its targets API reported **3 of 3 active scrape targets UP**. Five sampled core mail containers stayed Running/Healthy. Grafana/Alertmanager were not restarted. Mark **P8-009 current service outage Resolved**, with normal alert-delivery acceptance distinct and not newly tested.
 
 **P8-001 and P8-003 remain open:** Debian stable security tracker lists vulnerable MariaDB and libxml2 packages; this review must not import unstable/test packages into pinned production images without safety tests. GitGuardian incident state/rotation cannot be confirmed using currently exposed GitHub connector permissions.
+
+## 2026-10-23 Dependency hotfix merged; deployment pending
+The documentation PR uncovered newer upstream advisories not covered at the original 2026-10-21 release: `next@16.3.8` affected by multiple Next.js 16.4.0-and-earlier advisories (including unauthenticated RCE), and `djangorestframework==3.17.2` affected by three CVEs with fix in 3.18.2.
+
+**Remediation merged to main:** [PR #154](https://github.com/rizwansammo/MateMail/pull/154), commit `4942c4d6b9044127b6611418bf45b20480e80f7b`, updated Next.js and eslint-config-next to **16.4.1**, DRF to **3.18.2**, and regenerated npm lock. Patch-branch CI and Frontend production smoke passed; production npm audit reported zero vulnerabilities.
+
+**CRITICAL OPERATIONAL DISTINCTION:** GitHub merge does NOT deploy. The currently running production app may still be on old SHA `1638299f...` until the owner performs authorized manual deployment of newly published immutable images. Treat those application vulnerabilities as **code fixed, production patch NOT YET VERIFIED** until deployment, smoke, migration and rollback checks. Do not trigger deployment implicitly.
